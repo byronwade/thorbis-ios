@@ -96,8 +96,8 @@ struct StatusBadge: View {
 
 extension StatusBadge {
     init(_ status: JobStatus) { self.init(text: status.label, symbol: status.symbol, tone: status.tone) }
-    init(_ status: EstimateStatus) { self.init(text: Format.status(status), tone: status.tone) }
-    init(_ status: InvoiceStatus) { self.init(text: Format.status(status), tone: status.tone) }
+    init(_ status: EstimateStatus) { self.init(text: Format.status(status), symbol: status.symbol, tone: status.tone) }
+    init(_ status: InvoiceStatus) { self.init(text: Format.status(status), symbol: status.symbol, tone: status.tone) }
 }
 
 struct Avatar: View {

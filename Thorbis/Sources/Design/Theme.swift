@@ -106,6 +106,16 @@ extension EstimateStatus {
         case .draft, .unknown: .neutral
         }
     }
+
+    var symbol: String {
+        switch self {
+        case .draft: "pencil.circle"
+        case .sent: "paperplane"
+        case .approved: "checkmark.circle"
+        case .declined: "xmark.circle"
+        case .unknown: "questionmark.circle"
+        }
+    }
 }
 
 extension InvoiceStatus {
@@ -115,6 +125,16 @@ extension InvoiceStatus {
         case .issued: .info
         case .void: .danger
         case .draft, .unknown: .neutral
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .draft: "pencil.circle"
+        case .issued: "paperplane"
+        case .paid: "checkmark.circle"
+        case .void: "xmark.circle"
+        case .unknown: "questionmark.circle"
         }
     }
 }

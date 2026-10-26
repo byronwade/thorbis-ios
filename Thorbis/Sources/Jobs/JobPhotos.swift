@@ -212,6 +212,8 @@ struct PhotoViewer: View {
     let jobId: String
     let photo: JobPhoto
     @State private var image: UIImage?
+    @State private var error: String?
+    @State private var attempt = 0
 
     var body: some View {
         NavigationStack {
@@ -220,6 +222,14 @@ struct PhotoViewer: View {
                 if let image {
                     Image(uiImage: image).resizable().scaledToFit()
                         .accessibilityLabel("Job photo")
+                } else if let error {
+                    ContentUnavailableView {
+                        Label("Couldn't load photo", systemImage: "photo.badge.exclamationmark")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Try again") { attempt += 1 }.buttonStyle(.rim).fixedSize()
+                    }
                 } else {
                     ProgressView()
                 }
@@ -234,9 +244,23 @@ struct PhotoViewer: View {
                     }
                 }
             }
-            .task {
-                if let data = try? await model.api.photoData(job: jobId, photo: photo.id) { image = UIImage(data: data) }
+            .task(id: attempt) { await load() }
+        }
+    }
+}
+
+extension PhotoViewer {
+    private func load() async {
+        error = nil
+        do {
+            let data = try await model.api.photoData(job: jobId, photo: photo.id)
+            guard let decoded = UIImage(data: data) else {
+                error = "This photo couldn't be opened."
+                return
             }
+            image = decoded
+        } catch {
+            self.error = model.message(for: error)
         }
     }
 }
