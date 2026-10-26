@@ -294,6 +294,7 @@ struct InvoiceDetailView: View {
     let invoiceId: String
     @State private var invoice: Invoice?
     @State private var payments: [Payment] = []
+    @State private var paymentsError: String?
     @State private var error: String?
     @State private var issuing = false
     @State private var confirmingIssue = false
@@ -331,8 +332,11 @@ struct InvoiceDetailView: View {
                         }
                         .sheetRow()
                     }
-                    if !payments.isEmpty {
+                    if !payments.isEmpty || paymentsError != nil {
                         Section("Payments") {
+                            if let paymentsError {
+                                InlineError(message: paymentsError) { await load() }.sheetRow()
+                            }
                             ForEach(payments) { payment in
                                 LabeledContent {
                                     MoneyText(cents: payment.amount.amount, currency: payment.amount.currency)
@@ -389,9 +393,17 @@ struct InvoiceDetailView: View {
             let fresh = try await model.send { try await $0.invoice(invoiceId) }
             invoice = fresh
             model.store(fresh)
-            payments = (try? await model.api.payments(invoice: invoiceId)) ?? []
         } catch {
             self.error = model.message(for: error)
+            return
+        }
+        // Keep the last good history if this refresh fails, and say so.
+        do {
+            payments = try await model.send { try await $0.payments(invoice: invoiceId) }
+            paymentsError = nil
+        } catch is CancellationError {
+        } catch {
+            paymentsError = "Couldn't load payments. Showing what was loaded before."
         }
     }
 }
