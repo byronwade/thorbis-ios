@@ -81,16 +81,20 @@ struct SearchView: View {
         guard !text.isEmpty else {
             results = []
             error = nil
+            searching = false
             return
         }
         searching = true
-        defer { searching = false }
+        // Only the search for the text still in the field may change what's shown.
+        defer { if text == query.trimmed { searching = false } }
         do {
             let found = try await model.api.search(text)
-            guard text == query.trimmed else { return }
+            guard text == query.trimmed, !Task.isCancelled else { return }
             results = found
             error = nil
         } catch {
+            // Typing cancels the previous search; that isn't a failure.
+            guard text == query.trimmed, !Task.isCancelled else { return }
             self.error = model.message(for: error)
         }
     }
