@@ -10,6 +10,8 @@ struct JobPhotosSection: View {
     @Environment(AppModel.self) private var model
     let jobId: String
     @Binding var photos: [JobPhoto]
+    var loadError: String?
+    var retry: (() async -> Void)?
 
     @State private var picked: [PhotosPickerItem] = []
     @State private var pending: [PendingUpload] = []
@@ -21,8 +23,11 @@ struct JobPhotosSection: View {
 
     var body: some View {
         Section {
+            if let loadError {
+                InlineError(message: loadError, retry: retry).sheetRow()
+            }
             if photos.isEmpty, pending.isEmpty {
-                Text("No photos yet.").foregroundStyle(Theme.inkQuiet).sheetRow()
+                if loadError == nil { Text("No photos yet.").foregroundStyle(Theme.inkQuiet).sheetRow() }
             } else {
                 LazyVGrid(columns: columns, spacing: Theme.Space.s) {
                     ForEach(photos) { photo in

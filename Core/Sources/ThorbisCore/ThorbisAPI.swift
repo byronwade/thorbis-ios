@@ -481,6 +481,9 @@ public actor ThorbisAPI {
             headers["x-thorbis-roles"] = roles
         }
 
+        // Requests can outlive the session that sent them (sign-out, then sign-in while one
+        // is in flight); only a response to the current session may change credentials.
+        let sentWith = credentials
         let response: HTTPResponse
         do {
             response = try await transport.send(HTTPRequest(method: method, url: url, headers: headers, body: body))
@@ -489,10 +492,11 @@ public actor ThorbisAPI {
         } catch {
             throw APIError.transport(Self.describe(error))
         }
-        absorbCookies(response.cookies)
+        let current = credentials == sentWith
+        if current { absorbCookies(response.cookies) }
         guard (200..<300).contains(response.status) else {
             let error = APIError.from(status: response.status, body: response.body)
-            if error == .unauthenticated, case .session = credentials { updateCredentials(.none) }
+            if current, error == .unauthenticated, case .session = credentials { updateCredentials(.none) }
             throw error
         }
         return response

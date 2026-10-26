@@ -10,6 +10,8 @@ struct JobDetailView: View {
 
     @State private var job: Job?
     @State private var notes: [JobNote] = []
+    @State private var notesError: String?
+    @State private var photosError: String?
     @State private var photos: [JobPhoto] = []
     @State private var locations: [ServiceLocation] = []
     @State private var loading = false
@@ -113,7 +115,9 @@ struct JobDetailView: View {
             }
 
             Section {
-                if notes.isEmpty {
+                if let notesError {
+                    InlineError(message: notesError) { await loadNotes() }.sheetRow()
+                } else if notes.isEmpty {
                     Text("No notes yet.").foregroundStyle(Theme.inkQuiet).sheetRow()
                 }
                 ForEach(notes) { note in
@@ -136,7 +140,7 @@ struct JobDetailView: View {
                 Text("Notes are a running log. They can't be edited or deleted; add a new note to correct one.")
             }
 
-            JobPhotosSection(jobId: job.id, photos: $photos)
+            JobPhotosSection(jobId: job.id, photos: $photos, loadError: photosError) { await loadPhotos() }
 
             Section("Timeline") {
                 ForEach(JobWorkflow.milestones(job)) { milestone in
@@ -329,12 +333,30 @@ struct JobDetailView: View {
         defer { loading = false }
         await reloadJob()
         guard let job = current else { return }
-        async let notes = model.api.notes(job: jobId)
-        async let photos = model.api.photos(job: jobId)
+        async let notesLoaded: Void = loadNotes()
+        async let photosLoaded: Void = loadPhotos()
         async let locations = model.api.locations(customer: job.customerId)
-        if let value = try? await notes { self.notes = value }
-        if let value = try? await photos { self.photos = value }
+        _ = await (notesLoaded, photosLoaded)
         if let value = try? await locations { self.locations = value }
+    }
+
+    /// A failed read is shown as a failure, never as an empty log.
+    private func loadNotes() async {
+        do {
+            notes = try await model.api.notes(job: jobId)
+            notesError = nil
+        } catch {
+            notesError = model.message(for: error)
+        }
+    }
+
+    private func loadPhotos() async {
+        do {
+            photos = try await model.api.photos(job: jobId)
+            photosError = nil
+        } catch {
+            photosError = model.message(for: error)
+        }
     }
 
     /// Detail reads always come from the server so `allowedTransitions` is current.

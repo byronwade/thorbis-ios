@@ -46,7 +46,7 @@ struct SearchView: View {
             HStack {
                 Text(result.title).font(.body.weight(.medium)).foregroundStyle(Theme.ink)
                 Spacer()
-                if let status = result.status { StatusBadge(text: status.replacingOccurrences(of: "_", with: " ").capitalized) }
+                if let status = result.status { Self.badge(type: result.resultType, status: status) }
             }
             HStack(spacing: Theme.Space.xs) {
                 Text(result.resultType.capitalized)
@@ -61,6 +61,18 @@ struct SearchView: View {
         case let .estimate(id): NavigationLink(value: Route.estimate(id)) { label }
         case let .invoice(id): NavigationLink(value: Route.invoice(id)) { label }
         case .unsupported: label
+        }
+    }
+
+    /// Status as word plus symbol, using the same badge as the record's own screens.
+    @ViewBuilder
+    static func badge(type: String, status: String) -> some View {
+        switch type {
+        case "job" where JobStatus(rawValue: status) != nil: StatusBadge(JobStatus(rawValue: status)!)
+        case "estimate" where EstimateStatus(rawValue: status) != nil: StatusBadge(EstimateStatus(rawValue: status)!)
+        case "invoice" where InvoiceStatus(rawValue: status) != nil: StatusBadge(InvoiceStatus(rawValue: status)!)
+        default:
+            StatusBadge(text: status.replacingOccurrences(of: "_", with: " ").capitalized, symbol: "circle.dashed")
         }
     }
 
