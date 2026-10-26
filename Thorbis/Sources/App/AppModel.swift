@@ -294,10 +294,17 @@ final class AppModel {
 
     /// Runs a request whose result will land in this workspace's cache. If the
     /// workspace changes while it is in flight, the result is dropped (it belongs
-    /// to the previous workspace) and the caller sees a cancellation.
+    /// to the previous workspace) and the caller sees a cancellation. A failure is
+    /// dropped the same way, so an old session's 401 can't sign out the new one.
     func send<T: Sendable>(_ request: @MainActor (ThorbisAPI) async throws -> T) async throws -> T {
         let started = generation
-        let result = try await request(api)
+        let result: T
+        do {
+            result = try await request(api)
+        } catch {
+            guard started == generation else { throw CancellationError() }
+            throw error
+        }
         guard started == generation else { throw CancellationError() }
         return result
     }
@@ -363,8 +370,13 @@ final class AppModel {
 
     func markNoticesRead() async {
         do {
-            try await api.markNoticesRead()
-            notices = try await api.staffNotices()
+            let fresh = try await send { api in
+                try await api.markNoticesRead()
+                return try await api.staffNotices()
+            }
+            notices = fresh
+            noticesError = nil
+        } catch is CancellationError {
         } catch { handle(error) }
     }
 
@@ -383,7 +395,10 @@ final class AppModel {
         }
     }
 
-    func message(for error: Error) -> String {
+    /// What to show for a failed request, or nil when there is nothing to show:
+    /// a cancelled request, or one that belonged to a workspace the user has left.
+    func message(for error: Error) -> String? {
+        if error is CancellationError { return nil }
         if case APIError.unauthenticated = error { handle(error) }
         return error.localizedDescription
     }

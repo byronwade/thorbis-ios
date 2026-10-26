@@ -122,7 +122,7 @@ struct JobPhotosSection: View {
             photos.append(photo)
         } catch {
             if let index = pending.firstIndex(where: { $0.id == upload.id }) {
-                pending[index].failure = model.message(for: error)
+                pending[index].failure = model.message(for: error) ?? "Upload stopped."
             }
         }
     }

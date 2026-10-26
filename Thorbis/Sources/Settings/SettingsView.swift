@@ -96,7 +96,7 @@ struct SettingsView: View {
             deletionStatus = "Deletion requested (\(request.status.replacingOccurrences(of: "_", with: " "))). We'll sign you out when it's processed."
         } catch {
             // Production may require recent re-authentication first; say so plainly.
-            deletionStatus = "Couldn't start deletion: \(model.message(for: error)) Sign in again and retry, or contact your organization administrator."
+            deletionStatus = "Couldn't start deletion: \(model.message(for: error) ?? error.localizedDescription) Sign in again and retry, or contact your organization administrator."
         }
     }
 }
