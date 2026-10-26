@@ -1,13 +1,16 @@
-# Native iOS app (SwiftUI)
+# Agent notes: Thorbis iOS
 
-`apps/ios` is the native SwiftUI field app built from the Paper "Thorbis Mobile" page
-(file "Thorbis — Schedule Redesign", page B-0, 390×844 artboards). It is a thin client of the
-canonical API (`services/api`, OpenAPI in `services/api/openapi.json`). No business rules live here.
-
-- Generate the project with `xcodegen` (the `.xcodeproj` is not committed).
-- Apple commerce rules from `apps/mobile/AGENTS.md` and ADR-0018 apply: no plan purchase,
-  upgrade, pricing, StoreKit/IAP or external checkout surfaces, and no arbitrary URL opening.
-- Auth: production uses the Better Auth session cookie (`/api/auth/sign-in/email`). Against a
-  loopback API the app offers "Local dev identity", which sends the `x-thorbis-*` dev headers that
-  only `createDevHeaderIdentityResolver` accepts.
-- Not built by Thorbis CI; build locally with Xcode.
+- Native Swift 6 / SwiftUI app, iOS 18. `project.yml` → `xcodegen generate`; never commit the `.xcodeproj`.
+- Put logic in `Core/` (ThorbisCore) with tests; views in `Thorbis/Sources/<Feature>/`. Core must stay
+  free of UIKit/SwiftUI so `swift test --package-path Core` runs on Linux
+  (`docker run --rm -v "$PWD":/w -w /w swift:6.1-noble swift test --package-path Core`).
+- The API is the authority. Never invent state locally; replace cached records with the server's response.
+  Request shapes: path ids never repeated in the body, bodyless POSTs send `{}`, estimate send uses
+  `expectedRevisionNumber`, invoice issue uses `expectedLinesRevision`, job progress uses `{to, arrival, pause}`.
+- Auth is the Better Auth session cookie, kept in the Keychain per server. Sign-in sends an `Origin` header.
+- Design: follow design.thorbis.com exactly (Native contract HIG-001–022). Colours come from
+  `Assets.xcassets/Colors` via `Theme`; commit buttons are ink (`CommitButtonStyle`), accent is for
+  pointers only, status is a word plus a symbol, system text styles only, 44pt targets.
+- Apple commerce rules: no plan purchase, upgrade, pricing, StoreKit/IAP or external checkout, and no
+  arbitrary URL opening. Outbound links go through `OutboundLink` (tel, sms, mailto, Maps) only.
+- Fixture data (`FixtureTransport`, `--ui-fixture`) must stay inside `#if DEBUG`.

@@ -1,0 +1,18 @@
+{
+  "id": "018f3a52-0000-7000-8000-00000000a001",
+  "organizationId": "018f0000-0000-7000-8000-000000000201",
+  "customerId": "018f3a52-0000-7000-8000-00000000c001",
+  "createdByUserId": "018f0000-0000-7000-8000-000000000203",
+  "status": "sent",
+  "currentRevisionNumber": 2,
+  "title": "Repipe",
+  "lines": [
+    {"id": "018f3a52-0000-7000-8000-00000000a101", "description": "PEX repipe", "quantity": 1, "unitPrice": {"amount": 240000, "currency": "USD"}, "source": {"kind": "price_book", "priceBookItemId": "x", "priceBookRevision": 1, "originalDescription": "PEX", "originalUnitPrice": {"amount": 240000, "currency": "USD"}, "addedByUserId": "y", "capturedAt": "2026-10-20T15:04:05.123Z", "overriddenFields": []}}
+  ],
+  "options": [
+    {"id": "018f3a52-0000-7000-8000-00000000a201", "title": "Good", "description": "", "lines": [{"id": "018f3a52-0000-7000-8000-00000000a202", "description": "Patch", "quantity": 1, "unitPrice": {"amount": 50000, "currency": "USD"}}], "totalAmount": 50000, "currency": "USD"}
+  ],
+  "createdAt": "2026-10-20T15:04:05.123Z",
+  "updatedAt": "2026-10-21T15:04:05.123Z",
+  "sentAt": "2026-10-21T15:04:05.123Z"
+}

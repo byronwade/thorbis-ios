@@ -1,0 +1,20 @@
+{
+  "id": "018f3a52-0000-7000-8000-00000000f001",
+  "organizationId": "018f0000-0000-7000-8000-000000000201",
+  "customerId": "018f3a52-0000-7000-8000-00000000c001",
+  "jobId": "018f3a52-7b1c-7e00-9a3e-5c1d2e3f4a5b",
+  "createdByUserId": "018f0000-0000-7000-8000-000000000203",
+  "origin": "job_completion",
+  "sourceOperationKey": "job-completion:018f3a52",
+  "status": "issued",
+  "lines": [
+    {"id": "018f3a52-0000-7000-8000-00000000f101", "description": "Water heater", "quantity": 1, "unitPrice": {"amount": 185000, "currency": "USD"}, "source": {"kind": "manual"}},
+    {"id": "018f3a52-0000-7000-8000-00000000f102", "description": "Haul away", "quantity": 2, "unitPrice": {"amount": 2500, "currency": "USD"}}
+  ],
+  "linesRevision": 3,
+  "amountPaid": 50000,
+  "currency": "USD",
+  "issuedAt": "2026-10-27T18:00:00.000Z",
+  "createdAt": "2026-10-27T17:00:00.000Z",
+  "updatedAt": "2026-10-27T18:00:00.000Z"
+}
