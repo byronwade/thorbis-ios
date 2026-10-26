@@ -12,7 +12,8 @@ struct TodayView: View {
         var title: String { self == .mine ? "Mine" : "Everyone" }
     }
 
-    private var assignee: String? { scope == .mine ? model.userId : nil }
+    // Until we know who is signed in, "Mine" shows nothing rather than everyone's jobs.
+    private var assignee: String? { scope == .mine ? (model.userId ?? "") : nil }
     private var agenda: (days: [AgendaDay], unscheduled: [Job]) { Agenda.build(model.jobs, assignedTo: assignee) }
     private var nextUp: Job? {
         Agenda.nextUp(model.jobs.filter { assignee == nil || $0.assignedToUserId == assignee })

@@ -30,12 +30,20 @@ final class AppModel {
 
     private(set) var isRefreshing = false
     private(set) var refreshError: String?
+    private(set) var noticesError: String?
     private(set) var lastRefreshed: Date?
 
     let isFixture: Bool
     @ObservationIgnored private(set) var api: ThorbisAPI
     @ObservationIgnored private let keychain = KeychainStore()
     @ObservationIgnored private let defaults: UserDefaults
+
+    /// Bumped whenever the workspace changes, so a refresh started for the
+    /// previous workspace or session can't write its results into this one.
+    @ObservationIgnored private var generation = 0
+    /// Set when the app opened offline with a saved session and still needs
+    /// to confirm the session and load who is signed in.
+    @ObservationIgnored private var needsIdentity = false
 
     private static let environmentKey = "thorbis.environment"
 
@@ -153,8 +161,10 @@ final class AppModel {
             phase = .signedOut
         } catch {
             // Offline at launch with a saved session: open the app and let lists show the problem.
+            // The next refresh retries the session before anything is shown as "mine".
+            needsIdentity = true
             phase = .signedIn
-            refreshError = error.localizedDescription
+            refreshError = message(for: error)
         }
     }
 
@@ -179,30 +189,66 @@ final class AppModel {
     }
 
     private func clearWorkspace() {
+        generation += 1
+        needsIdentity = false
         jobs = []; customers = []; estimates = []; invoices = []; notices = []; assignees = []
-        refreshError = nil; lastRefreshed = nil
+        refreshError = nil; noticesError = nil; lastRefreshed = nil
+        isRefreshing = false
+    }
+
+    /// Finishes an offline launch once the server is reachable again. Returns
+    /// true when the caller should still load lists (the server is still unreachable).
+    private func restoreIdentity() async -> Bool {
+        do {
+            let session = try await api.session()
+            needsIdentity = false
+            try await finishSignIn(activeOrganizationId: session.session.activeOrganizationId)
+            return false // finishSignIn ran its own refresh, or is asking for a workspace
+        } catch {
+            handle(error)
+            return phase == .signedIn
+        }
     }
 
     // MARK: Loading
 
     func refreshAll() async {
         guard phase == .signedIn, !isRefreshing else { return }
+        if needsIdentity {
+            let loadHere = await restoreIdentity()
+            guard loadHere, phase == .signedIn, !isRefreshing else { return }
+        }
+        let started = generation
         isRefreshing = true
-        defer { isRefreshing = false }
-        async let jobs = api.jobs()
-        async let customers = api.customers()
-        async let estimates = api.estimates()
-        async let invoices = api.invoices()
-        async let notices = api.staffNotices()
-        async let assignees = api.assignees()
+        defer { if started == generation { isRefreshing = false } }
+        let api = api
+        async let jobs = Self.attempt { try await api.jobs() }
+        async let customers = Self.attempt { try await api.customers() }
+        async let estimates = Self.attempt { try await api.estimates() }
+        async let invoices = Self.attempt { try await api.invoices() }
+        async let notices = Self.attempt { try await api.staffNotices() }
+        async let assignees = Self.attempt { try await api.assignees() }
+        let results = await (jobs, customers, estimates, invoices, notices, assignees)
+        // The workspace changed while this was loading; these records belong to the old one.
+        guard started == generation else { return }
+
         var failures: [Error] = []
-        do { self.jobs = try await jobs } catch { failures.append(error) }
-        do { self.customers = try await customers } catch { failures.append(error) }
+        func take<T>(_ result: Result<T, Error>, _ assign: (T) -> Void) {
+            switch result {
+            case let .success(value): assign(value)
+            case let .failure(error): failures.append(error)
+            }
+        }
+        take(results.0) { self.jobs = $0 }
+        take(results.1) { self.customers = $0 }
         // Money and inbox may be outside a role's grants; a refusal there must not hide jobs.
-        do { self.estimates = try await estimates } catch { failures.append(error) }
-        do { self.invoices = try await invoices } catch { failures.append(error) }
-        do { self.notices = try await notices } catch { failures.append(error) }
-        do { self.assignees = try await assignees } catch {}
+        take(results.2) { self.estimates = $0 }
+        take(results.3) { self.invoices = $0 }
+        switch results.4 {
+        case let .success(value): self.notices = value; noticesError = nil
+        case let .failure(error): if !Self.isPermission(error) { noticesError = message(for: error) }
+        }
+        if case let .success(value) = results.5 { self.assignees = value }
         if let first = failures.first(where: { !Self.isPermission($0) }) {
             handle(first)
         } else {
@@ -212,7 +258,22 @@ final class AppModel {
     }
 
     func refreshNotices() async {
-        do { notices = try await api.staffNotices() } catch { handle(error) }
+        let started = generation
+        do {
+            let value = try await api.staffNotices()
+            guard started == generation else { return }
+            notices = value
+            noticesError = nil
+        } catch {
+            guard started == generation else { return }
+            noticesError = message(for: error)
+        }
+    }
+
+    private nonisolated static func attempt<T: Sendable>(
+        _ body: @Sendable () async throws -> T
+    ) async -> Result<T, Error> {
+        do { return .success(try await body()) } catch { return .failure(error) }
     }
 
     private static func isPermission(_ error: Error) -> Bool {

@@ -9,7 +9,7 @@ struct InboxView: View {
     var body: some View {
         LoadState(
             isLoading: model.isRefreshing,
-            error: model.refreshError,
+            error: model.noticesError,
             isEmpty: model.notices.isEmpty,
             emptyTitle: "You're caught up",
             emptySymbol: "tray",

@@ -155,10 +155,10 @@ struct JobDetailView: View {
             CompleteJobSheet(job: job) { notes in await complete(notes: notes) }
         }
         .sheet(isPresented: $scheduling) {
-            ScheduleJobSheet(job: job) { updated in store(updated) }
+            ScheduleJobSheet(job: job) { updated in apply(updated) }
         }
         .sheet(isPresented: $assigning) {
-            AssignJobSheet(job: job) { updated in store(updated) }
+            AssignJobSheet(job: job) { updated in apply(updated) }
         }
         .sheet(isPresented: $addingNote) {
             AddNoteSheet(jobId: job.id) { note in notes.append(note) }
@@ -266,29 +266,33 @@ struct JobDetailView: View {
         }
     }
 
-    private func progress(_ target: JobStatus, pause: PauseDetails? = nil, expectedPauseAuditId: String? = nil) async {
+    /// Returns whether the server accepted the change, so sheets keep their drafts on failure.
+    @discardableResult
+    private func progress(_ target: JobStatus, pause: PauseDetails? = nil, expectedPauseAuditId: String? = nil) async -> Bool {
         let action: JobAction = target == .paused ? .pause : (expectedPauseAuditId != nil ? .resume : .progress(target))
         busyAction = action
         defer { busyAction = nil }
         do {
-            _ = try await model.api.progress(jobId, to: target, pause: pause, expectedPauseAuditId: expectedPauseAuditId)
-            await reloadJob()
+            apply(try await model.api.progress(jobId, to: target, pause: pause, expectedPauseAuditId: expectedPauseAuditId))
             succeeded += 1
+            return true
         } catch {
             actionError = model.message(for: error)
             if (error as? APIError)?.isConflict == true { await reloadJob() }
+            return false
         }
     }
 
-    private func complete(notes: String?) async {
+    private func complete(notes: String?) async -> Bool {
         busyAction = .complete
         defer { busyAction = nil }
         do {
-            _ = try await model.api.complete(jobId, notes: notes)
-            await reloadJob()
+            apply(try await model.api.complete(jobId, notes: notes))
             succeeded += 1
+            return true
         } catch {
             actionError = model.message(for: error)
+            return false
         }
     }
 
@@ -296,11 +300,18 @@ struct JobDetailView: View {
         busyAction = .cancel
         defer { busyAction = nil }
         do {
-            _ = try await model.api.cancel(jobId)
-            await reloadJob()
+            apply(try await model.api.cancel(jobId))
         } catch {
             actionError = model.message(for: error)
         }
+    }
+
+    /// The mutation response is the server's record: show it now, then refresh
+    /// `allowedTransitions` from the detail read without discarding it on failure.
+    private func apply(_ updated: Job) {
+        job = updated
+        model.store(updated)
+        Task { await reloadJob() }
     }
 
     private func createInvoice() async {
@@ -309,11 +320,6 @@ struct JobDetailView: View {
         } catch {
             actionError = model.message(for: error)
         }
-    }
-
-    private func store(_ updated: Job) {
-        model.store(updated)
-        Task { await reloadJob() }
     }
 
     // MARK: Loading

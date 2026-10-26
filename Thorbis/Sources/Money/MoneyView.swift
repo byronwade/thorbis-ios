@@ -13,8 +13,12 @@ struct MoneyView: View {
         var title: String { self == .estimates ? "Estimates" : "Invoices" }
     }
 
-    private var openBalance: Int {
-        model.invoices.filter { $0.status == .issued }.reduce(0) { $0 + $1.balance }
+    /// Outstanding totals per currency; amounts in different currencies are never added together.
+    private var openBalances: [(currency: String, cents: Int)] {
+        let issued = model.invoices.filter { $0.status == .issued && $0.balance > 0 }
+        return Dictionary(grouping: issued, by: \.currency)
+            .map { (currency: $0.key, cents: $0.value.reduce(0) { $0 + $1.balance }) }
+            .sorted { $0.currency < $1.currency }
     }
 
     var body: some View {
@@ -67,12 +71,16 @@ struct MoneyView: View {
 
     @ViewBuilder
     private var invoices: some View {
-        if openBalance > 0 {
+        if !openBalances.isEmpty {
             Section {
-                LabeledContent("Open balance") {
-                    MoneyText(cents: openBalance).font(.title3.weight(.medium)).foregroundStyle(Theme.ink)
+                ForEach(openBalances, id: \.currency) { balance in
+                    LabeledContent(openBalances.count > 1 ? "Open balance (\(balance.currency))" : "Open balance") {
+                        MoneyText(cents: balance.cents, currency: balance.currency)
+                            .font(.title3.weight(.medium))
+                            .foregroundStyle(Theme.ink)
+                    }
+                    .sheetRow()
                 }
-                .sheetRow()
             }
         }
         if model.invoices.isEmpty {

@@ -4,7 +4,7 @@ import ThorbisCore
 /// A pause is never ambiguous: it carries a reason and a next action (domains/jobs).
 struct PauseJobSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let onPause: (PauseDetails) async -> Void
+    let onPause: (PauseDetails) async -> Bool
     @State private var reason = ""
     @State private var nextAction = ""
     @State private var busy = false
@@ -53,9 +53,9 @@ struct PauseJobSheet: View {
                         Button("Pause job") {
                             busy = true
                             Task {
-                                await onPause(PauseDetails(reason: reason.trimmed, nextAction: nextAction.trimmed))
+                                let paused = await onPause(PauseDetails(reason: reason.trimmed, nextAction: nextAction.trimmed))
                                 busy = false
-                                dismiss()
+                                if paused { dismiss() }
                             }
                         }
                         .disabled(reason.trimmed.isEmpty || nextAction.trimmed.isEmpty)
@@ -70,7 +70,7 @@ struct PauseJobSheet: View {
 struct CompleteJobSheet: View {
     @Environment(\.dismiss) private var dismiss
     let job: Job
-    let onComplete: (String?) async -> Void
+    let onComplete: (String?) async -> Bool
     @State private var notes = ""
     @State private var busy = false
 
@@ -91,9 +91,9 @@ struct CompleteJobSheet: View {
                     CommitButton(title: "Complete job", symbol: "checkmark.circle", busy: busy) {
                         busy = true
                         Task {
-                            await onComplete(notes.trimmed.isEmpty ? nil : notes.trimmed)
+                            let completed = await onComplete(notes.trimmed.isEmpty ? nil : notes.trimmed)
                             busy = false
-                            dismiss()
+                            if completed { dismiss() }
                         }
                     }
                     .accessibilityIdentifier("confirm-complete")
