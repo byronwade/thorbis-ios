@@ -216,8 +216,10 @@ struct JobDetailView: View {
     @ViewBuilder
     private func siteSection(_ job: Job) -> some View {
         let customer = model.customer(job.customerId)
-        let site = locations.first { $0.kind == .service } ?? locations.first
-        let address = site?.address ?? customer?.address
+        // Only the job's own location: another property's gate code is worse than none.
+        let site = job.locationId.flatMap { id in locations.first { $0.id == id } }
+            ?? (job.locationId == nil && locations.count == 1 ? locations.first : nil)
+        let address = site?.address ?? (job.locationId == nil ? customer?.address : nil)
         if address != nil || customer?.phone != nil || customer?.email != nil {
             Section("Site") {
                 if let address {

@@ -274,7 +274,7 @@ public actor FixtureTransport: HTTPTransport {
             pauseNextAction: status == .paused ? pauseNext : nil,
             pauseCycleAuditId: status == .paused ? nextId() : job.pauseCycleAuditId,
             completedAt: status == .completed ? at : nil, canceledAt: status == .canceled ? at : nil,
-            estimateId: job.estimateId
+            estimateId: job.estimateId, locationId: job.locationId
         )
     }
 
@@ -286,7 +286,7 @@ public actor FixtureTransport: HTTPTransport {
             dispatchedAt: job.dispatchedAt, enRouteAt: job.enRouteAt, arrivedAt: job.arrivedAt, startedAt: job.startedAt,
             pausedAt: job.pausedAt, pauseReason: job.pauseReason, pauseNextAction: job.pauseNextAction,
             pauseCycleAuditId: job.pauseCycleAuditId, completedAt: job.completedAt, canceledAt: job.canceledAt,
-            estimateId: job.estimateId, allowedTransitions: transitions
+            estimateId: job.estimateId, locationId: job.locationId, allowedTransitions: transitions
         )
     }
 
@@ -348,9 +348,9 @@ struct FixtureSeed {
         jobs = [
             Job(id: id(201), customerId: id(101), title: "Water heater replacement", notes: "50 gal gas, garage. Old unit leaking at the base.",
                 status: .enRoute, assignedToUserId: me, scheduledFor: at(0, 9), createdAt: created, updatedAt: at(0, 8, 40),
-                dispatchedAt: at(0, 8, 15), enRouteAt: at(0, 8, 40)),
+                dispatchedAt: at(0, 8, 15), enRouteAt: at(0, 8, 40), locationId: id(401)),
             Job(id: id(202), customerId: id(102), title: "Backflow test", status: .scheduled, assignedToUserId: me,
-                scheduledFor: at(0, 13, 30), createdAt: created, updatedAt: created),
+                scheduledFor: at(0, 13, 30), createdAt: created, updatedAt: created, locationId: id(402)),
             Job(id: id(203), customerId: id(103), title: "Kitchen drain clog", status: .scheduled, assignedToUserId: me,
                 scheduledFor: at(1, 10), createdAt: created, updatedAt: created),
             Job(id: id(204), customerId: id(104), title: "Grease trap service", status: .paused, assignedToUserId: me,

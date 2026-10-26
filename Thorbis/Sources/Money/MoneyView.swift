@@ -272,8 +272,9 @@ struct EstimateDetailView: View {
                 model.store(updated)
                 succeeded += 1
             } catch {
-                self.error = model.message(for: error)
+                let message = model.message(for: error)
                 if (error as? APIError)?.isConflict == true { await load() }
+                self.error = message
             }
         }
     }
@@ -283,6 +284,8 @@ struct EstimateDetailView: View {
             let fresh = try await model.send { try await $0.estimate(estimateId) }
             estimate = fresh
             model.store(fresh)
+            error = nil
+        } catch is CancellationError {
         } catch {
             self.error = model.message(for: error)
         }
@@ -382,8 +385,9 @@ struct InvoiceDetailView: View {
                 self.invoice = updated
                 model.store(updated)
             } catch {
-                self.error = model.message(for: error)
+                let message = model.message(for: error)
                 if (error as? APIError)?.isConflict == true { await load() }
+                self.error = message
             }
         }
     }
@@ -393,6 +397,9 @@ struct InvoiceDetailView: View {
             let fresh = try await model.send { try await $0.invoice(invoiceId) }
             invoice = fresh
             model.store(fresh)
+            error = nil
+        } catch is CancellationError {
+            return
         } catch {
             self.error = model.message(for: error)
             return

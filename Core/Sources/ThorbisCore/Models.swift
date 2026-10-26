@@ -57,6 +57,8 @@ public struct Job: Codable, Hashable, Identifiable, Sendable {
     public let id: String
     public let organizationId: String?
     public let customerId: String
+    /// The service location the work happens at; a customer can have several.
+    public let locationId: String?
     public let title: String
     public let notes: String?
     public let status: JobStatus
@@ -86,7 +88,7 @@ public struct Job: Codable, Hashable, Identifiable, Sendable {
         startedAt: String? = nil, pausedAt: String? = nil, pauseReason: String? = nil,
         pauseNextAction: String? = nil, pauseCycleAuditId: String? = nil,
         completedAt: String? = nil, canceledAt: String? = nil, estimateId: String? = nil,
-        allowedTransitions: [JobStatus]? = nil
+        locationId: String? = nil, allowedTransitions: [JobStatus]? = nil
     ) {
         self.id = id; self.organizationId = organizationId; self.customerId = customerId
         self.title = title; self.notes = notes; self.status = status
@@ -95,7 +97,7 @@ public struct Job: Codable, Hashable, Identifiable, Sendable {
         self.enRouteAt = enRouteAt; self.arrivedAt = arrivedAt; self.startedAt = startedAt
         self.pausedAt = pausedAt; self.pauseReason = pauseReason; self.pauseNextAction = pauseNextAction
         self.pauseCycleAuditId = pauseCycleAuditId; self.completedAt = completedAt
-        self.canceledAt = canceledAt; self.estimateId = estimateId
+        self.canceledAt = canceledAt; self.estimateId = estimateId; self.locationId = locationId
         self.allowedTransitions = allowedTransitions
     }
 

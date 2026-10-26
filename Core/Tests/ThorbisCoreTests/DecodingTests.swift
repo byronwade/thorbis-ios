@@ -13,6 +13,7 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(job.status, .paused)
         XCTAssertEqual(job.allowedTransitions, [.inProgress, .completed, .canceled])
         XCTAssertEqual(job.pauseReason, "Waiting on part")
+        XCTAssertEqual(job.locationId, "018f3a52-0000-7000-8000-00000000b001")
         XCTAssertEqual(job.reference, "JOB-4A5B")
         XCTAssertNotNil(job.scheduledDate)
         XCTAssertNotNil(job.updatedDate, "timestamps without fractional seconds still parse")
