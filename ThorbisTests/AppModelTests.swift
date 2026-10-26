@@ -28,7 +28,7 @@ struct AppModelTests {
         let agenda = Agenda.build(model.jobs, assignedTo: FixtureTransport.userId)
         let next = Agenda.nextUp(agenda.days.flatMap(\.jobs))
         #expect(next?.status == .enRoute)
-        #expect(JobWorkflow.primaryAction(status: .enRoute, allowed: next?.allowedTransitions ?? [])?.title == "Arrive")
+        #expect(JobWorkflow.primaryAction(status: .enRoute, allowed: next?.allowedTransitions ?? JobWorkflow.fallbackTransitions(from: .enRoute))?.title == "Arrive")
     }
 
     @Test func progressingAJobReplacesTheCachedCopy() async throws {

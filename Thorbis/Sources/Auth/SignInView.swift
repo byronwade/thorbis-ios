@@ -79,7 +79,7 @@ struct SignInView: View {
                         .buttonStyle(.rim)
                     }
 
-                    Text("Need access? Contact your organization administrator.")
+                    Text("Need access? Contact your organization administrator, then pull down to check again.")
                         .font(.footnote)
                         .foregroundStyle(Theme.inkQuiet)
                 }
@@ -222,7 +222,7 @@ struct OrganizationPickerView: View {
                     ContentUnavailableView(
                         "No workspaces",
                         systemImage: "building.2",
-                        description: Text("This account isn't a member of any company yet. Contact your organization administrator.")
+                        description: Text("This account isn't a member of any company yet. Contact your organization administrator, then pull down to check again.")
                     )
                     .listRowBackground(Color.clear)
                 }
@@ -249,6 +249,7 @@ struct OrganizationPickerView: View {
                 }
             }
             .thorbisList()
+            .refreshable { await model.switchOrganization() }
             .navigationTitle("Choose a workspace")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

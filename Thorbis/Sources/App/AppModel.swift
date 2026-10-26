@@ -99,10 +99,7 @@ final class AppModel {
 
     func useDevIdentity() async throws {
         try await api.useDevIdentity()
-        account = Account(id: "dev", name: "Local dev", email: nil)
-        organization = Organization(id: "dev", name: "Local workspace")
-        phase = .signedIn
-        await refreshAll()
+        await enterDevWorkspace()
     }
 
     func chooseOrganization(_ organization: Organization) async throws {
@@ -148,10 +145,7 @@ final class AppModel {
 
     private func resumeSession() async {
         if case .devHeaders = await api.credentials {
-            account = Account(id: "dev", name: "Local dev", email: nil)
-            organization = Organization(id: "dev", name: "Local workspace")
-            phase = .signedIn
-            await refreshAll()
+            await enterDevWorkspace()
             return
         }
         do {
@@ -168,16 +162,30 @@ final class AppModel {
         }
     }
 
+    /// The local API's dev headers act as a fixed user; use that id so "Mine" matches assignments.
+    private func enterDevWorkspace() async {
+        let user = (try? await api.me()) ?? Account(id: ThorbisAPI.devUserId, name: "Local dev", email: nil)
+        account = user
+        organization = Organization(id: ThorbisAPI.devOrganizationId, name: "Local workspace")
+        phase = .signedIn
+        await refreshAll()
+    }
+
     private func finishSignIn(activeOrganizationId: String?) async throws {
-        let organizations = (try? await api.organizations()) ?? []
         if let activeOrganizationId {
+            // The name is cosmetic here; the session already has its workspace.
+            let organizations = (try? await api.organizations()) ?? []
             organization = organizations.first { $0.id == activeOrganizationId } ?? Organization(id: activeOrganizationId, name: "Workspace")
-        } else if organizations.count == 1, let only = organizations.first {
-            try await api.setActiveOrganization(only.id)
-            organization = only
         } else {
-            phase = .choosingOrganization(organizations)
-            return
+            // Without a workspace the list decides what happens next, so a failure must surface.
+            let organizations = try await api.organizations()
+            if organizations.count == 1, let only = organizations.first {
+                try await api.setActiveOrganization(only.id)
+                organization = only
+            } else {
+                phase = .choosingOrganization(organizations)
+                return
+            }
         }
         phase = .signedIn
         await loadAccount()

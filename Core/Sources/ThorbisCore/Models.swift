@@ -320,6 +320,10 @@ public struct Estimate: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var total: Int { lines.reduce(0) { $0 + $1.total } }
+    /// The currency the server priced this estimate in (taken from its lines).
+    public var currency: String {
+        lines.first?.unitPrice.currency ?? options?.first?.lines.first?.unitPrice.currency ?? "USD"
+    }
     public var reference: String { "EST-" + String(id.replacingOccurrences(of: "-", with: "").suffix(4)).uppercased() }
 }
 

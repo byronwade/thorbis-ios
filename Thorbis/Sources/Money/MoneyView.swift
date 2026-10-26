@@ -118,7 +118,7 @@ struct EstimateRow: View {
             }
             Spacer(minLength: Theme.Space.s)
             VStack(alignment: .trailing, spacing: 2) {
-                MoneyText(cents: estimate.total).font(.body).foregroundStyle(Theme.ink)
+                MoneyText(cents: estimate.total, currency: estimate.currency).font(.body).foregroundStyle(Theme.ink)
                 StatusBadge(estimate.status)
             }
         }
@@ -202,14 +202,14 @@ struct EstimateDetailView: View {
                         actions(estimate)
                     }
                     if let error { Section { InlineError(message: error).sheetRow() } }
-                    LinesSection(lines: estimate.lines, currency: "USD")
+                    LinesSection(lines: estimate.lines, currency: estimate.currency)
                     Section {
-                        LabeledContent("Total") { MoneyText(cents: estimate.total).font(.headline.weight(.medium)) }.sheetRow()
+                        LabeledContent("Total") { MoneyText(cents: estimate.total, currency: estimate.currency).font(.headline.weight(.medium)) }.sheetRow()
                     }
                     if let options = estimate.options, !options.isEmpty {
                         Section("Options") {
                             ForEach(options) { option in
-                                LabeledContent(option.title) { MoneyText(cents: option.totalAmount) }.sheetRow()
+                                LabeledContent(option.title) { MoneyText(cents: option.totalAmount, currency: option.lines.first?.unitPrice.currency ?? estimate.currency) }.sheetRow()
                             }
                         }
                     }

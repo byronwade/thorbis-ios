@@ -140,9 +140,12 @@ public actor ThorbisAPI {
         updateCredentials(.none)
     }
 
+    public static let devUserId = "018f0000-0000-7000-8000-000000000203"
+    public static let devOrganizationId = "018f0000-0000-7000-8000-000000000201"
+
     public func useDevIdentity(
-        user: String = "018f0000-0000-7000-8000-000000000203",
-        organization: String = "018f0000-0000-7000-8000-000000000201",
+        user: String = ThorbisAPI.devUserId,
+        organization: String = ThorbisAPI.devOrganizationId,
         roles: String = "owner"
     ) throws {
         guard environment.isLoopback else {
