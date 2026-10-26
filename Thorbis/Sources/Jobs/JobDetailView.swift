@@ -19,6 +19,8 @@ struct JobDetailView: View {
     @State private var actionError: String?
     @State private var busyAction: JobAction?
     @State private var succeeded = 0
+    /// Bumped by every applied mutation; a detail read started before it is stale.
+    @State private var revision = 0
 
     @State private var pausing = false
     @State private var completing = false
@@ -324,6 +326,7 @@ struct JobDetailView: View {
     /// The mutation response is the server's record: show it now, then refresh
     /// `allowedTransitions` from the detail read without discarding it on failure.
     private func apply(_ updated: Job) {
+        revision += 1
         job = updated
         model.store(updated)
         Task { await reloadJob() }
@@ -374,12 +377,17 @@ struct JobDetailView: View {
 
     /// Detail reads always come from the server so `allowedTransitions` is current.
     private func reloadJob() async {
+        let started = revision
         do {
             let fresh = try await model.send { try await $0.job(jobId) }
+            // A mutation landed while this read was in flight; its own reload follows.
+            guard started == revision else { return }
             job = fresh
             model.store(fresh)
             loadError = nil
+        } catch is CancellationError {
         } catch {
+            guard started == revision else { return }
             loadError = model.message(for: error)
         }
     }
