@@ -36,7 +36,8 @@ xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
 
 # Release builds must not ship the fixture workspace or preview switches.
 binary="$archive/Products/Applications/Thorbis.app/Thorbis"
-if strings "$binary" | grep -q -e '--ui-fixture' -e 'mike@example.com'; then
+# grep reads all input (no -q) so strings never hits SIGPIPE under pipefail.
+if strings "$binary" | grep -e '--ui-fixture' -e 'mike@example.com' >/dev/null; then
   echo "Release binary contains fixture data; refusing to upload" >&2
   exit 1
 fi

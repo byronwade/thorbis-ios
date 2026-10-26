@@ -58,6 +58,15 @@ struct JobDetailView: View {
     @ViewBuilder
     private func content(_ job: Job) -> some View {
         List {
+            if let loadError {
+                // Cached content stays visible, but actions depend on a fresh detail read.
+                Section {
+                    InlineError(message: "Couldn't refresh this job, so its actions may be missing. \(loadError)") {
+                        await reloadJob()
+                    }
+                    .sheetRow()
+                }
+            }
             Section {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     StatusBadge(job.status)

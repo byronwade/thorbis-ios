@@ -224,9 +224,11 @@ struct CustomerDetailView: View {
             let fresh = try await customer
             self.customer = fresh
             model.store(fresh)
-            self.contacts = (try? await contacts) ?? []
-            self.locations = (try? await locations) ?? []
-            error = nil
+            // Keep what was already shown when a child list fails, and say so.
+            var failed: [String] = []
+            do { self.contacts = try await contacts } catch { failed.append("contacts") }
+            do { self.locations = try await locations } catch { failed.append("locations") }
+            error = failed.isEmpty ? nil : "Couldn't load \(failed.joined(separator: " or ")). Showing what was loaded before."
         } catch {
             self.error = model.message(for: error)
         }
