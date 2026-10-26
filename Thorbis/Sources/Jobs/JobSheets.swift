@@ -166,11 +166,11 @@ struct ScheduleJobSheet: View {
         Task {
             defer { busy = false }
             do {
-                let updated = try await model.api.schedule(
+                let updated = try await model.send { try await $0.schedule(
                     job.id, at: start, timeZone: .current,
                     windowEnds: hasWindow ? start.addingTimeInterval(TimeInterval(windowMinutes * 60)) : nil,
                     expectedPrior: job.scheduledFor
-                )
+                ) }
                 onSaved(updated)
                 dismiss()
             } catch {
@@ -236,7 +236,7 @@ struct AssignJobSheet: View {
         Task {
             defer { busy = nil }
             do {
-                onSaved(try await model.api.assign(job.id, to: person.userId, expectedAssigneeId: job.assignedToUserId))
+                onSaved(try await model.send { try await $0.assign(job.id, to: person.userId, expectedAssigneeId: job.assignedToUserId) })
                 dismiss()
             } catch {
                 self.error = model.message(for: error)

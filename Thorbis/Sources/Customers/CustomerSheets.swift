@@ -81,7 +81,7 @@ struct NewCustomerView: View {
         Task {
             defer { busy = false }
             do {
-                model.store(try await model.api.createCustomer(payload))
+                model.store(try await model.send { try await $0.createCustomer(payload) })
                 dismiss()
             } catch {
                 self.error = model.message(for: error)

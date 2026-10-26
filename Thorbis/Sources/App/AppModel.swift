@@ -292,6 +292,16 @@ final class AppModel {
         }
     }
 
+    /// Runs a request whose result will land in this workspace's cache. If the
+    /// workspace changes while it is in flight, the result is dropped (it belongs
+    /// to the previous workspace) and the caller sees a cancellation.
+    func send<T: Sendable>(_ request: @MainActor (ThorbisAPI) async throws -> T) async throws -> T {
+        let started = generation
+        let result = try await request(api)
+        guard started == generation else { throw CancellationError() }
+        return result
+    }
+
     /// Applies a refresh snapshot, keeping any record saved after the refresh began.
     private func merge<T: Identifiable>(_ fresh: [T], keeping current: [T], kind: String) -> [T] where T.ID == String {
         let touched = current.filter { storedDuringRefresh.contains("\(kind):\($0.id)") }

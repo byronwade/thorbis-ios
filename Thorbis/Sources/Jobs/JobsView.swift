@@ -172,7 +172,7 @@ struct NewJobView: View {
         Task {
             defer { busy = false }
             do {
-                let job = try await model.api.createJob(customerId: selectedCustomer, title: title.trimmingCharacters(in: .whitespacesAndNewlines), notes: notes)
+                let job = try await model.send { try await $0.createJob(customerId: selectedCustomer, title: title.trimmingCharacters(in: .whitespacesAndNewlines), notes: notes) }
                 model.store(job)
                 onCreated?(job)
                 dismiss()

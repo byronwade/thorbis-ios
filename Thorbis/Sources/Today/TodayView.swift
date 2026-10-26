@@ -135,7 +135,7 @@ struct NextUpCard: View {
         Task {
             defer { busy = false }
             do {
-                model.store(try await model.api.progress(job.id, to: target))
+                model.store(try await model.send { try await $0.progress(job.id, to: target) })
                 completed += 1
             } catch {
                 self.error = model.message(for: error)

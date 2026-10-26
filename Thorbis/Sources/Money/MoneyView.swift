@@ -264,9 +264,9 @@ struct EstimateDetailView: View {
             do {
                 let updated: Estimate
                 switch action {
-                case "send": updated = try await model.api.sendEstimate(estimate)
-                case "approve": updated = try await model.api.approveEstimate(estimate)
-                default: updated = try await model.api.declineEstimate(estimate)
+                case "send": updated = try await model.send { try await $0.sendEstimate(estimate) }
+                case "approve": updated = try await model.send { try await $0.approveEstimate(estimate) }
+                default: updated = try await model.send { try await $0.declineEstimate(estimate) }
                 }
                 self.estimate = updated
                 model.store(updated)
@@ -280,7 +280,7 @@ struct EstimateDetailView: View {
 
     private func load() async {
         do {
-            let fresh = try await model.api.estimate(estimateId)
+            let fresh = try await model.send { try await $0.estimate(estimateId) }
             estimate = fresh
             model.store(fresh)
         } catch {
@@ -374,7 +374,7 @@ struct InvoiceDetailView: View {
         Task {
             defer { issuing = false }
             do {
-                let updated = try await model.api.issueInvoice(invoice)
+                let updated = try await model.send { try await $0.issueInvoice(invoice) }
                 self.invoice = updated
                 model.store(updated)
             } catch {
@@ -386,7 +386,7 @@ struct InvoiceDetailView: View {
 
     private func load() async {
         do {
-            let fresh = try await model.api.invoice(invoiceId)
+            let fresh = try await model.send { try await $0.invoice(invoiceId) }
             invoice = fresh
             model.store(fresh)
             payments = (try? await model.api.payments(invoice: invoiceId)) ?? []

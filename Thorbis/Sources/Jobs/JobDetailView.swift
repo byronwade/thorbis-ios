@@ -286,7 +286,7 @@ struct JobDetailView: View {
         busyAction = action
         defer { busyAction = nil }
         do {
-            apply(try await model.api.progress(jobId, to: target, pause: pause, expectedPauseAuditId: expectedPauseAuditId))
+            apply(try await model.send { try await $0.progress(jobId, to: target, pause: pause, expectedPauseAuditId: expectedPauseAuditId) })
             succeeded += 1
             return true
         } catch {
@@ -300,7 +300,7 @@ struct JobDetailView: View {
         busyAction = .complete
         defer { busyAction = nil }
         do {
-            apply(try await model.api.complete(jobId, notes: notes))
+            apply(try await model.send { try await $0.complete(jobId, notes: notes) })
             succeeded += 1
             return true
         } catch {
@@ -313,7 +313,7 @@ struct JobDetailView: View {
         busyAction = .cancel
         defer { busyAction = nil }
         do {
-            apply(try await model.api.cancel(jobId))
+            apply(try await model.send { try await $0.cancel(jobId) })
         } catch {
             actionError = model.message(for: error)
         }
@@ -329,7 +329,7 @@ struct JobDetailView: View {
 
     private func createInvoice() async {
         do {
-            model.store(try await model.api.completionInvoice(job: jobId))
+            model.store(try await model.send { try await $0.completionInvoice(job: jobId) })
         } catch {
             actionError = model.message(for: error)
         }
@@ -371,7 +371,7 @@ struct JobDetailView: View {
     /// Detail reads always come from the server so `allowedTransitions` is current.
     private func reloadJob() async {
         do {
-            let fresh = try await model.api.job(jobId)
+            let fresh = try await model.send { try await $0.job(jobId) }
             job = fresh
             model.store(fresh)
             loadError = nil
