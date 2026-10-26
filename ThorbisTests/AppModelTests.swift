@@ -35,8 +35,8 @@ struct AppModelTests {
         let model = makeModel()
         await model.bootstrap()
         let job = try #require(model.jobs.first { $0.status == .enRoute })
-        model.store(try await model.api.progress(job.id, to: .onSite))
-        #expect(model.cached(job: job.id)?.status == .onSite)
+        model.store(try await model.api.progress(job.id, to: .arrived))
+        #expect(model.cached(job: job.id)?.status == .arrived)
     }
 
     @Test func signOutClearsTheWorkspace() async {
