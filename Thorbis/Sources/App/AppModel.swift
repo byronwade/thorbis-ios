@@ -315,7 +315,7 @@ final class AppModel {
         if isRefreshing { storedDuringRefresh.insert("\(kind):\(id)") }
     }
 
-    private nonisolated static func attempt<T: Sendable>(
+    nonisolated static func attempt<T: Sendable>(
         _ body: @Sendable () async throws -> T
     ) async -> Result<T, Error> {
         do { return .success(try await body()) } catch { return .failure(error) }

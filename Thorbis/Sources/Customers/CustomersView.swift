@@ -218,17 +218,21 @@ struct CustomerDetailView: View {
 
     private func load() async {
         do {
-            async let customer = model.api.customer(customerId)
-            async let contacts = model.api.contacts(customer: customerId)
-            async let locations = model.api.locations(customer: customerId)
-            let fresh = try await customer
+            // One guarded read, so a reply that lands after a workspace switch is dropped.
+            let (fresh, contacts, locations) = try await model.send { api in
+                async let customer = api.customer(customerId)
+                async let contacts = AppModel.attempt { try await api.contacts(customer: customerId) }
+                async let locations = AppModel.attempt { try await api.locations(customer: customerId) }
+                return try await (customer, contacts, locations)
+            }
             self.customer = fresh
             model.store(fresh)
             // Keep what was already shown when a child list fails, and say so.
             var failed: [String] = []
-            do { self.contacts = try await contacts } catch { failed.append("contacts") }
-            do { self.locations = try await locations } catch { failed.append("locations") }
+            if case .success(let value) = contacts { self.contacts = value } else { failed.append("contacts") }
+            if case .success(let value) = locations { self.locations = value } else { failed.append("locations") }
             error = failed.isEmpty ? nil : "Couldn't load \(failed.joined(separator: " or ")). Showing what was loaded before."
+        } catch is CancellationError {
         } catch {
             self.error = model.message(for: error)
         }

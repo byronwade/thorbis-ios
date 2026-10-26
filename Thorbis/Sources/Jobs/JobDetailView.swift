@@ -344,16 +344,17 @@ struct JobDetailView: View {
         guard let job = current else { return }
         async let notesLoaded: Void = loadNotes()
         async let photosLoaded: Void = loadPhotos()
-        async let locations = model.api.locations(customer: job.customerId)
+        async let locations = try? model.send { try await $0.locations(customer: job.customerId) }
         _ = await (notesLoaded, photosLoaded)
-        if let value = try? await locations { self.locations = value }
+        if let value = await locations { self.locations = value }
     }
 
     /// A failed read is shown as a failure, never as an empty log.
     private func loadNotes() async {
         do {
-            notes = try await model.api.notes(job: jobId)
+            notes = try await model.send { try await $0.notes(job: jobId) }
             notesError = nil
+        } catch is CancellationError {
         } catch {
             notesError = model.message(for: error)
         }
@@ -361,8 +362,9 @@ struct JobDetailView: View {
 
     private func loadPhotos() async {
         do {
-            photos = try await model.api.photos(job: jobId)
+            photos = try await model.send { try await $0.photos(job: jobId) }
             photosError = nil
+        } catch is CancellationError {
         } catch {
             photosError = model.message(for: error)
         }
