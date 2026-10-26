@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct LoginView: View {
-    @EnvironmentObject var api: APIClient
+    @EnvironmentObject var session: SessionController
     @State private var email = ""
     @State private var password = ""
     @State private var busy = false
     @State private var error: String?
-    @State private var showServer = false
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 0) {
             Text("T").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
                 .frame(width: 32, height: 32).background(Theme.brand, in: RoundedRectangle(cornerRadius: 8))
@@ -17,35 +17,26 @@ struct LoginView: View {
             Text("Log in to your Thorbis workspace").font(.system(size: 15)).foregroundStyle(Theme.muted).padding(.top, 4)
 
             field("Email") {
-                TextField("you@company.com", text: $email).textInputAutocapitalization(.never).keyboardType(.emailAddress).autocorrectionDisabled()
+                TextField("you@company.com", text: $email).textInputAutocapitalization(.never).keyboardType(.emailAddress).autocorrectionDisabled().textContentType(.username)
             }.padding(.top, 28)
-            field("Password", trailing: "Forgot?") { SecureField("••••••••", text: $password) }.padding(.top, 14)
+            field("Password") { SecureField("Password", text: $password).textContentType(.password) }.padding(.top, 14)
 
-            if let error { Text(error).font(.system(size: 13)).foregroundStyle(Theme.destructive).padding(.top, 10) }
+            if let error = error ?? session.error { Text(error).font(.system(size: 13)).foregroundStyle(Theme.destructive).padding(.top, 10) }
 
             PrimaryButton(title: "Log in", busy: busy) { Task { await signIn() } }.padding(.top, 18)
 
-            HStack { line; Text("or continue with").font(.system(size: 12)).foregroundStyle(Theme.muted); line }.padding(.vertical, 18)
+            if session.phase == .failed {
+                Button("Retry session") { Task { await session.restore() } }
+                    .font(.system(size: 14, weight: .medium))
+                    .padding(.top, 16)
+            }
 
-            if api.isLoopback {
-                Button { api.useDevIdentity() } label: {
-                    Label("Local dev identity", systemImage: "hammer").font(.system(size: 14, weight: .medium))
-                        .frame(maxWidth: .infinity).frame(height: 44)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
-                }.foregroundStyle(Theme.foreground)
-            }
-            Spacer()
-            Button { showServer.toggle() } label: {
-                Text("API: \(api.baseURL)").font(Theme.mono).foregroundStyle(Theme.muted)
-            }.frame(maxWidth: .infinity)
-            if showServer {
-                TextField("https://api…", text: $api.baseURL).font(Theme.mono).textInputAutocapitalization(.never)
-                    .padding(10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8)).padding(.top, 8)
-            }
         }
-        .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(24)
+        .frame(maxWidth: 460, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        }
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background.ignoresSafeArea())
     }
 
@@ -62,8 +53,14 @@ struct LoginView: View {
     }
 
     func signIn() async {
+        guard !busy else { return }
         busy = true; defer { busy = false }
-        do { try await api.signIn(email: email, password: password); error = nil }
-        catch { self.error = error.localizedDescription }
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty, !password.isEmpty else {
+            error = "Enter your email and password."
+            return
+        }
+        error = nil
+        await session.signIn(email: address, password: password)
     }
 }

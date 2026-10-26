@@ -5,14 +5,18 @@ options:
     iOS: "17.0"
 settings:
   base:
-    SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   Thorbis:
     type: application
     platform: iOS
-    sources: [Thorbis/Sources]
+    sources:
+      - Thorbis/Sources
+      - path: Thorbis/Resources/Assets.xcassets
+      - path: Thorbis/Resources/PrivacyInfo.xcprivacy
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thorbis.field
@@ -21,4 +25,17 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Thorbis
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
         INFOPLIST_FILE: Thorbis/Resources/Info.plist
+        DEVELOPMENT_TEAM: T677262U5B
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  ThorbisTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [ThorbisTests]
+    dependencies:
+      - target: Thorbis
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thorbis.field.tests
+        GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO

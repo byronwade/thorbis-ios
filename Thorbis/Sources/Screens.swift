@@ -10,149 +10,111 @@ func statusIcon(_ s: String) -> (String, Color) {
     }
 }
 
-struct JobRow: View {
-    let job: Job
-    let customer: String
-    var body: some View {
-        let (icon, tint) = statusIcon(job.status)
-        HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(tint).font(.system(size: 14))
-            Text(job.shortRef).font(Theme.mono).foregroundStyle(Theme.muted)
-            Text("\(job.title) — \(customer.split(separator: " ").last.map(String.init) ?? customer)")
-                .font(.system(size: 14, weight: .medium)).lineLimit(1)
-                .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
-            Spacer()
-            Avatar(name: customer, size: 22)
-        }
-        .padding(.horizontal, 16).frame(height: 44).contentShape(Rectangle())
-    }
-}
-
 struct ScheduleView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
-    @State private var range = "Today"
-    var active: [Job] { store.jobs.filter { !["completed", "canceled"].contains($0.status) } }
+    @State private var range: ScheduleRange = .today
+    var items: [Job] { JobFiltering.schedule(store.jobs, range: range) }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ScreenHeader(icon: "calendar", title: "Schedule",
-                             subtitle: "\(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) · \(active.count) jobs open")
-                SegmentTabs(options: ["Today", "Week", "Map"], selected: $range)
-                if let e = store.error { ErrorBanner(message: e) }
-                if let next = active.first {
-                    HStack { Text("Next up").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-                        Text("updated \(relativeDay(next.updatedAt))").font(Theme.mono).foregroundStyle(Theme.muted.opacity(0.7)); Spacer() }
-                        .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
-                    NavigationLink(value: next) { NextUpCard(job: next, customer: store.customerName(next.customerId)) }.buttonStyle(.plain)
+        List {
+            Picker("Schedule range", selection: $range) {
+                ForEach(ScheduleRange.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented)
+            if let error = store.error { ErrorBanner(message: error) }
+            if store.loading { ProgressView("Updating schedule…") }
+            ForEach(items) { job in
+                NavigationLink(value: job) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let date = JobFiltering.date(job.scheduledFor) {
+                            Text(date, format: .dateTime.weekday().hour().minute()).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Text(job.title).font(.headline)
+                        Text(store.customerName(job.customerId))
+                        Label(job.status.statusLabel, systemImage: statusIcon(job.status).0).font(.caption).foregroundStyle(statusIcon(job.status).1)
+                    }.padding(.vertical, 6)
                 }
-                SectionHeader(title: "Later", count: max(active.count - 1, 0))
-                ForEach(active.dropFirst()) { j in
-                    NavigationLink(value: j) {
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(j.status.statusLabel).font(Theme.mono).foregroundStyle(Theme.muted).frame(width: 74, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(j.title) — \(store.customerName(j.customerId))").font(.system(size: 14, weight: .medium)).lineLimit(1)
-                                Text(j.shortRef).font(.system(size: 12)).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            Image(systemName: statusIcon(j.status).0).foregroundStyle(statusIcon(j.status).1).font(.system(size: 13))
-                        }.padding(.horizontal, 16).padding(.vertical, 8).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                }
-                if active.isEmpty && !store.loading {
-                    Text("Nothing scheduled. New jobs from the API show up here.").font(.system(size: 14)).foregroundStyle(Theme.muted).padding(16)
-                }
-                Spacer(minLength: 100)
+            }
+            if items.isEmpty && !store.loading {
+                ContentUnavailableView("No jobs", systemImage: "calendar", description: Text(range == .unscheduled ? "Jobs without a scheduled time appear here." : "No active jobs in this date range."))
             }
         }
+        .navigationTitle("Schedule")
         .refreshable { await store.refresh(api) }
-    }
-}
-
-struct NextUpCard: View {
-    let job: Job
-    let customer: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Text(job.status.statusLabel).font(Theme.mono).frame(width: 74, alignment: .leading)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(job.title).font(.system(size: 15, weight: .semibold))
-                    Text(customer).font(.system(size: 13)).foregroundStyle(Theme.muted)
-                    HStack { Chip(text: job.status.statusLabel, icon: "arrow.right", tint: Theme.brand, bg: Theme.brandSurface); Chip(text: job.shortRef) }
-                }
-            }
-            HStack(spacing: 8) {
-                Label("Open job", systemImage: "location.north.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).frame(height: 34).background(Theme.brand, in: RoundedRectangle(cornerRadius: 8))
-                Image(systemName: "phone").frame(width: 34, height: 34).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
-                Image(systemName: "bubble.left").frame(width: 34, height: 34).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
-            }.padding(.leading, 86).font(.system(size: 13))
-        }
-        .padding(16).background(Theme.chrome)
     }
 }
 
 struct JobsView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
-    @State private var filter = "Assigned"
+    @EnvironmentObject var session: SessionController
+    @State private var assignedOnly = false
+    @State private var search = ""
     @State private var showNew = false
-    let groups: [(String, Set<String>)] = [
-        ("In progress", ["in_progress", "arrived", "en_route", "dispatched"]),
-        ("Scheduled", ["scheduled", "unscheduled", "draft"]),
-        ("Done", ["completed"]),
-    ]
+    var items: [Job] { JobFiltering.jobs(store.jobs, assignedTo: assignedOnly ? (session.user?.id ?? "") : nil, search: search) }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ScreenHeader(icon: "briefcase", title: "Jobs",
-                             subtitle: "\(store.jobs.filter { $0.status != "completed" }.count) active · \(store.jobs.count) total")
-                SegmentTabs(options: ["Assigned", "All jobs", "Recent"], selected: $filter)
-                if let e = store.error { ErrorBanner(message: e) }
-                ForEach(groups, id: \.0) { g in
-                    let items = store.jobs.filter { g.1.contains($0.status) }
-                    if !items.isEmpty {
-                        HStack { SectionHeader(title: g.0, count: items.count)
-                            if g.0 != "Done" { Button { showNew = true } label: { Image(systemName: "plus") }.foregroundStyle(Theme.muted).padding(.trailing, 16).padding(.top, 12) } }
-                        ForEach(items) { j in NavigationLink(value: j) { JobRow(job: j, customer: store.customerName(j.customerId)) }.buttonStyle(.plain) }
+        List {
+            Toggle("Assigned to me", isOn: $assignedOnly)
+            if let error = store.error { ErrorBanner(message: error) }
+            if store.loading { ProgressView("Updating jobs…") }
+            ForEach(items) { job in
+                NavigationLink(value: job) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(job.title).font(.headline)
+                        Text(store.customerName(job.customerId)).foregroundStyle(.secondary)
+                        Label(job.status.statusLabel, systemImage: statusIcon(job.status).0).font(.caption).foregroundStyle(statusIcon(job.status).1)
                     }
                 }
-                Spacer(minLength: 100)
+            }
+            if items.isEmpty && !store.loading { ContentUnavailableView.search(text: search) }
+        }
+        .navigationTitle("Jobs")
+        .searchable(text: $search, prompt: "Title or job reference")
+        .refreshable { await store.refresh(api) }
+        .toolbar {
+            if session.can("job.create", feature: "jobs") {
+                Button("New job", systemImage: "plus") { showNew = true }
             }
         }
-        .refreshable { await store.refresh(api) }
-        .sheet(isPresented: $showNew) { NewJobSheet().presentationDetents([.medium]) }
+        .sheet(isPresented: $showNew) { NewJobSheet() }
     }
 }
 
 struct NewJobSheet: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
+    @EnvironmentObject var session: SessionController
     @Environment(\.dismiss) var dismiss
     var preselected: Customer? = nil
     @State private var title = ""
     @State private var customerId = ""
+    @State private var busy = false
     @State private var error: String?
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New job").font(.system(size: 20, weight: .bold))
-            TextField("What's the job?", text: $title).padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-            Picker("Customer", selection: $customerId) {
-                ForEach(store.customers) { Text($0.name).tag($0.id) }
-            }.pickerStyle(.menu)
-            if let error { Text(error).foregroundStyle(Theme.destructive).font(.system(size: 13)) }
-            PrimaryButton(title: "Create job", icon: "plus") {
-                Task {
-                    do { _ = try await api.createJob(customerId: customerId, title: title); await store.refresh(api); dismiss() }
-                    catch { self.error = error.localizedDescription }
+        NavigationStack {
+            Form {
+                TextField("Job title", text: $title)
+                Picker("Customer", selection: $customerId) {
+                    Text("Choose a customer").tag("")
+                    ForEach(store.customers.filter { $0.archived != true }) { Text($0.name).tag($0.id) }
                 }
+                if let error { Text(error).foregroundStyle(Theme.destructive) }
+                Button { Task { await create() } } label: {
+                    if busy { ProgressView() } else { Text("Create job") }
+                }.disabled(busy || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || customerId.isEmpty || !session.can("job.create", feature: "jobs"))
             }
-            Spacer()
+            .navigationTitle("New job")
+            .toolbar { Button("Cancel") { dismiss() }.disabled(busy) }
+            .onAppear { customerId = preselected?.id ?? "" }
         }
-        .padding(20).background(Theme.background)
-        .onAppear { customerId = preselected?.id ?? store.customers.first?.id ?? "" }
+    }
+    private func create() async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await api.createJob(customerId: customerId, title: title.trimmingCharacters(in: .whitespacesAndNewlines))
+            await store.refresh(api)
+            dismiss()
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 }
 
@@ -160,125 +122,185 @@ struct JobDetailView: View {
     let jobId: String
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
-    @State private var job: Job?
-    @State private var tab = "Overview"
+    @EnvironmentObject var session: SessionController
+    @State private var job: JobRecord?
+    @State private var notes: [JobNoteRecord] = []
+    @State private var note = ""
+    @State private var reason = ""
+    @State private var nextAction = ""
+    @State private var showPause = false
     @State private var busy = false
     @State private var error: String?
 
-    var nextStep: String? {
-        guard let t = job?.allowedTransitions else { return nil }
-        for s in ["en_route", "arrived", "in_progress"] where t.contains(s) { return s }
-        return nil
-    }
     var body: some View {
-        ScrollView {
+        List {
+            if let error { ErrorBanner(message: error) }
             if let job {
-                let customer = store.customerName(job.customerId)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("\(job.shortRef) · \(customer)").font(Theme.mono).foregroundStyle(Theme.muted).padding(.horizontal, 16)
-                    Text(job.title).font(.system(size: 24, weight: .bold)).padding(.horizontal, 16).padding(.top, 4)
-                    HStack {
-                        let (icon, tint) = statusIcon(job.status)
-                        Chip(text: job.status.statusLabel, icon: icon, tint: tint, bg: tint.opacity(0.15))
-                        Chip(text: "Updated \(relativeDay(job.updatedAt))", icon: "clock")
-                    }.padding(.horizontal, 16).padding(.top, 10)
-                    SegmentTabs(options: ["Overview", "Estimates", "Invoice", "Media", "Activity"], selected: $tab)
-                    if let error { ErrorBanner(message: error) }
-                    HStack { Text("Details").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted); Spacer() }
-                        .padding(.horizontal, 16).padding(.top, 18)
-                    detail("Customer", customer)
-                    detail("Status", job.status.statusLabel)
-                    detail("Created", relativeDay(job.createdAt))
-                    detail("Job ID", String(job.id.prefix(13)) + "…", mono: true)
-                    SectionHeader(title: "Next steps", count: job.allowedTransitions?.count)
-                    FlowChips(items: (job.allowedTransitions ?? []).map { $0.statusLabel })
-                    Spacer(minLength: 120)
-                }.padding(.top, 8)
-            } else if let error { ErrorBanner(message: error) } else { ProgressView().padding(40) }
+                Section("Job") {
+                    LabeledContent("Customer", value: store.customerName(job.customerId))
+                    LabeledContent("Status", value: job.status.statusLabel)
+                    if let date = JobFiltering.date(job.scheduledFor) { LabeledContent("Scheduled", value: date.formatted()) }
+                    if let detail = job.notes, !detail.isEmpty { Text(detail) }
+                    if let reason = job.pauseReason { LabeledContent("Pause reason", value: reason) }
+                    if let next = job.pauseNextAction { LabeledContent("Next action", value: next) }
+                }
+                if session.can("job.edit", feature: "jobs") || session.can("job.assign", feature: "jobs") {
+                    Section("Actions") {
+                        ForEach((job.allowedTransitions ?? []).filter { ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused"].contains($0) && session.can(["scheduled", "dispatched"].contains($0) ? "job.assign" : "job.edit", feature: "jobs") }, id: \.self) { target in
+                            Button(target == "paused" ? "Pause job…" : "Mark \(target.statusLabel.lowercased())") {
+                                if target == "paused" { showPause = true }
+                                else { Task { await advance(target) } }
+                            }.disabled(busy)
+                        }
+                    }
+                }
+                Section("Related work") {
+                    NavigationLink("Closeout") { JobCloseoutView(jobID: jobId) }
+                    NavigationLink("Media") { JobMediaView(jobID: jobId) }
+                    NavigationLink("Follow-ups") { JobFollowUpsView(jobID: jobId) }
+                    if session.can("job.assign", feature: "jobs") {
+                        NavigationLink("Schedule job") { JobScheduleView(job: job) }
+                        NavigationLink("Assign job") { JobAssignmentView(jobID: jobId) }
+                    }
+                    if let estimateID = job.estimateId, session.can("estimate.view", feature: "estimates") {
+                        NavigationLink("Estimate") { EstimateDetailView(id: estimateID) }
+                    }
+                }
+                Section("Notes") {
+                    ForEach(notes) { record in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(record.body)
+                            if let date = JobFiltering.date(record.createdAt) { Text(date.formatted()).font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }
+                    if notes.isEmpty { Text("No notes yet").foregroundStyle(.secondary) }
+                    if session.can("job.note", feature: "jobs") {
+                        TextField("Add a note", text: $note, axis: .vertical).lineLimit(3...8)
+                        Button("Save note") { Task { await saveNote() } }
+                            .disabled(busy || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || note.utf16.count > 10_000)
+                    }
+                }
+                Section("Record") {
+                    Text(job.id).font(.caption.monospaced()).textSelection(.enabled)
+                    LabeledContent("Updated", value: JobFiltering.date(job.updatedAt)?.formatted() ?? job.updatedAt)
+                }
+            } else if error == nil { ProgressView("Loading job…") }
         }
-        .background(Theme.background)
-        .safeAreaInset(edge: .bottom) {
-            if let step = nextStep {
-                HStack(spacing: 8) {
-                    PrimaryButton(title: "Mark \(step.statusLabel.lowercased())", icon: "checkmark.circle", busy: busy) { Task { await advance(step) } }
-                    Image(systemName: "phone").frame(width: 44, height: 44).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
-                }.padding(.horizontal, 16).padding(.vertical, 10).background(Theme.background)
+        .navigationTitle(job?.title ?? "Job")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .refreshable { await load() }
+        .sheet(isPresented: $showPause) {
+            NavigationStack {
+                Form {
+                    TextField("Why are you pausing?", text: $reason, axis: .vertical)
+                    TextField("What needs to happen next?", text: $nextAction, axis: .vertical)
+                    if let error { Text(error).foregroundStyle(Theme.destructive) }
+                    Button("Pause job") { Task { await pause() } }
+                        .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
+                }.navigationTitle("Pause job")
+                    .toolbar { Button("Cancel") { showPause = false }.disabled(busy) }
             }
         }
-        .toolbarBackground(Theme.background, for: .navigationBar)
-        .task { await load() }
     }
-
-    func detail(_ k: String, _ v: String, mono: Bool = false) -> some View {
-        HStack { Text(k).foregroundStyle(Theme.muted); Spacer(); Text(v).font(mono ? Theme.mono : .system(size: 14, weight: .medium)) }
-            .font(.system(size: 14)).padding(.horizontal, 16).frame(height: 40)
+    private func load() async {
+        do {
+            job = try await api.fieldJob(jobId)
+            notes = try await api.fieldNotes(jobId)
+            error = nil
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
-    func load() async {
-        do { job = try await api.job(jobId) } catch { self.error = error.localizedDescription }
-    }
-    func advance(_ step: String) async {
-        busy = true; defer { busy = false }
-        do { try await api.progress(jobId, to: step); await load(); await store.refresh(api); error = nil }
-        catch { self.error = error.localizedDescription }
-    }
-}
-
-struct FlowChips: View {
-    let items: [String]
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack { ForEach(items, id: \.self) { Chip(text: $0) } }.padding(.horizontal, 16)
+    private func advance(_ target: String) async {
+        let request: FieldProgressRequest
+        switch target {
+        case "scheduled": request = .scheduled
+        case "dispatched": request = .dispatched
+        case "en_route": request = .enRoute()
+        case "arrived": request = .arrived()
+        case "in_progress":
+            if job?.status == "paused", let auditID = job?.pauseCycleAuditId, session.can("job.edit", feature: "job_pause_cycle_resume") {
+                request = .resume(expectedPauseAuditId: auditID)
+            } else { request = .start }
+        default: return
         }
+        await progress(request)
+    }
+    private func pause() async {
+        if await progress(.pause(reason: reason.trimmingCharacters(in: .whitespacesAndNewlines), nextAction: nextAction.trimmingCharacters(in: .whitespacesAndNewlines))) {
+            showPause = false
+            reason = ""
+            nextAction = ""
+        }
+    }
+    @discardableResult private func progress(_ request: FieldProgressRequest) async -> Bool {
+        busy = true
+        defer { busy = false }
+        do {
+            job = try await api.progressFieldJob(jobId, request: request)
+            await store.refresh(api)
+            error = nil
+            return true
+        } catch is CancellationError { return false } catch { self.error = error.localizedDescription; return false }
+    }
+    private func saveNote() async {
+        busy = true
+        defer { busy = false }
+        do {
+            let saved = try await api.addFieldNote(jobId, body: note.trimmingCharacters(in: .whitespacesAndNewlines))
+            notes.append(saved)
+            note = ""
+            error = nil
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 }
 
 struct CustomersView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
+    @EnvironmentObject var session: SessionController
     @State private var showNew = false
+    @State private var search = ""
     @State private var newName = ""
-    var grouped: [(String, [Customer])] {
-        Dictionary(grouping: store.customers.filter { $0.archived != true }) { String($0.name.prefix(1)).uppercased() }
-            .sorted { $0.key < $1.key }.map { ($0.key, $0.value.sorted { $0.name < $1.name }) }
+    @State private var busy = false
+    @State private var error: String?
+    var items: [Customer] {
+        store.customers.filter { $0.archived != true && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ScreenHeader(icon: "person.2", title: "Customers",
-                             subtitle: "\(store.customers.count) customers · \(store.jobs.filter { $0.status != "completed" }.count) active jobs")
-                if let e = store.error { ErrorBanner(message: e) }
-                ForEach(grouped, id: \.0) { letter, items in
-                    SectionHeader(title: letter, count: items.count)
-                    ForEach(items) { c in
-                        NavigationLink(value: c) {
-                            HStack(spacing: 12) {
-                                Avatar(name: c.name, size: 28)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(c.name).font(.system(size: 14, weight: .medium))
-                                    Text("\(store.jobs.filter { $0.customerId == c.id }.count) jobs").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                                }
-                                Spacer()
-                                if let open = store.jobs.first(where: { $0.customerId == c.id && $0.status != "completed" }) {
-                                    Image(systemName: statusIcon(open.status).0).foregroundStyle(statusIcon(open.status).1)
-                                }
-                            }.padding(.horizontal, 16).frame(height: 48).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                    }
+        List {
+            if let error = error ?? store.error { ErrorBanner(message: error) }
+            if store.loading { ProgressView("Updating customers…") }
+            ForEach(items) { customer in
+                NavigationLink(value: customer) {
+                    Label(customer.name, systemImage: "person.crop.circle")
                 }
-                Spacer(minLength: 100)
+            }
+            if items.isEmpty && !store.loading { ContentUnavailableView.search(text: search) }
+        }
+        .navigationTitle("Customers")
+        .searchable(text: $search, prompt: "Customer name")
+        .refreshable { await store.refresh(api) }
+        .toolbar {
+            if session.can("customer.create", feature: "core_crm") {
+                Button("New customer", systemImage: "plus") { showNew = true }.disabled(busy)
             }
         }
-        .refreshable { await store.refresh(api) }
         .alert("New customer", isPresented: $showNew) {
             TextField("Name", text: $newName)
-            Button("Create") { Task { _ = try? await api.createCustomer(name: newName); newName = ""; await store.refresh(api) } }
+            Button("Create") { Task { await create() } }.disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) {}
         }
-        .overlay(alignment: .bottomTrailing) {
-            Button { showNew = true } label: { Image(systemName: "plus").font(.system(size: 16, weight: .semibold)) }
-                .foregroundStyle(Theme.foreground).frame(width: 46, height: 46).background(Theme.surface, in: Circle())
-                .overlay(Circle().stroke(Theme.border)).padding(.trailing, 16).padding(.bottom, 64)
-        }
+    }
+    private func create() async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await api.createCustomer(name: newName.trimmingCharacters(in: .whitespacesAndNewlines))
+            newName = ""
+            await store.refresh(api)
+            error = nil
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 }
 
@@ -286,59 +308,206 @@ struct CustomerDetailView: View {
     let customer: Customer
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
-    @State private var tab = "Overview"
-    @State private var showNew = false
+    @EnvironmentObject var session: SessionController
+    @State private var record: CustomerRecord?
+    @State private var contacts: [CustomerContactRecord] = []
+    @State private var locations: [ServiceLocationRecord] = []
+    @State private var error: String?
+    @State private var showNewJob = false
+    @State private var showContact = false
+    @State private var showLocation = false
     var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("CUS-\(String(customer.id.suffix(4)).uppercased()) · Customer since \(relativeDay(customer.createdAt))").font(Theme.mono).foregroundStyle(Theme.muted).padding(.horizontal, 16)
-                Text(customer.name).font(.system(size: 24, weight: .bold)).padding(.horizontal, 16).padding(.top, 4)
-                HStack {
-                    if jobs.contains(where: { $0.status == "in_progress" }) { Chip(text: "Job in progress", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface) }
-                    Chip(text: "\(jobs.count) jobs", icon: "clock")
-                }.padding(.horizontal, 16).padding(.top, 10)
-                SegmentTabs(options: ["Overview", "Jobs", "Billing", "Media", "Activity"], selected: $tab)
-                SectionHeader(title: "Job history", count: jobs.count)
-                ForEach(jobs) { j in NavigationLink(value: j) { JobRow(job: j, customer: customer.name) }.buttonStyle(.plain) }
-                if jobs.isEmpty { Text("No jobs yet.").font(.system(size: 14)).foregroundStyle(Theme.muted).padding(.horizontal, 16) }
-                Spacer(minLength: 120)
-            }.padding(.top, 8)
+        List {
+            if let error { ErrorBanner(message: error) }
+            if let record {
+                Section("Customer") {
+                    ContactActions(phone: record.phone, email: record.email)
+                    if let address = record.address { AddressLink(address: address) }
+                    if let terms = record.billingTerms { LabeledContent("Billing terms", value: terms) }
+                    if let account = record.accountType { LabeledContent("Account", value: account.statusLabel) }
+                }
+            }
+            Section("Contacts") {
+                ForEach(contacts) { contact in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(contact.name).font(.headline)
+                        if contact.primary { Text("Primary contact").font(.caption).foregroundStyle(.secondary) }
+                        if let role = contact.role { Text(role).font(.subheadline) }
+                        ContactActions(phone: contact.phone, email: contact.email)
+                    }.padding(.vertical, 4)
+                }
+                if contacts.isEmpty { Text("No contacts").foregroundStyle(.secondary) }
+                if session.can("customer.edit", feature: "core_crm") { Button("Add contact") { showContact = true } }
+            }
+            Section("Locations") {
+                ForEach(locations) { location in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(location.label).font(.headline)
+                        Text(location.kind.statusLabel).font(.caption).foregroundStyle(.secondary)
+                        AddressLink(address: location.address)
+                        if let notes = location.notes { Text(notes) }
+                        if let parking = location.parking { LabeledContent("Parking", value: parking) }
+                        if let dogs = location.dogOnSite { LabeledContent("Dogs on site", value: dogs) }
+                    }.padding(.vertical, 4)
+                }
+                if locations.isEmpty { Text("No locations").foregroundStyle(.secondary) }
+                if session.can("customer.edit", feature: "core_crm") { Button("Add location") { showLocation = true } }
+            }
+            if session.can("job.view", feature: "jobs") {
+                Section("Jobs") {
+                    ForEach(jobs) { job in NavigationLink(value: job) { Text(job.title) } }
+                    if jobs.isEmpty { Text("No jobs").foregroundStyle(.secondary) }
+                    if session.can("job.create", feature: "jobs") { Button("New job") { showNewJob = true } }
+                }
+            }
         }
-        .background(Theme.background)
-        .safeAreaInset(edge: .bottom) {
-            PrimaryButton(title: "New job", icon: "plus") { showNew = true }.padding(.horizontal, 16).padding(.vertical, 10).background(Theme.background)
+        .navigationTitle(customer.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .refreshable { await load() }
+        .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
+        .sheet(isPresented: $showContact, onDismiss: { Task { await load() } }) { CustomerRecordSheet(customerID: customer.id, isLocation: false) }
+        .sheet(isPresented: $showLocation, onDismiss: { Task { await load() } }) { CustomerRecordSheet(customerID: customer.id, isLocation: true) }
+    }
+    private func load() async {
+        do {
+            record = try await api.fieldCustomer(customer.id)
+            contacts = try await api.fieldContacts(customer.id)
+            locations = try await api.fieldLocations(customer.id)
+            error = nil
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+}
+
+struct ContactActions: View {
+    let phone: String?
+    let email: String?
+    var body: some View {
+        if let phone, !phone.isEmpty {
+            let number = phone.filter { $0.isNumber || $0 == "+" }
+            if let url = URL(string: "tel:" + number) { Link(destination: url) { Label(phone, systemImage: "phone") } }
         }
-        .sheet(isPresented: $showNew) { NewJobSheet(preselected: customer).presentationDetents([.medium]) }
+        if let email, let encoded = email.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), let url = URL(string: "mailto:" + encoded) {
+            Link(destination: url) { Label(email, systemImage: "envelope") }
+        }
+    }
+}
+
+struct AddressLink: View {
+    let address: String
+    var body: some View {
+        if let url {
+            Link(destination: url) { Label(address, systemImage: "map") }
+        } else { Text(address) }
+    }
+    private var url: URL? {
+        var components = URLComponents(string: "https://maps.apple.com/")
+        components?.queryItems = [URLQueryItem(name: "q", value: address)]
+        return components?.url
+    }
+}
+
+struct CustomerRecordSheet: View {
+    let customerID: String
+    let isLocation: Bool
+    @EnvironmentObject var api: APIClient
+    @EnvironmentObject var session: SessionController
+    @Environment(\.dismiss) var dismiss
+    @State private var name = ""
+    @State private var email = ""
+    @State private var phone = ""
+    @State private var address = ""
+    @State private var kind = "service"
+    @State private var primary = false
+    @State private var busy = false
+    @State private var error: String?
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField(isLocation ? "Label" : "Name", text: $name)
+                if isLocation {
+                    Picker("Type", selection: $kind) { Text("Service").tag("service"); Text("Billing").tag("billing") }
+                    TextField("Address", text: $address, axis: .vertical).textContentType(.fullStreetAddress)
+                } else {
+                    TextField("Email", text: $email).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Phone", text: $phone).keyboardType(.phonePad)
+                    Toggle("Primary contact", isOn: $primary)
+                }
+                if let error { Text(error).foregroundStyle(Theme.destructive) }
+                Button("Save") { Task { await save() } }
+                    .disabled(busy || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (isLocation && address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || !session.can("customer.edit", feature: "core_crm"))
+                if busy { ProgressView() }
+            }.navigationTitle(isLocation ? "New location" : "New contact")
+                .toolbar { Button("Cancel") { dismiss() }.disabled(busy) }
+        }
+    }
+    private func save() async {
+        busy = true
+        defer { busy = false }
+        do {
+            if isLocation {
+                _ = try await api.createFieldLocation(customerID, request: .init(label: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind, address: address.trimmingCharacters(in: .whitespacesAndNewlines)))
+            } else {
+                _ = try await api.createFieldContact(customerID, request: .init(name: name.trimmingCharacters(in: .whitespacesAndNewlines), email: email.isEmpty ? nil : email, phone: phone.isEmpty ? nil : phone, primary: primary))
+            }
+            dismiss()
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 }
 
 struct MoreView: View {
+    @EnvironmentObject var session: SessionController
     @EnvironmentObject var api: APIClient
+    @State private var showWorkspaces = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                HStack(spacing: 6) {
-                    Text("T").font(.system(size: 11, weight: .bold)).foregroundStyle(.white).frame(width: 20, height: 20).background(Theme.brand, in: RoundedRectangle(cornerRadius: 5))
-                    Text(api.displayName.isEmpty ? "Workspace" : api.displayName).font(.system(size: 14, weight: .semibold))
-                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(Theme.muted)
-                }.padding(.horizontal, 10).frame(height: 34).background(Theme.surface, in: Capsule())
-                Spacer()
-            }.padding(16)
-            VStack(alignment: .leading, spacing: 2) {
-                row("calendar", "Schedule"); row("briefcase", "Jobs"); row("person.2", "Customers")
-                row("bubble.left", "Messages"); row("book.closed", "Price book"); row("clock", "Time clock")
-                Divider().overlay(Theme.border).padding(.vertical, 4)
-                Button { api.signOut() } label: { rowLabel("rectangle.portrait.and.arrow.right", "Sign out") }.foregroundStyle(Theme.destructive)
+        List {
+            Section("Workspace") {
+                LabeledContent("Workspace", value: session.activeOrganization?.name ?? "")
+                LabeledContent("Signed in", value: session.user?.name ?? session.user?.email ?? "")
+                if session.organizations.count > 1 { Button("Switch workspace") { showWorkspaces = true } }
             }
-            .padding(6).background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border)).padding(.horizontal, 16)
-            Spacer()
+            Section("Work") {
+                if session.can("job.view", feature: "jobs") {
+                    NavigationLink { ScheduleView() } label: { Label("Schedule", systemImage: "calendar") }
+                    NavigationLink { JobsView() } label: { Label("Jobs", systemImage: "briefcase") }
+                }
+                if session.can("customer.view", feature: "core_crm") {
+                    NavigationLink { CustomersView() } label: { Label("Customers", systemImage: "person.2") }
+                }
+                if session.can("estimate.view", feature: "estimates") {
+                    NavigationLink { EstimatesView() } label: { Label("Estimates", systemImage: "doc.text") }
+                }
+                if session.can("invoice.view", feature: "invoicing") {
+                    NavigationLink { InvoicesView() } label: { Label("Invoices", systemImage: "doc.plaintext") }
+                }
+            }
+            Section("Workspace tools") {
+                if session.can("job.view", feature: "job_booking_notices") {
+                    NavigationLink("Notifications") { WorkspaceNoticesView(api: api, available: true).id(session.generation) }
+                }
+                if session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments") {
+                    NavigationLink("Revenue report") { WorkspaceRevenueView(api: api, available: true).id(session.generation) }
+                }
+                if session.can("pricebook.view", feature: "price_book") {
+                    NavigationLink("Price Book") { WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation) }
+                }
+            }
+            if let actorID = session.user?.id, let organizationID = session.activeOrganization?.id {
+                Section("On this device") {
+                    NavigationLink { InboxLocalDraftView(actorID: actorID, organizationID: organizationID) } label: { Label("Message drafts", systemImage: "bubble.left") }
+                    ForEach(LocalWorkspaceSection.allCases, id: \.self) { section in
+                        if session.can(section.requiredCapability, feature: section.requiredFeature) {
+                            NavigationLink(section.title) { LocalWorkspaceView(section: section, actorID: actorID, organizationID: organizationID) }
+                        }
+                    }
+                }
+            }
+            Section {
+                Button("Sign out", role: .destructive) { Task { await session.signOut() } }
+            }
         }
-    }
-    func row(_ icon: String, _ t: String) -> some View { rowLabel(icon, t).foregroundStyle(Theme.foreground) }
-    func rowLabel(_ icon: String, _ t: String) -> some View {
-        HStack(spacing: 10) { Image(systemName: icon).frame(width: 20).foregroundStyle(Theme.muted); Text(t).font(.system(size: 15)); Spacer() }
-            .padding(.horizontal, 10).frame(height: 40)
+        .navigationTitle("More")
+        .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
     }
 }

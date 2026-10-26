@@ -1,0 +1,326 @@
+import SwiftUI
+
+enum LocalWorkspaceSection: String, CaseIterable, Hashable {
+    case fleet, equipment, agreements, team
+
+    var title: String {
+        switch self {
+        case .fleet: "Fleet"
+        case .equipment: "Equipment"
+        case .agreements: "Agreements"
+        case .team: "Team additions"
+        }
+    }
+
+    /// Navigation gating follows apps/web/src/navigation/registry.ts.
+    var requiredCapability: String {
+        switch self {
+        case .fleet: "job.view"
+        case .equipment, .agreements: "customer.view"
+        case .team: "organization.view"
+        }
+    }
+
+    var requiredFeature: String? {
+        switch self {
+        case .fleet: "jobs"
+        case .equipment, .agreements: "core_crm"
+        case .team: nil
+        }
+    }
+
+    var fields: [(key: String, label: String, required: Bool)] {
+        switch self {
+        case .fleet:
+            [
+                ("name", "Name", true), ("model", "Make and model", false),
+                ("plate", "Plate", false), ("year", "Year", false), ("vin", "VIN", false),
+                ("assignedTo", "Assigned driver (name or local ID)", false),
+                ("mileage", "Mileage as noted", false), ("purchasePrice", "Purchase price as noted", false),
+                ("marketValue", "Owner-estimated market value", false),
+                ("purchaseDate", "Purchase date (YYYY-MM-DD)", false),
+                ("registrationDue", "Registration due (YYYY-MM-DD)", false),
+                ("lastOilChange", "Last oil change (YYYY-MM-DD)", false),
+                ("nextOilChange", "Next oil change (YYYY-MM-DD)", false),
+                ("lastTireRotation", "Last tire rotation (YYYY-MM-DD)", false),
+                ("lastNewTires", "Last new tires (YYYY-MM-DD)", false),
+                ("lastRepair", "Last repair", false), ("notes", "Notes", false),
+            ]
+        case .equipment:
+            [("name", "Unit name", true), ("site", "Site as written", true),
+             ("brand", "Brand", false), ("serial", "Serial", false),
+             ("installedYear", "Installed year", false), ("notes", "Notes", false)]
+        case .agreements:
+            [("name", "Agreement name", true), ("customer", "Customer name as written", true),
+             ("cadence", "Visit cadence", true), ("renewsOn", "Renews on (YYYY-MM-DD)", false),
+             ("notes", "Notes", false)]
+        case .team:
+            [("name", "Name", true), ("role", "Role", true), ("phone", "Phone", false)]
+        }
+    }
+}
+
+struct LocalWorkspaceRow: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+}
+
+struct LocalWorkspaceDraft: Identifiable {
+    let id: String
+    let createdAt: String
+    var kind: LocalAgreementRecord.Kind = .maintenance
+    var values: [String: String] = [:]
+
+    init(id: String = UUID().uuidString,
+         createdAt: String = ISO8601DateFormatter().string(from: Date())) {
+        self.id = id
+        self.createdAt = createdAt
+    }
+
+    func value(_ key: String) -> String { values[key] ?? "" }
+    func optional(_ key: String) -> String? {
+        let value = self.value(key).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+    func required(_ key: String) -> String {
+        value(key).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Owns one opened device partition. Clearing this model immediately hides old actor data.
+@MainActor
+final class LocalWorkspaceViewModel: ObservableObject {
+    @Published private(set) var actorID: String?
+    @Published private(set) var organizationID: String?
+    @Published private(set) var error: String?
+    @Published private(set) var revision = 0
+    private var storage: LocalWorkspaceRecords?
+
+    func bind(actorID: String, organizationID: String) {
+        guard self.actorID != actorID || self.organizationID != organizationID || storage == nil else { return }
+        clear()
+        do {
+            let opened = try LocalWorkspaceRecords(actorID: actorID, organizationID: organizationID)
+            storage = opened
+            self.actorID = actorID
+            self.organizationID = organizationID
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func clear() {
+        storage = nil
+        actorID = nil
+        organizationID = nil
+        error = nil
+        revision += 1
+    }
+
+    func rows(_ section: LocalWorkspaceSection) -> [LocalWorkspaceRow] {
+        guard let storage else { return [] }
+        switch section {
+        case .fleet: return storage.vehicles.map { .init(id: $0.id, title: $0.name, subtitle: [$0.model, $0.plate].compactMap { $0 }.joined(separator: " · ")) }
+        case .equipment: return storage.equipment.map { .init(id: $0.id, title: $0.name, subtitle: $0.site) }
+        case .agreements: return storage.agreements.map { .init(id: $0.id, title: $0.name, subtitle: "\($0.customer) · \($0.kind.rawValue.capitalized)") }
+        case .team: return storage.crew.map { .init(id: $0.id, title: $0.name, subtitle: $0.role) }
+        }
+    }
+
+    func draft(_ section: LocalWorkspaceSection, id: String) -> LocalWorkspaceDraft? {
+        guard let storage else { return nil }
+        var draft: LocalWorkspaceDraft
+        switch section {
+        case .fleet:
+            guard let row = storage.vehicles.first(where: { $0.id == id }) else { return nil }
+            draft = .init(id: row.id, createdAt: row.createdAt)
+            draft.values = ["name": row.name, "model": row.model ?? "", "plate": row.plate ?? "",
+                            "year": row.year ?? "", "vin": row.vin ?? "", "assignedTo": row.assignedTo ?? "",
+                            "mileage": row.mileage ?? "", "purchasePrice": row.purchasePrice ?? "",
+                            "marketValue": row.marketValue ?? "", "purchaseDate": row.purchaseDate ?? "",
+                            "registrationDue": row.registrationDue ?? "", "lastOilChange": row.lastOilChange ?? "",
+                            "nextOilChange": row.nextOilChange ?? "", "lastTireRotation": row.lastTireRotation ?? "",
+                            "lastNewTires": row.lastNewTires ?? "", "lastRepair": row.lastRepair ?? "",
+                            "notes": row.notes ?? ""]
+        case .equipment:
+            guard let row = storage.equipment.first(where: { $0.id == id }) else { return nil }
+            draft = .init(id: row.id, createdAt: row.createdAt)
+            draft.values = ["name": row.name, "site": row.site, "brand": row.brand ?? "",
+                            "serial": row.serial ?? "", "installedYear": row.installedYear ?? "",
+                            "notes": row.notes ?? ""]
+        case .agreements:
+            guard let row = storage.agreements.first(where: { $0.id == id }) else { return nil }
+            draft = .init(id: row.id, createdAt: row.createdAt)
+            draft.kind = row.kind
+            draft.values = ["name": row.name, "customer": row.customer, "cadence": row.cadence,
+                            "renewsOn": row.renewsOn ?? "", "notes": row.notes ?? ""]
+        case .team:
+            guard let row = storage.crew.first(where: { $0.id == id }) else { return nil }
+            draft = .init(id: row.id, createdAt: row.createdAt)
+            draft.values = ["name": row.name, "role": row.role, "phone": row.phone ?? ""]
+        }
+        return draft
+    }
+
+    func save(_ draft: LocalWorkspaceDraft, section: LocalWorkspaceSection) throws {
+        guard let storage else { throw Problem(title: "Local book unavailable", status: nil, detail: nil) }
+        guard section.fields.filter({ $0.required }).allSatisfy({ !draft.required($0.key).isEmpty }) else {
+            throw Problem(title: "Required fields are missing", status: nil, detail: nil)
+        }
+        switch section {
+        case .fleet:
+            try storage.save(LocalVehicleRecord(id: draft.id, name: draft.required("name"),
+                model: draft.optional("model"), plate: draft.optional("plate"), year: draft.optional("year"),
+                vin: draft.optional("vin"), assignedTo: draft.optional("assignedTo"), mileage: draft.optional("mileage"),
+                purchasePrice: draft.optional("purchasePrice"), marketValue: draft.optional("marketValue"),
+                purchaseDate: draft.optional("purchaseDate"), registrationDue: draft.optional("registrationDue"),
+                lastOilChange: draft.optional("lastOilChange"), nextOilChange: draft.optional("nextOilChange"),
+                lastTireRotation: draft.optional("lastTireRotation"), lastNewTires: draft.optional("lastNewTires"),
+                lastRepair: draft.optional("lastRepair"), notes: draft.optional("notes"), createdAt: draft.createdAt))
+        case .equipment:
+            try storage.save(LocalEquipmentRecord(id: draft.id, name: draft.required("name"),
+                brand: draft.optional("brand"), serial: draft.optional("serial"), site: draft.required("site"),
+                installedYear: draft.optional("installedYear"), notes: draft.optional("notes"), createdAt: draft.createdAt))
+        case .agreements:
+            try storage.save(LocalAgreementRecord(id: draft.id, kind: draft.kind, name: draft.required("name"),
+                customer: draft.required("customer"), cadence: draft.required("cadence"),
+                renewsOn: draft.optional("renewsOn"), notes: draft.optional("notes"), createdAt: draft.createdAt))
+        case .team:
+            try storage.save(LocalCrewRecord(id: draft.id, name: draft.required("name"),
+                role: draft.required("role"), phone: draft.optional("phone"), createdAt: draft.createdAt))
+        }
+        revision += 1
+    }
+
+    func remove(_ id: String, section: LocalWorkspaceSection) throws {
+        guard let storage else { throw Problem(title: "Local book unavailable", status: nil, detail: nil) }
+        switch section {
+        case .fleet: try storage.removeVehicle(id)
+        case .equipment: try storage.removeEquipment(id)
+        case .agreements: try storage.removeAgreement(id)
+        case .team: try storage.removeCrew(id)
+        }
+        revision += 1
+    }
+}
+
+/// Pass the authenticated user and active organization from SessionController.
+/// Root navigation should gate with section.requiredCapability/requiredFeature.
+struct LocalWorkspaceView: View {
+    let section: LocalWorkspaceSection
+    let actorID: String
+    let organizationID: String
+    @StateObject private var model = LocalWorkspaceViewModel()
+    @State private var editor: LocalWorkspaceDraft?
+    @State private var editorOwner: String?
+    @State private var actionError: String?
+
+    private var identityKey: String { "\(actorID.lowercased())|\(organizationID.lowercased())" }
+
+    private func present(_ draft: LocalWorkspaceDraft) {
+        editorOwner = identityKey
+        editor = draft
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Text("On this device · Not synced")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let error = actionError ?? model.error { Text(error).foregroundStyle(.red) }
+            if model.actorID == actorID && model.organizationID == organizationID {
+                let rows = model.rows(section)
+                Section(section.title) {
+                    ForEach(rows) { row in
+                        Button { if let draft = model.draft(section, id: row.id) { present(draft) } } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(row.title).foregroundStyle(.primary)
+                                if !row.subtitle.isEmpty { Text(row.subtitle).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                    }
+                    .onDelete { offsets in
+                        do {
+                            for offset in offsets { try model.remove(rows[offset].id, section: section) }
+                            actionError = nil
+                        } catch { actionError = error.localizedDescription }
+                    }
+                    if rows.isEmpty { Text("No records on this device").foregroundStyle(.secondary) }
+                }
+                .id(model.revision)
+            } else if model.error == nil { ProgressView("Opening device book…") }
+        }
+        .navigationTitle(section.title)
+        .toolbar { Button("Add", systemImage: "plus") { present(LocalWorkspaceDraft()) }
+            .disabled(model.actorID != actorID || model.organizationID != organizationID) }
+        .task(id: identityKey) {
+            editor = nil
+            editorOwner = nil
+            actionError = nil
+            model.bind(actorID: actorID, organizationID: organizationID)
+        }
+        .sheet(item: $editor) { draft in
+            if editorOwner == identityKey && model.actorID == actorID && model.organizationID == organizationID {
+                LocalWorkspaceEditor(section: section, draft: draft) { saved in
+                    guard editorOwner == identityKey && model.actorID == actorID && model.organizationID == organizationID else {
+                        throw Problem(title: "Session changed", status: nil, detail: nil)
+                    }
+                    try model.save(saved, section: section)
+                    actionError = nil
+                }
+            } else {
+                Text("Session changed").foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct LocalWorkspaceEditor: View {
+    let section: LocalWorkspaceSection
+    @State var draft: LocalWorkspaceDraft
+    let onSave: (LocalWorkspaceDraft) throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("On this device") {
+                    if section == .agreements {
+                        Picker("Kind", selection: $draft.kind) {
+                            Text("Maintenance").tag(LocalAgreementRecord.Kind.maintenance)
+                            Text("Membership").tag(LocalAgreementRecord.Kind.membership)
+                        }
+                    }
+                    ForEach(section.fields.indices, id: \.self) { index in
+                        let field = section.fields[index]
+                        TextField(field.label, text: Binding(
+                            get: { draft.value(field.key) },
+                            set: { draft.values[field.key] = $0 }
+                        ), axis: field.key == "notes" ? .vertical : .horizontal)
+                    }
+                }
+                if section == .fleet {
+                    Text("Values and maintenance dates are written as entered. Market value is your estimate; no live valuation is connected.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let error { Text(error).foregroundStyle(.red) }
+            }
+            .navigationTitle(draft.values.isEmpty ? "New \(section.title)" : "Edit \(section.title)")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        do { try onSave(draft); dismiss() }
+                        catch { self.error = error.localizedDescription }
+                    }
+                    .disabled(section.fields.filter { $0.required }.contains { draft.required($0.key).isEmpty })
+                }
+            }
+        }
+    }
+}
