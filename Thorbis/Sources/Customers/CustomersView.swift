@@ -76,7 +76,7 @@ struct CustomerRow: View {
                 }
             }
             Spacer(minLength: 0)
-            if customer.isArchived { StatusBadge(text: "Archived") }
+            if customer.isArchived { StatusBadge(text: "Archived", symbol: "archivebox") }
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)

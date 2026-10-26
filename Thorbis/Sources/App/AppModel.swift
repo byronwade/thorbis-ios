@@ -44,6 +44,9 @@ final class AppModel {
     /// Set when the app opened offline with a saved session and still needs
     /// to confirm the session and load who is signed in.
     @ObservationIgnored private var needsIdentity = false
+    /// Records saved (e.g. after a job action) while a refresh is in flight; the
+    /// refresh's older snapshot must not overwrite them.
+    @ObservationIgnored private var storedDuringRefresh: Set<String> = []
 
     private static let environmentKey = "thorbis.environment"
 
@@ -94,7 +97,7 @@ final class AppModel {
 
     func signIn(email: String, password: String) async throws {
         let session = try await api.signIn(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
-        try await finishSignIn(activeOrganizationId: session.session.activeOrganizationId)
+        try await finishSignIn(session)
     }
 
     func useDevIdentity() async throws {
@@ -150,7 +153,7 @@ final class AppModel {
         }
         do {
             let session = try await api.session()
-            try await finishSignIn(activeOrganizationId: session.session.activeOrganizationId)
+            try await finishSignIn(session)
         } catch APIError.unauthenticated {
             phase = .signedOut
         } catch {
@@ -171,8 +174,13 @@ final class AppModel {
         await refreshAll()
     }
 
-    private func finishSignIn(activeOrganizationId: String?) async throws {
-        if let activeOrganizationId {
+    private func finishSignIn(_ session: AuthSession) async throws {
+        // The session already names the user; /v1/me only adds detail, so "Mine" never
+        // depends on that second request succeeding.
+        if account?.id != session.user.id {
+            account = Account(id: session.user.id, name: session.user.name, email: session.user.email)
+        }
+        if let activeOrganizationId = session.session.activeOrganizationId {
             // The name is cosmetic here; the session already has its workspace.
             let organizations = (try? await api.organizations()) ?? []
             organization = organizations.first { $0.id == activeOrganizationId } ?? Organization(id: activeOrganizationId, name: "Workspace")
@@ -210,7 +218,7 @@ final class AppModel {
         do {
             let session = try await api.session()
             needsIdentity = false
-            try await finishSignIn(activeOrganizationId: session.session.activeOrganizationId)
+            try await finishSignIn(session)
             return false // finishSignIn ran its own refresh, or is asking for a workspace
         } catch {
             handle(error)
@@ -228,7 +236,13 @@ final class AppModel {
         }
         let started = generation
         isRefreshing = true
-        defer { if started == generation { isRefreshing = false } }
+        storedDuringRefresh = []
+        defer {
+            if started == generation {
+                isRefreshing = false
+                storedDuringRefresh = []
+            }
+        }
         let api = api
         async let jobs = Self.attempt { try await api.jobs() }
         async let customers = Self.attempt { try await api.customers() }
@@ -247,11 +261,11 @@ final class AppModel {
             case let .failure(error): failures.append(error)
             }
         }
-        take(results.0) { self.jobs = $0 }
-        take(results.1) { self.customers = $0 }
+        take(results.0) { self.jobs = merge($0, keeping: self.jobs, kind: "job") }
+        take(results.1) { self.customers = merge($0, keeping: self.customers, kind: "customer") }
         // Money and inbox may be outside a role's grants; a refusal there must not hide jobs.
-        take(results.2) { self.estimates = $0 }
-        take(results.3) { self.invoices = $0 }
+        take(results.2) { self.estimates = merge($0, keeping: self.estimates, kind: "estimate") }
+        take(results.3) { self.invoices = merge($0, keeping: self.invoices, kind: "invoice") }
         switch results.4 {
         case let .success(value): self.notices = value; noticesError = nil
         case let .failure(error): if !Self.isPermission(error) { noticesError = message(for: error) }
@@ -276,6 +290,19 @@ final class AppModel {
             guard started == generation else { return }
             noticesError = message(for: error)
         }
+    }
+
+    /// Applies a refresh snapshot, keeping any record saved after the refresh began.
+    private func merge<T: Identifiable>(_ fresh: [T], keeping current: [T], kind: String) -> [T] where T.ID == String {
+        let touched = current.filter { storedDuringRefresh.contains("\(kind):\($0.id)") }
+        guard !touched.isEmpty else { return fresh }
+        let newer = Dictionary(touched.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let freshIds = Set(fresh.map(\.id))
+        return touched.filter { !freshIds.contains($0.id) } + fresh.map { newer[$0.id] ?? $0 }
+    }
+
+    private func noteStored(_ kind: String, _ id: String) {
+        if isRefreshing { storedDuringRefresh.insert("\(kind):\(id)") }
     }
 
     private nonisolated static func attempt<T: Sendable>(
@@ -305,18 +332,22 @@ final class AppModel {
     func cached(job id: String) -> Job? { jobs.first { $0.id == id } }
 
     func store(_ job: Job) {
+        noteStored("job", job.id)
         if let index = jobs.firstIndex(where: { $0.id == job.id }) { jobs[index] = job } else { jobs.insert(job, at: 0) }
     }
 
     func store(_ customer: Customer) {
+        noteStored("customer", customer.id)
         if let index = customers.firstIndex(where: { $0.id == customer.id }) { customers[index] = customer } else { customers.append(customer) }
     }
 
     func store(_ estimate: Estimate) {
+        noteStored("estimate", estimate.id)
         if let index = estimates.firstIndex(where: { $0.id == estimate.id }) { estimates[index] = estimate } else { estimates.insert(estimate, at: 0) }
     }
 
     func store(_ invoice: Invoice) {
+        noteStored("invoice", invoice.id)
         if let index = invoices.firstIndex(where: { $0.id == invoice.id }) { invoices[index] = invoice } else { invoices.insert(invoice, at: 0) }
     }
 
