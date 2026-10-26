@@ -16,9 +16,16 @@ final class ThorbisUITests: XCTestCase {
         let nextUp = app.descendants(matching: .any)["next-up"]
         XCTAssertTrue(nextUp.waitForExistence(timeout: 10))
 
-        for tab in ["Jobs", "Customers", "Money", "Inbox", "Today"] {
+        for tab in ["Jobs", "Customers", "Money", "Today"] {
             app.tabBars.buttons[tab].tap()
         }
+
+        // The inbox is a toolbar destination, so the tab bar never folds into More.
+        app.buttons["inbox"].tap()
+        XCTAssertTrue(app.navigationBars["Inbox"].waitForExistence(timeout: 5))
+        let inboxBar = app.navigationBars["Inbox"]
+        let back = inboxBar.buttons["Today"].exists ? inboxBar.buttons["Today"] : inboxBar.buttons["Back"]
+        back.tap()
 
         let action = app.buttons["next-up-action"]
         XCTAssertTrue(action.waitForExistence(timeout: 5))

@@ -51,6 +51,7 @@ enum Route: Hashable {
     case customer(String)
     case estimate(String)
     case invoice(String)
+    case inbox
     case settings
 }
 
@@ -62,6 +63,7 @@ extension View {
             case let .customer(id): CustomerDetailView(customerId: id)
             case let .estimate(id): EstimateDetailView(estimateId: id)
             case let .invoice(id): InvoiceDetailView(invoiceId: id)
+            case .inbox: InboxView()
             case .settings: SettingsView()
             }
         }
@@ -69,11 +71,12 @@ extension View {
 }
 
 enum AppTab: String, Hashable {
-    case today, jobs, customers, money, inbox, search
+    case today, jobs, customers, money, search
 }
 
 /// Stable top-level destinations, not actions (HIG-005). On iPad the same tabs
-/// adapt to a sidebar (HIG-016).
+/// adapt to a sidebar (HIG-016). An iPhone tab bar shows five items before it
+/// folds the rest into More, so the inbox lives in every root screen's toolbar.
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @SceneStorage("thorbis.tab") private var tab: AppTab = .today
@@ -92,10 +95,6 @@ struct MainTabView: View {
             Tab("Money", systemImage: "doc.text", value: AppTab.money) {
                 NavigationStack { MoneyView().thorbisDestinations() }
             }
-            Tab("Inbox", systemImage: "tray", value: AppTab.inbox) {
-                NavigationStack { InboxView().thorbisDestinations() }
-            }
-            .badge(model.unreadNotices)
             Tab(value: AppTab.search, role: .search) {
                 NavigationStack { SearchView().thorbisDestinations() }
             }
@@ -104,11 +103,25 @@ struct MainTabView: View {
     }
 }
 
-/// The account button every root screen carries; settings is a destination, not a tab.
+/// The inbox and account buttons every root screen carries; both are
+/// destinations pushed on the current tab, not tabs of their own.
 struct AccountToolbarItem: ToolbarContent {
     @Environment(AppModel.self) private var model
 
     var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            NavigationLink(value: Route.inbox) {
+                Image(systemName: model.unreadNotices > 0 ? "tray.full" : "tray")
+                    .overlay(alignment: .topTrailing) {
+                        if model.unreadNotices > 0 {
+                            Circle().fill(Theme.accent).frame(width: 8, height: 8).offset(x: 3, y: -3)
+                        }
+                    }
+                    .frame(minWidth: Theme.minimumHit, minHeight: Theme.minimumHit)
+            }
+            .accessibilityLabel(model.unreadNotices > 0 ? "Inbox, \(model.unreadNotices) unread" : "Inbox")
+            .accessibilityIdentifier("inbox")
+        }
         ToolbarItem(placement: .topBarTrailing) {
             NavigationLink(value: Route.settings) {
                 Image(systemName: "person.crop.circle")

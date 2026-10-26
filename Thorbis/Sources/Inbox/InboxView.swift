@@ -42,13 +42,13 @@ struct InboxView: View {
             .thorbisList()
         }
         .navigationTitle("Inbox")
+        .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refreshNotices() }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button("Mark all read") { Task { await model.markNoticesRead() } }
                     .disabled(model.unreadNotices == 0)
             }
-            AccountToolbarItem()
         }
     }
 }

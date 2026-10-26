@@ -9,7 +9,7 @@ and a device check is still owed; "Not tested" means it needs a simulator or dev
 | HIG-002 | Platform authority before desktop resemblance | Pass | TabView, NavigationStack, Lists, sheets; no web layout ported. |
 | HIG-003 | Native components and system materials | Pass | System List, Form, Picker, Menu, confirmationDialog, PhotosPicker. |
 | HIG-004 | Touch geometry | Pass in code | `Theme.minimumHit` 44pt on custom controls. Needs device check. |
-| HIG-005 | Navigation is destinations | Pass | Tabs are destinations; actions live in toolbars and buttons. |
+| HIG-005 | Navigation is destinations | Pass | Five tabs, so the iPhone tab bar never folds into More; the inbox and account are toolbar destinations on every root screen. Actions live in toolbars and buttons. |
 | HIG-006 | Sheets, dismissal, continuity | Pass in code | Dirty forms disable interactive dismiss; drafts kept until saved. |
 | HIG-007 | Safe areas and keyboards | Not tested | Relies on system layout; verify on device with keyboard up. |
 | HIG-008 | System text styles and Dynamic Type | Pass in code | Only system text styles; verify at AX5. |
