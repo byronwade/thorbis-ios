@@ -56,6 +56,7 @@ struct EstimateDetailView: View {
     let id: String
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject var store: Store
     @State private var record: EstimateRecord?
     @State private var error: String?
     @State private var busy = false
@@ -67,7 +68,7 @@ struct EstimateDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 if let error { ErrorBanner(message: error) }
                 if let record {
-                    commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
+                    commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased()) · \(store.customerName(record.customerId))", title: record.title,
                                       status: record.status.statusLabel, date: record.createdAt)
                     Text("Line items")
                         .font(Theme.font(16, weight: .semibold))
