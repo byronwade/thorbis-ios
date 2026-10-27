@@ -279,6 +279,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
         case "/v1/jobs": return ["items": jobs().map { $0.filter { $0.key != "allowedTransitions" } }]
         case "/v1/customers": return ["items": customers()]
+        case "/v1/membership-plans":
+            return ["items": [["id": "00000000-0000-4000-8000-000000006301", "organizationId": PaperPreview.organizationID, "name": "Comfort Club",
+                               "kind": "membership", "visitsPerYear": 2, "price": 1900, "billingFrequency": "monthly", "discountPercent": 15,
+                               "archived": false, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"]]]
         case "/v1/invoices": return ["items": [PaperPreview.issuedInvoice, PaperPreview.invoice].compactMap { jsonObject($0) }]
         case "/v1/estimates":
             // Sent ten days ago, so it shows under Needs attention.
@@ -321,6 +325,26 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                      "name": "Taylor Marlowe", "role": "Spouse", "phone": "(415) 555-0177",
                      "primary": false, "createdAt": now, "updatedAt": now] as [String: Any]
                 ]]
+            }
+            if path == "/v1/customers/\(id)/equipment" {
+                return ["items": [["id": "00000000-0000-4000-8000-000000006101", "organizationId": org, "customerId": id,
+                                   "locationId": "00000000-0000-4000-8000-000000007001", "name": "3-ton condenser", "kind": "AC",
+                                   "brand": "Carrier", "model": "24ACC636", "serialNumber": "2419E04117", "installedOn": "2019-06-12",
+                                   "warrantyExpiresOn": "2029-06-12", "createdAt": now, "updatedAt": now],
+                                  ["id": "00000000-0000-4000-8000-000000006102", "organizationId": org, "customerId": id,
+                                   "locationId": "00000000-0000-4000-8000-000000007001", "name": "50-gal gas water heater",
+                                   "brand": "Rheem", "model": "XG50T06EC36U1", "warrantyExpiresOn": "2024-03-01",
+                                   "createdAt": now, "updatedAt": now]]]
+            }
+            if path == "/v1/customers/\(id)/memberships" {
+                return ["items": [["id": "00000000-0000-4000-8000-000000006201", "organizationId": org, "customerId": id,
+                                   "planId": "00000000-0000-4000-8000-000000006301", "name": "Comfort Club", "kind": "membership",
+                                   "cadence": "2 tune-ups a year", "startsOn": "2026-01-15", "renewsOn": "2027-01-15", "status": "active",
+                                   "discountPercent": 15, "createdAt": now, "updatedAt": now]]]
+            }
+            if path == "/v1/customers/\(id)/member-pricing" {
+                return ["customerId": id, "isMember": true, "discountPercent": 15,
+                        "membership": ["id": "00000000-0000-4000-8000-000000006201", "name": "Comfort Club", "renewsOn": "2027-01-15"]]
             }
             if path == "/v1/customers/\(id)/sms-consent" {
                 return ["decision": "grant", "version": "00000000-0000-4000-8000-000000006001", "recordedAt": "2026-10-20T15:00:00Z"]

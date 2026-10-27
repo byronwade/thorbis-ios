@@ -66,6 +66,7 @@ struct EstimateDetailView: View {
     @State private var showRevisionEditor = false
     @State private var action = ""
     @State private var showSignature = false
+    @State private var memberPricing: MemberPricing?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -88,6 +89,18 @@ struct EstimateDetailView: View {
                                     .font(Theme.monoFont(14, weight: .semibold))
                             }
                             .padding(15)
+                            if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
+                                let memberTotal = record.lines.reduce(0) { $0 + $1.quantity * memberPricing.memberPrice($1.unitPrice.amount) }
+                                HStack {
+                                    Label("Member price · \(memberPricing.discountPercent)% off", systemImage: "star.fill")
+                                        .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                                    Spacer()
+                                    Text(money(memberTotal, currency: record.lines.first?.unitPrice.currency ?? "USD"))
+                                        .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                }
+                                .padding(.horizontal, 15).padding(.bottom, 15)
+                                .accessibilityElement(children: .combine)
+                            }
                         }
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
@@ -198,7 +211,11 @@ struct EstimateDetailView: View {
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     private func load() async {
-        do { record = try await api.fieldEstimate(id); error = nil }
+        do {
+            record = try await api.fieldEstimate(id)
+            error = nil
+            if let customer = record?.customerId { memberPricing = try? await api.memberPricing(customer) }
+        }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 }

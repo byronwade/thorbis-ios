@@ -250,6 +250,7 @@ struct JobDetailView: View {
                         .frame(height: 24)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
                     }
+                    MemberChip(customerID: job.customerId)
                     if let balance = invoiceBalanceCents {
                         Text("\(money(balance, currency: "USD")) due")
                             .font(Theme.monoFont(11, weight: .medium))
@@ -414,6 +415,8 @@ struct JobDetailView: View {
                 if let reason = job.pauseReason { PaperDetailRow("Pause reason", value: reason) }
                 if let next = job.pauseNextAction { PaperDetailRow("Next action", value: next) }
             }
+            // What's installed at this address, so the tech arrives knowing model and serial.
+            CustomerEquipmentSection(customerID: job.customerId, locations: locations, onlyLocationID: locations.first?.id)
             VStack(alignment: .leading, spacing: 0) {
                 PaperGroupHeader(title: "On this job")
                 ForEach(availableTransitions(job).dropFirst(), id: \.self) { target in

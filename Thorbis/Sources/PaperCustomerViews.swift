@@ -237,8 +237,10 @@ struct CustomerDetailView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     switch tab {
                     case "Overview":
+                        CustomerMembershipSection(customerID: customer.id)
                         contactsSection
                         locationsSection
+                        CustomerEquipmentSection(customerID: customer.id, locations: locations.filter { $0.kind == "service" })
                         if session.can("job.view", feature: "jobs") { jobsSection }
                     case "Jobs":
                         if session.can("job.view", feature: "jobs") { jobsSection }
@@ -328,6 +330,7 @@ struct CustomerDetailView: View {
         if jobs.contains(where: { $0.status == "in_progress" }) { Chip(text: "Job in progress", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface) }
         if session.can("job.view", feature: "jobs") { Chip(text: "\(jobs.count) jobs", icon: "clock") }
         if let type = record?.accountType { Chip(text: type.statusLabel) }
+        MemberChip(customerID: customer.id)
     }
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {
