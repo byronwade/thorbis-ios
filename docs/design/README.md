@@ -11,6 +11,20 @@ Source: [current Thorbis Mobile page in Paper](https://app.paper.design/file/01K
 - Leading coloured rails (Next up underline, week bars, composer caret) are removed per design.thorbis.com D-018.
 - Every type-ramp step scales with its nearest Dynamic Type style; lanes use `@ScaledMetric` and rows stack at accessibility sizes. `Theme.brandText` (#5285FF dark, #2558E0 light) replaces brand blue as text and tint for 4.5:1 contrast.
 
+## Field flows (end to end)
+
+- **Estimates.** Built from the Price Book on a job (price-book provenance kept) and linked to the job (`POST /v1/jobs/{id}/estimates/{estimateId}/link`). The job's Estimates tab lists every linked estimate.
+- **Payments.** Collect payment opens on the card payment link (`POST /v1/invoices/{id}/pay-link`). Tap to Pay is not offered until Apple's entitlement and a card-present terminal exist.
+- **Photos.** Camera capture with Before / After / Other filing (server tags `Before` / `After`). Photos are kept on disk until the server confirms them.
+- **Lifecycle.** List items and progress responses carry no `allowedTransitions`, so the app re-reads `GET /v1/jobs/{id}` after each step and for Schedule's Next up.
+- **Offline.**
+  - **Foreground re-check.** Returning to the app re-checks in place instead of tearing the session down.
+  - **Cold launch.** With no signal, the app uses the last verified authority from a device-only Keychain snapshot. The same deadlines are enforced.
+  - **Cached work.** Jobs and customers are cached per actor and workspace.
+  - **Queued changes.** On my way, Arrived, Start work and notes queue in `FieldOutbox` and drain via `POST /v1/commands` when `offline_sync` is on, or via the same REST routes in order when it is off.
+  - **Refusals.** A refused change is shown with the server's reason and holds that job's later changes. Queued work is always labelled as waiting to sync.
+  - **Sign-out.** Deletes the cache, the queue and any waiting photos.
+
 ## Implemented presentation (before the redesign)
 
 - Shared colors/type, compact screen headers, the native Jobs/Arrive/Inbox tab bar with More workspace navigation, workspace selector, search and settings presentation; signed-in workspace navigation uses the official Thorbis mark, while login and customer estimate headers use the mark-and-wordmark lockup.

@@ -41,6 +41,7 @@ struct ScheduleView: View {
     /// The Next up job as GET /v1/jobs/{id} returns it: list items carry no allowed transitions,
     /// so the hero's commit is read from the server rather than guessed from status.
     @State private var hero: JobRecord?
+    @State private var committed = 0
 
     private var range: ScheduleRange {
         switch tab {
@@ -82,6 +83,7 @@ struct ScheduleView: View {
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showNew) { NewJobSheet() }
+        .sensoryFeedback(.success, trigger: committed)
     }
 
     private var subtitle: String {
@@ -227,6 +229,7 @@ struct ScheduleView: View {
         defer { busyJobID = nil }
         do {
             _ = try await api.progressFieldJob(job.id, request: request)
+            committed += 1
             await loadHero(job)
             progressError = nil
             if await store.refresh(api) == .failed {
@@ -245,6 +248,7 @@ struct ScheduleView: View {
             return
         }
         outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
+        committed += 1
         progressError = nil
         if !session.isOffline {
             Task {

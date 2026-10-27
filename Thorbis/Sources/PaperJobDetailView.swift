@@ -38,6 +38,7 @@ struct JobDetailView: View {
     @State private var jobEstimates: [EstimateRecord] = []
     @State private var estimatesLoaded = false
     @State private var showNewEstimate = false
+    @State private var committed = 0
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
 
@@ -79,6 +80,7 @@ struct JobDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
+        .sensoryFeedback(.success, trigger: committed)
         .task(id: session.generation) {
             invoicePaymentModel = nil
             loadedInvoiceModelID = nil
@@ -789,6 +791,7 @@ struct JobDetailView: View {
         defer { busy = false }
         do {
             job = try await api.progressFieldJob(jobId, request: request)
+            committed += 1
             // The progress response carries no allowedTransitions; re-read the job so the
             // next step (Mark arrived, Start work, ...) appears without a manual refresh.
             await load()
@@ -809,6 +812,7 @@ struct JobDetailView: View {
             return false
         }
         outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
+        committed += 1
         error = nil
         if !session.isOffline { Task { await syncQueued() } }
         return true
