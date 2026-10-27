@@ -325,3 +325,97 @@ extension EnvironmentValues {
         set { self[PaperShowMenuKey.self] = newValue }
     }
 }
+
+/// Paper 73 / 74: offline, syncing and needs-review states. Queued is never shown as done.
+struct OfflineBanner: View {
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var store: Store
+    @EnvironmentObject private var outbox: FieldOutbox
+    @State private var showReview = false
+
+    var body: some View {
+        Group {
+            if !outbox.needsReview.isEmpty {
+                Button { showReview = true } label: {
+                    banner(symbol: "exclamationmark.triangle", tint: Theme.destructive, ground: Theme.destructiveSurface,
+                           text: "\(outbox.needsReview.count) change\(outbox.needsReview.count == 1 ? "" : "s") couldn't sync",
+                           trailing: "Review")
+                }
+                .buttonStyle(.plain)
+            } else if session.isOffline {
+                banner(symbol: "wifi.slash", tint: Theme.warning, ground: Theme.warningSurface,
+                       text: outbox.pending.isEmpty ? "Offline · showing \(store.cachedAt.map { "work saved " + $0.formatted(.relative(presentation: .named)) } ?? "your last copy")"
+                                                    : "Offline · changes save on this phone",
+                       trailing: outbox.pending.isEmpty ? nil : "\(outbox.pending.count) queued")
+            } else if outbox.syncing || !outbox.pending.isEmpty {
+                banner(symbol: "arrow.triangle.2.circlepath", tint: Theme.success, ground: Theme.successSurface,
+                       text: outbox.syncing ? "Back online · syncing changes" : "Waiting to sync",
+                       trailing: "\(outbox.pending.count) left")
+            }
+        }
+        .padding(.horizontal, Theme.gutter).padding(.bottom, 10)
+        .sheet(isPresented: $showReview) { OutboxReviewSheet() }
+    }
+
+    private func banner(symbol: String, tint: Color, ground: Color, text: String, trailing: String?) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 13, weight: .semibold))
+            Text(text).font(Theme.font(13, weight: .medium)).lineLimit(2)
+            Spacer(minLength: 8)
+            if let trailing { Text(trailing).font(Theme.monoFont(11, weight: .medium)) }
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ground, in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Changes the server refused, with its reason. Dismissing removes the local copy only.
+struct OutboxReviewSheet: View {
+    @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("These changes were made without signal and the server didn't accept them. Open the job to redo what's still needed.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.bottom, 12)
+                    ForEach(outbox.needsReview) { entry in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.destructive).padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("\(entry.summary) · \(store.jobs.first { $0.id == entry.jobID }?.title ?? "Job")")
+                                    .font(Theme.font(15, weight: .medium))
+                                Text(reason(entry)).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Dismiss") { outbox.dismiss(entry) }
+                                .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+                .padding(.horizontal, Theme.gutter)
+            }
+            .background(Theme.background)
+            .foregroundStyle(Theme.foreground)
+            .navigationTitle("Couldn't sync")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func reason(_ entry: OutboxEntry) -> String {
+        switch entry.state {
+        case .rejected(let reason): reason
+        case .held: "Waiting on an earlier change to this job that didn't sync."
+        case .pending: "Waiting to sync."
+        }
+    }
+}

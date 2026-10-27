@@ -9,6 +9,7 @@ struct ThorbisApp: App {
     @StateObject private var session: SessionController
     @StateObject private var inboxBoard: InboxLocalDrafts
     @StateObject private var connectivity = ConnectivityMonitor()
+    @StateObject private var outbox: FieldOutbox
     @State private var publicEstimateToken: String?
 
     init() {
@@ -20,18 +21,28 @@ struct ThorbisApp: App {
         let session = SessionController(api: api)
         #endif
         let inboxBoard = InboxLocalDrafts()
+        #if DEBUG
+        let outbox = PaperPreview.enabled ? FieldOutbox(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), defaults: PaperPreview.defaults()) : FieldOutbox()
+        #else
+        let outbox = FieldOutbox()
+        #endif
         let store = Store { [weak session] api in
             guard let session else { throw CancellationError() }
             return try await Store.fetchAuthorized(api: api, session: session)
         }
         session.onInvalidate = { [weak store] in store?.invalidate() }
-        session.onVerifiedIdentity = { [weak inboxBoard, weak store] actorID, organizationID in
+        session.onSignedOut = { [weak store, weak outbox] in
+            store?.cache.clearAll()
+            outbox?.clearAll()
+        }
+        session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
             if let actorID, let organizationID {
                 inboxBoard?.bind(actorID: actorID, organizationID: organizationID)
             } else {
                 inboxBoard?.clear()
             }
             store?.bindCache(actorID: actorID, organizationID: organizationID)
+            outbox?.bind(actorID: actorID, organizationID: organizationID)
         }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
@@ -39,6 +50,7 @@ struct ThorbisApp: App {
         _store = StateObject(wrappedValue: store)
         _session = StateObject(wrappedValue: session)
         _inboxBoard = StateObject(wrappedValue: inboxBoard)
+        _outbox = StateObject(wrappedValue: outbox)
         #if DEBUG
         _publicEstimateToken = State(initialValue: PaperPreview.enabled && PaperPreview.screen == "public-estimate" ? "preview-estimate" : nil)
         #else
@@ -74,6 +86,7 @@ struct ThorbisApp: App {
             .environmentObject(session)
             .environmentObject(inboxBoard)
             .environmentObject(connectivity)
+            .environmentObject(outbox)
             .font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
@@ -103,6 +116,9 @@ extension ThorbisApp {
     @MainActor private func resync() async {
         await session.revalidate()
         guard session.phase == .ready, !session.isOffline else { return }
+        if !outbox.pending.isEmpty {
+            await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
+        }
         await store.refresh(api)
     }
 }
@@ -176,7 +192,6 @@ final class Store: ObservableObject {
     func bindCache(actorID: String?, organizationID: String?) {
         guard let actorID, let organizationID else {
             cacheIdentity = nil
-            cache.clearAll()
             return
         }
         cacheIdentity = (actorID, organizationID)

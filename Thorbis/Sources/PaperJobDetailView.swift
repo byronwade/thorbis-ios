@@ -16,6 +16,7 @@ struct JobDetailView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
     @State private var notes: [JobNoteRecord] = []
@@ -42,6 +43,7 @@ struct JobDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            OfflineBanner().padding(.top, 4)
             if let error { ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12) }
             if let job {
                 if selectedTab == "Media" {
@@ -257,10 +259,11 @@ struct JobDetailView: View {
     }
 
     private func statusChip(_ job: JobRecord, tint: Color, surface: Color, showsMenu: Bool) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: statusIcon(job.status).0)
+        let queued = outbox.pendingStatus(for: job.id)
+        return HStack(spacing: 5) {
+            Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
                 .font(.system(size: 11, weight: .semibold))
-            Text(job.status.statusLabel)
+            Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
                 .font(Theme.font(12, weight: .medium))
             if showsMenu { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
         }
@@ -599,6 +602,11 @@ struct JobDetailView: View {
     private func timeline(_ job: JobRecord) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         if activityFilter != "Status" {
+            entries += outbox.pendingNotes(for: job.id).compactMap { entry in
+                guard case .note(let payload) = entry.action else { return nil }
+                let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
+                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath")
+            }
             entries += notes.compactMap { record in
                 JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble") }
             }
@@ -667,7 +675,13 @@ struct JobDetailView: View {
     }
 
     private func availableTransitions(_ job: JobRecord) -> [String] {
-        (job.allowedTransitions ?? []).filter {
+        let allowed: [String]
+        if let queued = outbox.pendingStatus(for: job.id) {
+            allowed = outbox.offlineSteps(from: queued).filter { ["en_route", "arrived", "in_progress"].contains($0) }
+        } else {
+            allowed = job.allowedTransitions ?? []
+        }
+        return allowed.filter {
             ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused"].contains($0)
                 && session.can(["scheduled", "dispatched"].contains($0) ? "job.assign" : "job.edit", feature: "jobs")
         }
@@ -735,6 +749,7 @@ struct JobDetailView: View {
             let loadedJob = try await api.fieldJob(jobId)
             guard session.generation == generation else { return }
             job = loadedJob
+            outbox.learn(loadedJob)
             let loadedNotes = try await api.fieldNotes(jobId)
             guard session.generation == generation else { return }
             notes = loadedNotes
@@ -767,6 +782,9 @@ struct JobDetailView: View {
         }
     }
     @discardableResult private func progress(_ request: FieldProgressRequest) async -> Bool {
+        if session.isOffline || outbox.pendingStatus(for: jobId) != nil {
+            return queue(request)
+        }
         busy = true
         defer { busy = false }
         do {
@@ -777,9 +795,37 @@ struct JobDetailView: View {
             await store.refresh(api)
             error = nil
             return true
-        } catch is CancellationError { return false } catch { self.error = error.localizedDescription; return false }
+        } catch is CancellationError { return false } catch {
+            if error.isConnectivityFailure { return queue(request) }
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    /// No signal: the step is saved on the phone and sent in order later; the header says so.
+    private func queue(_ request: FieldProgressRequest) -> Bool {
+        guard let payload = OutboxEntry.ProgressPayload(jobID: jobId, request: request) else {
+            error = "Pausing a job needs a connection."
+            return false
+        }
+        outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
+        error = nil
+        if !session.isOffline { Task { await syncQueued() } }
+        return true
+    }
+
+    private func syncQueued() async {
+        await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
+        await load()
+        await store.refresh(api)
     }
     private func saveNote() async {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if session.isOffline {
+            outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
+            note = ""
+            return
+        }
         busy = true
         defer { busy = false }
         do {
@@ -787,6 +833,13 @@ struct JobDetailView: View {
             notes.append(saved)
             note = ""
             error = nil
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {} catch {
+            if error.isConnectivityFailure {
+                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
+                note = ""
+            } else {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }

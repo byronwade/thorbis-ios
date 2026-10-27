@@ -86,6 +86,14 @@ final class SessionController: ObservableObject {
     /// Non-nil only after actor and workspace authority are verified. A nil pair
     /// retires session-owned drafts; ordinary foreground revalidation does not.
     var onVerifiedIdentity: ((_ actorID: String?, _ organizationID: String?) -> Void)?
+    /// Explicit sign-out only: device copies of work (cache, unsent changes) are deleted.
+    var onSignedOut: (() -> Void)?
+
+    /// Whether the workspace has a feature on, independent of a capability.
+    func isFeatureOn(_ feature: String) -> Bool {
+        guard let decision = features[feature] else { return false }
+        return decision.enabled && decision.released && decision.entitled
+    }
 
     private let api: APIClient
     private let defaults: UserDefaults
@@ -262,6 +270,7 @@ final class SessionController: ObservableObject {
         defer { signingOut = false }
         defaults.set(true, forKey: Self.explicitSignOutKey)
         snapshots.clear()
+        onSignedOut?()
         onVerifiedIdentity?(nil, nil)
         let requestGeneration = invalidate(next: .restoring)
         do {

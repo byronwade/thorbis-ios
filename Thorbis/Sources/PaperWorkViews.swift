@@ -31,6 +31,7 @@ struct ScheduleView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @State private var tab = "Today"
     @State private var search = ""
     @State private var searchVisible = false
@@ -60,6 +61,7 @@ struct ScheduleView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Schedule", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
+                OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Unscheduled"], selection: $tab)
                 if let error = store.error { ErrorBanner(message: error) }
@@ -96,7 +98,7 @@ struct ScheduleView: View {
         if let first = jobs.first {
             PaperGroupHeader(title: range == .unscheduled ? "Needs a time" : "Next up")
                 .padding(.horizontal, Theme.gutter).padding(.top, 4)
-            ScheduleHero(job: first, customer: store.customerName(first.customerId)) { commit(for: first) }
+            ScheduleHero(job: first, customer: store.customerName(first.customerId), pendingStatus: outbox.pendingStatus(for: first.id)) { commit(for: first) }
                 .padding(.bottom, 16)
                 .task(id: "\(first.id)|\(first.status)|\(first.updatedAt ?? "")") { await loadHero(first) }
             if jobs.count > 1 {
@@ -145,9 +147,23 @@ struct ScheduleView: View {
 
     /// The next field step for the Next up job, in lifecycle order.
     private func nextStep(for job: Job) -> String? {
-        guard let hero, hero.id == job.id, session.can("job.edit", feature: "jobs") else { return nil }
-        let allowed = hero.allowedTransitions ?? []
-        return ["en_route", "arrived", "in_progress"].first { allowed.contains($0) && !(hero.status == "paused" && $0 == "in_progress") }
+        guard session.can("job.edit", feature: "jobs") else { return nil }
+        let allowed: [String]
+        let status: String
+        if let queued = outbox.pendingStatus(for: job.id) {
+            // Already queued a step: only offer what the server allowed from that status before.
+            status = queued
+            allowed = outbox.offlineSteps(from: queued)
+        } else if let hero, hero.id == job.id {
+            status = hero.status
+            allowed = hero.allowedTransitions ?? []
+        } else if session.isOffline {
+            status = job.status
+            allowed = outbox.offlineSteps(from: job.status)
+        } else {
+            return nil
+        }
+        return ["en_route", "arrived", "in_progress"].first { allowed.contains($0) && !(status == "paused" && $0 == "in_progress") }
     }
 
     @ViewBuilder private func commit(for job: Job) -> some View {
@@ -193,6 +209,7 @@ struct ScheduleView: View {
             let record = try await api.fieldJob(job.id)
             guard session.generation == generation else { return }
             hero = record
+            outbox.learn(record)
         } catch is CancellationError {} catch {
             // Without the server's transitions the band stays a link to the job.
             guard session.generation == generation else { return }
@@ -202,6 +219,10 @@ struct ScheduleView: View {
 
     private func progress(_ job: Job, _ request: FieldProgressRequest) async {
         guard busyJobID == nil else { return }
+        if session.isOffline || !outbox.pending.filter({ $0.jobID == job.id }).isEmpty {
+            queue(job, request)
+            return
+        }
         busyJobID = job.id
         defer { busyJobID = nil }
         do {
@@ -213,7 +234,23 @@ struct ScheduleView: View {
             }
         } catch is CancellationError {
         } catch {
-            progressError = error.localizedDescription
+            if error.isConnectivityFailure { queue(job, request) } else { progressError = error.localizedDescription }
+        }
+    }
+
+    /// No signal: save the step on the phone; it is sent in order when signal returns.
+    private func queue(_ job: Job, _ request: FieldProgressRequest) {
+        guard let payload = OutboxEntry.ProgressPayload(jobID: job.id, request: request) else {
+            progressError = "That change needs a connection."
+            return
+        }
+        outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
+        progressError = nil
+        if !session.isOffline {
+            Task {
+                await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
+                await store.refresh(api)
+            }
         }
     }
 }
@@ -222,6 +259,7 @@ struct ScheduleView: View {
 private struct ScheduleHero<Commit: View>: View {
     let job: Job
     let customer: String
+    var pendingStatus: String? = nil
     @ViewBuilder var commit: () -> Commit
     @ScaledMetric(relativeTo: .caption) private var laneWidth: CGFloat = 60
 
@@ -267,8 +305,11 @@ private struct ScheduleHero<Commit: View>: View {
 
 private extension ScheduleHero {
     @ViewBuilder var chips: some View {
-        let (symbol, color) = statusIcon(job.status)
-        Chip(text: job.status.statusLabel, icon: symbol, tint: color, bg: job.status == "en_route" || job.status == "dispatched" ? Theme.brandSurface : Theme.fill)
+        let status = pendingStatus ?? job.status
+        let (symbol, color) = statusIcon(status)
+        Chip(text: pendingStatus == nil ? status.statusLabel : "\(status.statusLabel) · waiting to sync", icon: pendingStatus == nil ? symbol : "clock.arrow.circlepath",
+             tint: pendingStatus == nil ? color : Theme.warning,
+             bg: pendingStatus != nil ? Theme.warningSurface : status == "en_route" || status == "dispatched" ? Theme.brandSurface : Theme.fill)
         Text(job.shortRef).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
             .lineLimit(1).fixedSize()
             .padding(.horizontal, 9).frame(minHeight: 24)
@@ -344,6 +385,7 @@ struct JobsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Jobs", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
+                OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Title or job number") }
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
                 if let error = store.error { ErrorBanner(message: error) }
