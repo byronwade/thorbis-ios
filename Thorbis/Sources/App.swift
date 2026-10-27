@@ -35,6 +35,7 @@ struct ThorbisApp: App {
             store?.cache.clearAll()
             outbox?.clearAll()
             PendingPhotoStore.clearAll()
+            JobDetailCache.clearAll()
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
             if let actorID, let organizationID {

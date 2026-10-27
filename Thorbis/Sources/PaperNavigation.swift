@@ -4,6 +4,7 @@ struct RootView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @State private var tab: TabletSection = .more
     @State private var primaryTab: PrimaryTab = .initial
     @State private var path = NavigationPath()
@@ -158,6 +159,17 @@ struct RootView: View {
             #if DEBUG
             guard PaperPreview.enabled else { return }
             if PaperPreview.screen == "new-estimate" { previewNewEstimate = true; return }
+            if PaperPreview.screen == "offline" || PaperPreview.screen == "offline-job" {
+                PaperPreviewProtocol.simulateNoSignal = true
+                await session.revalidate()
+                outbox.enqueue(.progress(.init(jobId: PaperPreview.jobID, to: "en_route", etaMinutes: 15)), policyVersion: session.policyVersion ?? 1)
+                outbox.enqueue(.note(.init(jobId: PaperPreview.jobID, body: "Gate code 4417 — dog in the back yard.")), policyVersion: session.policyVersion ?? 1)
+                if PaperPreview.screen == "offline-job", let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
+                    primaryTab = .jobs
+                    jobsPath.append(job)
+                }
+                return
+            }
             if PaperPreview.screen == "invoice-editor" { previewInvoiceEditor = true; return }
             if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
             if PaperPreview.screen == "estimate-revision" { previewEstimateRevision = true; return }

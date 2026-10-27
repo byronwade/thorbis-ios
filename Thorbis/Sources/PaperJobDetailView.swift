@@ -351,7 +351,7 @@ struct JobDetailView: View {
                 } else {
                     PaperDetailRow("Scheduled", value: "Not scheduled")
                 }
-                PaperDetailRow("Status", value: job.status.statusLabel)
+                PaperDetailRow("Status", value: outbox.pendingStatus(for: job.id).map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
                 if let reason = job.pauseReason { PaperDetailRow("Pause reason", value: reason) }
                 if let next = job.pauseNextAction { PaperDetailRow("Next action", value: next) }
             }
@@ -752,14 +752,35 @@ struct JobDetailView: View {
             guard session.generation == generation else { return }
             job = loadedJob
             outbox.learn(loadedJob)
+            JobDetailCache.save(loadedJob)
             let loadedNotes = try await api.fieldNotes(jobId)
             guard session.generation == generation else { return }
             notes = loadedNotes
+            JobDetailCache.save(notes: loadedNotes, jobID: jobId)
             error = nil
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
+            if error.isConnectivityFailure {
+                // No signal: the last copy of this job, or what the schedule already knows.
+                if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
+                if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
+                if job != nil { self.error = nil; return }
+            }
             self.error = error.localizedDescription
         }
+    }
+
+    /// A minimal record from the cached job list, so an unopened job still shows offline.
+    private func listRecord() -> JobRecord? {
+        guard let item = store.jobs.first(where: { $0.id == jobId }), let customerID = item.customerId,
+              let organizationID = session.activeOrganization?.id else { return nil }
+        return JobRecord(id: item.id, organizationId: organizationID, customerId: customerID, estimateId: nil, estimateRevisionNumber: nil,
+                         locationId: item.locationId, teamId: nil, title: item.title, notes: nil, status: item.status,
+                         assignedToUserId: item.assignedToUserId, scheduledFor: item.scheduledFor,
+                         createdAt: item.createdAt ?? "", updatedAt: item.updatedAt ?? "", dispatchedAt: nil, enRouteAt: nil,
+                         arrivedAt: nil, arrivalMethod: nil, startedAt: nil, pausedAt: nil, pauseReason: nil, pauseNextAction: nil,
+                         pauseOwnerUserId: nil, pauseCycleAuditId: nil, lastResumeAuditId: nil, scheduleCycleAuditId: nil,
+                         completedAt: nil, canceledAt: nil, allowedTransitions: nil)
     }
     private func advance(_ target: String) async {
         let request: FieldProgressRequest

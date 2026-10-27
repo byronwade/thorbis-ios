@@ -262,7 +262,14 @@ final class APIClient: ObservableObject {
         do { (data, resp) = try await session.data(for: req) }
         catch is CancellationError { throw CancellationError() }
         catch let error as URLError where error.code == .cancelled { throw CancellationError() }
-        catch { throw Problem(title: "Network error", status: nil, detail: error.localizedDescription) }
+        catch {
+            let offline: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost,
+                                               .cannotConnectToHost, .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff]
+            let detail = (error as? URLError).map { offline.contains($0.code) } == true
+                ? "No connection. Check your signal and try again."
+                : error.localizedDescription
+            throw Problem(title: "Network error", status: nil, detail: detail)
+        }
         try Task.checkCancellation()
         guard generation == requestGeneration else { throw CancellationError() }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0

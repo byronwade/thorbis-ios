@@ -65,3 +65,29 @@ struct WorkspaceCache {
         try? FileManager.default.removeItem(at: directory)
     }
 }
+
+/// Job details and notes as last read, so a job opened before still opens without signal.
+enum JobDetailCache {
+    private static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("JobDetailCache", isDirectory: true)
+    }
+
+    private static func write<T: Encodable>(_ value: T, _ name: String) {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(value).write(to: directory.appendingPathComponent(name),
+                                                  options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } catch {}
+    }
+
+    private static func read<T: Decodable>(_ type: T.Type, _ name: String) -> T? {
+        (try? Data(contentsOf: directory.appendingPathComponent(name))).flatMap { try? JSONDecoder().decode(type, from: $0) }
+    }
+
+    static func save(_ job: JobRecord) { write(job, "\(job.id).job.json") }
+    static func save(notes: [JobNoteRecord], jobID: String) { write(notes, "\(jobID).notes.json") }
+    static func job(_ id: String) -> JobRecord? { read(JobRecord.self, "\(id).job.json") }
+    static func notes(_ id: String) -> [JobNoteRecord] { read([JobNoteRecord].self, "\(id).notes.json") ?? [] }
+    static func clearAll() { try? FileManager.default.removeItem(at: directory) }
+}
