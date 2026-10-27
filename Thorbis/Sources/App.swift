@@ -11,6 +11,7 @@ struct ThorbisApp: App {
     @StateObject private var inboxBoard: InboxLocalDrafts
     @StateObject private var connectivity = ConnectivityMonitor()
     @StateObject private var outbox: FieldOutbox
+    @StateObject private var menuLayout = MenuLayout()
     @State private var publicEstimateToken: String?
 
     init() {
@@ -95,6 +96,7 @@ struct ThorbisApp: App {
             .environmentObject(inboxBoard)
             .environmentObject(connectivity)
             .environmentObject(outbox)
+            .environmentObject(menuLayout)
             .font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)

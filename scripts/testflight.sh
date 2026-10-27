@@ -21,17 +21,19 @@ destination=upload
 root="$(mktemp -d /private/tmp/thorbis-$build_number.XXXXXX)"
 archive="$root/Thorbis.xcarchive"
 options="$root/ExportOptions.plist"
+# Swift packages (Stripe Terminal ships a large binary) are cached across builds.
+packages="${THORBIS_SPM_CACHE:-/private/tmp/thorbis-spm}"
 
 xcodegen generate
 
 simulator_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for key,values in sorted(d["devices"].items(), reverse=True) if "iOS" in key for v in values if v["name"].startswith("iPhone")))')
 xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
   -destination "platform=iOS Simulator,id=$simulator_id" \
-  -derivedDataPath "$root/test" -parallel-testing-enabled NO \
+  -derivedDataPath "$root/test" -clonedSourcePackagesDirPath "$packages" -parallel-testing-enabled NO \
   CODE_SIGNING_ALLOWED=NO test
 
 xcodebuild -project Thorbis.xcodeproj -scheme Thorbis -configuration Release \
-  -destination 'generic/platform=iOS' -derivedDataPath "$root/archive" \
+  -destination 'generic/platform=iOS' -derivedDataPath "$root/archive" -clonedSourcePackagesDirPath "$packages" \
   -archivePath "$archive" CURRENT_PROJECT_VERSION="$build_number" \
   -allowProvisioningUpdates archive
 

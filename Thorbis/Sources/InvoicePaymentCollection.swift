@@ -805,6 +805,8 @@ struct InvoicePaymentCollectionSheet: View {
     @State private var showPayLinkShare = false
     @State private var receiptDestination: String?
     @State private var receiptDestinationLoaded = false
+    @StateObject private var tapToPayController: TapToPayController
+    private var tapToPay: TapToPayController? { tapToPayController }
 
     init(model: InvoicePaymentCollectionModel, invoice: InvoiceRecord) {
         self.model = model
@@ -815,6 +817,7 @@ struct InvoicePaymentCollectionSheet: View {
         // Tap to Pay needs Apple's entitlement and a card-present terminal first;
         // open on the fastest path that actually takes money today.
         _option = State(initialValue: model.pendingRequest == nil ? .paymentLink : .alreadyCollected)
+        _tapToPayController = StateObject(wrappedValue: TapToPayController(invoiceID: invoice.id))
     }
 
     private var amountCents: Int? {
@@ -829,6 +832,7 @@ struct InvoicePaymentCollectionSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         amountHero
+                        if tapToPayAvailable && !hasLockedIntent { tapToPayCard }
                         paymentOptions
                         receiptRow
                         if option == .alreadyCollected {
@@ -907,7 +911,11 @@ struct InvoicePaymentCollectionSheet: View {
             } message: {
                 Text(recordConfirmationMessage)
             }
-            .task { await loadReceiptDestination() }
+            .task {
+                // Open on the iPhone reader when this workspace and phone can take cards in person.
+                if tapToPayAvailable && model.pendingRequest == nil { option = .tapToPay }
+                await loadReceiptDestination()
+            }
         }
     }
 
@@ -929,8 +937,8 @@ struct InvoicePaymentCollectionSheet: View {
                     .multilineTextAlignment(.center)
                     .frame(minWidth: 120)
                     .accessibilityLabel("Amount to collect in dollars")
-                    .disabled(hasLockedIntent || model.waitingForProjection || option == .paymentLink)
-                if !hasLockedIntent && !model.waitingForProjection && option != .paymentLink {
+                    .disabled(hasLockedIntent || model.waitingForProjection || option == .paymentLink || option == .tapToPay)
+                if !hasLockedIntent && !model.waitingForProjection && option != .paymentLink && option != .tapToPay {
                     Button("Balance") {
                         amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
                     }
@@ -952,39 +960,65 @@ struct InvoicePaymentCollectionSheet: View {
         .padding(.vertical, 8)
     }
 
-    private var tapToPayPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
+    /// Paper 39: the card reader is the iPhone itself. Shown only when the workspace has Tap to Pay
+    /// and this iPhone supports it; everything else about the sheet is unchanged.
+    private var tapToPayCard: some View {
+        Button {
+            guard !hasLockedIntent && !model.waitingForProjection else { return }
+            option = .tapToPay
+            amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+        } label: {
+            VStack(spacing: 10) {
                 Image(systemName: "wave.3.right")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(Theme.brandText)
-                    .frame(width: 38, height: 38)
-                    .background(Theme.brand.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Tap to Pay on iPhone")
-                        .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(Theme.foreground)
-                    Text("Hold a contactless card or wallet near your phone")
-                        .font(Theme.font(12))
-                        .foregroundStyle(Theme.muted)
-                }
-                Spacer(minLength: 0)
+                    .frame(width: 60, height: 60)
+                    .overlay(Circle().stroke(Theme.brand, lineWidth: 1.5))
+                Text(tapToPayHeadline)
+                    .font(Theme.font(17, weight: .semibold))
+                    .foregroundStyle(Theme.foreground)
+                Text("Accepts contactless cards, Apple Pay and other wallets")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
             }
-            Divider().overlay(Theme.border)
-            HStack(spacing: 7) {
-                Image(systemName: "lock.fill")
-                Text("Terminal setup and Apple approval required")
-            }
-            .font(Theme.font(12, weight: .medium))
-            .foregroundStyle(Theme.subtle)
+            .frame(maxWidth: .infinity, minHeight: 168)
+            .background(option == .tapToPay ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(option == .tapToPay ? Theme.brand.opacity(0.5) : Theme.border, lineWidth: 1))
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 136, alignment: .leading)
-        .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.brand.opacity(0.22), lineWidth: 1))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Tap to Pay on iPhone is unavailable. Terminal setup and Apple approval are required.")
-        .accessibilityIdentifier("tap-to-pay-unavailable")
+        .buttonStyle(.plain)
+        .accessibilityLabel("Tap to Pay on iPhone")
+        .accessibilityAddTraits(option == .tapToPay ? .isSelected : [])
+        .accessibilityIdentifier("tap-to-pay")
+    }
+
+    private var tapToPayHeadline: String {
+        switch tapToPay?.phase {
+        case .preparing: "Getting ready…"
+        case .waitingForCard: "Hold card near your phone"
+        case .processing: "Processing…"
+        case .recording: "Approved · recording payment"
+        case .paid: "Paid"
+        default: "Tap to Pay on iPhone"
+        }
+    }
+
+    private var tapToPayAvailable: Bool {
+        session.isFeatureOn(TapToPayController.feature) && TapToPayController.deviceSupported
+            && session.can("invoice.payment.create", feature: "payments")
+    }
+
+    private func charge() async {
+        let tapToPay = tapToPayController
+        let before = model.payments.count
+        await tapToPay.charge(api: api) { [model] in
+            await model.load()
+            return model.payments.count > before || model.outstandingCents == 0
+        }
+        if tapToPay.phase == .paid {
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            dismiss()
+        }
     }
 
     private var paymentOptions: some View {
@@ -1074,12 +1108,13 @@ struct InvoicePaymentCollectionSheet: View {
 
     private var footer: some View {
         VStack(spacing: 6) {
-            if option == .tapToPay {
-                Text("Tap to Pay isn’t ready for this account yet.")
-                    .font(Theme.font(11))
-                    .foregroundStyle(Theme.muted)
+            if option == .tapToPay, case .failed(let message) = tapToPay?.phase {
+                Text(message)
+                    .font(Theme.font(12))
+                    .foregroundStyle(Theme.warning)
+                    .multilineTextAlignment(.center)
             }
-            PrimaryButton(title: primaryTitle, busy: isCreatingPayLink || model.isRecording || model.isLoading) {
+            PrimaryButton(title: primaryTitle, busy: isCreatingPayLink || model.isRecording || model.isLoading || tapToPay?.busy == true) {
                 amountFocused = false
                 Task { await submit() }
             }
@@ -1128,7 +1163,8 @@ struct InvoicePaymentCollectionSheet: View {
         if hasLockedIntent { return "Retry recording" }
         switch option {
         case .tapToPay:
-            return "Tap to Pay unavailable"
+            if case .failed = tapToPay?.phase { return "Try again" }
+            return "Charge \(money(model.outstandingCents ?? 0, currency: invoice.currency))"
         case .paymentLink:
             return "Create payment link"
         case .cash:
@@ -1144,7 +1180,7 @@ struct InvoicePaymentCollectionSheet: View {
         guard !model.isRecording, !model.isLoading, !isCreatingPayLink else { return false }
         if model.waitingForProjection { return true }
         guard session.can("invoice.payment.create", feature: "payments"), model.canRecordPayment else { return false }
-        if option == .tapToPay { return false }
+        if option == .tapToPay { return tapToPayAvailable && (model.outstandingCents ?? 0) > 0 && tapToPay?.busy != true }
         if option == .paymentLink { return model.outstandingCents == amountCents }
         guard let amountCents else { return false }
         if hasLockedIntent {
@@ -1176,7 +1212,11 @@ struct InvoicePaymentCollectionSheet: View {
             await createPayLink()
             return
         }
-        guard option != .tapToPay, amountCents != nil else { return }
+        if option == .tapToPay {
+            await charge()
+            return
+        }
+        guard amountCents != nil else { return }
         if hasLockedIntent {
             await recordPayment()
         } else {

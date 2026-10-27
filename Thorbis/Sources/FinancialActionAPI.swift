@@ -204,7 +204,7 @@ private struct FinancialItems<T: Decodable>: Decodable {
 
 @MainActor
 extension APIClient {
-    private func financialPath(_ base: String, id: String, suffix: String) throws -> String {
+    func financialPath(_ base: String, id: String, suffix: String) throws -> String {
         guard UUID(uuidString: id) != nil else {
             throw Problem(title: "Invalid financial record ID", status: nil, detail: id)
         }

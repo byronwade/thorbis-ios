@@ -46,7 +46,7 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
     /// Before sign-out or a workspace switch, while the session can still authorize the call.
     func unbind() async {
         guard let api, !Self.disabled else { return }
-        _ = try? await api.send("DELETE", "/v1/devices/\(Self.installationID)") as DeviceRemoval
+        _ = try? await api.send("POST", "/v1/devices/unregister", body: ["installationId": Self.installationID]) as DeviceRemoval
     }
 
     private func register() async {

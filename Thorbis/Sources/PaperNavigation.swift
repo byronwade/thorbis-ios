@@ -6,7 +6,11 @@ struct RootView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
     @State private var tab: TabletSection = .more
-    @State private var primaryTab: PrimaryTab = .initial
+    @EnvironmentObject private var layout: MenuLayout
+    /// The selected phone tab: a MenuItem id, "more" or "search".
+    @State private var selectedTab = PrimaryTab.initial.rawValue
+    /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
+    @State private var customPaths: [String: NavigationPath] = [:]
     @State private var path = NavigationPath()
     @State private var schedulePath = NavigationPath()
     @State private var jobsPath = NavigationPath()
@@ -135,20 +139,14 @@ struct RootView: View {
     }
 
     private func phoneNavigation() -> some View {
-        TabView(selection: $primaryTab) {
-            Tab(PrimaryTab.schedule.title, systemImage: PrimaryTab.schedule.symbol, value: PrimaryTab.schedule) {
-                NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.paperDestinations() }
+        TabView(selection: $selectedTab) {
+            ForEach(layout.visibleTabs(session)) { item in
+                Tab(item.tabTitle, systemImage: item.symbol, value: item.rawValue) { tabRoot(item) }
             }
-            Tab(PrimaryTab.jobs.title, systemImage: PrimaryTab.jobs.symbol, value: PrimaryTab.jobs) {
-                NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.paperDestinations() }
-            }
-            Tab(PrimaryTab.customers.title, systemImage: PrimaryTab.customers.symbol, value: PrimaryTab.customers) {
-                NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.paperDestinations() }
-            }
-            Tab(PrimaryTab.more.title, systemImage: PrimaryTab.more.symbol, value: PrimaryTab.more) {
+            Tab(PrimaryTab.more.title, systemImage: PrimaryTab.more.symbol, value: PrimaryTab.more.rawValue) {
                 NavigationStack(path: $morePath) { MoreView().paperDestinations() }
             }
-            Tab(value: PrimaryTab.search, role: .search) {
+            Tab(value: PrimaryTab.search.rawValue, role: .search) {
                 PaperGlobalSearch(embedded: true)
             }
         }
@@ -206,6 +204,7 @@ struct RootView: View {
             case "invoices": primaryTab = .more; morePath.append(PaperRoute.invoices)
             case "price-book": primaryTab = .more; morePath.append(PaperRoute.priceBook)
             case "team": primaryTab = .more; morePath.append(PaperRoute.team)
+            case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
             case "notices": primaryTab = .more; morePath.append(PaperRoute.notices)
@@ -242,6 +241,25 @@ struct RootView: View {
     }
 
     /// Tabs stay stable for every role; a tab the role cannot use says so (HIG-005).
+    /// Proxy so tab switches can still be written as `primaryTab = .jobs`.
+    private var primaryTab: PrimaryTab {
+        get { PrimaryTab(rawValue: selectedTab) ?? .more }
+        nonmutating set { selectedTab = newValue.rawValue }
+    }
+
+    @ViewBuilder private func tabRoot(_ item: MenuItem) -> some View {
+        switch item {
+        case .schedule: NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.paperDestinations() }
+        case .jobs: NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.paperDestinations() }
+        case .customers: NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.paperDestinations() }
+        default:
+            NavigationStack(path: Binding(get: { customPaths[item.rawValue] ?? NavigationPath() },
+                                          set: { customPaths[item.rawValue] = $0 })) {
+                if let route = item.route { PaperRouteView(route: route).paperDestinations() }
+            }
+        }
+    }
+
     /// Opens the job a Live Activity tap asked for, once the job list has it.
     private func openRequestedJob(phone: Bool) {
         guard let id = store.requestedJobID, session.can("job.view", feature: "jobs"),
@@ -249,9 +267,20 @@ struct RootView: View {
         else { return }
         store.requestedJobID = nil
         if phone {
-            primaryTab = .schedule
-            schedulePath = NavigationPath()
-            schedulePath.append(job)
+            let tabs = layout.visibleTabs(session)
+            if tabs.contains(.schedule) {
+                primaryTab = .schedule
+                schedulePath = NavigationPath()
+                schedulePath.append(job)
+            } else if tabs.contains(.jobs) {
+                primaryTab = .jobs
+                jobsPath = NavigationPath()
+                jobsPath.append(job)
+            } else {
+                primaryTab = .more
+                morePath = NavigationPath()
+                morePath.append(job)
+            }
         } else {
             tab = .schedule
             path = NavigationPath()
@@ -350,6 +379,7 @@ enum PaperRoute: Hashable {
     case estimate(String)
     case invoice(String)
     case followUps(jobID: String)
+    case customizeMenu
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -360,35 +390,45 @@ private struct PaperDestinations: ViewModifier {
         content
             .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
             .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
-            .navigationDestination(for: PaperRoute.self) { route in
-                switch route {
-                case .inbox:
-                    WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices")).id(session.generation)
-                case .estimates: EstimatesView()
-                case .invoices: InvoicesView()
-                case .priceBook:
-                    WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
-                case .revenue: WorkspaceRevenueView(api: api, available: true).id(session.generation)
-                case .drafts:
-                    if let actor = session.user?.id, let org = session.activeOrganization?.id {
-                        InboxLocalDraftView(actorID: actor, organizationID: org)
-                    }
-                case .closeout(let jobID): JobCloseoutView(jobID: jobID)
-                case .team: TeamView()
-                case .reports: ReportsView()
-                case .assign(let jobID): JobAssignmentView(jobID: jobID)
-                case .billing: BillingSchedulesView()
-                case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)
-                case .notices: NoticeSettingsView()
-                case .estimate(let id): EstimateDetailView(id: id)
-                case .invoice(let id): InvoiceDetailView(id: id)
-                case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
-                case .local(let section):
-                    if let actor = session.user?.id, let org = session.activeOrganization?.id {
-                        LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
-                    }
-                }
+            .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
+    }
+}
+
+/// The screen for a route, used both as a pushed destination and as a custom tab's root.
+struct PaperRouteView: View {
+    let route: PaperRoute
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+
+    var body: some View {
+        switch route {
+        case .inbox:
+            WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices")).id(session.generation)
+        case .estimates: EstimatesView()
+        case .invoices: InvoicesView()
+        case .priceBook:
+            WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
+        case .revenue: WorkspaceRevenueView(api: api, available: true).id(session.generation)
+        case .drafts:
+            if let actor = session.user?.id, let org = session.activeOrganization?.id {
+                InboxLocalDraftView(actorID: actor, organizationID: org)
             }
+        case .closeout(let jobID): JobCloseoutView(jobID: jobID)
+        case .team: TeamView()
+        case .reports: ReportsView()
+        case .assign(let jobID): JobAssignmentView(jobID: jobID)
+        case .billing: BillingSchedulesView()
+        case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)
+        case .notices: NoticeSettingsView()
+        case .estimate(let id): EstimateDetailView(id: id)
+        case .invoice(let id): InvoiceDetailView(id: id)
+        case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
+        case .customizeMenu: CustomizeMenuView()
+        case .local(let section):
+            if let actor = session.user?.id, let org = session.activeOrganization?.id {
+                LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
+            }
+        }
     }
 }
 

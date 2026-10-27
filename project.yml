@@ -3,6 +3,10 @@ options:
   bundleIdPrefix: com.thorbis
   deploymentTarget:
     iOS: "18.0"
+packages:
+  StripeTerminal:
+    url: https://github.com/stripe/stripe-terminal-ios
+    majorVersion: 5.8.1
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -32,6 +36,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - target: ThorbisWidgets
+      - package: StripeTerminal
   ThorbisWidgets:
     type: app-extension
     platform: iOS

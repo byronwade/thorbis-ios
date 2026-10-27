@@ -44,6 +44,8 @@ struct JobDetailView: View {
     @State private var showDeposit = false
     /// The customer's service locations; the first (or only) one is where the job is.
     @State private var locations: [ServiceLocationRecord] = []
+    /// The primary contact's phone (else the customer's), for one-tap Call and Text.
+    @State private var customerPhone: String?
     @Environment(\.openURL) private var openURL
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
@@ -130,12 +132,9 @@ struct JobDetailView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if selectedTab == "Overview", let job, let target = availableTransitions(job).first {
+                // Directions now sits with Call and Text in the header; the bar carries one commit.
                 PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
                     runTransition(target)
-                } secondary: {
-                    if let place = locations.first, let url = Directions.url(address: place.address, coordinates: place.coordinates) {
-                        PaperSquareButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps") { openURL(url) }
-                    }
                 }
             } else if selectedTab == "Estimates", let job, session.can("estimate.create", feature: "estimates") {
                 PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus") { showNewEstimate = true }
@@ -261,10 +260,44 @@ struct JobDetailView: View {
                     }
                 }
             }
+            if !compact { quickActions }
         }
         .padding(.horizontal, Theme.gutter)
         .padding(.top, 4)
         .padding(.bottom, 10)
+    }
+
+    /// Everything a tech reaches for on arrival, without leaving the job: call, text, drive.
+    @ViewBuilder private var quickActions: some View {
+        let phone = customerPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
+        let place = locations.first
+        let directions = place.flatMap { Directions.url(address: $0.address, coordinates: $0.coordinates) }
+        if phone != nil || directions != nil {
+            HStack(spacing: 8) {
+                if let phone, let call = URL(string: "tel:\(phone)"), let text = URL(string: "sms:\(phone)") {
+                    quickAction("Call", symbol: "phone.fill") { openURL(call) }
+                    quickAction("Text", symbol: "message.fill") { openURL(text) }
+                }
+                if let directions {
+                    quickAction("Directions", symbol: "arrow.triangle.turn.up.right.diamond.fill") { openURL(directions) }
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    private func quickAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title == "Directions" ? "Directions in Maps" : "\(title) customer")
     }
 
     @ViewBuilder
@@ -404,7 +437,6 @@ struct JobDetailView: View {
                 } else {
                     PaperDetailRow("Scheduled", value: "Not scheduled")
                 }
-                PaperDetailRow("Status", value: outbox.pendingStatus(for: job.id).map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
                 if let reason = job.pauseReason { PaperDetailRow("Pause reason", value: reason) }
                 if let next = job.pauseNextAction { PaperDetailRow("Next action", value: next) }
             }
@@ -829,6 +861,12 @@ struct JobDetailView: View {
             if locations.isEmpty, session.can("customer.view", feature: "core_crm"),
                let places = try? await api.fieldLocations(loadedJob.customerId), session.generation == generation {
                 locations = places
+            }
+            if customerPhone == nil, session.can("customer.view", feature: "core_crm") {
+                let contacts = (try? await api.fieldContacts(loadedJob.customerId)) ?? []
+                let primary = contacts.first(where: \.primary)?.phone ?? contacts.first?.phone
+                if let primary { customerPhone = primary }
+                else { customerPhone = (try? await api.fieldCustomer(loadedJob.customerId))?.phone }
             }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)

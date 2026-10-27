@@ -474,6 +474,7 @@ struct CustomerContactSheet: View {
 struct MoreView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject var api: APIClient
     @State private var showWorkspaces = false
     @State private var showNewJob = false
@@ -482,51 +483,28 @@ struct MoreView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 workspaceHeader
-                group("Work") {
-                    if session.can("job.view", feature: "job_booking_notices") {
-                        NavigationLink(value: PaperRoute.inbox) { PaperMenuRow("Inbox", symbol: "tray", subtitle: "Job notices and assignments") }
-                    }
-                    if session.can("estimate.view", feature: "estimates") {
-                        NavigationLink(value: PaperRoute.estimates) { PaperMenuRow("Estimates", symbol: "doc.text") }
-                    }
-                    if session.can("invoice.view", feature: "invoicing") {
-                        NavigationLink(value: PaperRoute.invoices) { PaperMenuRow("Invoices", symbol: "doc.plaintext") }
-                    }
-                    if session.can("invoice.view", feature: "progress_billing") {
-                        NavigationLink(value: PaperRoute.billing) { PaperMenuRow("Billing schedules", symbol: "list.bullet.rectangle", subtitle: "Progress billing, deposits, retainage") }
-                    }
-                    if session.can("pricebook.view", feature: "price_book") {
-                        NavigationLink(value: PaperRoute.priceBook) { PaperMenuRow("Price book", symbol: "book.closed") }
-                    }
-                    if session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments") {
-                        NavigationLink(value: PaperRoute.revenue) { PaperMenuRow("Money", symbol: "chart.bar", subtitle: "Revenue, collected and overdue") }
-                    }
-                    if session.can("estimate.view", feature: "estimates") || session.can("job.view", feature: "jobs") {
-                        NavigationLink(value: PaperRoute.reports) { PaperMenuRow("Reports", symbol: "chart.xyaxis.line", subtitle: "Estimate conversion and schedule") }
-                    }
-                }
-                if session.can("organization.members.manage") || session.can("organization.permissions.manage")
-                    || session.can("organization.settings.edit", feature: "job_booking_notices") {
-                    group("Business") {
-                        if session.can("organization.members.manage") || session.can("organization.permissions.manage") {
-                            NavigationLink(value: PaperRoute.team) { PaperMenuRow("Team & permissions", symbol: "person.2.badge.gearshape") }
-                        }
-                        if session.can("organization.settings.edit", feature: "job_booking_notices") {
-                            NavigationLink(value: PaperRoute.notices) { PaperMenuRow("Job notices", symbol: "bell.badge", subtitle: "Who hears about booked and changed jobs") }
-                        }
-                    }
-                }
-                if session.user?.id != nil, session.activeOrganization?.id != nil {
-                    group("On this phone") {
-                        NavigationLink(value: PaperRoute.drafts) { PaperMenuRow("Message drafts", symbol: "bubble.left", subtitle: "Saved here, not sent") }
-                        ForEach(LocalWorkspaceSection.allCases, id: \.self) { section in
-                            if session.can(section.requiredCapability, feature: section.requiredFeature) {
+                // Items placed in the tab bar or hidden in Customize menu are left out here.
+                ForEach(MenuItem.Group.allCases, id: \.self) { section in
+                    let items = layout.moreItems(in: section, session: session)
+                    let local = section == .phone && session.user?.id != nil && session.activeOrganization?.id != nil
+                        ? LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) } : []
+                    if !items.isEmpty || !local.isEmpty {
+                        group(section.rawValue) {
+                            ForEach(items) { item in
+                                if let route = item.route {
+                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle) }
+                                }
+                            }
+                            ForEach(local, id: \.self) { section in
                                 NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder") }
                             }
                         }
                     }
                 }
                 group("Account") {
+                    NavigationLink(value: PaperRoute.customizeMenu) {
+                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here")
+                    }
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
                             .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
