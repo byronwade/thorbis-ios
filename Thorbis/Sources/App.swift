@@ -8,6 +8,7 @@ struct ThorbisApp: App {
     @StateObject private var store: Store
     @StateObject private var session: SessionController
     @StateObject private var inboxBoard: InboxLocalDrafts
+    @StateObject private var connectivity = ConnectivityMonitor()
     @State private var publicEstimateToken: String?
 
     init() {
@@ -24,12 +25,13 @@ struct ThorbisApp: App {
             return try await Store.fetchAuthorized(api: api, session: session)
         }
         session.onInvalidate = { [weak store] in store?.invalidate() }
-        session.onVerifiedIdentity = { [weak inboxBoard] actorID, organizationID in
+        session.onVerifiedIdentity = { [weak inboxBoard, weak store] actorID, organizationID in
             if let actorID, let organizationID {
                 inboxBoard?.bind(actorID: actorID, organizationID: organizationID)
             } else {
                 inboxBoard?.clear()
             }
+            store?.bindCache(actorID: actorID, organizationID: organizationID)
         }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
@@ -71,6 +73,7 @@ struct ThorbisApp: App {
             .environmentObject(store)
             .environmentObject(session)
             .environmentObject(inboxBoard)
+            .environmentObject(connectivity)
             .font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
@@ -78,10 +81,14 @@ struct ThorbisApp: App {
             #if DEBUG
             .overlay(alignment: .bottom) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
             #endif
-            .task { await session.restore() }
+            .task {
+                connectivity.onReconnect = { Task { await resync() } }
+                await session.restore()
+            }
             .onChange(of: scenePhase) { _, phase in
+                // Re-check without tearing down the session, the loaded work or navigation.
                 guard phase == .active, session.phase == .ready else { return }
-                Task { await session.restore() }
+                Task { await resync() }
             }
             .onOpenURL { url in
                 if let token = PublicEstimateActionLink.token(from: url) {
@@ -89,6 +96,14 @@ struct ThorbisApp: App {
                 }
             }
         }
+    }
+}
+
+extension ThorbisApp {
+    @MainActor private func resync() async {
+        await session.revalidate()
+        guard session.phase == .ready, !session.isOffline else { return }
+        await store.refresh(api)
     }
 }
 
@@ -117,8 +132,12 @@ final class Store: ObservableObject {
     @Published var customers: [Customer] = []
     @Published var error: String?
     @Published var loading = false
+    /// When the shown jobs came from the on-device copy instead of the server.
+    @Published private(set) var cachedAt: Date?
 
     private var generation = UUID()
+    private var cacheIdentity: (actorID: String, organizationID: String)?
+    var cache = WorkspaceCache()
     private var refreshID = UUID()
     private let fetch: @MainActor (APIClient) async throws -> ([Job], [Customer])
     var onUnauthorized: (() -> Void)?
@@ -148,6 +167,24 @@ final class Store: ObservableObject {
         customers = []
         error = nil
         loading = false
+        cachedAt = nil
+        cacheIdentity = nil
+    }
+
+    /// Binds the on-device copy to the verified actor and workspace and shows it until
+    /// the server answers. A nil pair (sign-out) deletes every cached workspace.
+    func bindCache(actorID: String?, organizationID: String?) {
+        guard let actorID, let organizationID else {
+            cacheIdentity = nil
+            cache.clearAll()
+            return
+        }
+        cacheIdentity = (actorID, organizationID)
+        if jobs.isEmpty && customers.isEmpty, let cached = cache.load(actorID: actorID, organizationID: organizationID) {
+            jobs = cached.jobs
+            customers = cached.customers
+            cachedAt = cached.savedAt
+        }
     }
 
     @discardableResult
@@ -163,6 +200,11 @@ final class Store: ObservableObject {
             jobs = newJobs
             customers = newCustomers
             error = nil
+            cachedAt = nil
+            if let identity = cacheIdentity {
+                cache.save(.init(savedAt: Date(), jobs: newJobs, customers: newCustomers),
+                           actorID: identity.actorID, organizationID: identity.organizationID)
+            }
             return .applied
         } catch is CancellationError {
             return .superseded
@@ -171,6 +213,10 @@ final class Store: ObservableObject {
             if let problem = error as? Problem, problem.status == 401 {
                 invalidate()
                 onUnauthorized?()
+            } else if error.isConnectivityFailure, !jobs.isEmpty || !customers.isEmpty {
+                // No signal: keep showing what is on the phone; the offline banner says so.
+                self.error = nil
+                return .failed
             } else {
                 self.error = error.localizedDescription
                 return .failed

@@ -110,8 +110,15 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
         }
     }
 
+    /// A reply that never reaches a server, like a phone with no signal.
+    static let offline = Reply(0)
+
     private func deliver(_ reply: Reply) {
         guard stateLock.withLock({ !stopped }) else { return }
+        if reply.status == 0 {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
         guard let url = request.url,
               let response = HTTPURLResponse(url: url, statusCode: reply.status,
                                              httpVersion: "HTTP/1.1", headerFields: ["Content-Type": reply.contentType])

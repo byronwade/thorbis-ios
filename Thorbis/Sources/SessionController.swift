@@ -1,17 +1,17 @@
 import Foundation
 
-struct SessionUser: Decodable, Identifiable, Equatable {
+struct SessionUser: Codable, Identifiable, Equatable {
     let id: String
     let name: String?
     let email: String?
 }
 
-struct SessionOrganization: Decodable, Identifiable, Equatable {
+struct SessionOrganization: Codable, Identifiable, Equatable {
     let id: String
     let name: String
 }
 
-struct FeatureDecision: Decodable, Equatable {
+struct FeatureDecision: Codable, Equatable {
     let enabled: Bool
     let released: Bool
     let entitled: Bool
@@ -76,6 +76,10 @@ final class SessionController: ObservableObject {
     @Published private(set) var capabilities: Set<String> = []
     @Published private(set) var features: [String: FeatureDecision] = [:]
     @Published private(set) var error: String?
+    /// The server could not be reached at the last check; cached authority and data are in use.
+    @Published private(set) var isOffline = false
+    /// Policy version of the verified authority; offline command envelopes carry it.
+    private(set) var policyVersion: Int?
 
     private(set) var generation = UUID()
     var onInvalidate: (() -> Void)?
@@ -89,10 +93,13 @@ final class SessionController: ObservableObject {
     private var authorityDeadline: Date?
     private var expiryTask: Task<Void, Never>?
     private var signingOut = false
+    private var revalidation: UUID?
+    private let snapshots: SessionSnapshotStoring
 
-    init(api: APIClient, defaults: UserDefaults = .standard) {
+    init(api: APIClient, defaults: UserDefaults = .standard, snapshots: SessionSnapshotStoring? = nil) {
         self.api = api
         self.defaults = defaults
+        self.snapshots = snapshots ?? (defaults == .standard ? KeychainSessionSnapshotStore.shared : MemorySessionSnapshotStore())
         api.onUnauthorized = { [weak self] in self?.invalidateUnauthorizedSession() }
     }
 
@@ -121,6 +128,87 @@ final class SessionController: ObservableObject {
             return
         }
         await loadSession(generation: requestGeneration)
+    }
+
+    /// Foreground and reconnect check. Keeps the session, the loaded work and the
+    /// user's place in the app; only a changed identity, a signed-out or expired
+    /// session, or a 401 falls back to a full restore. No signal keeps the session.
+    func revalidate() async {
+        guard !signingOut else { return }
+        guard phase == .ready, let currentUser = user, let currentOrganization = activeOrganization else {
+            if phase == .failed || phase == .restoring { await restore() }
+            return
+        }
+        let token = UUID()
+        revalidation = token
+        let sessionGeneration = generation
+        do {
+            let payload: SessionPayload? = try await api.send("GET", "/api/auth/get-session", authed: false)
+            guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
+            guard let payload, payload.user.id == currentUser.id,
+                  payload.session.activeOrganizationId == currentOrganization.id,
+                  let sessionExpiry = Self.date(payload.session.expiresAt), Date() < sessionExpiry
+            else { await restore(); return }
+            let catalog: CatalogPayload = try await api.send("GET", "/v1/query/catalog", authed: false)
+            guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
+            let binding = catalog.authority
+            guard binding.actorId == currentUser.id, binding.organizationId == currentOrganization.id,
+                  binding.policyVersion > 0, !binding.generation.isEmpty
+            else { await restore(); return }
+            var authorityExpiry: Date?
+            if let raw = catalog.authorityExpiresAt ?? binding.authorityExpiresAt {
+                guard let parsed = Self.date(raw), Date() < parsed else { await restore(); return }
+                authorityExpiry = parsed
+            }
+            let exposure: FeaturesPayload = try await api.send("GET", "/v1/features", authed: false)
+            guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
+            guard exposure.organizationId == currentOrganization.id else { await restore(); return }
+            capabilities = Set(catalog.capabilities)
+            features = exposure.features
+            sessionDeadline = sessionExpiry
+            authorityDeadline = authorityExpiry
+            policyVersion = binding.policyVersion
+            isOffline = false
+            expiryTask?.cancel()
+            scheduleExpiry(generation: sessionGeneration, deadline: min(sessionExpiry, authorityExpiry ?? sessionExpiry))
+            saveSnapshot()
+        } catch is CancellationError {
+        } catch {
+            guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
+            // Unreachable server: keep working on the verified session until its own deadlines.
+            if error.isConnectivityFailure { isOffline = true } else { await restore() }
+        }
+    }
+
+    private func saveSnapshot() {
+        guard phase == .ready, let user, let activeOrganization, let sessionDeadline, let policyVersion else { return }
+        snapshots.save(SessionSnapshot(user: user, organization: activeOrganization, organizations: organizations,
+                                       capabilities: capabilities.sorted(), features: features, policyVersion: policyVersion,
+                                       sessionDeadline: sessionDeadline, authorityDeadline: authorityDeadline))
+    }
+
+    /// Cold launch with no signal: adopt the last verified authority if it has not expired.
+    private func adoptSnapshot(generation requestGeneration: UUID) -> Bool {
+        guard generation == requestGeneration, let snapshot = snapshots.load(),
+              Date() < snapshot.sessionDeadline, snapshot.authorityDeadline.map({ Date() < $0 }) ?? true
+        else { return false }
+        user = snapshot.user
+        organizations = snapshot.organizations
+        activeOrganization = snapshot.organization
+        capabilities = Set(snapshot.capabilities)
+        features = snapshot.features
+        sessionDeadline = snapshot.sessionDeadline
+        authorityDeadline = snapshot.authorityDeadline
+        policyVersion = snapshot.policyVersion
+        api.auth = .session
+        api.displayName = snapshot.user.name ?? snapshot.user.email ?? ""
+        error = nil
+        isOffline = true
+        phase = .ready
+        onVerifiedIdentity?(snapshot.user.id, snapshot.organization.id)
+        scheduleExpiry(generation: requestGeneration,
+                       deadline: min(snapshot.sessionDeadline, snapshot.authorityDeadline ?? snapshot.sessionDeadline))
+        return true
     }
 
     func signIn(email: String, password: String) async {
@@ -152,6 +240,7 @@ final class SessionController: ObservableObject {
             return
         }
         let knownOrganizations = organizations
+        snapshots.clear()
         let requestGeneration = invalidate(next: .restoring)
         do {
             struct Selection: Encodable { let organizationId: String }
@@ -172,6 +261,7 @@ final class SessionController: ObservableObject {
         signingOut = true
         defer { signingOut = false }
         defaults.set(true, forKey: Self.explicitSignOutKey)
+        snapshots.clear()
         onVerifiedIdentity?(nil, nil)
         let requestGeneration = invalidate(next: .restoring)
         do {
@@ -189,6 +279,7 @@ final class SessionController: ObservableObject {
     private func invalidateUnauthorizedSession() {
         guard !signingOut, phase == .ready else { return }
         defaults.set(true, forKey: Self.explicitSignOutKey)
+        snapshots.clear()
         invalidate(next: .failed)
         api.clearSessionCookies()
         error = "Your session expired. Sign in again."
@@ -197,6 +288,9 @@ final class SessionController: ObservableObject {
     @discardableResult
     private func invalidate(next: Phase) -> UUID {
         generation = UUID()
+        revalidation = nil
+        isOffline = false
+        policyVersion = nil
         api.invalidateRequests()
         expiryTask?.cancel()
         expiryTask = nil
@@ -328,8 +422,10 @@ final class SessionController: ObservableObject {
             self.authorityDeadline = authorityExpiry
             self.api.auth = .session
             self.api.displayName = actor.name ?? actor.email ?? ""
+            self.policyVersion = binding.policyVersion
             self.error = nil
             self.phase = .ready
+            saveSnapshot()
             onVerifiedIdentity?(actor.id, organization.id)
             scheduleExpiry(generation: requestGeneration,
                            deadline: min(sessionExpiry, authorityExpiry ?? sessionExpiry))
@@ -350,6 +446,8 @@ final class SessionController: ObservableObject {
 
     private func fail(_ failure: Error, generation requestGeneration: UUID) {
         guard generation == requestGeneration else { return }
+        if failure.isConnectivityFailure, !defaults.bool(forKey: Self.explicitSignOutKey),
+           adoptSnapshot(generation: requestGeneration) { return }
         let description = failure.localizedDescription
         invalidate(next: .failed)
         error = description
