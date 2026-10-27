@@ -22,7 +22,7 @@ struct CustomersView: View {
     var body: some View {
         VStack(spacing: 0) {
             PaperHeader(title: "Customers", icon: "person.2", subtitle: "\(items.count) customers · \(activeJobs) active jobs", search: { showSearch.toggle() })
-            if showSearch { PaperSearchField(text: $search, prompt: "Customer name").padding(.horizontal, 16) }
+            if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let error = error ?? store.error { ErrorBanner(message: error) }
