@@ -37,7 +37,7 @@ final class MediaTransfer {
     }
 
     func upload(jobID: String, clientAssetID: String, kind: String, mime: String,
-                originalFilename: String, data: Data) async throws -> MediaAssetRecord {
+                originalFilename: String, data: Data, tags: [String] = []) async throws -> MediaAssetRecord {
         guard UUID(uuidString: clientAssetID) != nil else {
             throw Problem(title: "Invalid client asset ID", status: nil, detail: clientAssetID)
         }
@@ -49,7 +49,9 @@ final class MediaTransfer {
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let request = FieldMediaRegistrationRequest(clientAssetId: clientAssetID, kind: kind,
                                                     mime: mime, sizeBytes: data.count,
-                                                    originalFilename: originalFilename, contentHash: hash)
+                                                    originalFilename: originalFilename, contentHash: hash,
+                                                    capturedAt: ISO8601DateFormatter().string(from: Date()),
+                                                    tags: tags.isEmpty ? nil : tags)
         let registration = try await api.registerFieldMedia(jobID, request: request)
         try verify(generation)
         guard registration.asset.contentHash == hash, registration.asset.sizeBytes == data.count,

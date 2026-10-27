@@ -18,8 +18,19 @@ struct JobMediaView: View {
     @State private var error: String?
     @StateObject private var preview = DocumentPreviewController()
     @State private var importDocument = false
+    @State private var showCamera = false
+    /// Paper 21C: the stage a new photo is filed under (server tags "Before" / "After").
+    @State private var stage = "Before"
+    @State private var filter = "All"
     private var visible: [MediaAssetRecord] { records.filter { !$0.archived } }
-    private var photos: [MediaAssetRecord] { visible.filter { $0.kind == "photo" } }
+    private var allPhotos: [MediaAssetRecord] { visible.filter { $0.kind == "photo" } }
+    private var photos: [MediaAssetRecord] {
+        switch filter {
+        case "Before", "After": allPhotos.filter { $0.tags.contains(filter) }
+        case "Untagged": allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }
+        default: allPhotos
+        }
+    }
     private var documents: [MediaAssetRecord] { visible.filter { $0.kind != "photo" } }
     private var canAdd: Bool { session.can("job.edit", feature: "jobs") }
 
@@ -46,6 +57,24 @@ struct JobMediaView: View {
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
                 }
+                if !allPhotos.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
+                            let count = option == "All" ? allPhotos.count : option == "Untagged"
+                                ? allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }.count
+                                : allPhotos.filter { $0.tags.contains(option) }.count
+                            Button { filter = option } label: {
+                                Text("\(option) · \(count)").font(Theme.font(12, weight: filter == option ? .semibold : .medium))
+                                    .foregroundStyle(filter == option ? Theme.background : Theme.muted)
+                                    .padding(.horizontal, 11).frame(height: 28)
+                                    .background(filter == option ? Theme.foreground : Theme.fill, in: Capsule())
+                                    .frame(minHeight: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(filter == option ? .isSelected : [])
+                        }
+                    }
+                }
                 PaperGroupHeader(title: "Photos", count: photos.count)
                 if photos.isEmpty && !loading {
                     Text("No photos on this job yet.").font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -56,6 +85,15 @@ struct JobMediaView: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     Image(systemName: "photo").font(.system(size: 22, weight: .light)).foregroundStyle(Theme.muted)
                                         .frame(maxWidth: .infinity, minHeight: 96)
+                                        .overlay(alignment: .topLeading) {
+                                            if let tag = ["Before", "After"].first(where: record.tags.contains) {
+                                                Text(tag).font(Theme.font(11, weight: .semibold))
+                                                    .foregroundStyle(tag == "After" ? Theme.success : Theme.foreground)
+                                                    .padding(.horizontal, 7).frame(height: 20)
+                                                    .background(tag == "After" ? Theme.successSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 6))
+                                                    .padding(8)
+                                            }
+                                        }
                                     Text(record.caption ?? record.originalFilename).font(Theme.font(12, weight: .medium)).lineLimit(1)
                                         .padding(.horizontal, 10).padding(.bottom, 8)
                                     if record.uploadState != "stored" {
@@ -105,33 +143,49 @@ struct JobMediaView: View {
         .background(Theme.background)
         .safeAreaInset(edge: .bottom) {
             if canAdd {
-                HStack(spacing: 8) {
-                    if selectedData != nil {
-                        Button { Task { await upload() } } label: {
+                VStack(spacing: 8) {
+                    Picker("Photo stage", selection: $stage) {
+                        Text("Before").tag("Before")
+                        Text("After").tag("After")
+                        Text("Other").tag("Other")
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(busy)
+                    HStack(spacing: 8) {
+                        Button { showCamera = true } label: {
                             HStack(spacing: 7) {
-                                if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up.circle") }
-                                Text("Upload \(selectedMime == "application/pdf" ? "document" : "photo")")
+                                if busy { ProgressView().tint(.white) } else { Image(systemName: "camera") }
+                                Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")
                             }
                             .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
                             .frame(maxWidth: .infinity).frame(height: 46)
                             .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
                         }
-                        .buttonStyle(.plain).disabled(busy)
-                    } else {
+                        .buttonStyle(.plain)
+                        .disabled(busy || !UIImagePickerController.isSourceTypeAvailable(.camera))
                         PhotosPicker(selection: $selection, matching: .images) {
-                            Label("Add photo", systemImage: "camera")
-                                .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-                                .frame(maxWidth: .infinity).frame(height: 46)
-                                .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                            Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)
+                                .frame(width: 46, height: 46)
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
                         }
                         .disabled(busy)
+                        .accessibilityLabel("Choose from library")
+                        PaperSquareButton(symbol: "doc.badge.plus", label: "Add PDF") { importDocument = true }
+                            .disabled(busy)
                     }
-                    PaperSquareButton(symbol: "doc.badge.plus", label: "Add PDF") { importDocument = true }
-                        .disabled(busy)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
                 .background(Theme.background)
             }
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraCapture { image in
+                showCamera = false
+                guard let image else { return }
+                Task { await uploadImage(image) }
+            }
+            .ignoresSafeArea()
         }
         .task { await load() }
         .refreshable { await load() }
@@ -142,8 +196,14 @@ struct JobMediaView: View {
                 defer { busy = false }
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else { throw CocoaError(.fileReadCorruptFile) }
-                    let type = item.supportedContentTypes.first ?? .jpeg
-                    try select(data, mime: type.preferredMIMEType ?? "image/jpeg", filename: "photo." + (type.preferredFilenameExtension ?? "jpg"))
+                    selection = nil
+                    if let image = UIImage(data: data) {
+                        busy = false
+                        await uploadImage(image)
+                    } else {
+                        let type = item.supportedContentTypes.first ?? .jpeg
+                        try select(data, mime: type.preferredMIMEType ?? "image/jpeg", filename: "photo." + (type.preferredFilenameExtension ?? "jpg"))
+                    }
                 } catch { self.error = error.localizedDescription }
             }
         }
@@ -182,12 +242,44 @@ struct JobMediaView: View {
         busy = true
         defer { busy = false }
         do {
-            _ = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: clientAssetID, kind: selectedMime == "application/pdf" ? "document" : "photo", mime: selectedMime, originalFilename: selectedFilename, data: selectedData)
+            _ = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: clientAssetID, kind: selectedMime == "application/pdf" ? "document" : "photo", mime: selectedMime, originalFilename: selectedFilename, data: selectedData, tags: selectedMime == "application/pdf" ? [] : stageTags)
             self.selectedData = nil
             selection = nil
             await load()
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
+    private var stageTags: [String] { stage == "Other" ? [] : [stage] }
+
+    /// Photos upload as soon as they are taken: JPEG, long edge at most 2560 pt, under the 8 MB single-PUT limit.
+    private func uploadImage(_ image: UIImage) async {
+        guard let data = Self.jpeg(image) else {
+            error = MediaSelectionError.tooLarge.localizedDescription
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
+            _ = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/jpeg",
+                                                         originalFilename: "\(stage.lowercased())-\(stamp).jpg", data: data, tags: stageTags)
+            error = nil
+            await load()
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+
+    static func jpeg(_ image: UIImage) -> Data? {
+        let longEdge = max(image.size.width, image.size.height)
+        let scale = min(1, 2560 / max(longEdge, 1))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let resized = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        for quality in [0.82, 0.7, 0.55] {
+            if let data = resized.jpegData(compressionQuality: quality), data.count <= 8 * 1024 * 1024 { return data }
+        }
+        return nil
+    }
+
     private func open(_ record: MediaAssetRecord) {
         preview.open { try await MediaTransfer(api: api).download(mediaID: record.id, filename: record.originalFilename) }
     }
@@ -217,5 +309,33 @@ struct NativeDocumentPreview: UIViewControllerRepresentable {
         init(url: URL) { self.url = url }
         func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem { url as NSURL }
+    }
+}
+
+/// System camera (HIG-019): returns the captured photo or nil when cancelled.
+struct CameraCapture: UIViewControllerRepresentable {
+    let onFinish: (UIImage?) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.cameraCaptureMode = .photo
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onFinish: (UIImage?) -> Void
+        init(onFinish: @escaping (UIImage?) -> Void) { self.onFinish = onFinish }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            onFinish(info[.originalImage] as? UIImage)
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onFinish(nil) }
     }
 }
