@@ -113,14 +113,15 @@ final class FieldOutboxTests: XCTestCase {
         let refused = try XCTUnwrap(box.enqueue(.progress(.init(jobId: jobA, to: "arrived", arrival: .init(method: "manual"))), policyVersion: 1))
         box.enqueue(.note(.init(jobId: jobB, body: "Later")), policyVersion: 1)
 
-        await box.drain(api: api([.init(409, #"{"title":"Conflict","status":409,"detail":"Illegal transition"}"#), URLProtocolFixture.offline]),
+        let canceled = #"{"id":"\#(jobA)","organizationId":"\#(org)","customerId":"\#(jobB)","title":"T","status":"canceled","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}"#
+        await box.drain(api: api([.init(409, #"{"title":"Conflict","status":409,"detail":"Illegal transition"}"#), .init(200, canceled), URLProtocolFixture.offline]),
                         useCommandEndpoint: false)
 
         XCTAssertEqual(box.entries.first { $0.id == refused.id }?.state, .rejected("Illegal transition"))
         XCTAssertEqual(box.pending.count, 1)
         XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, [
-            "/v1/jobs/\(jobA)/progress", "/v1/jobs/\(jobB)/notes"
-        ])
+            "/v1/jobs/\(jobA)/progress", "/v1/jobs/\(jobA)", "/v1/jobs/\(jobB)/notes"
+        ], "A 409 re-reads the job before calling the step refused")
     }
 
     func testOfflineStepsOnlyOfferWhatTheServerAllowedFromThatStatus() throws {
@@ -129,5 +130,29 @@ final class FieldOutboxTests: XCTestCase {
         let json = #"{"id":"\#(jobA)","organizationId":"\#(org)","customerId":"\#(jobB)","title":"T","status":"en_route","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","allowedTransitions":["arrived","canceled"]}"#
         box.learn(try JSONDecoder().decode(JobRecord.self, from: Data(json.utf8)))
         XCTAssertEqual(box.offlineSteps(from: "en_route"), ["arrived", "canceled"])
+    }
+
+    func testATimedOutStepThatAlreadyLandedIsClearedNotRefused() async throws {
+        let box = outbox()
+        box.enqueue(.progress(.init(jobId: jobA, to: "en_route")), policyVersion: 1)
+        let arrived = #"{"id":"\#(jobA)","organizationId":"\#(org)","customerId":"\#(jobB)","title":"T","status":"arrived","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}"#
+
+        await box.drain(api: api([.init(409, #"{"title":"Conflict","status":409,"detail":"Illegal transition"}"#), .init(200, arrived)]),
+                        useCommandEndpoint: false)
+
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertEqual(box.lastSyncSent, 1)
+    }
+
+    func testDismissingARefusedChangeReleasesTheJobsHeldChanges() throws {
+        let box = outbox()
+        let refused = try XCTUnwrap(box.enqueue(.progress(.init(jobId: jobA, to: "arrived", arrival: .init(method: "manual"))), policyVersion: 1))
+        box.enqueue(.note(.init(jobId: jobA, body: "Held")), policyVersion: 1)
+        box.markRejectedForTesting(refused.id, reason: "No")
+        XCTAssertTrue(box.pending.isEmpty)
+
+        box.dismiss(try XCTUnwrap(box.entries.first { $0.id == refused.id }))
+
+        XCTAssertEqual(box.pending.map(\.command), ["jobs.addNote"])
     }
 }

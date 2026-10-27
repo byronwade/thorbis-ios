@@ -94,4 +94,24 @@ final class OfflineSessionTests: XCTestCase {
 
         XCTAssertNil(snapshots.snapshot)
     }
+
+    func testAServerOutageOnForegroundKeepsTheSessionInsteadOfSigningOut() async {
+        let controller = make(signIn + [.init(503, #"{"title":"Unavailable","status":503}"#)])
+        await controller.restore()
+
+        await controller.revalidate()
+
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertTrue(controller.isOffline)
+    }
+
+    func testAnUnauthorizedForegroundCheckStillSignsOut() async {
+        let controller = make(signIn + [.init(200, "null"), .init(200, "null")])
+        await controller.restore()
+
+        await controller.revalidate()
+
+        XCTAssertEqual(controller.phase, .signedOut)
+        XCTAssertFalse(controller.can("job.view"))
+    }
 }

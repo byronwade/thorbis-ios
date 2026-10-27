@@ -70,4 +70,12 @@ extension Error {
         if let urlError = self as? URLError { return urlError.code != .cancelled }
         return false
     }
+
+    /// The server could not give an answer about the session: no signal, an outage (5xx)
+    /// or rate limiting. Never a 401 or a changed identity, which must sign out.
+    var isTransientServerFailure: Bool {
+        if isConnectivityFailure { return true }
+        if let problem = self as? Problem, let status = problem.status { return status >= 500 || status == 429 }
+        return false
+    }
 }

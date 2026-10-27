@@ -394,8 +394,14 @@ struct OutboxReviewSheet: View {
                                 Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
                             }
                             Spacer(minLength: 8)
-                            Button("Dismiss") { outbox.dismiss(entry) }
-                                .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
+                            if case .rejected = entry.state {
+                                VStack(spacing: 0) {
+                                    Button("Retry") { outbox.retry(entry) }
+                                        .font(Theme.font(13, weight: .semibold)).frame(minHeight: 44)
+                                    Button("Dismiss", role: .destructive) { outbox.dismiss(entry) }
+                                        .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
+                                }
+                            }
                         }
                         .padding(.vertical, 8)
                     }

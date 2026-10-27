@@ -97,7 +97,23 @@ struct ThorbisApp: App {
             #endif
             .task {
                 connectivity.onReconnect = { Task { await resync() } }
+                store.onServerReached = {
+                    // Any answer from the server (including pull to refresh) ends offline mode.
+                    guard session.isOffline else { return }
+                    Task { await resync() }
+                }
                 await session.restore()
+            }
+            .task(id: session.isOffline) {
+                // While offline, keep checking with backoff in case no network event fires
+                // (captive Wi-Fi, a server outage, a cellular hand-off).
+                var delay: UInt64 = 15
+                while session.isOffline, !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                    guard !Task.isCancelled, session.isOffline else { return }
+                    await resync()
+                    delay = min(delay * 2, 120)
+                }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Re-check without tearing down the session, the loaded work or navigation.
@@ -152,6 +168,8 @@ final class Store: ObservableObject {
     @Published var loading = false
     /// When the shown jobs came from the on-device copy instead of the server.
     @Published private(set) var cachedAt: Date?
+    /// Called after the server answered a refresh, proof that it is reachable again.
+    var onServerReached: (() -> Void)?
 
     private var generation = UUID()
     private var cacheIdentity: (actorID: String, organizationID: String)?
@@ -218,6 +236,7 @@ final class Store: ObservableObject {
             customers = newCustomers
             error = nil
             cachedAt = nil
+            onServerReached?()
             if let identity = cacheIdentity {
                 cache.save(.init(savedAt: Date(), jobs: newJobs, customers: newCustomers),
                            actorID: identity.actorID, organizationID: identity.organizationID)

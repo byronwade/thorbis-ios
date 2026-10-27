@@ -173,9 +173,36 @@ final class FieldOutbox: ObservableObject {
     /// Steps this phone may queue for a job whose last known status is `status`.
     func offlineSteps(from status: String) -> [String] { learnedTransitions[status] ?? [] }
 
+    /// Drops a refused change; the job's held changes go back in the queue.
     func dismiss(_ entry: OutboxEntry) {
         entries.removeAll { $0.id == entry.id }
+        release(jobID: entry.jobID)
         persist()
+    }
+
+    /// Sends a refused change again, with the job's held changes after it.
+    func retry(_ entry: OutboxEntry) {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[index].state = .pending
+        release(jobID: entry.jobID)
+        persist()
+    }
+
+    private func release(jobID: String) {
+        guard !entries.contains(where: { $0.jobID == jobID && { if case .rejected = $0.state { true } else { false } }($0) }) else { return }
+        for index in entries.indices where entries[index].jobID == jobID && entries[index].state == .held {
+            entries[index].state = .pending
+        }
+    }
+
+    private static let lifecycleRank = ["scheduled": 0, "dispatched": 1, "en_route": 2, "arrived": 3, "in_progress": 4, "completed": 5]
+
+    /// A step that timed out on the phone may still have reached the server. If the job is
+    /// already at or past that step, the change is done, not refused.
+    private func alreadyApplied(_ entry: OutboxEntry, api: APIClient) async -> Bool {
+        guard case .progress(let payload) = entry.action, let target = Self.lifecycleRank[payload.to],
+              let job = try? await api.fieldJob(payload.jobId), let current = Self.lifecycleRank[job.status] else { return false }
+        return current >= target
     }
 
     /// The status this phone expects a job to have once its queued changes land.
@@ -239,6 +266,10 @@ final class FieldOutbox: ObservableObject {
                     if outcome.status == "applied" || outcome.status == "duplicate" {
                         entries.removeAll { $0.id == outcome.commandId }
                         sent += 1
+                    } else if let entry = entries.first(where: { $0.id == outcome.commandId }), outcome.category == "conflict",
+                              await alreadyApplied(entry, api: api) {
+                        entries.removeAll { $0.id == outcome.commandId }
+                        sent += 1
                     } else {
                         reject(outcome.commandId, reason: outcome.detail ?? outcome.category ?? "The server refused this change.")
                     }
@@ -279,7 +310,12 @@ final class FieldOutbox: ObservableObject {
             } catch {
                 if error.isConnectivityFailure { break }
                 if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status), status != 401, status != 429 {
-                    reject(entry.id, reason: problem.errorDescription ?? "The server refused this change.")
+                    if status == 409, await alreadyApplied(entry, api: api) {
+                        entries.removeAll { $0.id == entry.id }
+                        sent += 1
+                    } else {
+                        reject(entry.id, reason: problem.errorDescription ?? "The server refused this change.")
+                    }
                     persist()
                     continue
                 }
@@ -288,6 +324,10 @@ final class FieldOutbox: ObservableObject {
         }
         return sent
     }
+
+    #if DEBUG
+    func markRejectedForTesting(_ id: String, reason: String) { reject(id, reason: reason) }
+    #endif
 
     /// A refused change holds every later change to the same job for review.
     private func reject(_ id: String, reason: String) {

@@ -183,8 +183,8 @@ final class SessionController: ObservableObject {
         } catch is CancellationError {
         } catch {
             guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
-            // Unreachable server: keep working on the verified session until its own deadlines.
-            if error.isConnectivityFailure { isOffline = true } else { await restore() }
+            // Unreachable or failing server: keep working on the verified session until its own deadlines.
+            if error.isTransientServerFailure { isOffline = true } else { await restore() }
         }
     }
 
@@ -455,7 +455,7 @@ final class SessionController: ObservableObject {
 
     private func fail(_ failure: Error, generation requestGeneration: UUID) {
         guard generation == requestGeneration else { return }
-        if failure.isConnectivityFailure, !defaults.bool(forKey: Self.explicitSignOutKey),
+        if failure.isTransientServerFailure, !defaults.bool(forKey: Self.explicitSignOutKey),
            adoptSnapshot(generation: requestGeneration) { return }
         let description = failure.localizedDescription
         invalidate(next: .failed)
