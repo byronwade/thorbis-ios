@@ -478,7 +478,7 @@ struct MoreView: View {
                         NavigationLink(value: PaperRoute.priceBook) { PaperMenuRow("Price book", symbol: "book.closed") }
                     }
                     if session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments") {
-                        NavigationLink(value: PaperRoute.revenue) { PaperMenuRow("Revenue", symbol: "chart.bar") }
+                        NavigationLink(value: PaperRoute.revenue) { PaperMenuRow("Money", symbol: "chart.bar", subtitle: "Revenue, collected and overdue") }
                     }
                 }
                 if session.user?.id != nil, session.activeOrganization?.id != nil {

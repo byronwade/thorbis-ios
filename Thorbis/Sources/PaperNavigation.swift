@@ -168,6 +168,7 @@ struct RootView: View {
             case "estimates": primaryTab = .more; morePath.append(PaperRoute.estimates)
             case "invoices": primaryTab = .more; morePath.append(PaperRoute.invoices)
             case "price-book": primaryTab = .more; morePath.append(PaperRoute.priceBook)
+            case "revenue": primaryTab = .more; morePath.append(PaperRoute.revenue)
             case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout":
                 if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs

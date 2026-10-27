@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "customer", "estimates", "invoices", "price-book", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "customer", "estimates", "invoices", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -176,6 +176,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if path == "/v1/invoices/\(PaperPreview.refundInvoice.id)/payments" {
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.refundPayment))]]
         }
+        if path == "/v1/reports/revenue" {
+            let months = [("2026-05", 3_812_000, 3_540_000), ("2026-06", 4_105_000, 3_960_000), ("2026-07", 3_980_000, 4_020_000),
+                          ("2026-08", 4_612_000, 4_230_000), ("2026-09", 4_390_000, 4_480_000), ("2026-10", 4_892_000, 4_105_000)]
+            return ["freshness": "live", "generatedAt": now, "periodBasis": "utc_month", "reportVersion": 1, "truncated": false,
+                    "months": months.map { ["month": $0.0, "revenue": $0.1, "collected": $0.2] },
+                    "receivable": ["openInvoices": 9, "balance": 733_000, "overdueInvoices": 2, "overdueBalance": 620_000]] as [String: Any]
+        }
         if path == "/v1/invoices" { return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]] }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
@@ -195,7 +202,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
-            if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview { enabledFeatures.append("payments") }
+            if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" { enabledFeatures.append("payments") }
             let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         case "/v1/jobs": return ["items": jobs()]

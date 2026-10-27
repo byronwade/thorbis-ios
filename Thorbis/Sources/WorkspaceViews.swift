@@ -146,46 +146,127 @@ struct WorkspaceRevenueView: View {
     @State private var report: RevenueReport?
     @State private var error: String?
 
+    /// Paper 59/60: the month's number large, receivables beside it, six months as bars.
     var body: some View {
-        Group {
-            if !available {
-                ContentUnavailableView("Revenue unavailable", systemImage: "chart.bar.xaxis",
-                                       description: Text("This account cannot view invoice reports."))
-            } else {
-                List {
-                    if let error { Text(error).foregroundStyle(.red) }
-                    if let report {
-                        if report.truncated {
-                            Section {
-                                Text("The server reached its report scan limit. Its totals understate the full ledger, so this view does not show them as final values.")
-                            } header: { Text("Incomplete report") }
-                        } else {
-                            Section("Receivables") {
-                                LabeledContent("Open invoices", value: String(report.receivable.openInvoices))
-                                LabeledContent("Balance", value: money(report.receivable.balance, currency: "USD"))
-                                LabeledContent("Overdue invoices", value: String(report.receivable.overdueInvoices))
-                                LabeledContent("Overdue balance", value: money(report.receivable.overdueBalance, currency: "USD"))
-                            }
-                            Section("UTC months") {
-                                ForEach(report.months) { month in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(month.month).font(.headline)
-                                        Text("Issued revenue: \(money(month.revenue, currency: "USD"))")
-                                        Text("Collected: \(money(month.collected, currency: "USD"))")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                        Section { Text("Live server report · version \(report.reportVersion) · \(report.generatedAt)")
-                            .font(.footnote).foregroundStyle(.secondary) }
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Money").font(Theme.font(34, weight: .bold)).tracking(-0.68).accessibilityAddTraits(.isHeader)
+                    Text("Revenue and receivables · live").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
-                .refreshable { await load() }
-                .task { await load() }
+                .padding(.bottom, 16)
+                if !available {
+                    PaperEmptyState(symbol: "chart.bar.xaxis", title: "Money unavailable", message: "This account cannot view invoice and payment reports.")
+                } else if let error {
+                    ErrorBanner(message: error).padding(.horizontal, -Theme.gutter)
+                } else if let report {
+                    if report.truncated {
+                        PaperEmptyState(symbol: "exclamationmark.triangle", title: "Report incomplete",
+                                        message: "The server reached its scan limit, so these totals would understate the ledger. Open the full report on the web.")
+                    } else {
+                        content(report)
+                    }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                }
+            }
+            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await load() }
+        .task { await load() }
+    }
+
+    @ViewBuilder private func content(_ report: RevenueReport) -> some View {
+        let months = Array(report.months.suffix(6))
+        let current = months.last
+        let previous = months.dropLast().last
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Collected · \(current.map { monthName($0.month, long: true) } ?? "this month")")
+                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                Spacer()
+                Text("UTC MONTHS").font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted).tracking(0.5)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(money(current?.collected ?? 0, currency: "USD"))
+                    .font(Theme.monoFont(34, weight: .semibold)).minimumScaleFactor(0.6).lineLimit(1)
+                if let current, let previous, previous.collected > 0 {
+                    let change = Double(current.collected - previous.collected) / Double(previous.collected) * 100
+                    Label("\(abs(Int(change.rounded())))% vs \(monthName(previous.month, long: false))", systemImage: change >= 0 ? "arrow.up" : "arrow.down")
+                        .font(Theme.font(12, weight: .medium))
+                        .foregroundStyle(change >= 0 ? Theme.success : Theme.destructive)
+                }
+            }
+            bars(months)
+                .padding(.top, 8)
+        }
+        .padding(.bottom, 18)
+
+        HStack(spacing: 10) {
+            tile("Outstanding", money(report.receivable.balance, currency: "USD"),
+                 detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")", alert: nil)
+            tile("Overdue", money(report.receivable.overdueBalance, currency: "USD"),
+                 detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
+                 alert: report.receivable.overdueInvoices > 0 ? Theme.destructive : nil)
+        }
+        .padding(.bottom, 18)
+
+        PaperGroupHeader(title: "By month", count: months.count)
+        ForEach(months.reversed()) { month in
+            HStack {
+                Text(monthName(month.month, long: true)).font(Theme.font(15, weight: .medium))
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(money(month.collected, currency: "USD")).font(Theme.monoFont(13, weight: .semibold))
+                    Text("Invoiced \(money(month.revenue, currency: "USD"))").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                }
+            }
+            .frame(minHeight: 48)
+            .accessibilityElement(children: .combine)
+        }
+        Text("Live server report · v\(report.reportVersion)").font(Theme.monoFont(11)).foregroundStyle(Theme.muted).padding(.top, 14)
+    }
+
+    private func bars(_ months: [RevenueReport.Month]) -> some View {
+        let peak = max(months.map(\.collected).max() ?? 1, 1)
+        return HStack(alignment: .bottom, spacing: 10) {
+            ForEach(Array(months.enumerated()), id: \.element.id) { index, month in
+                VStack(spacing: 6) {
+                    Capsule()
+                        .fill(index == months.count - 1 ? Theme.brand : Theme.muted.opacity(0.45))
+                        .frame(width: 6, height: max(4, 44 * CGFloat(month.collected) / CGFloat(peak)))
+                    Text(monthName(month.month, long: false).uppercased()).font(Theme.monoFont(10, weight: .medium))
+                        .foregroundStyle(index == months.count - 1 ? Theme.foreground : Theme.muted)
+                }
+                .frame(maxWidth: .infinity)
             }
         }
-        .navigationTitle("Revenue")
+        .frame(height: 70, alignment: .bottom)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Collected by month: " + months.map { "\(monthName($0.month, long: true)) \(money($0.collected, currency: "USD"))" }.joined(separator: ", "))
+    }
+
+    private func tile(_ title: String, _ value: String, detail: String, alert: Color?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text(value).font(Theme.monoFont(19, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.7)
+            Text(detail).font(Theme.font(12, weight: alert == nil ? .regular : .medium)).foregroundStyle(alert ?? Theme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func monthName(_ raw: String, long: Bool) -> String {
+        let parts = raw.split(separator: "-")
+        guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]),
+              let date = Calendar(identifier: .gregorian).date(from: DateComponents(timeZone: .gmt, year: year, month: month, day: 15)) else { return raw }
+        return long ? date.formatted(.dateTime.month(.wide).year()) : date.formatted(.dateTime.month(.abbreviated))
     }
 
     private func load() async {
