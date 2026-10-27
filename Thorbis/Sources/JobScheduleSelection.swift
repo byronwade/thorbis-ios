@@ -5,10 +5,18 @@ enum JobScheduleSelection {
         guard let target = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: date)) else {
             return nil
         }
-        return Self.date(on: target,
-                    hour: calendar.component(.hour, from: date),
-                    minute: calendar.component(.minute, from: date),
-                    calendar: calendar)
+        return Self.date(on: target, preservingTimeFrom: date, calendar: calendar)
+    }
+
+    static func date(on day: Date, preservingTimeFrom selectedDate: Date,
+                     calendar: Calendar = .current) -> Date? {
+        if calendar.isDate(day, inSameDayAs: selectedDate) {
+            return minutePrecision(selectedDate)
+        }
+        return Self.date(on: day,
+                         hour: calendar.component(.hour, from: selectedDate),
+                         minute: calendar.component(.minute, from: selectedDate),
+                         calendar: calendar)
     }
 
     static func date(on day: Date, hour: Int, minute: Int, calendar: Calendar = .current) -> Date? {
@@ -23,7 +31,19 @@ enum JobScheduleSelection {
         components.minute = minute
         components.second = 0
 
-        guard let result = calendar.date(from: components) else { return nil }
+        guard let startOfDay = calendar.date(from: DateComponents(
+            era: dayComponents.era,
+            year: dayComponents.year,
+            month: dayComponents.month,
+            day: dayComponents.day
+        )),
+        let result = calendar.nextDate(
+            after: startOfDay.addingTimeInterval(-1),
+            matching: components,
+            matchingPolicy: .strict,
+            repeatedTimePolicy: .first,
+            direction: .forward
+        ) else { return nil }
         let resolved = calendar.dateComponents([.era, .year, .month, .day, .hour, .minute], from: result)
         guard resolved.era == components.era,
               resolved.year == components.year,

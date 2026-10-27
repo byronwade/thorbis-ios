@@ -142,6 +142,7 @@ struct JobScheduleView: View {
     @State private var showsCalendar = false
     @State private var showsCustomTime = false
 
+    private let invalidLocalTimeMessage = "That local time does not exist on this date. Choose another date or time."
     private let timeOptions: [(hour: Int, minute: Int)] = [
         (8, 0), (10, 30), (13, 0), (15, 30)
     ]
@@ -161,7 +162,7 @@ struct JobScheduleView: View {
                 VStack(spacing: 4) {
                     dayOptions
                     if showsCalendar {
-                        DatePicker("Pick date", selection: $date, in: Date.distantPast..., displayedComponents: .date)
+                        DatePicker("Pick date", selection: calendarDateSelection, in: Date.distantPast..., displayedComponents: .date)
                             .datePickerStyle(.graphical)
                             .tint(Theme.brand)
                             .accessibilityLabel("Choose schedule date")
@@ -181,6 +182,7 @@ struct JobScheduleView: View {
                                 .labelsHidden()
                                 .datePickerStyle(.compact)
                                 .accessibilityLabel("Choose a custom start time")
+                                .onChange(of: date) { _, _ in error = nil }
                         }
                         .frame(minHeight: 44)
                     } else {
@@ -196,6 +198,7 @@ struct JobScheduleView: View {
                 .padding(.bottom, 12)
             }
             .scrollIndicators(.hidden)
+            .disabled(busy)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 4) {
                     PrimaryButton(title: saved ? "Schedule saved" : "Save schedule", busy: busy) { Task { await save() } }
@@ -204,6 +207,7 @@ struct JobScheduleView: View {
                         .font(Theme.font(15, weight: .medium))
                         .foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: 44)
+                        .disabled(busy)
                 }
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
@@ -217,6 +221,7 @@ struct JobScheduleView: View {
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(20)
         .presentationBackground(Theme.card)
+        .interactiveDismissDisabled(busy)
     }
 
     private var header: some View {
@@ -238,6 +243,7 @@ struct JobScheduleView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close schedule picker")
+            .disabled(busy)
         }
         .frame(height: 44)
         .padding(.horizontal, 20)
@@ -271,15 +277,32 @@ struct JobScheduleView: View {
         .padding(.bottom, 4)
     }
 
+    private var calendarDateSelection: Binding<Date> {
+        Binding(
+            get: { date },
+            set: { proposedDate in
+                guard let selection = JobScheduleSelection.date(
+                    on: proposedDate, preservingTimeFrom: date, calendar: .current
+                ) else {
+                    error = invalidLocalTimeMessage
+                    return
+                }
+                date = selection
+                error = nil
+            }
+        )
+    }
+
     private func dayButton(_ title: String, offset: Int) -> some View {
         let calendar = Calendar.current
         let targetDay = calendar.date(byAdding: .day, value: offset, to: Date()) ?? Date()
         let selected = calendar.isDate(date, inSameDayAs: targetDay)
         return Button {
-            let hour = calendar.component(.hour, from: date)
-            let minute = calendar.component(.minute, from: date)
-            if let next = JobScheduleSelection.date(on: targetDay, hour: hour, minute: minute, calendar: calendar) {
+            if let next = JobScheduleSelection.date(on: targetDay, preservingTimeFrom: date, calendar: calendar) {
                 date = next
+                error = nil
+            } else {
+                error = invalidLocalTimeMessage
             }
         } label: {
             Text(title)
@@ -302,6 +325,9 @@ struct JobScheduleView: View {
             if let selectedDate = JobScheduleSelection.date(on: date, hour: hour, minute: minute) {
                 date = selectedDate
                 showsCustomTime = false
+                error = nil
+            } else {
+                error = invalidLocalTimeMessage
             }
         } label: {
             HStack(spacing: 12) {

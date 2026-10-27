@@ -8,6 +8,4 @@
 - Intended distribution: TestFlight; no public App Store submission authorized as part of this release.
 - Signing: existing Apple Development identity and automatic provisioning; App Store Connect export destination upload.
 
-Registration alone is not a build or TestFlight release. Record upload/processing evidence separately.
-
-App Store Connect record created and verified: https://appstoreconnect.apple.com/apps/6827337706 (Apple ID 6827337706). No build uploaded yet.
+App Store Connect record created and verified: https://appstoreconnect.apple.com/apps/6827337706 (Apple ID 6827337706). Build 4 uploaded successfully on 2026-10-26 and was in Processing when checked. See `build-4.md` and `../outputs/testflight-upload-4.log` for evidence. Hayley Wade (`hayleywoods15@gmail.com`) is already in the external `External Testers` group, which currently has no builds assigned. External beta review metadata still needs an App Review contact phone and a demo login before the invitation can be sent.

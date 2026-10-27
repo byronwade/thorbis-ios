@@ -55,6 +55,45 @@ final class JobScheduleSelectionTests: XCTestCase {
         XCTAssertEqual(secondRequest.scheduledFor, "2026-11-01T06:30:00Z")
     }
 
+    func testSelectingSameDayPreservesSecondFallBackOccurrence() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let secondOccurrence = try XCTUnwrap(formatter.date(from: "2026-11-01T06:30:00Z"))
+
+        let selected = try XCTUnwrap(JobScheduleSelection.date(
+            on: secondOccurrence, preservingTimeFrom: secondOccurrence, calendar: calendar
+        ))
+
+        XCTAssertEqual(formatter.string(from: selected), "2026-11-01T06:30:00Z")
+    }
+
+    func testMovingIntoRepeatedFallBackHourChoosesFirstOccurrence() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let source = try XCTUnwrap(formatter.date(from: "2026-10-31T05:30:00Z"))
+        let targetDay = try XCTUnwrap(formatter.date(from: "2026-11-01T12:00:00Z"))
+
+        let selected = try XCTUnwrap(JobScheduleSelection.date(
+            on: targetDay, preservingTimeFrom: source, calendar: calendar
+        ))
+
+        XCTAssertEqual(formatter.string(from: selected), "2026-11-01T05:30:00Z")
+    }
+
+    func testMovingIntoSpringForwardGapRejectsTheLocalTime() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let formatter = ISO8601DateFormatter()
+        let source = try XCTUnwrap(formatter.date(from: "2026-03-07T07:30:00Z"))
+        let targetDay = try XCTUnwrap(formatter.date(from: "2026-03-08T12:00:00Z"))
+
+        XCTAssertNil(JobScheduleSelection.date(
+            on: targetDay, preservingTimeFrom: source, calendar: calendar
+        ))
+    }
+
     func testScheduleRequestCarriesLocalZoneWindowAndPriorSchedule() throws {
         let job = try JSONDecoder().decode(JobRecord.self, from: Data(#"{"id":"00000000-0000-4000-8000-000000000001","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","title":"Repair","status":"scheduled","scheduledFor":"2026-10-26T12:00:00Z","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#.utf8))
         var calendar = Calendar(identifier: .gregorian)
