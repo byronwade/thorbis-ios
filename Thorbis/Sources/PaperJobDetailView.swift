@@ -41,6 +41,7 @@ struct JobDetailView: View {
     @State private var committed = 0
     @State private var creatingInvoice = false
     @State private var reviewInvoiceID: String?
+    @State private var showDeposit = false
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
 
@@ -83,6 +84,12 @@ struct JobDetailView: View {
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .sensoryFeedback(.success, trigger: committed)
+        .sheet(isPresented: $showDeposit) {
+            JobDepositSheet(jobID: jobId) { invoice in
+                selectedInvoiceID = invoice.id
+                Task { await loadInvoices() }
+            }
+        }
         .navigationDestination(item: $reviewInvoiceID) { id in
             InvoiceDetailView(id: id)
                 .onDisappear { Task { await loadInvoices() } }
@@ -481,6 +488,12 @@ struct JobDetailView: View {
                                 message: "Start the invoice from this job. Lines come from its approved estimate; you can edit them before sending.",
                                 actionTitle: session.can("invoice.create", feature: "invoicing") ? (creatingInvoice ? "Creating…" : "Create invoice") : nil,
                                 action: { Task { await createInvoice() } })
+                if job.estimateId != nil, session.can("invoice.create", feature: "progress_billing") {
+                    Button { showDeposit = true } label: {
+                        PaperMenuRow("Request a deposit", symbol: "banknote", subtitle: "Bill part up front from the approved estimate")
+                    }
+                    .buttonStyle(.plain)
+                }
             } else {
                 if invoices.count > 1 {
                     Menu {

@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -209,6 +209,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                        "role": ["roleId": "r\(index)", "currentRevision": 1, "name": person.3, "description": ""]]] as [String: Any]
             }]
         }
+        if path == "/v1/billing-schedules/00000000-0000-4000-8000-000000009501",
+           let list = fixture(path: "/v1/billing-schedules") as? [String: Any], let schedule = (list["items"] as? [[String: Any]])?.first {
+            return ["schedule": schedule,
+                    "lines": [["lineId": "00000000-0000-4000-8000-000000009511", "billedToDate": 420_000, "remaining": 0],
+                              ["lineId": "00000000-0000-4000-8000-000000009512", "billedToDate": 390_000, "remaining": 390_000],
+                              ["lineId": "00000000-0000-4000-8000-000000009513", "billedToDate": 0, "remaining": 150_000]],
+                    "invoiceIds": [], "retainedToDate": 81_000, "releasedToDate": 0, "retainageOutstanding": 81_000,
+                    "depositsBilled": 200_000, "depositCredited": 200_000, "depositOutstanding": 0] as [String: Any]
+        }
+        if path == "/v1/billing-schedules" {
+            return ["items": [["id": "00000000-0000-4000-8000-000000009501", "organizationId": org, "customerId": PaperPreview.customerID,
+                               "jobId": PaperPreview.jobID, "createdByUserId": actor, "retainageRateBps": 1000, "status": "open",
+                               "lines": [["id": "00000000-0000-4000-8000-000000009511", "position": 0, "description": "Rough-in", "scheduledAmount": ["amount": 420_000, "currency": "USD"]],
+                                         ["id": "00000000-0000-4000-8000-000000009512", "position": 1, "description": "Equipment set", "scheduledAmount": ["amount": 780_000, "currency": "USD"]],
+                                         ["id": "00000000-0000-4000-8000-000000009513", "position": 2, "description": "Start-up and balance", "scheduledAmount": ["amount": 150_000, "currency": "USD"]]],
+                               "createdAt": "2026-10-01T12:00:00Z", "updatedAt": now]]]
+        }
         if path == "/v1/reports/operations" {
             return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-month", "reportVersion": 1, "truncated": false,
                     "estimates": ["drafts": 4, "presented": 31, "approved": 18, "declined": 6, "conversionBps": 5806],
@@ -243,7 +260,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
-            if PaperPreview.screen == "job-invoice-empty" { capabilities.append("invoice.create") }
+            if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
                     "capabilities": capabilities,
                     "resources": [], "views": []] as [String: Any]
@@ -251,6 +268,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             let decision = ["enabled": true, "released": true, "entitled": true]
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" { enabledFeatures.append("payments") }
+            if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.

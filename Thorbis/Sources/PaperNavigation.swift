@@ -189,6 +189,11 @@ struct RootView: View {
             case "price-book": primaryTab = .more; morePath.append(PaperRoute.priceBook)
             case "team": primaryTab = .more; morePath.append(PaperRoute.team)
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
+            case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
+            case "billing-detail":
+                primaryTab = .more
+                morePath.append(PaperRoute.billing)
+                morePath.append(PaperRoute.billingSchedule("00000000-0000-4000-8000-000000009501"))
             case "new-customer": primaryTab = .customers; previewNewCustomer = true
             case "revenue": primaryTab = .more; morePath.append(PaperRoute.revenue)
             case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups":
@@ -303,6 +308,8 @@ enum PaperRoute: Hashable {
     case team
     case reports
     case assign(jobID: String)
+    case billing
+    case billingSchedule(String)
     case followUps(jobID: String)
 }
 
@@ -331,6 +338,8 @@ private struct PaperDestinations: ViewModifier {
                 case .team: TeamView()
                 case .reports: ReportsView()
                 case .assign(let jobID): JobAssignmentView(jobID: jobID)
+                case .billing: BillingSchedulesView()
+                case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)
                 case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
                 case .local(let section):
                     if let actor = session.user?.id, let org = session.activeOrganization?.id {

@@ -8,7 +8,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Schedule map | Not yet | Job list records carry no coordinates. Service locations do; the map needs a per-job location read. |
 | Jobs list, Job detail, job flow | Done | Overview, Estimates, Invoice, Media and Activity. The lifecycle runs from the server's transitions. |
 | Job closeout, follow-ups, follow-up booking | Done / partial | Wrap-up checklist and follow-ups. Booking a follow-up into capacity is not native yet. |
-| Job deposit request, commercial recovery | Not yet | |
+| Job deposit request, commercial recovery | Partial | Deposit request done (Invoice tab). Commercial recovery is not native yet. |
 | Customers, customer record, people and places | Done | Contacts and service locations. |
 | Customer intake | Done | Name, phone, email, address, account type, preferred contact. Also available from the new-job composer. |
 | Customer SMS consent, phone lookup | Not yet | |
@@ -16,7 +16,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Invoices, invoice detail and workflow | Done | Create from the job, edit lines, issue, collect, record payment, refund. |
 | Payments (collect) | Partial | Card payment link, cash, check and already-collected. Tap to Pay needs Apple's entitlement and a terminal. |
 | Money, reports | Done (read) | Money (revenue). Reports: estimate conversion, jobs and schedule backlog. The payment-activity report and XLSX export are web only. |
-| Billing schedules | Not yet | |
+| Billing schedules | Done | List, schedule progress (billed, remaining, deposits, retainage), bill the remainder, release retainage, and deposit request on a job. Each command keeps its idempotency key until the server answers. Gated by `progress_billing`. |
 | Pipeline (requests) | Not yet | |
 | Price book, price item | Done (read) | Browse and detail; editing is web-only for now. |
 | Properties, equipment, fleet, agreements | Device-only | "On this phone" records; the server has no contracts for these yet. |

@@ -482,6 +482,9 @@ struct MoreView: View {
                     if session.can("invoice.view", feature: "invoicing") {
                         NavigationLink(value: PaperRoute.invoices) { PaperMenuRow("Invoices", symbol: "doc.plaintext") }
                     }
+                    if session.can("invoice.view", feature: "progress_billing") {
+                        NavigationLink(value: PaperRoute.billing) { PaperMenuRow("Billing schedules", symbol: "list.bullet.rectangle", subtitle: "Progress billing, deposits, retainage") }
+                    }
                     if session.can("pricebook.view", feature: "price_book") {
                         NavigationLink(value: PaperRoute.priceBook) { PaperMenuRow("Price book", symbol: "book.closed") }
                     }
