@@ -1,4 +1,4 @@
-# Build 2 — native authentication Origin fix (pending release)
+# Build 2 — native authentication Origin fix
 
 Physical-device testing of build 1 reported `Missing or null Origin` during login. The native URLSession transport omitted Origin. Better Auth requires a trusted origin on cookie-bearing mutations, including workspace activation and sign-out, even though the initial cookie-free sign-in can proceed without it.
 
@@ -11,8 +11,13 @@ The canonical API transport now supplies the validated base origin on unsafe HTT
 - XCTest regression cases added for sign-in, workspace activation, sign-out, ordinary API mutation, trailing slash, read requests and debug loopback ports.
 - Independent read-only review found no blocking issues.
 
-## Release blocker
+## Release verification
 
-The current restricted task permissions prevent Xcode access to CoreSimulator and signing accounts. The XCTest run could not find its destination; signed archive failed with No Accounts / No profiles, and even unsigned asset compilation failed because Simulator runtimes were inaccessible. These are environment failures, not passing iOS verification.
+Full Access was restored and the previously blocked checks were rerun successfully:
 
-Build 2 is not uploaded. Restore the Xcode access used for build 1, regenerate with XcodeGen, run the iOS suite, archive version 1.0 build 2, export using ExportOptions.plist, then confirm processed internal TestFlight availability. Do not claim a successful live login until the device is retested.
+- 101 iOS tests passed, zero failures, on the dedicated Thorbis Beta iPhone simulator.
+- 20 Release API tests passed, zero failures, including production Origin behavior.
+- Signed archive succeeded at `/private/tmp/Thorbis-2-full.xcarchive`; strict codesign verification passed and the archived CFBundleVersion is 2.
+- Source fix commit: `3e9303e`; pushed to draft PR #2.
+
+Upload succeeded at 20:33 EDT on 26 October 2026 (`EXPORT SUCCEEDED`). Apple processing is pending. Live physical-device sign-in still requires retesting with build 2.
