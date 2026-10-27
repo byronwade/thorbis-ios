@@ -18,36 +18,121 @@ struct JobMediaView: View {
     @State private var error: String?
     @StateObject private var preview = DocumentPreviewController()
     @State private var importDocument = false
+    private var visible: [MediaAssetRecord] { records.filter { !$0.archived } }
+    private var photos: [MediaAssetRecord] { visible.filter { $0.kind == "photo" } }
+    private var documents: [MediaAssetRecord] { visible.filter { $0.kind != "photo" } }
+    private var canAdd: Bool { session.can("job.edit", feature: "jobs") }
+
+    /// Paper 21A: a photo grid, a documents list, and one commit to add more.
     var body: some View {
-        List {
-            if let error = error ?? preview.error { ErrorBanner(message: error) }
-            if loading || busy || preview.loading { ProgressView() }
-            if session.can("job.edit", feature: "jobs") {
-                Section("Add media") {
-                    PhotosPicker(selection: $selection, matching: .images) { Label("Choose photo", systemImage: "photo") }.disabled(busy)
-                    Button("Choose PDF", systemImage: "doc") { importDocument = true }.disabled(busy)
-                    Text("Photos and PDFs up to 8 MB.").font(.caption).foregroundStyle(.secondary)
-                    if selectedData != nil {
-                        Text(selectedFilename)
-                        Button("Upload") { Task { await upload() } }.disabled(busy)
-                        Button("Discard selection", role: .destructive) { selectedData = nil; selection = nil }.disabled(busy)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let error = error ?? preview.error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if loading || preview.loading { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20) }
+                if let selectedData {
+                    HStack(spacing: 12) {
+                        Image(systemName: selectedMime == "application/pdf" ? "doc" : "photo")
+                            .frame(width: 36, height: 36).background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(selectedFilename).font(Theme.font(14, weight: .medium)).lineLimit(1)
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(selectedData.count), countStyle: .file))
+                                .font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                        }
+                        Spacer()
+                        Button("Discard", role: .destructive) { self.selectedData = nil; selection = nil }
+                            .font(Theme.font(13, weight: .medium)).frame(minHeight: 44).disabled(busy)
+                    }
+                    .padding(12)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                }
+                PaperGroupHeader(title: "Photos", count: photos.count)
+                if photos.isEmpty && !loading {
+                    Text("No photos on this job yet.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                        ForEach(photos) { record in
+                            Button { open(record) } label: {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Image(systemName: "photo").font(.system(size: 22, weight: .light)).foregroundStyle(Theme.muted)
+                                        .frame(maxWidth: .infinity, minHeight: 96)
+                                    Text(record.caption ?? record.originalFilename).font(Theme.font(12, weight: .medium)).lineLimit(1)
+                                        .padding(.horizontal, 10).padding(.bottom, 8)
+                                    if record.uploadState != "stored" {
+                                        Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
+                                            .padding(.horizontal, 10).padding(.bottom, 8)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(busy || preview.loading || record.uploadState != "stored")
+                            .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
+                        }
                     }
                 }
-            }
-            Section("Files") {
-                ForEach(records.filter { !$0.archived }) { record in
-                    Button { open(record) } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label(record.originalFilename, systemImage: record.kind == "photo" ? "photo" : "doc")
-                            Text(record.uploadState.statusLabel).font(.caption).foregroundStyle(.secondary)
-                            if let caption = record.caption { Text(caption).font(.subheadline) }
-                        }
-                    }.disabled(busy || preview.loading || record.uploadState != "stored")
+                PaperGroupHeader(title: "Documents", count: documents.count).padding(.top, 6)
+                if documents.isEmpty && !loading {
+                    Text("No documents on this job yet.").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
-                if records.isEmpty && !loading { Text("No media yet").foregroundStyle(.secondary) }
+                ForEach(documents) { record in
+                    Button { open(record) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc").font(.system(size: 15)).foregroundStyle(Theme.muted)
+                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(record.originalFilename).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                                Text(record.uploadState == "stored" ? "PDF" : record.uploadState.statusLabel)
+                                    .font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.down.circle").foregroundStyle(Theme.muted)
+                        }
+                        .frame(minHeight: 48).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy || preview.loading || record.uploadState != "stored")
+                }
+                if canAdd {
+                    Text("Photos and PDFs up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
+                }
+            }
+            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .safeAreaInset(edge: .bottom) {
+            if canAdd {
+                HStack(spacing: 8) {
+                    if selectedData != nil {
+                        Button { Task { await upload() } } label: {
+                            HStack(spacing: 7) {
+                                if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up.circle") }
+                                Text("Upload \(selectedMime == "application/pdf" ? "document" : "photo")")
+                            }
+                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).frame(height: 46)
+                            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain).disabled(busy)
+                    } else {
+                        PhotosPicker(selection: $selection, matching: .images) {
+                            Label("Add photo", systemImage: "camera")
+                                .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                                .frame(maxWidth: .infinity).frame(height: 46)
+                                .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .disabled(busy)
+                    }
+                    PaperSquareButton(symbol: "doc.badge.plus", label: "Add PDF") { importDocument = true }
+                        .disabled(busy)
+                }
+                .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+                .background(Theme.background)
             }
         }
-        .navigationTitle("Media")
         .task { await load() }
         .refreshable { await load() }
         .onChange(of: selection) { _, item in
