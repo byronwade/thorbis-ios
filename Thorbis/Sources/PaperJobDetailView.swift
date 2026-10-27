@@ -3,6 +3,12 @@ import UIKit
 
 struct JobDetailView: View {
     let jobId: String
+    let showsBack: Bool
+
+    init(jobId: String, showsBack: Bool = true) {
+        self.jobId = jobId
+        self.showsBack = showsBack
+    }
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
@@ -89,13 +95,15 @@ struct JobDetailView: View {
 
     private var topBar: some View {
         HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 38, height: 38)
-                    .background(Theme.fill, in: Circle())
+            if showsBack {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 38, height: 38)
+                        .background(Theme.fill, in: Circle())
+                }
+                .accessibilityLabel("Back")
             }
-            .accessibilityLabel("Back")
             Spacer()
             if let job {
                 ShareLink(item: "\(job.title) · \(job.id)") {
@@ -106,8 +114,8 @@ struct JobDetailView: View {
                 .accessibilityLabel("Share job")
                 Menu {
                     Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
-                    NavigationLink("Closeout") { JobCloseoutView(jobID: jobId) }
-                    NavigationLink("Follow-ups") { JobFollowUpsView(jobID: jobId) }
+                    NavigationLink("Closeout") { JobCloseoutView(jobID: jobId).toolbar(.visible, for: .navigationBar) }
+                    NavigationLink("Follow-ups") { JobFollowUpsView(jobID: jobId).toolbar(.visible, for: .navigationBar) }
                 } label: {
                     Image(systemName: "ellipsis")
                         .frame(width: 38, height: 38)
@@ -199,11 +207,11 @@ struct JobDetailView: View {
                 ForEach(availableTransitions(job).dropFirst(), id: \.self) { target in
                     actionButton(transitionTitle(target), icon: "arrow.right") { runTransition(target) }
                 }
-                NavigationLink { JobCloseoutView(jobID: jobId) } label: { actionLabel("Closeout", icon: "checkmark.circle") }
-                NavigationLink { JobFollowUpsView(jobID: jobId) } label: { actionLabel("Follow-ups", icon: "list.bullet") }
+                NavigationLink { JobCloseoutView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Closeout", icon: "checkmark.circle") }
+                NavigationLink { JobFollowUpsView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Follow-ups", icon: "list.bullet") }
                 if session.can("job.assign", feature: "jobs") {
-                    NavigationLink { JobScheduleView(job: job) } label: { actionLabel("Schedule job", icon: "calendar") }
-                    NavigationLink { JobAssignmentView(jobID: jobId) } label: { actionLabel("Assign job", icon: "person.crop.circle.badge.plus") }
+                    NavigationLink { JobScheduleView(job: job).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Schedule job", icon: "calendar") }
+                    NavigationLink { JobAssignmentView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Assign job", icon: "person.crop.circle.badge.plus") }
                 }
             }
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
@@ -214,7 +222,7 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 15) {
             sectionTitle("Estimates")
             if let estimateID = job.estimateId, session.can("estimate.view", feature: "estimates") {
-                NavigationLink { EstimateDetailView(id: estimateID) } label: {
+                NavigationLink { EstimateDetailView(id: estimateID).toolbar(.visible, for: .navigationBar) } label: {
                     actionLabel("View linked estimate", icon: "doc.text")
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
                 }
@@ -235,7 +243,7 @@ struct JobDetailView: View {
                 emptyCard("No invoice is linked to this job.")
             } else {
                 ForEach(invoices) { invoice in
-                    NavigationLink { InvoiceDetailView(id: invoice.id) } label: {
+                    NavigationLink { InvoiceDetailView(id: invoice.id).toolbar(.visible, for: .navigationBar) } label: {
                         actionLabel("Invoice · \(invoice.status.statusLabel)", icon: "doc.text")
                             .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
                     }

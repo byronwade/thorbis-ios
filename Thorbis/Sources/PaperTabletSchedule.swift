@@ -29,7 +29,7 @@ struct PaperTabletSchedule: View {
                     if range == "Map" {
                         ContentUnavailableView("Map unavailable", systemImage: "map", description: Text("Job list records do not include map coordinates. Select Today or Week to view your schedule."))
                     } else if let selectedJob {
-                        JobDetailView(jobId: selectedJob.id)
+                        JobDetailView(jobId: selectedJob.id, showsBack: false)
                             .id(selectedJob)
                     } else if store.loading {
                         ProgressView("Updating schedule…")
