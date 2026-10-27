@@ -1290,6 +1290,6 @@ private func paymentDate(_ value: String) -> String {
     return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
 }
 
-private func paymentAmountText(_ cents: Int) -> String {
+func paymentAmountText(_ cents: Int) -> String {
     "\(cents / 100).\(String(format: "%02d", cents % 100))"
 }

@@ -292,6 +292,9 @@ struct WorkspacePriceBookView: View {
     @State private var error: String?
     @State private var search = ""
     @State private var category = "All"
+    @State private var creating = false
+    /// Same capability the server checks for Price Book changes.
+    private var canEdit: Bool { session.can("organization.settings.edit", feature: "price_book") }
 
     private var categories: [String] {
         ["All"] + Array(Set(items.map { $0.kind.capitalized })).sorted()
@@ -352,7 +355,7 @@ struct WorkspacePriceBookView: View {
                                     ForEach(grouped) { item in
                                         if canViewDetail {
                                             NavigationLink {
-                                                WorkspacePriceBookDetailView(api: api, id: item.id)
+                                                WorkspacePriceBookDetailView(api: api, id: item.id, canEdit: canEdit)
                                             } label: { row(item) }
                                             .buttonStyle(.plain)
                                         } else { row(item) }
@@ -376,6 +379,14 @@ struct WorkspacePriceBookView: View {
                 }
                 .refreshable { await refresh() }
                 .task { await refresh() }
+                .toolbar {
+                    if canEdit {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button { creating = true } label: { Image(systemName: "plus") }.accessibilityLabel("New price book item")
+                        }
+                    }
+                }
+                .sheet(isPresented: $creating) { PriceBookItemEditor(api: api) { Task { await refresh() } } }
             }
         }
         .background(Theme.background)
@@ -429,27 +440,146 @@ struct WorkspacePriceBookView: View {
 private struct WorkspacePriceBookDetailView: View {
     @ObservedObject var api: APIClient
     let id: String
+    var canEdit = false
+    @Environment(\.dismiss) private var dismiss
     @State private var detail: PriceBookDetail?
     @State private var error: String?
+    @State private var editing = false
+    @State private var confirmArchive = false
 
     var body: some View {
         List {
-            if let error { Text(error).foregroundStyle(.red) }
+            if let error { Text(error).foregroundStyle(Theme.destructive) }
             if let detail {
+                LabeledContent("Price", value: money(detail.revision.sellPrice.amount, currency: detail.revision.sellPrice.currency))
                 LabeledContent("Unit", value: detail.revision.unit)
                 LabeledContent("Kind", value: detail.revision.kind.capitalized)
-                LabeledContent("Price", value: money(detail.revision.sellPrice.amount,
-                                                       currency: detail.revision.sellPrice.currency))
                 LabeledContent("Tax", value: detail.revision.taxClassification.replacingOccurrences(of: "_", with: " ").capitalized)
-                LabeledContent("Revision", value: String(detail.revision.revision))
-                LabeledContent("Status", value: detail.item.status.capitalized)
+                if detail.item.status != "active" { LabeledContent("Status", value: detail.item.status.capitalized) }
+                if canEdit && detail.item.status == "active" {
+                    Section {
+                        Button("Remove from price book", role: .destructive) { confirmArchive = true }
+                    } footer: {
+                        Text("Estimates and invoices that already use it keep their prices.")
+                    }
+                }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
         .navigationTitle(detail?.revision.description ?? "Price Book item")
         .toolbar(.visible, for: .navigationBar)
-        .task {
-            do { detail = try await api.priceBookItem(id); error = nil }
-            catch { self.error = error.localizedDescription }
+        .toolbar {
+            if canEdit, detail?.item.status == "active" {
+                ToolbarItem(placement: .topBarTrailing) { Button("Edit") { editing = true } }
+            }
+        }
+        .sheet(isPresented: $editing) {
+            if let detail {
+                PriceBookItemEditor(api: api, existing: detail) { Task { await load() } }
+            }
+        }
+        .confirmationDialog("Remove this item from the price book?", isPresented: $confirmArchive, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) { Task { await archive() } }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        do { detail = try await api.priceBookItem(id); error = nil }
+        catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+
+    private func archive() async {
+        guard let detail else { return }
+        do {
+            _ = try await api.archivePriceBookItem(id, expectedRevision: detail.item.currentRevision)
+            dismiss()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Add or change a Price Book item. Prices are entered in dollars; a save writes a new revision,
+/// so nothing already on an estimate or invoice changes.
+struct PriceBookItemEditor: View {
+    @ObservedObject var api: APIClient
+    var existing: PriceBookDetail?
+    let onSaved: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var content = PriceBookContent(description: "", unit: "each", sellPrice: FieldMoney(amount: 0, currency: "USD"),
+                                                  taxClassification: "taxable", kind: "service")
+    @State private var priceText = ""
+    @State private var busy = false
+    @State private var error: String?
+    @State private var createKey = UUID().uuidString
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name customers see", text: $content.description, axis: .vertical).lineLimit(1...3)
+                    HStack {
+                        Text("Price")
+                        Spacer()
+                        TextField("0.00", text: $priceText).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                            .font(Theme.monoFont(15, weight: .medium))
+                    }
+                    TextField("Unit (each, hour, foot…)", text: $content.unit)
+                }
+                Section {
+                    Picker("Kind", selection: $content.kind) {
+                        ForEach(PriceBookContent.kinds, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    Picker("Tax", selection: $content.taxClassification) {
+                        Text("Taxable").tag("taxable")
+                        Text("Not taxable").tag("non_taxable")
+                    }
+                }
+                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle(existing == nil ? "New price book item" : "Edit item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(!valid || busy) }
+            }
+            .onAppear {
+                guard let existing, content.description.isEmpty else { return }
+                let r = existing.revision
+                content = PriceBookContent(description: r.description, unit: r.unit, sellPrice: r.sellPrice,
+                                           taxClassification: r.taxClassification, kind: r.kind)
+                priceText = paymentAmountText(r.sellPrice.amount)
+            }
+        }
+    }
+
+    private var cents: Int? { MoneyInput.cents(priceText, maximumCents: 100_000_000) }
+    private var valid: Bool {
+        !content.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !content.unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && cents != nil
+    }
+
+    private func save() async {
+        guard let cents else { return }
+        var body = content
+        body.description = body.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        body.unit = body.unit.trimmingCharacters(in: .whitespacesAndNewlines)
+        body.sellPrice = FieldMoney(amount: cents, currency: "USD")
+        busy = true
+        defer { busy = false }
+        do {
+            if let existing {
+                _ = try await api.revisePriceBookItem(existing.item.id, expectedRevision: existing.item.currentRevision, content: body)
+            } else {
+                _ = try await api.createPriceBookItem(body, idempotencyKey: createKey)
+            }
+            onSaved()
+            dismiss()
+        } catch is CancellationError {
+        } catch {
+            self.error = error.isConnectivityFailure ? "Saving needs a connection." : error.localizedDescription
         }
     }
 }

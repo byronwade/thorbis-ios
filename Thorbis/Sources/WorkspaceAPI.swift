@@ -186,3 +186,53 @@ extension APIClient {
         return detail
     }
 }
+
+/// The editable content of a Price Book item; every save writes a new revision.
+struct PriceBookContent: Encodable, Equatable {
+    var description: String
+    var unit: String
+    var sellPrice: FieldMoney
+    var taxClassification: String
+    var kind: String
+
+    static let kinds = ["service", "labor", "material", "assembly"]
+    static let taxClassifications = ["taxable", "non_taxable"]
+}
+
+extension APIClient {
+    func createPriceBookItem(_ content: PriceBookContent, idempotencyKey: String) async throws -> PriceBookItem {
+        struct Body: Encodable {
+            let idempotencyKey: String
+            let content: PriceBookContent
+            func encode(to encoder: Encoder) throws {
+                try content.encode(to: encoder)
+                var c = encoder.container(keyedBy: Key.self)
+                try c.encode(idempotencyKey, forKey: .idempotencyKey)
+            }
+            enum Key: String, CodingKey { case idempotencyKey }
+        }
+        return try await send("POST", "/v1/price-book/items", body: Body(idempotencyKey: idempotencyKey, content: content))
+    }
+
+    /// The item id comes from the route only; the server refuses it in the body.
+    func revisePriceBookItem(_ id: String, expectedRevision: Int, content: PriceBookContent) async throws -> PriceBookItem {
+        struct Body: Encodable {
+            let expectedRevision: Int
+            let content: PriceBookContent
+            func encode(to encoder: Encoder) throws {
+                try content.encode(to: encoder)
+                var c = encoder.container(keyedBy: Key.self)
+                try c.encode(expectedRevision, forKey: .expectedRevision)
+            }
+            enum Key: String, CodingKey { case expectedRevision }
+        }
+        guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid Price Book item ID", status: nil, detail: id) }
+        return try await send("POST", "/v1/price-book/items/\(id)/revise", body: Body(expectedRevision: expectedRevision, content: content))
+    }
+
+    func archivePriceBookItem(_ id: String, expectedRevision: Int) async throws -> PriceBookItem {
+        struct Body: Encodable { let expectedRevision: Int }
+        guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid Price Book item ID", status: nil, detail: id) }
+        return try await send("POST", "/v1/price-book/items/\(id)/archive", body: Body(expectedRevision: expectedRevision))
+    }
+}

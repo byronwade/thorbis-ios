@@ -18,7 +18,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Money, reports | Done (read) | Money (revenue). Reports: estimate conversion, jobs and schedule backlog. The payment-activity report and XLSX export are web only. |
 | Billing schedules | Done | List, schedule progress (billed, remaining, deposits, retainage), bill the remainder, release retainage, and deposit request on a job. Each command keeps its idempotency key until the server answers. Gated by `progress_billing`. |
 | Pipeline (requests) | Not yet | |
-| Price book, price item | Done (read) | Browse and detail; editing is web-only for now. |
+| Price book, price item | Done | Browse, detail, and for owners: add, edit (new revision) and remove items. |
 | Properties, equipment, fleet, agreements | Device-only | "On this phone" records; the server has no contracts for these yet. |
 | Team, team member, roles, role members | Done (read) | Team & permissions list with roles for owners and admins. Invites and role changes are web only. |
 | Inbox, notices | Done | Staff notices with mark-read. |
