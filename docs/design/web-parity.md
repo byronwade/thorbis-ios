@@ -7,7 +7,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | My day, Schedule, Unscheduled | Done | Schedule tab with Today, Week and Unscheduled. Next up carries the next lifecycle step. |
 | Schedule map | Done | Schedule → Map: the day's stops as numbered pins from each job's service location, with Open job and Directions. |
 | Jobs list, Job detail, job flow | Done | Overview, Estimates, Invoice, Media and Activity. The lifecycle runs from the server's transitions. |
-| Job closeout, follow-ups, follow-up booking | Done / partial | Wrap-up checklist and follow-ups. Booking a follow-up into capacity is not native yet. |
+| Job closeout, follow-ups, follow-up booking | Done | Wrap-up checklist, follow-ups, and booking a return visit into an arrival window (falls back to office review when nobody is free). |
 | Job deposit request, commercial recovery | Partial | Deposit request done (Invoice tab). Commercial recovery is not native yet. |
 | Customers, customer record, people and places | Done | Contacts and service locations. |
 | Customer intake | Done | Name, phone, email, address, account type, preferred contact. Also available from the new-job composer. |

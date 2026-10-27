@@ -459,6 +459,7 @@ struct JobFollowUpsView: View {
     @State private var reason = ""
     @State private var nextAction = ""
     @State private var kind: FieldFollowUpRequest.Kind = .notifyOffice
+    @State private var booking: FieldFollowUpRecord?
     /// Open follow-ups first, then one short form to ask the office for the next step.
     var body: some View {
         ScrollView {
@@ -483,9 +484,16 @@ struct JobFollowUpsView: View {
                                 .font(Theme.font(12)).foregroundStyle(Theme.muted)
                         }
                         if record.status == "open", session.can("job.assign", feature: "jobs") {
-                            Button("Resolve") { Task { await resolve(record.id) } }
-                                .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                                .frame(minHeight: 44).disabled(busy)
+                            HStack(spacing: 18) {
+                                if record.kind == "office_scheduling", record.scheduling?.appointment == nil {
+                                    Button("Book the return visit") { booking = record }
+                                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                        .frame(minHeight: 44).disabled(busy)
+                                }
+                                Button("Resolve") { Task { await resolve(record.id) } }
+                                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .frame(minHeight: 44).disabled(busy)
+                            }
                         }
                     }
                     .padding(14)
@@ -515,6 +523,9 @@ struct JobFollowUpsView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $booking) { record in
+            FollowUpBookingSheet(jobID: jobID, followUp: record) { Task { await load() } }
+        }
         .safeAreaInset(edge: .bottom) {
             if session.can("job.edit", feature: "jobs") {
                 PaperActionBar(title: "Send follow-up", symbol: "paperplane", busy: busy,
@@ -555,5 +566,86 @@ struct JobFollowUpsView: View {
         defer { busy = false }
         do { _ = try await api.resolveFieldFollowUp(jobID, followUpID: id); await load() }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Books an office-scheduling follow-up into a real arrival window. When capacity is short the
+/// server sends it to the office instead, and the sheet says so rather than claiming a booking.
+struct FollowUpBookingSheet: View {
+    let jobID: String
+    let followUp: FieldFollowUpRecord
+    let onDone: () -> Void
+    @EnvironmentObject private var api: APIClient
+    @Environment(\.dismiss) private var dismiss
+    @State private var day = Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now
+    @State private var start = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now
+    @State private var hours = 2
+    @State private var need = ""
+    @State private var busy = false
+    @State private var error: String?
+    @State private var result: String?
+    /// One intent per sheet, so a retry after a dropped connection can't book twice.
+    @State private var intentID = UUID().uuidString.lowercased()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Arrival window") {
+                    DatePicker("Day", selection: $day, in: Date()..., displayedComponents: .date)
+                    DatePicker("Arrive from", selection: $start, displayedComponents: .hourAndMinute)
+                    Stepper("Window: \(hours) hour\(hours == 1 ? "" : "s")", value: $hours, in: 1...8)
+                }
+                Section("What the visit is for") {
+                    TextField("Service needed", text: $need, axis: .vertical).lineLimit(2...4)
+                }
+                if let result { Section { Label(result, systemImage: "checkmark.circle").foregroundStyle(Theme.success) } }
+                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle("Book return visit")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button(result == nil ? "Cancel" : "Done") { if result != nil { onDone() }; dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if result == nil {
+                        Button("Book") { Task { await book() } }
+                            .disabled(busy || need.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .onAppear { if need.isEmpty { need = followUp.nextAction } }
+        }
+    }
+
+    private var window: (Date, Date)? {
+        let calendar = Calendar.current
+        let time = calendar.dateComponents([.hour, .minute], from: start)
+        guard let begins = calendar.date(bySettingHour: time.hour ?? 9, minute: time.minute ?? 0, second: 0, of: day),
+              let ends = calendar.date(byAdding: .hour, value: hours, to: begins) else { return nil }
+        return (begins, ends)
+    }
+
+    private func book() async {
+        guard let (begins, ends) = window else { return }
+        busy = true
+        defer { busy = false }
+        let format = ISO8601DateFormatter()
+        format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let request = FieldFollowUpBookingRequest(intentId: intentID,
+                                                  requestedWindow: FieldAppointmentWindow(startsAt: format.string(from: begins), endsAt: format.string(from: ends)),
+                                                  timeZone: TimeZone.current.identifier,
+                                                  serviceNeed: need.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                  requiredTraitIds: [])
+        do {
+            let booked = try await api.bookFieldFollowUp(jobID, followUpID: followUp.id, request: request)
+            result = booked.outcome == "booked"
+                ? "Booked for \(begins.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
+                : "No one is free then, so the office will confirm a time."
+            error = nil
+        } catch is CancellationError {
+        } catch {
+            self.error = error.isConnectivityFailure ? "Booking needs a connection. Try again when you have signal." : error.localizedDescription
+        }
     }
 }
