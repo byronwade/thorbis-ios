@@ -22,7 +22,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Properties, equipment, fleet, agreements | Device-only | "On this phone" records; the server has no contracts for these yet. |
 | Team, team member, roles, role members | Done (read) | Team & permissions list with roles for owners and admins. Invites and role changes are web only. |
 | Inbox, notices | Done | Staff notices with mark-read. |
-| Search | Done (local) | Searches loaded jobs and customers. Server search (`/v1/search`) is not used yet. |
+| Search | Done | Searches the whole company through the Search Gateway (`GET /v1/search`): jobs, customers, estimates, invoices and billing schedules. Offline, or if the gateway fails, it searches the jobs and customers saved on the phone and says so. |
 | Settings, notice settings | Done | Account, appearance and sign-out, plus the job-notice matrix (owner, dispatcher and technician × email and in-app). The delivery log is web only. |
 | Offline queue, sync banner | Done | Cached workspace, queued steps and notes, photos kept until uploaded. |
 | Workflows, agent / Brain | Not yet | |

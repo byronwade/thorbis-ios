@@ -312,6 +312,8 @@ enum PaperRoute: Hashable {
     case billing
     case billingSchedule(String)
     case notices
+    case estimate(String)
+    case invoice(String)
     case followUps(jobID: String)
 }
 
@@ -343,6 +345,8 @@ private struct PaperDestinations: ViewModifier {
                 case .billing: BillingSchedulesView()
                 case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)
                 case .notices: NoticeSettingsView()
+                case .estimate(let id): EstimateDetailView(id: id)
+                case .invoice(let id): InvoiceDetailView(id: id)
                 case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
                 case .local(let section):
                     if let actor = session.user?.id, let org = session.activeOrganization?.id {
@@ -357,16 +361,51 @@ extension View {
     func paperDestinations() -> some View { modifier(PaperDestinations()) }
 }
 
-/// Paper 76: one field, results grouped by record type.
+/// One result from the server's Search Gateway (`GET /v1/search`, packages/query SearchResult).
+struct ServerSearchResult: Decodable, Identifiable, Hashable {
+    let sourceId: String
+    let resultType: String
+    let entityId: String
+    let title: String
+    let subtitle: String?
+    let status: String?
+    var id: String { "\(sourceId):\(entityId)" }
+}
+
+struct ServerSearchPage: Decodable {
+    let items: [ServerSearchResult]
+    let nextCursor: String?
+    let completeness: String?
+}
+
+extension APIClient {
+    func search(_ query: String, limit: Int = 25) async throws -> ServerSearchPage {
+        try await send("GET", "/v1/search", queryItems: [URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: String(limit))])
+    }
+}
+
+/// Paper 76: one field, results grouped by record type. The server's Search Gateway
+/// searches the whole company; with no signal the phone's saved jobs and customers answer.
 struct PaperGlobalSearch: View {
     var embedded = false
+    @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @State private var server: [ServerSearchResult] = []
+    @State private var serverQuery = ""
+    @State private var serverFailed = false
+    @State private var searching = false
     private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var useServer: Bool { !serverFailed && !session.isOffline && serverQuery == trimmed && !trimmed.isEmpty }
     private var jobs: [Job] { trimmed.isEmpty ? [] : JobFiltering.jobs(store.jobs, assignedTo: nil, search: trimmed) }
     private var customers: [Customer] { trimmed.isEmpty ? [] : store.customers.filter { $0.archived != true && $0.name.localizedCaseInsensitiveContains(trimmed) } }
+    private var serverGroups: [(String, [ServerSearchResult])] {
+        let order = ["job", "customer", "estimate", "invoice"]
+        let grouped = Dictionary(grouping: server, by: \.resultType)
+        return grouped.keys.sorted { (order.firstIndex(of: $0) ?? 99, $0) < (order.firstIndex(of: $1) ?? 99, $1) }.map { ($0, grouped[$0] ?? []) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -374,8 +413,19 @@ struct PaperGlobalSearch: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if trimmed.isEmpty {
                         PaperEmptyState(symbol: "magnifyingglass", title: "Search your workspace",
-                                        message: "Find jobs by title or job number, and customers by name.")
+                                        message: "Jobs, customers, estimates and invoices across the company.")
+                    } else if useServer {
+                        ForEach(serverGroups, id: \.0) { type, results in
+                            PaperGroupHeader(title: label(type), count: results.count).padding(.top, 8)
+                            ForEach(results) { result in serverRow(result) }
+                        }
+                        if server.isEmpty && !searching { ContentUnavailableView.search(text: trimmed) }
                     } else {
+                        if session.isOffline || serverFailed {
+                            Label(session.isOffline ? "Offline · searching what's saved on this phone" : "Company search is unavailable · showing what's on this phone",
+                                  systemImage: "iphone")
+                                .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
+                        }
                         if session.can("job.view", feature: "jobs"), !jobs.isEmpty {
                             PaperGroupHeader(title: "Jobs", count: jobs.count).padding(.top, 8)
                             ForEach(jobs) { job in
@@ -402,10 +452,30 @@ struct PaperGlobalSearch: View {
                                 }.buttonStyle(.plain)
                             }
                         }
-                        if jobs.isEmpty && customers.isEmpty { ContentUnavailableView.search(text: trimmed) }
+                        if searching { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20) }
+                        else if jobs.isEmpty && customers.isEmpty { ContentUnavailableView.search(text: trimmed) }
                     }
                 }
                 .padding(.horizontal, Theme.gutter)
+            }
+            .task(id: trimmed) {
+                guard !trimmed.isEmpty, !session.isOffline else { return }
+                // Wait for a pause in typing before asking the server.
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                searching = true
+                defer { searching = false }
+                do {
+                    let page = try await api.search(trimmed)
+                    guard !Task.isCancelled else { return }
+                    server = page.items
+                    serverQuery = trimmed
+                    serverFailed = false
+                } catch is CancellationError {
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    serverFailed = true
+                }
             }
             .foregroundStyle(Theme.foreground)
             .background(Theme.background)
@@ -418,6 +488,59 @@ struct PaperGlobalSearch: View {
                 }
             }
             .paperDestinations()
+        }
+    }
+
+    private func label(_ type: String) -> String {
+        switch type {
+        case "job": "Jobs"
+        case "customer": "Customers"
+        case "estimate": "Estimates"
+        case "invoice": "Invoices"
+        case "billing_schedule": "Billing schedules"
+        case "payment": "Payments"
+        case "location": "Locations"
+        default: type.statusLabel
+        }
+    }
+
+    @ViewBuilder private func serverRow(_ result: ServerSearchResult) -> some View {
+        let row = HStack(spacing: 12) {
+            Image(systemName: icon(result.resultType)).font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(result.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                if let subtitle = result.subtitle { Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1) }
+            }
+            Spacer(minLength: 8)
+            if let status = result.status { Text(status.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted) }
+        }
+        .frame(minHeight: 50).contentShape(Rectangle())
+        switch result.resultType {
+        case "job":
+            NavigationLink(value: store.jobs.first { $0.id == result.entityId }
+                           ?? Job(id: result.entityId, customerId: nil, title: result.title, status: result.status ?? "scheduled",
+                                  createdAt: nil, updatedAt: nil, allowedTransitions: nil)) { row }.buttonStyle(.plain)
+        case "customer":
+            NavigationLink(value: store.customers.first { $0.id == result.entityId }
+                           ?? Customer(id: result.entityId, name: result.title, archived: nil, createdAt: nil)) { row }.buttonStyle(.plain)
+        case "estimate":
+            NavigationLink(value: PaperRoute.estimate(result.entityId)) { row }.buttonStyle(.plain)
+        case "invoice":
+            NavigationLink(value: PaperRoute.invoice(result.entityId)) { row }.buttonStyle(.plain)
+        case "billing_schedule":
+            NavigationLink(value: PaperRoute.billingSchedule(result.entityId)) { row }.buttonStyle(.plain)
+        default:
+            row.opacity(0.6)
+        }
+    }
+
+    private func icon(_ type: String) -> String {
+        switch type {
+        case "job": "briefcase"
+        case "customer": "person"
+        case "estimate": "doc.text"
+        case "invoice": "doc.plaintext"
+        default: "circle"
         }
     }
 }
