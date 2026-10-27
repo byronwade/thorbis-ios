@@ -20,6 +20,12 @@ enum PaperWorkGroups {
         jobs.filter { ["scheduled", "dispatched"].contains($0.status) }
     }
     static func completed(_ jobs: [Job]) -> [Job] { jobs.filter { $0.status == "completed" } }
+    /// The job under way, else the earliest booked one: what "open my next job" means.
+    static func next(_ jobs: [Job]) -> Job? {
+        inProgress(jobs).first ?? scheduled(jobs).min {
+            (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture)
+        }
+    }
     static func other(_ jobs: [Job]) -> [Job] {
         jobs.filter { !["in_progress", "arrived", "en_route", "paused", "scheduled", "dispatched", "completed"].contains($0.status) }
     }

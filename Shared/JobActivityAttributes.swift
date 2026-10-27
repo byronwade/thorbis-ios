@@ -52,6 +52,9 @@ extension JobActivityAttributes.ContentState {
 }
 
 enum JobActivityLink {
+    /// Stands in for a job id: the job under way, else the next booked one.
+    static let nextJob = "next"
+
     static func url(jobID: String) -> URL? { URL(string: "thorbis://job/\(jobID)") }
 
     static func jobID(from url: URL) -> String? {

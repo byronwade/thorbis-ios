@@ -28,4 +28,19 @@ final class JobLiveActivityTests: XCTestCase {
         XCTAssertEqual(state("paused").label, "Paused")
         XCTAssertEqual(JobLiveActivity.liveStatuses, ["en_route", "arrived", "in_progress", "paused"])
     }
+
+    func testNextJobPrefersTheJobUnderWayThenTheEarliestBooking() {
+        func job(_ id: String, _ status: String, _ at: String?) -> Job {
+            var job = Job(id: id, customerId: nil, title: id, status: status, createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+            job.scheduledFor = at
+            return job
+        }
+        let later = job("later", "scheduled", "2026-10-27T18:00:00Z")
+        let sooner = job("sooner", "dispatched", "2026-10-27T14:30:00Z")
+        let done = job("done", "completed", "2026-10-27T12:00:00Z")
+        XCTAssertEqual(PaperWorkGroups.next([later, done, sooner])?.id, "sooner")
+        XCTAssertEqual(PaperWorkGroups.next([later, job("working", "in_progress", nil), sooner])?.id, "working")
+        XCTAssertNil(PaperWorkGroups.next([done]))
+        XCTAssertEqual(JobActivityLink.jobID(from: URL(string: "thorbis://job/next")!), JobActivityLink.nextJob)
+    }
 }

@@ -127,6 +127,8 @@ struct ThorbisApp: App {
                     publicEstimateToken = token
                 } else if let jobID = JobActivityLink.jobID(from: url) {
                     store.requestedJobID = jobID
+                } else if url.scheme == "thorbis", url.host() == "schedule" {
+                    store.requestedSchedule += 1
                 }
             }
         }
@@ -169,6 +171,8 @@ final class Store: ObservableObject {
     @Published var jobs: [Job] = []
     /// A job a Live Activity or link asked to open; RootView pushes it and clears this.
     @Published var requestedJobID: String?
+    /// Bumped by the "Show my schedule" shortcut; RootView switches to Schedule.
+    @Published var requestedSchedule = 0
     @Published var customers: [Customer] = []
     @Published var error: String?
     @Published var loading = false

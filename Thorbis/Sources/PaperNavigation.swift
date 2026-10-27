@@ -115,6 +115,7 @@ struct RootView: View {
         }
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: false) }
         .onChange(of: store.jobs) { openRequestedJob(phone: false) }
+        .onChange(of: store.requestedSchedule) { path = NavigationPath(); tab = .schedule }
         .onAppear {
             if session.can("job.view", feature: "jobs") { path = NavigationPath(); tab = .schedule }
             else if session.can("customer.view", feature: "core_crm") { path = NavigationPath(); tab = .customers }
@@ -143,6 +144,7 @@ struct RootView: View {
         .background(Theme.background)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
+        .onChange(of: store.requestedSchedule) { schedulePath = NavigationPath(); primaryTab = .schedule }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
         #if DEBUG
@@ -231,7 +233,8 @@ struct RootView: View {
     /// Opens the job a Live Activity tap asked for, once the job list has it.
     private func openRequestedJob(phone: Bool) {
         guard let id = store.requestedJobID, session.can("job.view", feature: "jobs"),
-              let job = store.jobs.first(where: { $0.id == id }) else { return }
+              let job = id == JobActivityLink.nextJob ? PaperWorkGroups.next(store.jobs) : store.jobs.first(where: { $0.id == id })
+        else { return }
         store.requestedJobID = nil
         if phone {
             primaryTab = .schedule
