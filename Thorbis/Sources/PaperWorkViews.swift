@@ -225,8 +225,8 @@ private struct ScheduleCompactRow: View {
                 Image(systemName: statusIcon(job.status).0)
                     .font(.system(size: 16)).foregroundStyle(statusIcon(job.status).1)
             }
-            .frame(minHeight: 44)
             .padding(.horizontal, 16).padding(.vertical, 5)
+            .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
     }
@@ -256,7 +256,7 @@ struct JobsView: View {
             if searchVisible { PaperSearchField(text: $search, prompt: "Title or job reference") }
             PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 20) {
                     if let error = store.error { ErrorBanner(message: error) }
                     if store.loading { ProgressView("Updating jobs…") }
                     if tab == "Recent" {
@@ -272,35 +272,25 @@ struct JobsView: View {
                             description: Text(search.isEmpty ? "Jobs in this view appear here." : "Try another title or job reference."))
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 120)
+                .padding(.horizontal, 16).padding(.bottom, 24)
             }
             .refreshable { await store.refresh(api) }
         }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .bottom) {
-            if session.can("job.create", feature: "jobs") {
-                Button { showNew = true } label: {
-                    Label("New job", systemImage: "plus")
-                        .font(Theme.font(14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(height: 42)
-                        .background(Theme.brand, in: Capsule())
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.horizontal, 16).padding(.bottom, 7)
-            }
-        }
         .sheet(isPresented: $showNew) { NewJobSheet() }
     }
 
     @ViewBuilder private func group(_ title: String, jobs: [Job]) -> some View {
         if !jobs.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
                 Text(title).font(Theme.font(13, weight: .medium))
                 Text("\(jobs.count)").font(Theme.monoFont(12))
                 Spacer()
-                Image(systemName: "plus").font(.system(size: 13)).frame(width: 20, height: 20)
+                if session.can("job.create", feature: "jobs") {
+                    Button { showNew = true } label: { Image(systemName: "plus").font(.system(size: 13)).frame(width: 20, height: 20) }.accessibilityLabel("New job")
+                }
             }.foregroundStyle(Theme.muted)
             .padding(.horizontal, 2).padding(.bottom, 6)
             VStack(spacing: 2) {
@@ -322,12 +312,13 @@ struct JobsView: View {
                                     .background(Theme.brandSurface, in: Circle())
                             }
                         }
-                        .frame(minHeight: 44)
                         .padding(.horizontal, 2).padding(.vertical, 4)
+                        .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
+            }
             }
         }
     }
