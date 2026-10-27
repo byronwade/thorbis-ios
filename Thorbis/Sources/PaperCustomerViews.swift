@@ -85,7 +85,8 @@ struct CustomerDetailView: View {
     @EnvironmentObject var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @State private var record: CustomerRecord?
-    @State private var contacts: [CustomerContactRecord] = []
+    @State private var contactState = CustomerContactCollectionState()
+    @State private var loadGeneration = 0
     @State private var locations: [ServiceLocationRecord] = []
     @State private var error: String?
     @State private var showNewJob = false
@@ -94,6 +95,8 @@ struct CustomerDetailView: View {
     @State private var tab = "Overview"
     private var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
+    private var contacts: [CustomerContactRecord] { contactState.contacts }
+    private var contactsLoaded: Bool { contactState.isLoaded }
 
     var body: some View {
         ScrollView {
@@ -104,6 +107,7 @@ struct CustomerDetailView: View {
                     if canEdit {
                         Menu {
                             Button("Add contact", systemImage: "person.badge.plus") { showContact = true }
+                                .disabled(!contactsLoaded)
                             Button("Add location", systemImage: "mappin.and.ellipse") { showLocation = true }
                         } label: { Image(systemName: "ellipsis").frame(width: 38, height: 38).background(Theme.fill, in: Circle()) }.accessibilityLabel("Customer actions")
                     }
@@ -156,7 +160,13 @@ struct CustomerDetailView: View {
         }
         .task { await load() }.refreshable { await load() }
         .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
-        .sheet(isPresented: $showContact, onDismiss: { Task { await load() } }) { CustomerRecordSheet(customerID: customer.id, isLocation: false) }
+        .sheet(isPresented: $showContact, onDismiss: { Task { await load() } }) {
+            CustomerContactSheet(customerID: customer.id) { contact in
+                loadGeneration += 1
+                contactState.add(contact)
+                error = nil
+            }
+        }
         .sheet(isPresented: $showLocation, onDismiss: { Task { await load() } }) { CustomerRecordSheet(customerID: customer.id, isLocation: true) }
     }
     @ViewBuilder private var metadataChips: some View {
@@ -182,7 +192,7 @@ struct CustomerDetailView: View {
     }
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { showContact = true } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.accessibilityLabel("Add contact") } }
+            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { showContact = true } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
             ForEach(contacts) { contact in
                 HStack(spacing: 10) {
                     Avatar(name: contact.name, size: 28)
@@ -240,12 +250,24 @@ struct CustomerDetailView: View {
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
     private func load() async {
+        loadGeneration += 1
+        let requestGeneration = loadGeneration
+        contactState.beginLoading()
         do {
-            record = try await api.fieldCustomer(customer.id)
-            contacts = try await api.fieldContacts(customer.id)
-            locations = try await api.fieldLocations(customer.id)
+            let loadedRecord = try await api.fieldCustomer(customer.id)
+            guard loadGeneration == requestGeneration else { return }
+            record = loadedRecord
+            let loadedContacts = try await api.fieldContacts(customer.id)
+            guard loadGeneration == requestGeneration else { return }
+            contactState.receive(loadedContacts)
+            let loadedLocations = try await api.fieldLocations(customer.id)
+            guard loadGeneration == requestGeneration else { return }
+            locations = loadedLocations
             error = nil
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {} catch {
+            guard loadGeneration == requestGeneration else { return }
+            self.error = error.localizedDescription
+        }
     }
 }
 

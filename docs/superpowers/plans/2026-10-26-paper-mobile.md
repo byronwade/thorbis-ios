@@ -37,6 +37,7 @@
 
 ### Task 3: Remaining screen coverage
 - [x] Inventory all current native routes against current Paper artboards, record unimplemented contracts and empty artboards explicitly.
+- [x] Match the customer contact quick-add to Paper with live name, role, phone, email, and first-contact primary behavior; keep unsupported approval/SMS switches out of the active form.
 - [ ] Apply exported presentation to remaining supported routes and their sheets without inventing missing backend behavior. Schedule picker `RAG-0` is now complete for the supported native contract; many other screens/forms remain.
 
 ### Task 4: Verify and release

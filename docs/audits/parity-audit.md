@@ -20,7 +20,7 @@ Legend: **API-backed** means canonical endpoints/domain contracts exist; it does
 | Today/My day | Registered primary surfaces; assigned visit workflow in web | Schedule shows all active first-page jobs | P1 |
 | Schedule/unscheduled/dispatch | Schedule, assignment, office-review/follow-up booking API actions; web board and routing | Today/Week/Map selection does not change results; no time/assignee model | P1 |
 | Jobs | List/detail/create/assign/schedule/progress/complete/cancel; closeout policy/evidence; notes/follow-ups | List/create/detail; en-route/arrival/start button only | P1 |
-| Customer CRM | Create/update/archive/restore, contacts, service/billing locations, lifecycle; strict schemas | Name-only create/list; job history; detail segments inert | P1 |
+| Customer CRM | Create/update/archive/restore, contacts, service/billing locations, lifecycle; strict schemas | Search/create/detail, job history, contact and location add; customer/contact edit, archive/restore and full lifecycle parity remain absent | P1 |
 | Properties | Customer-location-backed data plus UI composition (`features/properties.tsx`) | Absent | P1 after customer locations |
 | Estimates | Draft/send/approve/decline/revise, immutable revisions, option signing, PDF/action tokens | Job Estimates segment inert | P1 |
 | Invoices/payments | Draft lines use revision-safe `/v2/invoices/:id/lines`; issue, payment/refund/card collection, PDFs | Job Invoice/customer Billing segments inert | P1; collection requires mobile provenance contract |

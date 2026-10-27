@@ -148,6 +148,48 @@ struct FieldContactCreate: Encodable {
     }
 }
 
+struct CustomerContactDraft {
+    let name: String
+    let role: String?
+    let email: String?
+    let phone: String?
+
+    func makeRequest() -> FieldContactCreate? {
+        guard let name = Self.cleaned(name) else { return nil }
+        return FieldContactCreate(
+            name: name,
+            role: Self.cleaned(role),
+            email: Self.cleaned(email),
+            phone: Self.cleaned(phone)
+        )
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+}
+
+struct CustomerContactCollectionState {
+    private(set) var contacts: [CustomerContactRecord] = []
+    private(set) var isLoaded = false
+
+    mutating func beginLoading() { isLoaded = false }
+
+    mutating func receive(_ contacts: [CustomerContactRecord]) {
+        self.contacts = contacts
+        isLoaded = true
+    }
+
+    mutating func add(_ contact: CustomerContactRecord) {
+        contacts.removeAll { $0.id == contact.id }
+        contacts.append(contact)
+        isLoaded = true
+    }
+}
+
 struct FieldLocationCreate: Encodable {
     let label: String
     let kind: String

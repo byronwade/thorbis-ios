@@ -130,17 +130,70 @@ final class FieldAPITests: XCTestCase {
         let location = #"{"id":"00000000-0000-4000-8000-000000000007","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","label":"Home","kind":"service","address":"123 Main","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
         let client = APIClient(session: URLProtocolFixture.session([.init(201, contact), .init(201, location)]), baseURL: "https://app.thorbis.com")
 
-        _ = try await client.createFieldContact(customerID, request: .init(name: "Alex", primary: true))
+        _ = try await client.createFieldContact(customerID, request: .init(name: "Alex", role: "Homeowner", email: "alex@example.com", phone: "555-0100"))
         _ = try await client.createFieldLocation(customerID, request: .init(label: "Home", kind: "service", address: "123 Main"))
 
         let sent = URLProtocolFixture.recorded
         XCTAssertEqual(sent.map { $0.url?.path }, ["/v1/customers/\(customerID)/contacts", "/v1/customers/\(customerID)/locations"])
         let contactBody = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent[0].body)) as? [String: Any])
-        XCTAssertEqual(contactBody["primary"] as? Bool, true)
+        XCTAssertNil(contactBody["primary"])
+        XCTAssertEqual(contactBody["role"] as? String, "Homeowner")
+        XCTAssertEqual(contactBody["email"] as? String, "alex@example.com")
+        XCTAssertEqual(contactBody["phone"] as? String, "555-0100")
         XCTAssertNil(contactBody["customerId"])
         let locationBody = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent[1].body)) as? [String: Any])
         XCTAssertEqual(locationBody["kind"] as? String, "service")
         XCTAssertNil(locationBody["organizationId"])
+    }
+
+    func testCustomerContactDraftTrimsFieldsAndOmitsBlankOptionals() {
+        let draft = CustomerContactDraft(
+            name: "  Alex Morgan  ",
+            role: "  Homeowner  ",
+            email: "   ",
+            phone: " (415) 555-0134 "
+        )
+
+        let request = draft.makeRequest()
+
+        XCTAssertEqual(request?.name, "Alex Morgan")
+        XCTAssertEqual(request?.role, "Homeowner")
+        XCTAssertNil(request?.email)
+        XCTAssertEqual(request?.phone, "(415) 555-0134")
+        XCTAssertNil(request?.primary)
+    }
+
+    func testCustomerContactCollectionTracksReadinessSeparatelyFromOtherCustomerData() throws {
+        var state = CustomerContactCollectionState()
+        XCTAssertFalse(state.isLoaded)
+
+        let contacts = try JSONDecoder().decode([CustomerContactRecord].self, from: Data(#"[{"id":"contact-1","organizationId":"org-1","customerId":"customer-1","name":"Alex","primary":true,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}]"#.utf8))
+        state.receive(contacts)
+
+        XCTAssertTrue(state.isLoaded)
+        XCTAssertEqual(state.contacts.map(\.id), ["contact-1"])
+    }
+
+    func testCustomerContactDraftRequiresANonblankName() {
+        let draft = CustomerContactDraft(name: " \n ", role: "Spouse", email: "alex@example.com", phone: "555-0100")
+
+        XCTAssertNil(draft.makeRequest())
+    }
+
+    func testBlankCustomerContactOptionalsAreOmittedFromRequestBody() async throws {
+        let contact = #"{"id":"00000000-0000-4000-8000-000000000006","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","name":"Alex","primary":false,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(201, contact)]), baseURL: "https://app.thorbis.com")
+        let request = try XCTUnwrap(CustomerContactDraft(name: " Alex ", role: " ", email: "\n", phone: " ").makeRequest())
+
+        _ = try await client.createFieldContact(customerID, request: request)
+
+        let sent = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent.body)) as? [String: Any])
+        XCTAssertEqual(body["name"] as? String, "Alex")
+        XCTAssertNil(body["primary"])
+        XCTAssertNil(body["role"])
+        XCTAssertNil(body["email"])
+        XCTAssertNil(body["phone"])
     }
 
     func testMalformedRecordIDDoesNotReachTransport() async {
