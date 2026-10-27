@@ -25,24 +25,28 @@
 - Pushed details and sheets need a reliable back/dismiss path under custom root navigation.
 
 ### Task 1: Shared design primitives and navigation
-- [ ] Bundle Inter and Geist Mono, register fonts, and define Theme.font/monoFont plus missing tokens.
-- [ ] Add PaperHeader, PaperTabs, PaperSearchField, custom pill dock and More overlay in PaperComponents.swift and PaperNavigation.swift; replace RootView TabView in App.swift.
+- [x] Bundle Inter and Geist Mono, register fonts, and define Theme.font/monoFont plus missing tokens.
+- [x] Add PaperHeader, PaperTabs, PaperSearchField, custom pill dock and More overlay in PaperComponents.swift and PaperNavigation.swift; replace RootView TabView in App.swift.
 - [ ] Verify iPhone safe areas, route permissions and back navigation in simulator; keep iPad adaptive.
 
 ### Task 2: Login and core work screens
-- [ ] Translate LoginView.swift from login export, preserving authentication and honest unsupported-provider states.
-- [ ] Translate ScheduleView and JobsView into PaperWorkViews.swift; keep filters/refresh/create/navigation.
-- [ ] Translate customers and job detail presentation from corresponding exports; preserve all existing handlers and data.
-- [ ] Check real empty/error states and populated debug-only visual fixtures, never enable fixtures in Release.
+- [x] Translate LoginView.swift from login export, preserving authentication and honest unsupported-provider states.
+- [x] Translate ScheduleView and JobsView into PaperWorkViews.swift; keep filters/refresh/create/navigation.
+- [x] Translate customers and job detail presentation from corresponding exports; preserve all existing handlers and data.
+- [x] Check real empty/error states and populated debug-only visual fixtures, never enable fixtures in Release.
 
 ### Task 3: Remaining screen coverage
-- [ ] Inventory all current native routes against current Paper artboards, record unimplemented contracts and empty artboards explicitly.
+- [x] Inventory all current native routes against current Paper artboards, record unimplemented contracts and empty artboards explicitly.
 - [ ] Apply exported presentation to remaining supported routes and their sheets without inventing missing backend behavior.
 
 ### Task 4: Verify and release
-- [ ] Run Swift strict-concurrency build and relevant existing full tests; add behavioral tests only for new route/filter logic.
+- [x] Run Swift strict-concurrency build and relevant existing full tests; add behavioral tests only for new route/filter logic.
 - [ ] Compare simulator screenshots to Paper on iPhone and iPad, fix differences, record remaining gaps precisely.
-- [ ] Independent review of UI, permission and navigation regressions.
+- [x] Independent review of UI, permission and navigation regressions.
 - [ ] Only claim full match when verified; increment build and upload the verified implementation to TestFlight.
 
 Execution authorization: user requested exact existing Paper design and already approved implementation and TestFlight distribution. Continue without redundant design approval.
+
+## Execution record
+
+Build 3 delivers the supported core screen presentation, with passing 105-test suite, iPhone/iPad screenshot checks, independent review, strict signature verification, and Release preview exclusion. See docs/design/README.md for the remaining artboard/contract gaps. Full exact design parity remains unchecked and is not represented as complete.
