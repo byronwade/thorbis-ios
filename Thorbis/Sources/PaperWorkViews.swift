@@ -234,17 +234,36 @@ private struct ScheduleCompactRow: View {
     }
 }
 
+enum JobsViewMode: Equatable {
+    case myDay, jobs, arrive
+
+    var initialFilter: String {
+        switch self {
+        case .myDay, .arrive: "My Day"
+        case .jobs: "All jobs"
+        }
+    }
+
+    var showsFilters: Bool { self != .arrive }
+}
+
 struct JobsView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
-    @State private var tab = "My Day"
+    private let mode: JobsViewMode
+    @State private var tab: String
     @State private var search = ""
     @State private var searchVisible = false
     @State private var showNew = false
     @State private var busyJobID: String?
     @State private var startedDriving: Set<String> = []
     @State private var progressError: String?
+
+    init(mode: JobsViewMode = .myDay) {
+        self.mode = mode
+        _tab = State(initialValue: mode.initialFilter)
+    }
 
     private var jobs: [Job] {
         if tab == "My Day" {
@@ -260,11 +279,11 @@ struct JobsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PaperHeader(title: tab == "My Day" ? "My Day" : "Jobs", icon: tab == "My Day" ? "sun.max" : "briefcase", subtitle: tab == "My Day" ? "\(jobs.count) visits · \(Date.now.formatted(date: .abbreviated, time: .omitted))" : "\(activeCount) active · \(attentionCount) need attention") {
+            PaperHeader(title: mode == .arrive ? "Arrive" : tab == "My Day" ? "My Day" : "Jobs", icon: mode == .arrive ? "location.north.circle" : tab == "My Day" ? "sun.max" : "briefcase", subtitle: tab == "My Day" ? "\(jobs.count) visits · \(Date.now.formatted(date: .abbreviated, time: .omitted))" : "\(activeCount) active · \(attentionCount) need attention") {
                 searchVisible.toggle()
             }
             if searchVisible { PaperSearchField(text: $search, prompt: "Title or job reference") }
-            PaperTabs(options: ["My Day", "Assigned", "All jobs", "Recent"], selection: $tab)
+            if mode.showsFilters { PaperTabs(options: ["My Day", "Assigned", "All jobs", "Recent"], selection: $tab) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if let error = store.error { ErrorBanner(message: error) }

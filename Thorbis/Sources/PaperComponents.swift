@@ -1,5 +1,25 @@
 import SwiftUI
 
+struct ThorbisLogoLockup: View {
+    var markSize: CGFloat = 30
+    var wordmarkSize: CGFloat = 16
+
+    var body: some View {
+        HStack(spacing: markSize * 0.3) {
+            Image("ThorbisMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: markSize, height: markSize)
+                .accessibilityHidden(true)
+            Text("Thorbis")
+                .font(Theme.font(wordmarkSize, weight: .semibold))
+                .foregroundStyle(Theme.foreground)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Thorbis")
+    }
+}
+
 /// Native counterparts of the shared Thorbis Mobile Paper components.
 struct PaperHeader: View {
     let title: String

@@ -274,6 +274,7 @@ struct InvoiceDetailView: View {
             if let paymentModel {
                 InvoiceDetailFooter(
                     model: paymentModel,
+                    canCollect: session.can("invoice.payment.create", feature: "payments"),
                     canIssue: session.can("invoice.issue", feature: "invoicing"),
                     busy: busy,
                     onCollect: { showCollectPayment = true },

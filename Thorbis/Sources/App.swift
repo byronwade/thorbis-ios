@@ -8,6 +8,7 @@ struct ThorbisApp: App {
     @StateObject private var store: Store
     @StateObject private var session: SessionController
     @StateObject private var inboxBoard: InboxLocalDrafts
+    @State private var publicEstimateToken: String?
 
     init() {
         #if DEBUG
@@ -35,20 +36,32 @@ struct ThorbisApp: App {
         _store = StateObject(wrappedValue: store)
         _session = StateObject(wrappedValue: session)
         _inboxBoard = StateObject(wrappedValue: inboxBoard)
+        #if DEBUG
+        _publicEstimateToken = State(initialValue: PaperPreview.enabled && PaperPreview.screen == "public-estimate" ? "preview-estimate" : nil)
+        #else
+        _publicEstimateToken = State(initialValue: nil)
+        #endif
     }
 
     var body: some Scene {
         WindowGroup {
             Group {
-                switch session.phase {
-                case .restoring:
-                    ProgressView("Opening your workspace…")
-                case .signedOut, .failed:
-                    LoginView()
-                case .choosingWorkspace, .noWorkspace:
-                    WorkspaceSelectionView()
-                case .ready:
-                    RootView().id(session.generation)
+                if let publicEstimateToken {
+                    PublicEstimateActionView(token: publicEstimateToken) {
+                        self.publicEstimateToken = nil
+                    }
+                    .id(publicEstimateToken)
+                } else {
+                    switch session.phase {
+                    case .restoring:
+                        ProgressView("Opening your workspace…")
+                    case .signedOut, .failed:
+                        LoginView()
+                    case .choosingWorkspace, .noWorkspace:
+                        WorkspaceSelectionView()
+                    case .ready:
+                        RootView().id(session.generation)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -68,6 +81,11 @@ struct ThorbisApp: App {
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active, session.phase == .ready else { return }
                 Task { await session.restore() }
+            }
+            .onOpenURL { url in
+                if let token = PublicEstimateActionLink.token(from: url) {
+                    publicEstimateToken = token
+                }
             }
         }
     }
@@ -172,6 +190,42 @@ enum StoreRefreshResult: Equatable {
 }
 
 enum Tab: Hashable { case schedule, jobs, customers, more }
+
+enum PrimaryTab: String, CaseIterable, Identifiable {
+    case jobs, arrive, inbox
+
+    static let initial: PrimaryTab = .jobs
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+
+    var symbol: String {
+        switch self {
+        case .jobs: "briefcase"
+        case .arrive: "location.north.circle"
+        case .inbox: "tray"
+        }
+    }
+}
+
+struct PrimaryTabAccess {
+    let canViewJobs: Bool
+    let canViewStaffNotices: Bool
+
+    func canOpen(_ tab: PrimaryTab) -> Bool {
+        switch tab {
+        case .jobs, .arrive: canViewJobs
+        case .inbox: canViewStaffNotices
+        }
+    }
+
+    func unavailableMessage(for tab: PrimaryTab) -> String {
+        switch tab {
+        case .jobs, .arrive: "Your role does not allow access to jobs."
+        case .inbox: "Your role does not allow access to staff notices."
+        }
+    }
+}
 
 struct ErrorBanner: View {
     let message: String

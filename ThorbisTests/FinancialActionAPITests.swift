@@ -8,6 +8,156 @@ final class FinancialActionAPITests: XCTestCase {
     private let estimate = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"sent","currentRevisionNumber":1,"title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
     private let invoice = #"{"id":"00000000-0000-4000-8000-00000000000a","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","origin":"job_completion","sourceOperationKey":"completion:test","status":"draft","lines":[],"linesRevision":3,"amountPaid":0,"currency":"USD","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
 
+    func testRefundRequestTrimsReasonAndDecodesCanonicalPayment() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, refundPayment())]), baseURL: "https://app.thorbis.com")
+
+        let response = try await client.refundFieldPayment(
+            "00000000-0000-4000-8000-00000000000b", reason: "  Customer approved the reversal. \n"
+        )
+
+        guard case let .completed(payment) = response else {
+            return XCTFail("Expected the canonical refunded payment")
+        }
+        XCTAssertEqual(payment.status.rawValue, "refunded")
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.url?.path, "/v1/payments/00000000-0000-4000-8000-00000000000b/refund")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: String])
+        XCTAssertEqual(body["reason"], "Customer approved the reversal.")
+    }
+
+    func testPayLinkUsesInvoiceOnlyAndReturnsTheServerGeneratedURL() async throws {
+        let response = #"{"url":"https://checkout.stripe.com/c/pay_test_123","expiresAt":"2026-10-27T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(201, response)]), baseURL: "https://app.thorbis.com")
+
+        let payLink = try await client.openFieldPayLink(invoiceID)
+
+        XCTAssertEqual(payLink.url, "https://checkout.stripe.com/c/pay_test_123")
+        XCTAssertEqual(payLink.shareURL?.host, "checkout.stripe.com")
+        XCTAssertEqual(payLink.expiresAt, "2026-10-27T12:00:00Z")
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.url?.path, "/v1/invoices/\(invoiceID)/pay-link")
+        XCTAssertNil(request.body, "The server derives the exact outstanding balance; the app sends no amount.")
+    }
+
+    func testPayLinkRejectsInvalidInvoiceIDBeforeSending() async {
+        let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+
+        do {
+            _ = try await client.openFieldPayLink("not-an-invoice-id")
+            XCTFail("Expected the pay-link request to reject an invalid invoice ID")
+        } catch let problem as Problem {
+            XCTAssertNil(problem.status)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
+    func testPayLinkRejectsAnInsecureServerReturnedURL() async {
+        let response = #"{"url":"http://example.invalid/pay","expiresAt":"2026-10-27T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(201, response)]), baseURL: "https://app.thorbis.com")
+
+        do {
+            _ = try await client.openFieldPayLink(invoiceID)
+            XCTFail("An insecure payment URL must never be shared")
+        } catch let problem as Problem {
+            XCTAssertNil(problem.status)
+            XCTAssertTrue(problem.title?.localizedCaseInsensitiveContains("payment link") == true)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testRefundRequestDecodesPending202AsAcceptedNotCompleted() async throws {
+        let accepted = #"{"outcome":"pending","paymentId":"00000000-0000-4000-8000-00000000000b"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(202, accepted)]), baseURL: "https://app.thorbis.com")
+
+        let response = try await client.refundFieldPayment(
+            "00000000-0000-4000-8000-00000000000b", reason: "Customer approved the reversal."
+        )
+
+        guard case let .accepted(outcome, paymentID) = response else {
+            return XCTFail("A 202 response must remain accepted and unresolved")
+        }
+        XCTAssertEqual(outcome.rawValue, "pending")
+        XCTAssertEqual(paymentID, "00000000-0000-4000-8000-00000000000b")
+    }
+
+    func testRefundRequestDecodesReconciliationRequired202() async throws {
+        let accepted = #"{"outcome":"reconciliation_required","paymentId":"00000000-0000-4000-8000-00000000000b"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(202, accepted)]), baseURL: "https://app.thorbis.com")
+
+        let response = try await client.refundFieldPayment(
+            "00000000-0000-4000-8000-00000000000b", reason: "Customer approved the reversal."
+        )
+
+        guard case let .accepted(outcome, _) = response else {
+            return XCTFail("Expected an accepted refund awaiting reconciliation")
+        }
+        XCTAssertEqual(outcome.rawValue, "reconciliation_required")
+    }
+
+    func testRefundRequestRejectsInvalidReasonBeforeSending() async {
+        let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+
+        do {
+            _ = try await client.refundFieldPayment(
+                "00000000-0000-4000-8000-00000000000b", reason: "  x  "
+            )
+            XCTFail("Expected a short reason to be rejected")
+        } catch let problem as Problem {
+            XCTAssertNil(problem.status)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
+    func testRefundRequestReturnsForbiddenAndConflictWithoutRetry() async {
+        for status in [403, 409] {
+            let refusal = #"{"title":"Refund refused","status":\#(status),"detail":"Review permission and current payment state."}"#
+            let client = APIClient(session: URLProtocolFixture.session([.init(status, refusal)]), baseURL: "https://app.thorbis.com")
+
+            do {
+                _ = try await client.refundFieldPayment(
+                    "00000000-0000-4000-8000-00000000000b", reason: "Customer approved the reversal."
+                )
+                XCTFail("Expected HTTP \(status) to be returned")
+            } catch let problem as Problem {
+                XCTAssertEqual(problem.status, status)
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
+
+            XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+            XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.path, "/v1/payments/00000000-0000-4000-8000-00000000000b/refund")
+        }
+    }
+
+    func testRefundRequestRejectsBodyStatusMismatch() async {
+        let accepted = #"{"outcome":"pending","paymentId":"00000000-0000-4000-8000-00000000000b"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, accepted)]), baseURL: "https://app.thorbis.com")
+
+        do {
+            _ = try await client.refundFieldPayment(
+                "00000000-0000-4000-8000-00000000000b", reason: "Customer approved the reversal."
+            )
+            XCTFail("A pending envelope is valid only for HTTP 202")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.status, 200)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    private func refundPayment() -> String {
+        #"{"id":"00000000-0000-4000-8000-00000000000b","organizationId":"00000000-0000-4000-8000-000000000002","invoiceId":"00000000-0000-4000-8000-00000000000a","amount":{"amount":2500,"currency":"USD"},"method":"card","status":"refunded","collectionEvidence":{"purpose":"physical_service","source":{"kind":"job","id":"00000000-0000-4000-8000-000000000001"}},"idempotencyKey":"payment-key","recordedAt":"2026-10-26T12:30:00Z","refundedAmount":2500,"netAmount":{"amount":0,"currency":"USD"},"refundedAt":"2026-10-26T13:00:00Z"}"#
+    }
+
     func testEstimateActionsSendExplicitRevisionEvidence() async throws {
         let client = APIClient(session: URLProtocolFixture.session([.init(200, estimate), .init(200, estimate), .init(200, estimate)]), baseURL: "https://app.thorbis.com")
         _ = try await client.sendFieldEstimate(estimateID, expectedRevisionNumber: 0)

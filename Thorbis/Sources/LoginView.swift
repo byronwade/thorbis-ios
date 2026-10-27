@@ -18,15 +18,7 @@ struct LoginView: View {
         GeometryReader { geometry in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Image("ThorbisMark")
-                    .resizable()
-                    .renderingMode(.template)
-                    .scaledToFit()
-                    .foregroundStyle(.white)
-                    .padding(8)
-                    .frame(width: 38, height: 38)
-                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 10))
-                    .accessibilityLabel("Thorbis")
+                ThorbisLogoLockup(markSize: 30, wordmarkSize: 19)
 
                 Text("Welcome back")
                     .font(Theme.font(34, weight: .bold))

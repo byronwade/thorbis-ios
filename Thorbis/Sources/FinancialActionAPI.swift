@@ -36,6 +36,21 @@ struct FieldInvoiceLinesRequest: Encodable {
     }
 }
 
+struct FieldInvoicePayLink: Decodable, Equatable {
+    let url: String
+    let expiresAt: String
+
+    var shareURL: URL? {
+        guard let components = URLComponents(string: url),
+              components.scheme?.lowercased() == "https",
+              components.host != nil,
+              components.user == nil,
+              components.password == nil,
+              components.port == nil else { return nil }
+        return components.url
+    }
+}
+
 enum FieldInvoiceLineSourceInput: Hashable, Encodable {
     case manual
     case priceBookSelection(itemID: String, revision: Int)
@@ -97,6 +112,30 @@ struct FieldInvoiceLineInput: Encodable, Hashable {
 /// tender type; processor-backed collection uses separate endpoints.
 enum FieldPaymentMethod: String, Codable, CaseIterable, Hashable { case card, ach, cash, check }
 enum FieldPaymentStatus: String, Codable { case recorded, refunded }
+
+enum FieldPaymentRefundOutcome: String, Decodable, Equatable {
+    case pending
+    case reconciliationRequired = "reconciliation_required"
+}
+
+enum FieldPaymentRefundResponse: Decodable {
+    case completed(FieldPaymentRecord)
+    case accepted(outcome: FieldPaymentRefundOutcome, paymentID: String)
+
+    private enum CodingKeys: String, CodingKey { case outcome, paymentId }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if values.contains(.outcome) {
+            self = .accepted(
+                outcome: try values.decode(FieldPaymentRefundOutcome.self, forKey: .outcome),
+                paymentID: try values.decode(String.self, forKey: .paymentId)
+            )
+        } else {
+            self = .completed(try FieldPaymentRecord(from: decoder))
+        }
+    }
+}
 
 struct FieldPhysicalServiceSource: Codable {
     enum Kind: String, Codable { case job, billingSchedule = "billing_schedule", manualPhysicalServiceEvidence = "manual_physical_service_evidence" }
@@ -223,6 +262,16 @@ extension APIClient {
         return payments
     }
 
+    func openFieldPayLink(_ invoiceID: String) async throws -> FieldInvoicePayLink {
+        let path = try financialPath("/v1/invoices", id: invoiceID, suffix: "/pay-link")
+        let payLink: FieldInvoicePayLink = try await send("POST", path)
+        guard payLink.shareURL != nil else {
+            throw Problem(title: "Invalid payment link", status: nil,
+                          detail: "The server returned a payment link that is not a secure HTTPS URL")
+        }
+        return payLink
+    }
+
     func recordFieldPayment(_ invoiceID: String, request: FieldRecordPaymentRequest) async throws -> FieldPaymentRecord {
         guard request.amount.amount > 0, request.amount.currency == "USD",
               (1...200).contains(request.idempotencyKey.count) else {
@@ -230,5 +279,39 @@ extension APIClient {
                           detail: "Use positive USD cents and a stable 1–200 character idempotency key")
         }
         return try await send("POST", financialPath("/v1/invoices", id: invoiceID, suffix: "/payments"), body: request)
+    }
+
+    func refundFieldPayment(_ paymentID: String, reason: String) async throws -> FieldPaymentRefundResponse {
+        struct Body: Encodable { let reason: String }
+
+        let normalizedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (3...2_000).contains(normalizedReason.utf16.count) else {
+            throw Problem(title: "Invalid refund reason", status: nil,
+                          detail: "Enter a reason between 3 and 2,000 characters.")
+        }
+        let path = try financialPath("/v1/payments", id: paymentID, suffix: "/refund")
+        let (response, status) = try await sendWithStatus(
+            "POST", path, body: Body(reason: normalizedReason)
+        ) as (value: FieldPaymentRefundResponse, status: Int)
+
+        switch status {
+        case 200:
+            guard case let .completed(payment) = response,
+                  payment.id == paymentID,
+                  case .refunded = payment.status else {
+                throw Problem(title: "Invalid refund response", status: status,
+                              detail: "The server did not return the refunded payment.")
+            }
+        case 202:
+            guard case let .accepted(_, responsePaymentID) = response,
+                  responsePaymentID == paymentID else {
+                throw Problem(title: "Invalid refund response", status: status,
+                              detail: "The accepted refund did not match the requested payment.")
+            }
+        default:
+            throw Problem(title: "Invalid refund response", status: status,
+                          detail: "The server returned an unsupported refund response status.")
+        }
+        return response
     }
 }

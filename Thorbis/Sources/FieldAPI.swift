@@ -52,6 +52,42 @@ struct FieldJobCreate: Encodable {
     }
 }
 
+struct FieldJobDraft: Equatable {
+    var customerID = ""
+    var title = ""
+    var notes = ""
+
+    init(customerID: String = "", title: String = "", notes: String = "") {
+        self.customerID = customerID
+        self.title = title
+        self.notes = notes
+    }
+
+    var canCreate: Bool {
+        !customerID.isEmpty && !trimmedTitle.isEmpty && !titleIsTooLong && !notesAreTooLong
+    }
+
+    var titleIsTooLong: Bool { trimmedTitle.utf16.count > 200 }
+    var notesAreTooLong: Bool { trimmedNotes.utf16.count > 10_000 }
+
+    var request: FieldJobCreate? {
+        guard canCreate else { return nil }
+        return FieldJobCreate(
+            customerId: customerID,
+            title: trimmedTitle,
+            notes: trimmedNotes.isEmpty ? nil : trimmedNotes
+        )
+    }
+
+    private var trimmedTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedNotes: String {
+        notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 struct CustomerRecord: Codable, Identifiable, Hashable {
     let id: String
     let organizationId: String

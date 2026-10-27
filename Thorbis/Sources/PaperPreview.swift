@@ -13,8 +13,15 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "customer", "menu", "invoice-editor", "invoice-detail", "invoice-payment", "estimate-revision"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "customer", "menu", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
+    }
+    static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
+    static var isPaymentRefundPreview: Bool {
+        ["invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation"].contains(screen)
+    }
+    static var invoiceDetailPreviewID: String {
+        isPaymentRefundPreview ? refundInvoice.id : issuedInvoice.id
     }
     static var estimate: EstimateRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002218","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","createdByUserId":"00000000-0000-4000-8000-000000000001","status":"sent","currentRevisionNumber":2,"title":"AC repair and compressor replacement","lines":[{"id":"00000000-0000-4000-8000-000000009211","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}},{"id":"00000000-0000-4000-8000-000000009212","description":"Replace compressor","quantity":1,"unitPrice":{"amount":85000,"currency":"USD"},"source":{"kind":"price_book","priceBookItemId":"00000000-0000-4000-8000-000000009201","priceBookRevision":4,"originalDescription":"Replace compressor","originalUnitPrice":{"amount":85000,"currency":"USD"},"addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z","overriddenFields":[]}}],"options":[{"id":"00000000-0000-4000-8000-000000009213","title":"Full system replacement","description":"Includes new compressor and efficiency inspection","lines":[{"id":"00000000-0000-4000-8000-000000009214","description":"System replacement","quantity":1,"unitPrice":{"amount":225000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}}],"totalAmount":225000,"currency":"USD"}],"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z","sentAt":"2026-07-20T12:00:00Z"}"#
@@ -27,6 +34,18 @@ enum PaperPreview {
     static var issuedInvoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"issued","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":null,"voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
         return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
+    }
+    static var refundInvoice: InvoiceRecord {
+        let json = #"{"id":"00000000-0000-4000-8000-000000002219","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-refund-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"paid","lines":[{"id":"00000000-0000-4000-8000-000000009111","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":1500,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009112","description":"Refrigerant recharge","quantity":1,"unitPrice":{"amount":1000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":1,"amountPaid":2500,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":"2026-07-20T12:10:00Z","voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:10:00Z"}"#
+        return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
+    }
+    static var refundPayment: FieldPaymentRecord {
+        let json = #"{"id":"00000000-0000-4000-8000-000000002220","organizationId":"00000000-0000-4000-8000-000000000002","invoiceId":"00000000-0000-4000-8000-000000002219","amount":{"amount":2500,"currency":"USD"},"method":"card","status":"recorded","collectionEvidence":{"purpose":"physical_service","source":{"kind":"job","id":"00000000-0000-4000-8000-000000002214"}},"idempotencyKey":"paper-preview-refund-payment","recordedAt":"2026-07-20T12:10:00Z","refundedAmount":null,"netAmount":{"amount":2500,"currency":"USD"},"refundedAt":null}"#
+        return try! JSONDecoder().decode(FieldPaymentRecord.self, from: Data(json.utf8))
+    }
+    @MainActor static func refundIntentStore(for payment: FieldPaymentRecord) -> PaymentRefundIntentStoring {
+        PreviewRefundIntentStore.shared.configure(for: payment, screen: screen)
+        return PreviewRefundIntentStore.shared
     }
     @MainActor static func api() -> APIClient {
         let api = APIClient(session: transport(), baseURL: "https://app.thorbis.com")
@@ -52,6 +71,46 @@ enum PaperPreview {
             .foregroundStyle(Color.orange).frame(maxWidth: .infinity).padding(.vertical, 3)
             .background(Color.black)
             .accessibilityLabel("Design preview. Sample data. Read only. No network connection.")
+    }
+}
+
+@MainActor
+private final class PreviewRefundIntentStore: PaymentRefundIntentStoring {
+    static let shared = PreviewRefundIntentStore()
+
+    private var intents: [String: FieldPaymentRefundIntent] = [:]
+    private var configuredPreview: String?
+
+    func configure(for payment: FieldPaymentRecord, screen: String) {
+        guard configuredPreview != screen else { return }
+        configuredPreview = screen
+        let state: FieldPaymentRefundIntentState? = switch screen {
+        case "invoice-payment-refund-pending": .pending
+        case "invoice-payment-refund-reconciliation": .reconciliationRequired
+        default: nil
+        }
+        let key = Self.key(actorID: PaperPreview.actorID, organizationID: payment.organizationId, paymentID: payment.id)
+        if let state {
+            intents[key] = FieldPaymentRefundIntent(reason: "Customer approved the sample refund.", state: state)
+        } else {
+            intents.removeValue(forKey: key)
+        }
+    }
+
+    func load(actorID: String, organizationID: String, paymentID: String) throws -> FieldPaymentRefundIntent? {
+        intents[Self.key(actorID: actorID, organizationID: organizationID, paymentID: paymentID)]
+    }
+
+    func save(_ intent: FieldPaymentRefundIntent, actorID: String, organizationID: String, paymentID: String) throws {
+        intents[Self.key(actorID: actorID, organizationID: organizationID, paymentID: paymentID)] = intent
+    }
+
+    func remove(actorID: String, organizationID: String, paymentID: String) throws {
+        intents.removeValue(forKey: Self.key(actorID: actorID, organizationID: organizationID, paymentID: paymentID))
+    }
+
+    private static func key(actorID: String, organizationID: String, paymentID: String) -> String {
+        [actorID, organizationID, paymentID].joined(separator: ":")
     }
 }
 
@@ -87,6 +146,37 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let org = PaperPreview.organizationID
         let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400))
         let now = ISO8601DateFormatter().string(from: Date())
+        if path == "/v1/public/document-actions/preview-estimate" {
+            return [
+                "kind": "estimate",
+                "title": "AC not cooling — Compressor replacement",
+                "status": "sent",
+                "revisionNumber": 2,
+                "contentHash": "preview-issued-content-hash-2026",
+                "allowedActions": ["approve", "decline", "request_changes"],
+                "nonce": "preview-decision-nonce-2026",
+                "totalAmount": 1575.00,
+                "currency": "USD",
+                "html": """
+                <!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>body{font:15px -apple-system,BlinkMacSystemFont,sans-serif;color:#201b14;background:#fff;margin:22px;line-height:1.5}.eyebrow{font-size:11px;color:#59544d;letter-spacing:.08em;text-transform:uppercase}h1{font-size:24px;margin:6px 0 16px}.line{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid #e5e2dc}.total{display:flex;justify-content:space-between;font-weight:700;padding-top:18px}.note{margin-top:22px;padding:12px;background:#f7f4ee;border-radius:10px}</style></head><body><div class=\"eyebrow\">Estimate · Revision 2</div><h1>AC not cooling — Compressor replacement</h1><p>Prepared for Danielle Marlowe</p><div class=\"line\"><span>Compressor diagnostic</span><span>$120.00</span></div><div class=\"line\"><span>Replace compressor</span><span>$1,455.00</span></div><div class=\"total\"><span>Estimate total</span><span>$1,575.00</span></div><div class=\"note\">This sample estimate is for design review only.</div></body></html>
+                """,
+                "approvalWithoutSignatureAllowed": false,
+                "scopeLines": [],
+                "options": [
+                    ["id": "00000000-0000-4000-8000-000000000101", "title": "Compressor repair", "description": "Replace the failed compressor and verify system operation.", "totalAmount": 1575.00, "currency": "USD"],
+                    ["id": "00000000-0000-4000-8000-000000000102", "title": "Full system replacement", "description": "Install a new high-efficiency system with a two-year labor warranty.", "totalAmount": 4850.00, "currency": "USD"]
+                ],
+                "consentVersion": "estimate-approval-v1",
+                "consentText": "I understand that typing my name records my electronic signature and approval of the selected estimate option."
+            ] as [String: Any]
+        }
+        if path == "/v1/invoices/\(PaperPreview.refundInvoice.id)" {
+            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.refundInvoice))
+        }
+        if path == "/v1/invoices/\(PaperPreview.refundInvoice.id)/payments" {
+            return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.refundPayment))]]
+        }
+        if path == "/v1/invoices" { return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]] }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
         }
@@ -96,12 +186,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["user": ["id": actor, "name": "Ramon Marlowe", "email": "preview@example.invalid"], "session": ["userId": actor, "activeOrganizationId": org, "expiresAt": expiry]]
         case "/api/auth/organization/list": return [["id": org, "name": "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
+            var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
+            if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
-                    "capabilities": ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"],
+                    "capabilities": capabilities,
                     "resources": [], "views": []] as [String: Any]
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
-            let features = Dictionary(uniqueKeysWithValues: ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"].map { ($0, decision) })
+            var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
+            if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview { enabledFeatures.append("payments") }
+            let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         case "/v1/jobs": return ["items": jobs()]
         case "/v1/customers": return ["items": customers()]

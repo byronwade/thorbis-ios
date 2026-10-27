@@ -1,11 +1,20 @@
 import SwiftUI
 
+private enum PhoneSecondaryDestination: String, Identifiable {
+    case schedule, customers, drafts, priceBook
+    var id: String { rawValue }
+}
+
 struct RootView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
     @State private var tab: Tab = .more
+    @State private var primaryTab: PrimaryTab = .initial
     @State private var path = NavigationPath()
+    @State private var jobsPath = NavigationPath()
+    @State private var arrivePath = NavigationPath()
+    @State private var phoneDestination: PhoneSecondaryDestination?
     @State private var menu = false
     @State private var search = false
     @State private var settings = false
@@ -28,22 +37,24 @@ struct RootView: View {
         }
     }
 
-    private func navigation(wide: Bool) -> some View {
+    @ViewBuilder private func navigation(wide: Bool) -> some View {
+        if wide { tabletNavigation() } else { phoneNavigation() }
+    }
+
+    private func tabletNavigation() -> some View {
         NavigationStack(path: $path) {
             ZStack(alignment: .bottom) {
                 Group {
                     switch tab {
                     case .schedule:
-                        if wide { PaperTabletSchedule() } else { ScheduleView() }
+                        PaperTabletSchedule()
                     case .jobs: JobsView()
                     case .customers: CustomersView()
                     case .more: MoreView()
                     }
                 }
-                .safeAreaInset(edge: .bottom) { Color.clear.frame(height: wide ? 0 : 70) }
                 .environment(\.paperShowMenu, { Task { @MainActor in menu = true } })
-                if !wide { dock.padding(.bottom, 4) }
-                if menu { menuOverlay }
+                if menu { menuOverlay(wide: true) }
             }
             .background(Theme.background)
             .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
@@ -70,7 +81,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $previewInvoiceDetail) {
             NavigationStack {
-                InvoiceDetailView(id: PaperPreview.issuedInvoice.id)
+                InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID)
             }
         }
         .sheet(isPresented: $previewEstimateRevision) {
@@ -88,7 +99,7 @@ struct RootView: View {
                     previewInvoiceEditor = true
                     return
                 }
-                if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" {
+                if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview {
                     previewInvoiceDetail = true
                     return
                 }
@@ -101,7 +112,7 @@ struct RootView: View {
                 case "my-day": tab = .jobs
                 case "customers": tab = .customers
                 case "menu": menu = true
-                case "job": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
+                case "job", "job-invoice": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
                 case "customer": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
                 default: break
                 }
@@ -114,13 +125,147 @@ struct RootView: View {
         }
     }
 
+    private func phoneNavigation() -> some View {
+        ZStack {
+            TabView(selection: $primaryTab) {
+                NavigationStack(path: $jobsPath) {
+                    gatedJobs(.jobs)
+                        .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
+                        .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+                }
+                .tabItem { Label(PrimaryTab.jobs.title, systemImage: PrimaryTab.jobs.symbol) }
+                .tag(PrimaryTab.jobs)
+
+                NavigationStack(path: $arrivePath) {
+                    gatedJobs(.arrive)
+                        .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
+                        .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+                }
+                .tabItem { Label(PrimaryTab.arrive.title, systemImage: PrimaryTab.arrive.symbol) }
+                .tag(PrimaryTab.arrive)
+
+                NavigationStack {
+                    WorkspaceNoticesView(api: api, available: primaryAccess.canOpen(.inbox))
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button { menu = true } label: { Image(systemName: "ellipsis") }
+                                    .accessibilityLabel("More")
+                            }
+                        }
+                }
+                .tabItem { Label(PrimaryTab.inbox.title, systemImage: PrimaryTab.inbox.symbol) }
+                .tag(PrimaryTab.inbox)
+            }
+            .environment(\.paperShowMenu, { Task { @MainActor in menu = true } })
+            if menu { menuOverlay(wide: false) }
+        }
+        .background(Theme.background)
+        .sheet(isPresented: $search) { PaperGlobalSearch() }
+        .sheet(isPresented: $settings) {
+            NavigationStack {
+                MoreView()
+                    .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
+                    .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { settings = false } } }
+            }
+        }
+        .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
+        .sheet(isPresented: $createJob) { NewJobSheet() }
+        .sheet(item: $phoneDestination) { destination in
+            NavigationStack {
+                Group {
+                    switch destination {
+                    case .schedule: ScheduleView()
+                    case .customers: CustomersView()
+                    case .drafts:
+                        if let actor = session.user?.id, let org = session.activeOrganization?.id {
+                            InboxLocalDraftView(actorID: actor, organizationID: org)
+                        }
+                    case .priceBook:
+                        WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
+                    }
+                }
+                .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
+                .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+                .safeAreaInset(edge: .top) {
+                    HStack {
+                        Spacer()
+                        Button("Done") { phoneDestination = nil }
+                            .font(Theme.font(15, weight: .medium))
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .padding(.horizontal, 16)
+                    .background(Theme.background)
+                }
+            }
+        }
+        #if DEBUG
+        .sheet(isPresented: $previewInvoiceEditor) {
+            NavigationStack { InvoiceLineEditorView(invoice: PaperPreview.invoice) { _ in } }
+                .presentationDetents([.large])
+        }
+        .sheet(isPresented: $previewInvoiceDetail) { NavigationStack { InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID) } }
+        .sheet(isPresented: $previewEstimateRevision) {
+            EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
+                .environmentObject(api).environmentObject(session).environmentObject(store)
+        }
+        #endif
+        .task {
+            await store.refresh(api)
+            #if DEBUG
+            guard PaperPreview.enabled else { return }
+            if PaperPreview.screen == "invoice-editor" { previewInvoiceEditor = true; return }
+            if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
+            if PaperPreview.screen == "estimate-revision" { previewEstimateRevision = true; return }
+            switch PaperPreview.screen {
+            case "jobs": primaryTab = .jobs
+            case "my-day": primaryTab = .arrive
+            case "customers": phoneDestination = .customers
+            case "menu": menu = true
+            case "job", "job-invoice":
+                if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
+                    primaryTab = .jobs
+                    jobsPath.append(job)
+                }
+            case "customer": phoneDestination = .customers
+            default: break
+            }
+            #endif
+        }
+    }
+
+    private var primaryAccess: PrimaryTabAccess {
+        PrimaryTabAccess(
+            canViewJobs: session.can("job.view", feature: "jobs"),
+            canViewStaffNotices: session.can("job.view", feature: "job_booking_notices")
+        )
+    }
+
+    @ViewBuilder private func gatedJobs(_ mode: JobsViewMode) -> some View {
+        let destination: PrimaryTab = mode == .arrive ? .arrive : .jobs
+        if primaryAccess.canOpen(destination) {
+            JobsView(mode: mode)
+        } else {
+            VStack(spacing: 0) {
+                PaperHeader(title: destination.title, icon: destination.symbol, subtitle: "Access unavailable")
+                ContentUnavailableView(
+                    destination == .arrive ? "Arrive unavailable" : "Jobs unavailable",
+                    systemImage: destination == .arrive ? "location.north.circle" : "briefcase",
+                    description: Text(primaryAccess.unavailableMessage(for: destination))
+                )
+            }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { workspace = true } label: {
                 HStack(spacing: 9) {
-                    Text(String((session.activeOrganization?.name ?? "W").prefix(1)))
-                        .font(Theme.font(12, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 24, height: 24).background(Theme.brand, in: RoundedRectangle(cornerRadius: 7))
+                    Image("ThorbisMark").resizable().scaledToFit().padding(4)
+                        .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
+                        .accessibilityHidden(true)
                     Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(14, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.down").font(.system(size: 10))
@@ -191,7 +336,7 @@ struct RootView: View {
         }.accessibilityLabel(title).accessibilityAddTraits(tab == target ? .isSelected : [])
     }
 
-    private var menuOverlay: some View {
+    private func menuOverlay(wide: Bool) -> some View {
         ZStack(alignment: .bottomLeading) {
             Color(hex: 0x111110).opacity(0.16).ignoresSafeArea().contentShape(Rectangle())
                 .onTapGesture { menu = false }.accessibilityLabel("Close navigation")
@@ -199,8 +344,10 @@ struct RootView: View {
                 HStack(spacing: 8) {
                     Button { menu = false; workspace = true } label: {
                         HStack(spacing: 6) {
-                            Text(String((session.activeOrganization?.name ?? "W").prefix(1))).font(Theme.font(11, weight: .bold))
-                                .frame(width: 20, height: 20).background(Theme.fill, in: RoundedRectangle(cornerRadius: 6))
+                            Image("ThorbisMark").resizable().scaledToFit().padding(3)
+                                .frame(width: 20, height: 20).background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border))
+                                .accessibilityHidden(true)
                             Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(14, weight: .semibold)).lineLimit(1)
                             Image(systemName: "chevron.down").font(.system(size: 10))
                         }.padding(.horizontal, 12).frame(minHeight: 44).background(Theme.card, in: Capsule())
@@ -215,12 +362,35 @@ struct RootView: View {
                 HStack(alignment: .bottom) {
                     VStack(spacing: 2) {
                         if session.can("job.view", feature: "jobs") {
-                            menuRow("Schedule", icon: "calendar", selected: tab == .schedule) { path = NavigationPath(); tab = .schedule }
-                            menuRow("Jobs", icon: "briefcase", selected: tab == .jobs) { path = NavigationPath(); tab = .jobs }
+                            menuRow("Schedule", icon: "calendar", selected: wide && tab == .schedule) {
+                                if wide { path = NavigationPath(); tab = .schedule }
+                                else { phoneDestination = .schedule }
+                            }
+                            menuRow("Jobs", icon: "briefcase", selected: wide ? tab == .jobs : primaryTab == .jobs) {
+                                if wide { path = NavigationPath(); tab = .jobs }
+                                else { primaryTab = .jobs }
+                            }
+                            if !wide {
+                                menuRow("Arrive", icon: "location.north.circle", selected: primaryTab == .arrive) { primaryTab = .arrive }
+                            }
                         }
-                        if session.can("customer.view", feature: "core_crm") { menuRow("Customers", icon: "person.2", selected: tab == .customers) { path = NavigationPath(); tab = .customers } }
-                        menuRow("Message drafts", icon: "bubble.left") { drafts = true }
-                        if session.can("pricebook.view", feature: "price_book") { menuRow("Price book", icon: "book.closed") { priceBook = true } }
+                        if session.can("customer.view", feature: "core_crm") {
+                            menuRow("Customers", icon: "person.2", selected: wide && tab == .customers) {
+                                if wide { path = NavigationPath(); tab = .customers }
+                                else { phoneDestination = .customers }
+                            }
+                        }
+                        if !wide && primaryAccess.canOpen(.inbox) {
+                            menuRow("Inbox", icon: "tray", selected: primaryTab == .inbox) { primaryTab = .inbox }
+                        }
+                        menuRow("Message drafts", icon: "bubble.left") {
+                            if wide { drafts = true } else { phoneDestination = .drafts }
+                        }
+                        if session.can("pricebook.view", feature: "price_book") {
+                            menuRow("Price book", icon: "book.closed") {
+                                if wide { priceBook = true } else { phoneDestination = .priceBook }
+                            }
+                        }
                         Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 10).padding(.vertical, 4)
                         menuRow("Workspace tools", icon: "slider.horizontal.3") { settings = true }
                     }.padding(6).frame(width: 250).background(Theme.card, in: RoundedRectangle(cornerRadius: 18))

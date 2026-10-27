@@ -8,6 +8,9 @@ struct JobDetailView: View {
     init(jobId: String, showsBack: Bool = true) {
         self.jobId = jobId
         self.showsBack = showsBack
+        #if DEBUG
+        _selectedTab = State(initialValue: PaperPreview.enabled && PaperPreview.screen == "job-invoice" ? "Invoice" : "Overview")
+        #endif
     }
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
@@ -24,6 +27,10 @@ struct JobDetailView: View {
     @State private var selectedTab = "Overview"
     @State private var invoices: [InvoiceRecord] = []
     @State private var invoicesLoaded = false
+    @State private var selectedInvoiceID: String?
+    @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
+    @State private var loadedInvoiceModelID: String?
+    @State private var showCollectPayment = false
     @State private var activityFilter = "All"
     @State private var showSchedule = false
 
@@ -52,7 +59,7 @@ struct JobDetailView: View {
                         }
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 22)
+                    .padding(.top, selectedTab == "Invoice" ? 4 : 22)
                     .padding(.bottom, 28)
                     }
                     }
@@ -67,10 +74,22 @@ struct JobDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .task(id: session.generation) { await load() }
-        .refreshable { await load() }
+        .task(id: session.generation) {
+            invoicePaymentModel = nil
+            loadedInvoiceModelID = nil
+            await load()
+            if selectedTab == "Invoice" { await loadInvoices() }
+        }
+        .refreshable {
+            if selectedTab == "Invoice" { await loadInvoices() }
+            else { await load() }
+        }
         .onChange(of: selectedTab) { _, tab in
             if tab == "Invoice" { Task { await loadInvoices() } }
+        }
+        .onChange(of: selectedInvoiceID) { _, selectedID in
+            guard let selectedID, let invoice = invoices.first(where: { $0.id == selectedID }) else { return }
+            Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
             if selectedTab == "Overview", let job, let target = availableTransitions(job).first {
@@ -81,6 +100,12 @@ struct JobDetailView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
                 .background(Theme.chrome)
+            } else if selectedTab == "Invoice",
+                      session.can("invoice.payment.create", feature: "payments"),
+                      let invoice = selectedInvoice,
+                      let model = invoicePaymentModel,
+                      loadedInvoiceModelID == invoice.id {
+                PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
             }
         }
         .sheet(isPresented: $showPause) {
@@ -101,6 +126,13 @@ struct JobDetailView: View {
                 JobScheduleView(job: job) { updatedJob in
                     self.job = updatedJob
                 }
+            }
+        }
+        .sheet(isPresented: $showCollectPayment) {
+            if let invoice = selectedInvoice, let model = invoicePaymentModel {
+                InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
             }
         }
     }
@@ -157,25 +189,130 @@ struct JobDetailView: View {
                 .tracking(-0.39)
                 .lineLimit(compact ? 2 : nil)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                Text(job.status.statusLabel)
-                    .foregroundStyle(job.status == "completed" ? Theme.success : Theme.warning)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(job.status == "completed" ? Theme.successSurface : Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
-                if let date = JobFiltering.date(job.scheduledFor) {
-                    Label(date.formatted(.dateTime.weekday().hour().minute()), systemImage: "calendar")
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    statusControl(job)
+                    if let date = JobFiltering.date(job.scheduledFor) {
+                        Label(scheduleLabel(date), systemImage: "clock")
+                            .font(Theme.font(13, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 10)
+                            .frame(height: 34)
+                            .background(Theme.fill, in: Capsule())
+                    }
                 }
-                if job.assignedToUserId != nil { Label("Assigned", systemImage: "person") }
+
+                HStack(spacing: 8) {
+                    if let assignedName = assignedDisplayName(for: job) {
+                        HStack(spacing: 7) {
+                            Text(nameInitials(assignedName))
+                                .font(Theme.font(10, weight: .semibold))
+                                .foregroundStyle(Theme.brand)
+                                .frame(width: 24, height: 24)
+                                .background(Theme.brandSurface, in: Circle())
+                            Text(shortName(assignedName))
+                                .font(Theme.font(13, weight: .medium))
+                                .foregroundStyle(Theme.muted)
+                        }
+                        .padding(.horizontal, 7)
+                        .frame(height: 34)
+                        .background(Theme.fill, in: Capsule())
+                    }
+                    if let balance = invoiceBalanceCents {
+                        Text("\(money(balance, currency: "USD")) due")
+                            .font(Theme.monoFont(12, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 10)
+                            .frame(height: 34)
+                            .background(Theme.fill, in: Capsule())
+                    }
+                }
             }
-            .font(Theme.font(11, weight: .medium))
-            .foregroundStyle(Theme.muted)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
         }
         .padding(.horizontal, 20)
         .padding(.top, 24)
         .padding(.bottom, 16)
+    }
+
+    @ViewBuilder
+    private func statusControl(_ job: JobRecord) -> some View {
+        let tint = job.status == "completed" ? Theme.success : Theme.warning
+        let surface = job.status == "completed" ? Theme.successSurface : Theme.warningSurface
+        let transitions = availableTransitions(job)
+        if transitions.isEmpty {
+            statusChip(job, tint: tint, surface: surface, showsMenu: false)
+        } else {
+            Menu {
+                ForEach(transitions, id: \.self) { target in
+                    Button(transitionTitle(target)) { runTransition(target) }
+                }
+            } label: {
+                statusChip(job, tint: tint, surface: surface, showsMenu: true)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func statusChip(_ job: JobRecord, tint: Color, surface: Color, showsMenu: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: job.status == "completed" ? "checkmark.circle" : "clock")
+                .font(.system(size: 13, weight: .medium))
+            Text(job.status.statusLabel)
+                .font(Theme.font(13, weight: .medium))
+            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)) }
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 10)
+        .frame(height: 34)
+        .background(surface, in: Capsule())
+        .contentShape(Capsule())
+        .accessibilityLabel("Job status, \(job.status.statusLabel)")
+    }
+
+    private func scheduleLabel(_ date: Date) -> String {
+        let time = date.formatted(.dateTime.hour().minute())
+        if Calendar.current.isDateInToday(date) { return "Today · \(time)" }
+        return "\(date.formatted(.dateTime.weekday())) · \(time)"
+    }
+
+    private func assignedDisplayName(for job: JobRecord) -> String? {
+        guard let assignedID = job.assignedToUserId else { return nil }
+        guard assignedID == session.user?.id, let name = session.user?.name, !name.isEmpty else { return "Assigned" }
+        return name
+    }
+
+    private func shortName(_ name: String) -> String {
+        let parts = name.split(whereSeparator: \.isWhitespace)
+        guard let first = parts.first else { return name }
+        guard let last = parts.dropFirst().last else { return String(first) }
+        return "\(first) \(last.prefix(1))."
+    }
+
+    private func nameInitials(_ name: String) -> String {
+        String(name.split(whereSeparator: \.isWhitespace).prefix(2).compactMap(\.first))
+    }
+
+    private var invoiceBalanceCents: Int? {
+        let issued = invoices.filter { $0.status == "issued" && $0.currency == "USD" }
+        guard !issued.isEmpty else { return nil }
+        var balanceTotal = 0
+        for invoice in issued {
+            var invoiceTotal = 0
+            for line in invoice.lines {
+                guard line.quantity >= 0, line.unitPrice.amount >= 0,
+                      line.unitPrice.currency == invoice.currency else { return nil }
+                let (lineTotal, lineOverflow) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
+                let (nextTotal, sumOverflow) = invoiceTotal.addingReportingOverflow(lineTotal)
+                guard !lineOverflow, !sumOverflow else { return nil }
+                invoiceTotal = nextTotal
+            }
+            let (due, dueOverflow) = invoiceTotal.subtractingReportingOverflow(invoice.amountPaid)
+            guard !dueOverflow, due >= 0 else { return nil }
+            let (nextBalance, balanceOverflow) = balanceTotal.addingReportingOverflow(due)
+            guard !balanceOverflow else { return nil }
+            balanceTotal = nextBalance
+        }
+        return balanceTotal
     }
 
     private var tabBar: some View {
@@ -251,7 +388,6 @@ struct JobDetailView: View {
 
     private func invoiceContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 15) {
-            sectionTitle("Invoice")
             if !session.can("invoice.view", feature: "invoicing") {
                 emptyCard("Invoice access is unavailable.")
             } else if !invoicesLoaded {
@@ -259,14 +395,52 @@ struct JobDetailView: View {
             } else if invoices.isEmpty {
                 emptyCard("No invoice is linked to this job.")
             } else {
-                ForEach(invoices) { invoice in
-                    NavigationLink { InvoiceDetailView(id: invoice.id).toolbar(.visible, for: .navigationBar) } label: {
-                        actionLabel("Invoice · \(invoice.status.statusLabel)", icon: "doc.text")
-                            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                if invoices.count > 1 {
+                    Menu {
+                        ForEach(invoices) { invoice in
+                            Button("INV-\(invoice.id.suffix(4).uppercased()) · \(invoice.status.statusLabel)") {
+                                selectedInvoiceID = invoice.id
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 7) {
+                            Text("INV-\((selectedInvoice?.id ?? invoices[0].id).suffix(4).uppercased())")
+                                .font(Theme.monoFont(12, weight: .medium))
+                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 36)
+                        .background(Theme.fill, in: Capsule())
+                    }
+                }
+                if let invoice = selectedInvoice {
+                    if let model = invoicePaymentModel, loadedInvoiceModelID == invoice.id {
+                        PaperJobInvoiceContent(
+                            invoice: invoice,
+                            paymentModel: model,
+                            onCollectPayment: { showCollectPayment = true },
+                            onInvoiceUpdated: updateInvoice
+                        )
+                    } else {
+                        ProgressView("Loading invoice…")
+                            .frame(maxWidth: .infinity, minHeight: 100)
                     }
                 }
             }
         }
+    }
+
+    private var selectedInvoice: InvoiceRecord? {
+        if let selectedInvoiceID, let selected = invoices.first(where: { $0.id == selectedInvoiceID }) {
+            return selected
+        }
+        return invoices.first
+    }
+
+    private func updateInvoice(_ updated: InvoiceRecord) {
+        guard let index = invoices.firstIndex(where: { $0.id == updated.id }) else { return }
+        invoices[index] = updated
     }
 
     private func activityContent(_ job: JobRecord) -> some View {
@@ -408,12 +582,26 @@ struct JobDetailView: View {
             let all = try await api.fieldInvoices()
             guard session.generation == generation else { return }
             invoices = all.filter { $0.jobId == jobId }
+                .sorted { $0.createdAt > $1.createdAt }
             invoicesLoaded = true
+            if let selectedInvoice {
+                selectedInvoiceID = selectedInvoice.id
+                await loadInvoicePayments(for: selectedInvoice)
+            }
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
             self.error = error.localizedDescription
             invoicesLoaded = true
         }
+    }
+
+    private func loadInvoicePayments(for invoice: InvoiceRecord) async {
+        guard session.can("invoice.view", feature: "invoicing") else { return }
+        if loadedInvoiceModelID != invoice.id {
+            loadedInvoiceModelID = invoice.id
+            invoicePaymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: invoice.id)
+        }
+        await invoicePaymentModel?.load()
     }
     private func load() async {
         let generation = session.generation

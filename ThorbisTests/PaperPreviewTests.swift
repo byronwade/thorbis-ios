@@ -42,11 +42,79 @@ final class PaperPreviewTests: XCTestCase {
         XCTAssertNil(page.nextCursor)
 
         let previewAPI = PaperPreview.api()
+        let invoiceList = try await previewAPI.fieldInvoices()
+        XCTAssertEqual(invoiceList.map(\.id), [PaperPreview.issuedInvoice.id])
         let issuedInvoice = try await previewAPI.fieldInvoice(PaperPreview.issuedInvoice.id)
         XCTAssertEqual(issuedInvoice.status, "issued")
         XCTAssertEqual(issuedInvoice.lines.count, 3)
         let payments = try await previewAPI.fieldPayments(issuedInvoice.id)
         XCTAssertTrue(payments.isEmpty)
+    }
+
+    func testPaperInvoiceBalanceReflectsUnpaidPartialPaidAndUnavailableStates() throws {
+        let issued = PaperInvoiceBalance(invoice: PaperPreview.issuedInvoice, balanceCents: 44_000)
+        XCTAssertEqual(issued.statusLabel, "Unpaid")
+        XCTAssertEqual(issued.balanceCents, 44_000)
+
+        var partialJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice)) as? [String: Any]
+        )
+        partialJSON["amountPaid"] = 10_000
+        let partialInvoice = try JSONDecoder().decode(
+            InvoiceRecord.self,
+            from: JSONSerialization.data(withJSONObject: partialJSON)
+        )
+        let partial = PaperInvoiceBalance(invoice: partialInvoice, balanceCents: 34_000)
+        XCTAssertEqual(partial.statusLabel, "Partially paid")
+        XCTAssertEqual(partial.balanceCents, 34_000)
+
+        let paid = PaperInvoiceBalance(invoice: PaperPreview.refundInvoice, balanceCents: 0)
+        XCTAssertEqual(paid.statusLabel, "Paid")
+
+        let unavailable = PaperInvoiceBalance(invoice: PaperPreview.issuedInvoice, balanceCents: nil)
+        XCTAssertEqual(unavailable.statusLabel, "Balance unavailable")
+        XCTAssertNil(unavailable.balanceCents)
+    }
+
+    @MainActor
+    func testPaperInvoiceContentStateAdvancesWhenTheObservedModelLoads() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "thorbis.paper-invoice-content-state-test"))
+        defaults.removePersistentDomain(forName: "thorbis.paper-invoice-content-state-test")
+        let model = InvoicePaymentCollectionModel(
+            api: PaperPreview.api(),
+            invoiceID: PaperPreview.issuedInvoice.id,
+            intentStore: InvoicePaymentIntentStore(defaults: defaults)
+        )
+
+        XCTAssertEqual(PaperInvoiceContentState.resolve(invoiceID: PaperPreview.issuedInvoice.id, model: model), .loading)
+        await model.load()
+        XCTAssertEqual(PaperInvoiceContentState.resolve(invoiceID: PaperPreview.issuedInvoice.id, model: model), .ready)
+    }
+
+    func testPaymentRefundPreviewUsesAConsistentRecordedPaymentFixture() async throws {
+        let api = PaperPreview.api()
+        let invoice = try await api.fieldInvoice(PaperPreview.refundInvoice.id)
+        let payments = try await api.fieldPayments(PaperPreview.refundInvoice.id)
+
+        XCTAssertEqual(payments.count, 1)
+        XCTAssertEqual(invoice.amountPaid, payments[0].amount.amount)
+        XCTAssertEqual(payments[0].invoiceId, invoice.id)
+        XCTAssertEqual(payments[0].status.rawValue, "recorded")
+    }
+
+    func testPaymentRefundPreviewRejectsRefundSubmission() async {
+        do {
+            _ = try await PaperPreview.api().refundFieldPayment(
+                PaperPreview.refundPayment.id,
+                reason: "Sample refund for design review."
+            )
+            XCTFail("Design previews must remain read-only")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.status, 405)
+            XCTAssertTrue(problem.localizedDescription.localizedCaseInsensitiveContains("cannot be changed"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
     func testEstimateRevisionPreviewUsesPaperFixtureAndPreservesPriceBookRevision() throws {
@@ -62,6 +130,16 @@ final class PaperPreviewTests: XCTestCase {
         XCTAssertEqual(state.lines.last?.source, .priceBookSelection(
             itemID: "00000000-0000-4000-8000-000000009201", revision: 4
         ))
+    }
+
+    func testPublicEstimatePreviewUsesAnIssuedPaperAndTwoSelectablePackages() async throws {
+        let action = try await PaperPreview.api().publicDocumentAction(token: "preview-estimate")
+
+        XCTAssertEqual(action.title, "AC not cooling — Compressor replacement")
+        XCTAssertEqual(action.status, .sent)
+        XCTAssertEqual(action.options?.map(\.title), ["Compressor repair", "Full system replacement"])
+        XCTAssertTrue(action.signingOffered)
+        XCTAssertTrue(action.html?.contains("Danielle Marlowe") == true)
     }
 
     func testEveryRequestIsInterceptedAndUnknownHostsNeverFallThrough() async throws {
