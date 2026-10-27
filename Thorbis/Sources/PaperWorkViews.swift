@@ -53,6 +53,7 @@ struct ScheduleView: View {
         switch tab {
         case "Week": .week
         case "Unscheduled": .unscheduled
+        case "Map": .today
         default: .today
         }
     }
@@ -70,13 +71,15 @@ struct ScheduleView: View {
                 PaperHeader(title: "Schedule", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
                 OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
-                PaperTabs(options: ["Today", "Week", "Unscheduled"], selection: $tab)
+                PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
                 if let error = store.error { ErrorBanner(message: error) }
                 if let progressError { ErrorBanner(message: progressError) }
                 if store.loading && store.jobs.isEmpty {
                     ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
                 } else if jobs.isEmpty {
                     emptyState
+                } else if tab == "Map" {
+                    ScheduleMapView(jobs: jobs.filter { $0.status != "canceled" })
                 } else if range == .week {
                     weekContent
                 } else {
@@ -90,6 +93,9 @@ struct ScheduleView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showNew) { NewJobSheet() }
         .sensoryFeedback(.success, trigger: committed)
+        #if DEBUG
+        .onAppear { if PaperPreview.enabled && PaperPreview.screen == "schedule-map" { tab = "Map" } }
+        #endif
     }
 
     private var subtitle: String {

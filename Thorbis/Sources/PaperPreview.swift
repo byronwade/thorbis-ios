@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "schedule-map", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -320,13 +320,21 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
                                     "label": "Home", "kind": "service", "address": address,
                                     "notes": "Sample location for design preview",
-                                    "coordinates": ["latitude": 37.7749, "longitude": -122.4194],
+                                    "coordinates": previewCoordinates(customerID: id),
                                     "gateCode": "4821#", "alarmCode": "7350",
                                     "dogOnSite": "Rusty — friendly, stays in the back yard",
                                     "parking": "Driveway on the left", "createdAt": now, "updatedAt": now]]]
             }
         }
         return nil
+    }
+    /// Spreads the sample customers across San Francisco so the schedule map has distinct pins.
+    private static func previewCoordinates(customerID: String) -> [String: Double] {
+        let spots: [String: (Double, Double)] = ["0412": (37.7749, -122.4194), "0413": (37.7599, -122.4148),
+                                                "0414": (37.7880, -122.4074), "0415": (37.7680, -122.4400),
+                                                "0416": (37.7952, -122.4330)]
+        let spot = spots[String(customerID.suffix(4))] ?? (37.7749, -122.4194)
+        return ["latitude": spot.0, "longitude": spot.1]
     }
     private static func today(hour: Int, minute: Int) -> String {
         let date = Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
