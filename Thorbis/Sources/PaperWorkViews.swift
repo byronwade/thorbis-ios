@@ -409,12 +409,12 @@ struct JobsView: View {
                     if store.loading && store.jobs.isEmpty {
                         ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
                     } else if tab == "Recent" {
-                        group("Recently updated", jobs: Array(jobs.prefix(25)))
+                        group("Recently updated", jobs: Array(jobs.prefix(25)), first: true)
                     } else {
-                        group("In progress", jobs: PaperWorkGroups.inProgress(jobs))
-                        group("Scheduled", jobs: PaperWorkGroups.scheduled(jobs))
-                        group("Done", jobs: PaperWorkGroups.completed(jobs))
-                        group("Other", jobs: PaperWorkGroups.other(jobs))
+                        let groups = [("In progress", PaperWorkGroups.inProgress(jobs)), ("Scheduled", PaperWorkGroups.scheduled(jobs)),
+                                      ("Done", PaperWorkGroups.completed(jobs)), ("Other", PaperWorkGroups.other(jobs))]
+                        let lead = groups.first { !$0.1.isEmpty }?.0
+                        ForEach(groups, id: \.0) { title, members in group(title, jobs: members, first: title == lead) }
                     }
                     if MyDayRules.shouldShowEmptyState(isEmpty: jobs.isEmpty, isLoading: store.loading, hasError: store.error != nil) {
                         PaperEmptyState(
@@ -436,11 +436,12 @@ struct JobsView: View {
         .sheet(isPresented: $showNew) { NewJobSheet() }
     }
 
-    @ViewBuilder private func group(_ title: String, jobs: [Job]) -> some View {
+    /// One "New job" entry point, on the first group shown, instead of a plus on every group.
+    @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool = false) -> some View {
         if !jobs.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 PaperGroupHeader(title: title, count: jobs.count) {
-                    if session.can("job.create", feature: "jobs") && title != "Done" {
+                    if session.can("job.create", feature: "jobs") && first {
                         Button { showNew = true } label: {
                             Image(systemName: "plus").font(.system(size: 14, weight: .medium))
                                 .frame(width: 44, height: 44).contentShape(Rectangle())

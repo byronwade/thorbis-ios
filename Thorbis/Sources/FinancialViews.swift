@@ -228,6 +228,7 @@ struct InvoiceDetailView: View {
     let id: String
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject var store: Store
     @State private var record: InvoiceRecord?
     @State private var error: String?
     @State private var busy = false
@@ -240,11 +241,14 @@ struct InvoiceDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 if let error { ErrorBanner(message: error) }
                 if let record {
-                    commercialHeading(ref: "INV-\(record.id.suffix(4).uppercased())", title: "Invoice",
+                    // Who it's for and what's owed come first; the line revision is bookkeeping, not for people.
+                    commercialHeading(ref: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
                                       status: record.status.statusLabel, date: record.issuedAt ?? record.createdAt)
+                    let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                     VStack(spacing: 0) {
-                        commercialDetail("Amount paid", money(record.amountPaid, currency: record.currency))
-                        commercialDetail("Line revision", "\(record.linesRevision)")
+                        commercialDetail("Total", money(total, currency: record.currency))
+                        if record.amountPaid > 0 { commercialDetail("Paid", money(record.amountPaid, currency: record.currency)) }
+                        commercialDetail("Balance due", money(max(total - record.amountPaid, 0), currency: record.currency))
                     }
                     .padding(.horizontal, 15)
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
