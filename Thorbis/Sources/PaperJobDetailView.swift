@@ -402,9 +402,9 @@ struct JobDetailView: View {
         do {
             let loadedJob = try await api.fieldJob(jobId)
             guard session.generation == generation else { return }
+            job = loadedJob
             let loadedNotes = try await api.fieldNotes(jobId)
             guard session.generation == generation else { return }
-            job = loadedJob
             notes = loadedNotes
             error = nil
         } catch is CancellationError {} catch {
