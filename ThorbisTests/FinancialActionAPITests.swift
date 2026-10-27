@@ -129,6 +129,35 @@ final class FinancialActionAPITests: XCTestCase {
         XCTAssertNil(body["collectionEvidence"])
     }
 
+    func testPaymentMethodsMatchCanonicalRecordPaymentContract() async throws {
+        let methods = ["card", "ach", "cash", "check"]
+        var replies: [URLProtocolFixture.Reply] = []
+        for (index, method) in methods.enumerated() {
+            let id = String(format: "00000000-0000-4000-8000-%012d", index + 20)
+            let payment = #"{"id":"\#(id)","organizationId":"00000000-0000-4000-8000-000000000002","invoiceId":"00000000-0000-4000-8000-00000000000a","amount":{"amount":2500,"currency":"USD"},"method":"\#(method)","status":"recorded","collectionEvidence":{"purpose":"physical_service","source":{"kind":"job","id":"00000000-0000-4000-8000-000000000001"}},"idempotencyKey":"payment-\#(method)","recordedAt":"2026-10-26T12:00:00Z"}"#
+            replies.append(.init(201, payment))
+        }
+        let client = APIClient(session: URLProtocolFixture.session(replies), baseURL: "https://app.thorbis.com")
+
+        for methodName in methods {
+            guard let method = FieldPaymentMethod(rawValue: methodName) else {
+                XCTFail("FieldPaymentMethod should support \(methodName) as a recorded tender")
+                return
+            }
+            _ = try await client.recordFieldPayment(
+                invoiceID,
+                request: .init(amount: .init(amount: 2500, currency: "USD"), method: method,
+                               idempotencyKey: "payment-\(methodName)")
+            )
+        }
+
+        let recorded = try URLProtocolFixture.recorded.map { request -> String in
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+            return try XCTUnwrap(body["method"] as? String)
+        }
+        XCTAssertEqual(recorded, methods)
+    }
+
     func testUnknownPaymentProvenanceIsRejected() throws {
         let response = #"{"id":"00000000-0000-4000-8000-00000000000b","organizationId":"00000000-0000-4000-8000-000000000002","invoiceId":"00000000-0000-4000-8000-00000000000a","amount":{"amount":2500,"currency":"USD"},"method":"cash","status":"recorded","collectionEvidence":{"purpose":"other"},"idempotencyKey":"cash-receipt-1","recordedAt":"2026-10-26T12:00:00Z"}"#
         XCTAssertThrowsError(try JSONDecoder().decode(FieldPaymentRecord.self, from: Data(response.utf8)))

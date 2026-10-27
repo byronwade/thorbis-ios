@@ -15,6 +15,7 @@ struct RootView: View {
     @State private var drafts = false
     #if DEBUG
     @State private var previewInvoiceEditor = false
+    @State private var previewInvoiceDetail = false
     #endif
 
     var body: some View {
@@ -66,6 +67,11 @@ struct RootView: View {
             }
             .presentationDetents([.large])
         }
+        .sheet(isPresented: $previewInvoiceDetail) {
+            NavigationStack {
+                InvoiceDetailView(id: PaperPreview.issuedInvoice.id)
+            }
+        }
         #endif
         .task {
             await store.refresh(api)
@@ -73,6 +79,10 @@ struct RootView: View {
             if PaperPreview.enabled {
                 if PaperPreview.screen == "invoice-editor" {
                     previewInvoiceEditor = true
+                    return
+                }
+                if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" {
+                    previewInvoiceDetail = true
                     return
                 }
                 switch PaperPreview.screen {

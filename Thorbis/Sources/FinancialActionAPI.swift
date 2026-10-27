@@ -93,7 +93,9 @@ struct FieldInvoiceLineInput: Encodable, Hashable {
     }
 }
 
-enum FieldPaymentMethod: String, Codable { case cash, check }
+/// Tender already collected from the customer. Card/ACH here record the
+/// tender type; processor-backed collection uses separate endpoints.
+enum FieldPaymentMethod: String, Codable, CaseIterable, Hashable { case card, ach, cash, check }
 enum FieldPaymentStatus: String, Codable { case recorded, refunded }
 
 struct FieldPhysicalServiceSource: Codable {
@@ -149,7 +151,7 @@ struct FieldPaymentRecord: Codable, Identifiable {
     let refundedAt: String?
 }
 
-struct FieldRecordPaymentRequest: Encodable {
+struct FieldRecordPaymentRequest: Codable {
     let amount: FieldMoney
     let method: FieldPaymentMethod
     /// Mint once for the observed collection; retain unchanged through every retry.

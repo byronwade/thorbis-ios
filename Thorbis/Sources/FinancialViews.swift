@@ -203,6 +203,8 @@ struct InvoiceDetailView: View {
     @State private var busy = false
     @State private var confirmIssue = false
     @State private var showEditDraft = false
+    @State private var showCollectPayment = false
+    @State private var paymentModel: InvoicePaymentCollectionModel?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -222,6 +224,14 @@ struct InvoiceDetailView: View {
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    if let paymentModel {
+                        InvoicePaymentsSection(
+                            model: paymentModel,
+                            invoice: record,
+                            onCollectPayment: { showCollectPayment = true },
+                            onInvoiceUpdated: { self.record = $0 }
+                        )
+                    }
                     if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
                         Button { showEditDraft = true } label: {
                             commercialAction("Edit line items", icon: "pencil")
@@ -244,7 +254,15 @@ struct InvoiceDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
-            if let record, record.status == "draft", session.can("invoice.issue", feature: "invoicing") {
+            if let paymentModel {
+                InvoiceDetailFooter(
+                    model: paymentModel,
+                    canIssue: session.can("invoice.issue", feature: "invoicing"),
+                    busy: busy,
+                    onCollect: { showCollectPayment = true },
+                    onIssue: { confirmIssue = true }
+                )
+            } else if let record, record.status == "draft", session.can("invoice.issue", feature: "invoicing") {
                 PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
                     .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
                     .background(Theme.chrome)
@@ -258,7 +276,9 @@ struct InvoiceDetailView: View {
                 NavigationStack {
                     InvoiceLineEditorView(invoice: record) { updated in
                         self.record = updated
+                        paymentModel?.acceptInvoiceMutationResponse(updated)
                         error = nil
+                        Task { await paymentModel?.load() }
                     }
                     .environmentObject(api)
                     .environmentObject(session)
@@ -267,19 +287,49 @@ struct InvoiceDetailView: View {
                 .presentationDragIndicator(.visible)
             }
         }
-        .task { await load() }
+        .sheet(isPresented: $showCollectPayment) {
+            if let paymentModel, let record {
+                InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
+                    .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+        }
+        .task {
+            await load()
+            #if DEBUG
+            if PaperPreview.enabled, PaperPreview.screen == "invoice-payment" {
+                showCollectPayment = paymentModel?.canRecordPayment == true
+            }
+            #endif
+        }
         .refreshable { await load() }
     }
     private func issue() async {
         guard let current = record else { return }
         busy = true
         defer { busy = false }
-        do { record = try await api.issueFieldInvoice(id, expectedLinesRevision: current.linesRevision); error = nil }
+        do {
+            let issued = try await api.issueFieldInvoice(id, expectedLinesRevision: current.linesRevision)
+            record = issued
+            paymentModel?.acceptInvoiceMutationResponse(issued)
+            error = nil
+            await paymentModel?.load()
+            if let invoice = paymentModel?.invoice { record = invoice }
+        }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     private func load() async {
-        do { record = try await api.fieldInvoice(id); error = nil }
-        catch is CancellationError {} catch { self.error = error.localizedDescription }
+        if paymentModel == nil {
+            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id)
+        }
+        guard let paymentModel else { return }
+        await paymentModel.load()
+        if let invoice = paymentModel.invoice {
+            record = invoice
+            error = nil
+        } else if let loadError = paymentModel.loadError {
+            error = loadError
+        }
     }
 }
 

@@ -30,14 +30,14 @@
 | HIG-012 | not applicable | No haptic behavior changed. |
 | HIG-013 | not tested | No input semantics changed. Keyboard overlap and focus recovery in the affected sheets still need review. |
 | HIG-014 | not applicable | No permission request or protected-data access changed. |
-| HIG-015 | not tested | Existing loading, offline, error, and confirmation semantics were left unchanged; interruption and retry behavior were not re-exercised in this pass. |
+| HIG-015 | partial | Invoice payment loading failures expose retry; a successful collection remains locked until invoice and full payment history reconcile. Automated interruption/retry coverage passes, while device-level network interruption remains untested. |
 | HIG-016 | not tested | A 13-inch iPad simulator showed the adaptive schedule list and detail layout. Split View resizing, rotation, and draft preservation are still unverified. |
 | HIG-017 | not tested | SF Symbols remain in use. RTL and localized long-string layout still need review. |
 | HIG-018 | not tested | Simulator validation does not establish physical-device performance. |
 | HIG-019 | not applicable | No media capture or upload behavior changed. |
 | HIG-020 | pass | No API/domain contract, token namespace, dependency, or web wrapper was introduced. |
 | HIG-021 | pass | This matrix records evidence and untested areas separately. Unresolved applicable checks continue to block full mobile completion. |
-| HIG-022 | not tested | Independent review is pending; no design deviation is being requested. |
+| HIG-022 | partial | Independent review of invoice-payment retry, refund reconciliation, and issue-refresh state passed. App-wide visual and accessibility review remains open. |
 
 ## Verification
 
@@ -47,3 +47,12 @@
 - Read-only iPad 13-inch schedule preview: `/private/tmp/thorbis-ipad-schedule-rotated.png` (landscape orientation).
 
 This evidence covers the listed UI adjustments only. It is not an app-wide HIG certification or proof of full Paper/TanStack parity. Physical-device, assistive-technology, Dynamic Type, dark/high-contrast, orientation/resizing, and independent review gates remain open.
+
+## Invoice payment history and recorded collection
+
+- The issued invoice detail now shows a complete-history payment count, read-only payment detail, a Paper-style add control, and a fixed `Collect payment` action. The full-height SwiftUI sheet records a tender already collected using Card, ACH, Cash, or Check; the sheet states that it does not charge a card or bank account.
+- The displayed balance remains derived from the latest server `InvoiceRecord`. The form blocks overpayment and stays locked after a successful POST until the full payment history and refreshed invoice `amountPaid` agree. Retries reuse the same amount, method, and idempotency key after an uncertain transport or server failure.
+- Screens were inspected in the iPhone 17 Pro / iOS 26.3.1 read-only fixture: `/private/tmp/thorbis-invoice-detail-payment-preview.png` and `/private/tmp/thorbis-invoice-payment-entry-preview.png`.
+- Verification on 2026-10-27: full simulator suite passed, 161 tests and 0 failures on iPhone 17 Pro / iOS 26.3.1 (`/tmp/ThorbisReviewFixTests.xcresult`); `xcodebuild -project Thorbis.xcodeproj -scheme Thorbis -configuration Release -destination 'generic/platform=iOS' -quiet build` passed.
+- An uncertain payment intent persists only its amount, tender type, and idempotency key, scoped to organization and invoice. A definitive 4xx response or successful server-history reconciliation clears it. A fully refunded record without `netAmount` contributes zero; an issued invoice response remains authoritative if the follow-up refresh fails.
+- This slice is not proof of full feature parity. Processor-backed card collection, hosted pay links, refunds, and other audited app areas remain outside this implementation.

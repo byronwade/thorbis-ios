@@ -38,6 +38,13 @@ final class PaperPreviewTests: XCTestCase {
         XCTAssertEqual(page.items.first?.description, "Replace capacitor")
         XCTAssertEqual(page.items.first?.revision, 4)
         XCTAssertNil(page.nextCursor)
+
+        let previewAPI = PaperPreview.api()
+        let issuedInvoice = try await previewAPI.fieldInvoice(PaperPreview.issuedInvoice.id)
+        XCTAssertEqual(issuedInvoice.status, "issued")
+        XCTAssertEqual(issuedInvoice.lines.count, 3)
+        let payments = try await previewAPI.fieldPayments(issuedInvoice.id)
+        XCTAssertTrue(payments.isEmpty)
     }
 
     func testEveryRequestIsInterceptedAndUnknownHostsNeverFallThrough() async throws {
