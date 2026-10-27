@@ -106,7 +106,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000008001", "organizationId": org, "customerId": id, "name": name, "role": "Homeowner", "primary": true, "createdAt": now, "updatedAt": now] as [String: Any]]]
             }
             if path == "/v1/customers/\(id)/locations" {
-                return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id, "label": "Home", "kind": "service", "address": address, "notes": "Sample location for design preview", "createdAt": now, "updatedAt": now]]]
+                return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
+                                    "label": "Home", "kind": "service", "address": address,
+                                    "notes": "Sample location for design preview",
+                                    "coordinates": ["latitude": 37.7749, "longitude": -122.4194],
+                                    "gateCode": "4821#", "alarmCode": "7350",
+                                    "dogOnSite": "Rusty — friendly, stays in the back yard",
+                                    "parking": "Driveway on the left", "createdAt": now, "updatedAt": now]]]
             }
         }
         return nil

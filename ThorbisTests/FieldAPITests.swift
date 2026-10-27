@@ -159,6 +159,91 @@ final class FieldAPITests: XCTestCase {
         XCTAssertNil(locationBody["organizationId"])
     }
 
+    func testUpdateFieldLocationSendsNullableValuesToClearAndDecodesSavedRecord() async throws {
+        let locationID = "00000000-0000-4000-8000-000000000007"
+        let location = #"{"id":"00000000-0000-4000-8000-000000000007","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","label":"Shop","kind":"service","address":"456 Main","notes":null,"coordinates":null,"gateCode":null,"alarmCode":null,"dogOnSite":null,"parking":null,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T13:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, location)]), baseURL: "https://app.thorbis.com")
+
+        let saved = try await client.updateFieldLocation(customerID, locationID, request: .init(
+            label: "Shop", kind: "service", address: "456 Main", notes: nil, coordinates: nil,
+            gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil
+        ))
+
+        XCTAssertEqual(saved.address, "456 Main")
+        let sent = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(sent.method, "POST")
+        XCTAssertEqual(sent.url?.path, "/v1/customers/\(customerID)/locations/\(locationID)")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent.body)) as? [String: Any])
+        XCTAssertEqual(body["label"] as? String, "Shop")
+        XCTAssertEqual(body["address"] as? String, "456 Main")
+        for key in ["notes", "coordinates", "gateCode", "alarmCode", "dogOnSite", "parking"] {
+            XCTAssertTrue(body[key] is NSNull, "Expected \(key) to be explicitly cleared")
+        }
+        XCTAssertNil(body["customerId"])
+        XCTAssertNil(body["organizationId"])
+    }
+
+    func testRemoveFieldLocationUsesEmptyPostAndAcceptsNoContent() async throws {
+        let locationID = "00000000-0000-4000-8000-000000000007"
+        let client = APIClient(session: URLProtocolFixture.session([.init(204, "")]), baseURL: "https://app.thorbis.com")
+
+        try await client.removeFieldLocation(customerID, locationID)
+
+        let sent = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(sent.method, "POST")
+        XCTAssertEqual(sent.url?.path, "/v1/customers/\(customerID)/locations/\(locationID)/remove")
+        XCTAssertNil(sent.body)
+    }
+
+    func testFieldLocationMutationsRejectInvalidIdsBeforeSending() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        let update = FieldLocationUpdate(
+            label: "Home", kind: "service", address: "123 Main", notes: nil, coordinates: nil,
+            gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil
+        )
+
+        do {
+            _ = try await client.updateFieldLocation(customerID, "not-a-uuid", request: update)
+            XCTFail("Expected invalid location ID to be rejected")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Invalid record ID")
+        }
+        do {
+            try await client.removeFieldLocation("not-a-uuid", "00000000-0000-4000-8000-000000000007")
+            XCTFail("Expected invalid customer ID to be rejected")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Invalid record ID")
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
+    func testServiceLocationDraftTrimsValuesAndBuildsCoordinates() throws {
+        let draft = ServiceLocationDraft(
+            label: "  Shop  ", kind: "billing", address: "  456 Main  ", notes: "  Side entrance  ",
+            latitude: " 40.25 ", longitude: "-73.5", gateCode: "  1234# ", alarmCode: " ",
+            dogOnSite: " Rusty ", parking: "  Rear lot  "
+        )
+
+        let request = try draft.makeCreateRequest()
+
+        XCTAssertEqual(request.label, "Shop")
+        XCTAssertEqual(request.kind, "billing")
+        XCTAssertEqual(request.address, "456 Main")
+        XCTAssertEqual(request.notes, "Side entrance")
+        XCTAssertEqual(request.coordinates, FieldCoordinates(latitude: 40.25, longitude: -73.5))
+        XCTAssertEqual(request.gateCode, "1234#")
+        XCTAssertNil(request.alarmCode)
+        XCTAssertEqual(request.dogOnSite, "Rusty")
+        XCTAssertEqual(request.parking, "Rear lot")
+    }
+
+    func testServiceLocationDraftRejectsMissingRequiredValuesAndInvalidCoordinatePairs() {
+        XCTAssertThrowsError(try ServiceLocationDraft(label: " ", kind: "service", address: "123 Main").makeCreateRequest())
+        XCTAssertThrowsError(try ServiceLocationDraft(label: "Home", kind: "service", address: " ").makeCreateRequest())
+        XCTAssertThrowsError(try ServiceLocationDraft(label: "Home", kind: "service", address: "123 Main", latitude: "40").makeCreateRequest())
+        XCTAssertThrowsError(try ServiceLocationDraft(label: "Home", kind: "service", address: "123 Main", latitude: "91", longitude: "0").makeCreateRequest())
+    }
+
     func testCustomerContactDraftTrimsFieldsAndOmitsBlankOptionals() {
         let draft = CustomerContactDraft(
             name: "  Alex Morgan  ",

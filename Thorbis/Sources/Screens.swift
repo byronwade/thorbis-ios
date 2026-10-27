@@ -78,6 +78,7 @@ struct ContactActions: View {
 
 struct AddressLink: View {
     let address: String
+    var coordinates: FieldCoordinates? = nil
     var body: some View {
         if let url {
             Link(destination: url) { Label(address, systemImage: "map") }
@@ -85,56 +86,9 @@ struct AddressLink: View {
     }
     private var url: URL? {
         var components = URLComponents(string: "https://maps.apple.com/")
-        components?.queryItems = [URLQueryItem(name: "q", value: address)]
+        let destination = coordinates.map { "\($0.latitude),\($0.longitude)" } ?? address
+        components?.queryItems = [URLQueryItem(name: "q", value: destination)]
         return components?.url
-    }
-}
-
-struct CustomerRecordSheet: View {
-    let customerID: String
-    let isLocation: Bool
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var session: SessionController
-    @Environment(\.dismiss) var dismiss
-    @State private var name = ""
-    @State private var email = ""
-    @State private var phone = ""
-    @State private var address = ""
-    @State private var kind = "service"
-    @State private var primary = false
-    @State private var busy = false
-    @State private var error: String?
-    var body: some View {
-        NavigationStack {
-            Form {
-                TextField(isLocation ? "Label" : "Name", text: $name)
-                if isLocation {
-                    Picker("Type", selection: $kind) { Text("Service").tag("service"); Text("Billing").tag("billing") }
-                    TextField("Address", text: $address, axis: .vertical).textContentType(.fullStreetAddress)
-                } else {
-                    TextField("Email", text: $email).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("Phone", text: $phone).keyboardType(.phonePad)
-                    Toggle("Primary contact", isOn: $primary)
-                }
-                if let error { Text(error).foregroundStyle(Theme.destructive) }
-                Button("Save") { Task { await save() } }
-                    .disabled(busy || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (isLocation && address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) || !session.can("customer.edit", feature: "core_crm"))
-                if busy { ProgressView() }
-            }.navigationTitle(isLocation ? "New location" : "New contact")
-                .toolbar { Button("Cancel") { dismiss() }.disabled(busy) }
-        }
-    }
-    private func save() async {
-        busy = true
-        defer { busy = false }
-        do {
-            if isLocation {
-                _ = try await api.createFieldLocation(customerID, request: .init(label: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind, address: address.trimmingCharacters(in: .whitespacesAndNewlines)))
-            } else {
-                _ = try await api.createFieldContact(customerID, request: .init(name: name.trimmingCharacters(in: .whitespacesAndNewlines), email: email.isEmpty ? nil : email, phone: phone.isEmpty ? nil : phone, primary: primary))
-            }
-            dismiss()
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 }
 

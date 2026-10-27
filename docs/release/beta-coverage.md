@@ -1,4 +1,4 @@
-# Native beta coverage — 26 October 2026
+# Native beta coverage — 27 October 2026
 
 This is an initial staff beta, not full Thorbis-TanStack parity. The source reference is commit 448c238a11245d525d42cc542ce5fe9a512415ff. Native changes started at 811faf60fdcc929618292341c5081e84d65421db.
 
@@ -6,7 +6,7 @@ This is an initial staff beta, not full Thorbis-TanStack parity. The source refe
 
 - Better Auth sign-in, restore, workspace selection, capability/feature hydration, expiry and sign-out; all workspace state is invalidated when authority changes.
 - Schedule and assigned-job filters; a local-day My Day list sorted by scheduled time with server-gated “On my way” and optional ETA; jobs, create job, notes, manual arrival/progress, pause/resume, scheduling and assignment, closeout requirements and office follow-ups.
-- Customer search, details and creation, plus Paper-style contact quick-add with role, phone, optional email and first-contact primary behavior; service locations.
+- Customer search, details and creation, plus Paper-style contact quick-add with role, phone, optional email and first-contact primary behavior. Service locations support create/edit/remove, address and notes, service/billing type, map pins, and access/parking details.
 - Estimates: list, detail, create draft and revision-bound send/approve/decline. Invoices: list, detail and issue. Protected native PDF previews.
 - Job media: selected photos/PDFs up to 8 MiB, signed upload/confirmation and protected download/preview.
 - Staff notices, revenue report with incomplete-total disclosure, and paginated Price Book with separately gated detail.
@@ -23,10 +23,10 @@ This is an initial staff beta, not full Thorbis-TanStack parity. The source refe
 ## Validation evidence
 
 - Swift 6 language mode with complete strict concurrency.
-- 126 unit/contract tests passed in the iPhone 17 Pro simulator, including contact quick-add, My Day local-date/assignment/order rules, ETA request encoding, and error-versus-empty-state behavior. Latest result bundle: `DerivedData/Thorbis-Local/Logs/Test/Test-Thorbis-2026.10.26_23-56-28--0400.xcresult` (26 October 2026).
-- My Day was visually checked in a read-only Paper preview on iPhone 17 Pro; screenshot: `outputs/paper/my-day.png`. This verifies presentation only, not authenticated live workflow behavior.
+- 131 unit/contract tests passed with no failures or skips in the iPhone 17 Pro simulator, including location update/clear/remove contracts and coordinate validation. Result bundle: `/Users/byronwade/Library/Developer/Xcode/DerivedData/Thorbis-dmuwxdzkujtkngcfxjqjbnvsarbv/Logs/Test/Test-Thorbis-2026.10.27_00-20-11--0400.xcresult` (27 October 2026).
+- My Day and Customer detail were visually checked in read-only Paper previews on iPhone. The location editor was checked with sample data; a rejected save preserved the form values and a rejected removal preserved the location. Preview evidence verifies presentation/error handling only, not authenticated live workflow behavior.
 - 18 Release transport tests passed, including rejection of development identity in Release.
-- Signed device archive and signature verification succeeded for Build 5 (`1.0 (5)`), which includes customer quick-add and My Day. The upload log reports success and Apple processing; the build is not yet assigned to a tester group. Build 4 predates both changes.
+- Signed device archive and signature verification succeeded for Build 5 (`1.0 (5)`), which includes customer quick-add and My Day. The upload log reports success and Apple processing; the build is not yet assigned to a tester group. Build 6 includes service-location management and is being prepared from this coverage update.
 - iPhone and iPad native login screens launched and were visually inspected. Browser sign-in is confirmed; native authenticated end-to-end checks still await a separate app sign-in.
 - Independent review found and drove fixes for logout overlap, central 401 invalidation, late preview cleanup, draft lifetime and roster truncation. Tests cover the corresponding transport/state behavior.
 

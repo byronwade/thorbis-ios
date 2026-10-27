@@ -216,6 +216,136 @@ struct FieldLocationCreate: Encodable {
     }
 }
 
+struct FieldLocationUpdate: Encodable {
+    let label: String
+    let kind: String
+    let address: String
+    let notes: String?
+    let coordinates: FieldCoordinates?
+    let gateCode: String?
+    let alarmCode: String?
+    let dogOnSite: String?
+    let parking: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case label, kind, address, notes, coordinates, gateCode, alarmCode, dogOnSite, parking
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(label, forKey: .label)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(address, forKey: .address)
+        try values.encode(notes, forKey: .notes)
+        try values.encode(coordinates, forKey: .coordinates)
+        try values.encode(gateCode, forKey: .gateCode)
+        try values.encode(alarmCode, forKey: .alarmCode)
+        try values.encode(dogOnSite, forKey: .dogOnSite)
+        try values.encode(parking, forKey: .parking)
+    }
+}
+
+enum ServiceLocationDraftError: LocalizedError, Equatable {
+    case missingLabel
+    case missingAddress
+    case incompleteCoordinates
+    case invalidCoordinates
+
+    var errorDescription: String? {
+        switch self {
+        case .missingLabel: "Enter a location label."
+        case .missingAddress: "Enter a location address."
+        case .incompleteCoordinates: "Enter both latitude and longitude, or clear both."
+        case .invalidCoordinates: "Enter valid coordinates (latitude −90 to 90, longitude −180 to 180)."
+        }
+    }
+}
+
+struct ServiceLocationDraft {
+    var label: String
+    var kind: String
+    var address: String
+    var notes: String
+    var latitude: String
+    var longitude: String
+    var gateCode: String
+    var alarmCode: String
+    var dogOnSite: String
+    var parking: String
+
+    init(label: String = "", kind: String = "service", address: String = "", notes: String = "",
+         latitude: String = "", longitude: String = "", gateCode: String = "", alarmCode: String = "",
+         dogOnSite: String = "", parking: String = "") {
+        self.label = label
+        self.kind = kind
+        self.address = address
+        self.notes = notes
+        self.latitude = latitude
+        self.longitude = longitude
+        self.gateCode = gateCode
+        self.alarmCode = alarmCode
+        self.dogOnSite = dogOnSite
+        self.parking = parking
+    }
+
+    func makeCreateRequest() throws -> FieldLocationCreate {
+        let values = try cleanedValues()
+        return FieldLocationCreate(
+            label: values.label, kind: values.kind, address: values.address, notes: values.notes,
+            coordinates: values.coordinates, gateCode: values.gateCode, alarmCode: values.alarmCode,
+            dogOnSite: values.dogOnSite, parking: values.parking
+        )
+    }
+
+    func makeUpdateRequest() throws -> FieldLocationUpdate {
+        let values = try cleanedValues()
+        return FieldLocationUpdate(
+            label: values.label, kind: values.kind, address: values.address, notes: values.notes,
+            coordinates: values.coordinates, gateCode: values.gateCode, alarmCode: values.alarmCode,
+            dogOnSite: values.dogOnSite, parking: values.parking
+        )
+    }
+
+    private func cleanedValues() throws -> (
+        label: String, kind: String, address: String, notes: String?, coordinates: FieldCoordinates?,
+        gateCode: String?, alarmCode: String?, dogOnSite: String?, parking: String?
+    ) {
+        guard let label = Self.cleaned(label) else { throw ServiceLocationDraftError.missingLabel }
+        guard let address = Self.cleaned(address) else { throw ServiceLocationDraftError.missingAddress }
+        return (
+            label: label,
+            kind: Self.cleaned(kind) ?? "service",
+            address: address,
+            notes: Self.cleaned(notes),
+            coordinates: try parsedCoordinates(),
+            gateCode: Self.cleaned(gateCode),
+            alarmCode: Self.cleaned(alarmCode),
+            dogOnSite: Self.cleaned(dogOnSite),
+            parking: Self.cleaned(parking)
+        )
+    }
+
+    private func parsedCoordinates() throws -> FieldCoordinates? {
+        let latitudeValue = latitude.trimmingCharacters(in: .whitespacesAndNewlines)
+        let longitudeValue = longitude.trimmingCharacters(in: .whitespacesAndNewlines)
+        if latitudeValue.isEmpty && longitudeValue.isEmpty { return nil }
+        guard !latitudeValue.isEmpty, !longitudeValue.isEmpty else {
+            throw ServiceLocationDraftError.incompleteCoordinates
+        }
+        guard let latitude = Double(latitudeValue), let longitude = Double(longitudeValue),
+              latitude.isFinite, longitude.isFinite,
+              (-90...90).contains(latitude), (-180...180).contains(longitude) else {
+            throw ServiceLocationDraftError.invalidCoordinates
+        }
+        return FieldCoordinates(latitude: latitude, longitude: longitude)
+    }
+
+    private static func cleaned(_ value: String) -> String? {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
+
 struct FieldMoney: Codable, Hashable {
     let amount: Int
     let currency: String
@@ -508,6 +638,21 @@ extension APIClient {
 
     func createFieldLocation(_ customerID: String, request: FieldLocationCreate) async throws -> ServiceLocationRecord {
         try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/locations"), body: request)
+    }
+
+    func updateFieldLocation(_ customerID: String, _ locationID: String, request: FieldLocationUpdate) async throws -> ServiceLocationRecord {
+        let path = try fieldLocationPath(customerID, locationID)
+        return try await send("POST", path, body: request)
+    }
+
+    func removeFieldLocation(_ customerID: String, _ locationID: String) async throws {
+        let path = try fieldLocationPath(customerID, locationID)
+        let _: EmptyResponse = try await send("POST", "\(path)/remove")
+    }
+
+    private func fieldLocationPath(_ customerID: String, _ locationID: String) throws -> String {
+        let customerPath = try fieldPath("/v1/customers", id: customerID)
+        return try fieldPath("\(customerPath)/locations", id: locationID)
     }
 
     func fieldNotes(_ jobID: String) async throws -> [JobNoteRecord] {

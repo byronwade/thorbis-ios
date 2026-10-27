@@ -78,6 +78,23 @@ struct CustomersView: View {
     }
 }
 
+private enum CustomerLocationSheet: Identifiable {
+    case add
+    case edit(ServiceLocationRecord)
+
+    var id: String {
+        switch self {
+        case .add: "new-location"
+        case .edit(let location): location.id
+        }
+    }
+
+    var location: ServiceLocationRecord? {
+        if case .edit(let location) = self { return location }
+        return nil
+    }
+}
+
 struct CustomerDetailView: View {
     let customer: Customer
     @EnvironmentObject var api: APIClient
@@ -91,7 +108,11 @@ struct CustomerDetailView: View {
     @State private var error: String?
     @State private var showNewJob = false
     @State private var showContact = false
-    @State private var showLocation = false
+    @State private var locationSheet: CustomerLocationSheet?
+    @State private var locationToRemove: ServiceLocationRecord?
+    @State private var showRemoveLocationConfirmation = false
+    @State private var isRemovingLocation = false
+    @State private var locationError: String?
     @State private var tab = "Overview"
     private var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
@@ -108,7 +129,7 @@ struct CustomerDetailView: View {
                         Menu {
                             Button("Add contact", systemImage: "person.badge.plus") { showContact = true }
                                 .disabled(!contactsLoaded)
-                            Button("Add location", systemImage: "mappin.and.ellipse") { showLocation = true }
+                            Button("Add location", systemImage: "mappin.and.ellipse") { locationSheet = .add }
                         } label: { Image(systemName: "ellipsis").frame(width: 38, height: 38).background(Theme.fill, in: Circle()) }.accessibilityLabel("Customer actions")
                     }
                 }.foregroundStyle(Theme.foreground).padding(.horizontal, 20).frame(height: 54)
@@ -167,7 +188,29 @@ struct CustomerDetailView: View {
                 error = nil
             }
         }
-        .sheet(isPresented: $showLocation, onDismiss: { Task { await load() } }) { CustomerRecordSheet(customerID: customer.id, isLocation: true) }
+        .sheet(item: $locationSheet) { item in
+            ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
+                if let index = locations.firstIndex(where: { $0.id == saved.id }) {
+                    locations[index] = saved
+                } else {
+                    locations.append(saved)
+                }
+                locationError = nil
+            }
+        }
+        .confirmationDialog(
+            "Remove service location?",
+            isPresented: $showRemoveLocationConfirmation,
+            titleVisibility: .visible,
+            presenting: locationToRemove
+        ) { location in
+            Button("Remove \(location.label)", role: .destructive) {
+                Task { await removeLocation(location) }
+            }
+            Button("Cancel", role: .cancel) { locationToRemove = nil }
+        } message: { location in
+            Text("This removes the location from \(record?.name ?? customer.name).")
+        }
     }
     @ViewBuilder private var metadataChips: some View {
         if jobs.contains(where: { $0.status == "in_progress" }) { Chip(text: "Job in progress", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface) }
@@ -210,17 +253,63 @@ struct CustomerDetailView: View {
     }
     private var locationsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { showLocation = true } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.accessibilityLabel("Add location") } }
+            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { locationSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.accessibilityLabel("Add location") } }
+            if let locationError {
+                Text(locationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 9))
+                    .accessibilityIdentifier("location-mutation-error")
+            }
             ForEach(locations) { location in
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack { Text(location.label).font(Theme.font(14, weight: .medium)); Spacer(); Text(location.kind.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted) }
-                    AddressLink(address: location.address).font(Theme.font(13))
+                    HStack(spacing: 6) {
+                        Text(location.label).font(Theme.font(14, weight: .medium)).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(location.kind.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                        if canEdit {
+                            Menu {
+                                Button("Edit location", systemImage: "pencil") { locationSheet = .edit(location) }
+                                Button("Remove location", systemImage: "trash", role: .destructive) {
+                                    locationToRemove = location
+                                    showRemoveLocationConfirmation = true
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .frame(width: 30, height: 30)
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityLabel("Options for \(location.label)")
+                        }
+                    }
+                    AddressLink(address: location.address, coordinates: location.coordinates).font(Theme.font(13))
                     if let notes = location.notes { Text(notes).font(Theme.font(13)) }
                     if let parking = location.parking { detailRow("Parking", value: parking) }
                     if let dogs = location.dogOnSite { detailRow("Dogs on site", value: dogs) }
+                    HStack(spacing: 5) {
+                        Image(systemName: location.coordinates == nil ? "mappin.slash" : "mappin.and.ellipse")
+                        Text(location.coordinates.map { String(format: "%.4f, %.4f", $0.latitude, $0.longitude) } ?? "No map pin")
+                    }
+                    .font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
                 }.padding(.vertical, 5)
             }
             if locations.isEmpty { emptyText("No locations") }
+        }
+    }
+
+    private func removeLocation(_ location: ServiceLocationRecord) async {
+        guard canEdit, !isRemovingLocation else { return }
+        isRemovingLocation = true
+        defer {
+            isRemovingLocation = false
+            locationToRemove = nil
+        }
+        do {
+            try await api.removeFieldLocation(customer.id, location.id)
+            locations.removeAll { $0.id == location.id }
+            locationError = nil
+        } catch is CancellationError {
+        } catch {
+            locationError = error.localizedDescription
         }
     }
     private var jobsSection: some View {
@@ -263,6 +352,7 @@ struct CustomerDetailView: View {
             let loadedLocations = try await api.fieldLocations(customer.id)
             guard loadGeneration == requestGeneration else { return }
             locations = loadedLocations
+            locationError = nil
             error = nil
         } catch is CancellationError {} catch {
             guard loadGeneration == requestGeneration else { return }
