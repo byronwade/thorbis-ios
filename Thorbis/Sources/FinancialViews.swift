@@ -54,6 +54,8 @@ struct EstimatesView: View {
 
 struct EstimateDetailView: View {
     let id: String
+    /// The job it was opened from; in-person approval stores the signature with that job.
+    var jobID: String? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
@@ -63,6 +65,7 @@ struct EstimateDetailView: View {
     @State private var confirm = false
     @State private var showRevisionEditor = false
     @State private var action = ""
+    @State private var showSignature = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -108,8 +111,15 @@ struct EstimateDetailView: View {
                     NavigationLink { CommercialDocumentView(path: "/v1/estimates/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
                         commercialAction("View PDF", icon: "doc.text")
                     }
+                    if let signature = record.approvalSignature { SignatureBadge(label: "Approved by", signature: signature) }
                     if record.status == "sent", session.can("estimate.approve", feature: "estimates") {
-                        Button("Approve estimate") { action = "Approve"; confirm = true }
+                        if jobID != nil && (record.options ?? []).isEmpty {
+                            // In person: the customer signs on this phone and that approves it.
+                            Button("Customer approves and signs") { showSignature = true }
+                                .buttonStyle(CommercialSecondaryButtonStyle())
+                                .disabled(busy)
+                        }
+                        Button(jobID != nil && (record.options ?? []).isEmpty ? "Approve without a signature" : "Approve estimate") { action = "Approve"; confirm = true }
                             .buttonStyle(CommercialSecondaryButtonStyle())
                             .disabled(busy)
                         Button("Decline estimate", role: .destructive) { action = "Decline"; confirm = true }
@@ -156,6 +166,18 @@ struct EstimateDetailView: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        .sheet(isPresented: $showSignature) {
+            if let record, let jobID, let revision = record.currentRevisionNumber {
+                SignatureCaptureSheet(title: "Approve \(paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") } ?? "estimate")",
+                                      summary: "By signing, \(store.customerName(record.customerId)) approves \"\(record.title)\" as shown.",
+                                      jobID: jobID, suggestedName: store.customerName(record.customerId)) { signature in
+                    do {
+                        self.record = try await api.approveFieldEstimate(id, revisionNumber: revision, signature: signature)
+                        return nil
+                    } catch { return error.localizedDescription }
+                }
+            }
+        }
     }
     private func performAction() async {
         guard let current = record else { return }
@@ -237,6 +259,7 @@ struct InvoiceDetailView: View {
     @State private var showEditDraft = false
     @State private var showCollectPayment = false
     @State private var paymentModel: InvoicePaymentCollectionModel?
+    @State private var showSignature = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -253,6 +276,12 @@ struct InvoiceDetailView: View {
                     }
                     .padding(.horizontal, 15)
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
+                        SignatureBadge(label: "Authorized by", signature: signed)
+                    } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
+                        Button { showSignature = true } label: { commercialAction("Get customer signature", icon: "signature") }
+                            .buttonStyle(.plain)
+                    }
                     Text("Line items").font(Theme.font(16, weight: .semibold)).padding(.top, 8)
                     VStack(spacing: 0) {
                         ForEach(record.lines) { line in CommercialLineView(line: line) }
@@ -288,6 +317,19 @@ struct InvoiceDetailView: View {
         .navigationTitle("Invoice")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .sheet(isPresented: $showSignature) {
+            if let record, let jobID = record.jobId {
+                let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
+                SignatureCaptureSheet(title: "Sign for \(money(total, currency: record.currency))",
+                                      summary: "By signing, \(store.customerName(record.customerId)) authorizes the work and charges on this invoice.",
+                                      jobID: jobID, suggestedName: store.customerName(record.customerId)) { signature in
+                    do {
+                        self.record = try await api.authorizeFieldInvoice(id, expectedLinesRevision: record.linesRevision, signature: signature)
+                        return nil
+                    } catch { return error.localizedDescription }
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             if let paymentModel {
                 InvoiceDetailFooter(

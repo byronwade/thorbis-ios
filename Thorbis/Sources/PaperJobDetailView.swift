@@ -460,7 +460,7 @@ struct JobDetailView: View {
                                     message: "Build one from the price book. It's added to this job automatically.")
                 }
                 ForEach(jobEstimates) { estimate in
-                    NavigationLink { EstimateDetailView(id: estimate.id) } label: {
+                    NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .firstTextBaseline) {
                                 Text(estimate.title).font(Theme.font(16, weight: .semibold))

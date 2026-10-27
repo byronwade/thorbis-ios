@@ -717,6 +717,18 @@ struct EstimateRecord: Codable, Identifiable, Hashable {
     let sentAt: String?
     let approvedAt: String?
     let declinedAt: String?
+    /// Present once the customer signed the approval on a technician's phone.
+    var approvalSignature: FieldSignatureRecord? = nil
+}
+
+/// A signature recorded with an estimate approval or an invoice authorization.
+struct FieldSignatureRecord: Codable, Hashable {
+    let id: String
+    let signerName: String
+    let signedAt: String
+    let imageMediaId: String
+    /// Invoice authorizations only: the line revision the customer signed.
+    var linesRevision: Int? = nil
 }
 
 struct FieldPhysicalServiceEvidence: Codable, Hashable {
@@ -748,6 +760,8 @@ struct InvoiceRecord: Codable, Identifiable, Hashable {
     let voidedAt: String?
     let createdAt: String
     let updatedAt: String
+    /// The customer's latest signed authorization; current when its linesRevision matches.
+    var customerAuthorization: FieldSignatureRecord? = nil
 }
 
 enum FieldEstimateLineSourceInput: Hashable, Encodable {

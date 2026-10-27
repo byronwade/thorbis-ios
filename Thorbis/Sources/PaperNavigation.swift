@@ -28,6 +28,7 @@ struct RootView: View {
     @State private var previewEstimateRevision = false
     @State private var previewNewEstimate = false
     @State private var previewNewCustomer = false
+    @State private var previewSignature = false
     #endif
 
     var body: some View {
@@ -176,6 +177,10 @@ struct RootView: View {
                 .environmentObject(api).environmentObject(session).environmentObject(store)
         }
         .sheet(isPresented: $previewNewCustomer) { NewCustomerSheet() }
+        .sheet(isPresented: $previewSignature) {
+            SignatureCaptureSheet(title: "Approve $970.00", summary: "By signing, Danielle Marlowe approves \"AC repair and compressor replacement\" as shown.",
+                                  jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe") { _ in nil }
+        }
         .sheet(isPresented: $previewNewEstimate) {
             NewEstimateView(customerID: PaperPreview.customerID, jobID: PaperPreview.jobID, title: "AC not cooling")
         }
@@ -213,6 +218,7 @@ struct RootView: View {
             case "price-book": primaryTab = .more; morePath.append(PaperRoute.priceBook)
             case "team": primaryTab = .more; morePath.append(PaperRoute.team)
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
+            case "signature": previewSignature = true
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
             case "notices": primaryTab = .more; morePath.append(PaperRoute.notices)

@@ -217,10 +217,19 @@ extension APIClient {
                               body: Body(expectedRevisionNumber: expectedRevisionNumber))
     }
 
-    func approveFieldEstimate(_ id: String, revisionNumber: Int, depositRequired: FieldMoney? = nil) async throws -> EstimateRecord {
-        struct Body: Encodable { let revisionNumber: Int; let depositRequired: FieldMoney? }
+    func approveFieldEstimate(_ id: String, revisionNumber: Int, depositRequired: FieldMoney? = nil,
+                              signature: FieldSignatureInput? = nil) async throws -> EstimateRecord {
+        struct Body: Encodable { let revisionNumber: Int; let depositRequired: FieldMoney?; let signature: FieldSignatureInput? }
         return try await send("POST", financialPath("/v1/estimates", id: id, suffix: "/approve"),
-                              body: Body(revisionNumber: revisionNumber, depositRequired: depositRequired))
+                              body: Body(revisionNumber: revisionNumber, depositRequired: depositRequired, signature: signature))
+    }
+
+    /// The customer signs the invoice's current lines on the technician's phone (online only).
+    func authorizeFieldInvoice(_ id: String, expectedLinesRevision: Int, signature: FieldSignatureInput) async throws -> InvoiceRecord {
+        struct Body: Encodable { let expectedLinesRevision: Int; let signerName: String; let signedAt: String; let imageMediaId: String }
+        return try await send("POST", financialPath("/v1/invoices", id: id, suffix: "/authorizations"),
+                              body: Body(expectedLinesRevision: expectedLinesRevision, signerName: signature.signerName,
+                                         signedAt: signature.signedAt, imageMediaId: signature.imageMediaId))
     }
 
     func declineFieldEstimate(_ id: String, revisionNumber: Int) async throws -> EstimateRecord {
@@ -314,4 +323,10 @@ extension APIClient {
         }
         return response
     }
+}
+
+struct FieldSignatureInput: Encodable, Hashable {
+    let signerName: String
+    let signedAt: String
+    let imageMediaId: String
 }
