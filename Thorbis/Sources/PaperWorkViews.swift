@@ -36,8 +36,10 @@ struct ScheduleView: View {
     @State private var searchVisible = false
     @State private var showNew = false
     @State private var busyJobID: String?
-    @State private var startedDriving: Set<String> = []
     @State private var progressError: String?
+    /// The Next up job as GET /v1/jobs/{id} returns it: list items carry no allowed transitions,
+    /// so the hero's commit is read from the server rather than guessed from status.
+    @State private var hero: JobRecord?
 
     private var range: ScheduleRange {
         switch tab {
@@ -96,6 +98,7 @@ struct ScheduleView: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 4)
             ScheduleHero(job: first, customer: store.customerName(first.customerId)) { commit(for: first) }
                 .padding(.bottom, 16)
+                .task(id: "\(first.id)|\(first.status)|\(first.updatedAt ?? "")") { await loadHero(first) }
             if jobs.count > 1 {
                 PaperGroupHeader(title: range == .today ? "Later today" : "More jobs", count: jobs.count - 1)
                     .padding(.horizontal, Theme.gutter)
@@ -140,42 +143,73 @@ struct ScheduleView: View {
         .padding(.top, 40)
     }
 
+    /// The next field step for the Next up job, in lifecycle order.
+    private func nextStep(for job: Job) -> String? {
+        guard let hero, hero.id == job.id, session.can("job.edit", feature: "jobs") else { return nil }
+        let allowed = hero.allowedTransitions ?? []
+        return ["en_route", "arrived", "in_progress"].first { allowed.contains($0) && !(hero.status == "paused" && $0 == "in_progress") }
+    }
+
     @ViewBuilder private func commit(for job: Job) -> some View {
-        if startedDriving.contains(job.id) {
-            Label("On the way", systemImage: "checkmark.circle.fill")
-                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.success)
-                .frame(minHeight: 40)
-        } else if MyDayRules.canStartDriving(job, canEdit: session.can("job.edit", feature: "jobs")) {
+        switch nextStep(for: job) {
+        case "en_route":
             Menu {
-                Button("On my way") { Task { await startDriving(job, etaMinutes: nil) } }
+                Button("On my way") { Task { await progress(job, .enRoute(etaMinutes: nil)) } }
                 ForEach([15, 30, 45, 60], id: \.self) { minutes in
-                    Button("On my way · ETA \(minutes) min") { Task { await startDriving(job, etaMinutes: minutes) } }
+                    Button("On my way · ETA \(minutes) min") { Task { await progress(job, .enRoute(etaMinutes: minutes)) } }
                 }
-            } label: {
-                HStack(spacing: 7) {
-                    if busyJobID == job.id { ProgressView().tint(.white) } else { Image(systemName: "location.fill") }
-                    Text("On my way")
-                }
-                .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity).frame(height: 40)
-                .background(Theme.brand, in: RoundedRectangle(cornerRadius: 10))
-            }
+            } label: { commitLabel("On my way", symbol: "location.fill", busy: busyJobID == job.id) }
             .disabled(busyJobID != nil)
             .accessibilityHint("Tells the office and customer you are driving to this job")
+        case "arrived":
+            Button { Task { await progress(job, .arrived()) } } label: {
+                commitLabel("Mark arrived", symbol: "mappin.and.ellipse", busy: busyJobID == job.id)
+            }
+            .buttonStyle(.plain).disabled(busyJobID != nil)
+        case "in_progress":
+            Button { Task { await progress(job, .start) } } label: {
+                commitLabel("Start work", symbol: "wrench.and.screwdriver", busy: busyJobID == job.id)
+            }
+            .buttonStyle(.plain).disabled(busyJobID != nil)
+        default:
+            EmptyView()
         }
     }
 
-    private func startDriving(_ job: Job, etaMinutes: Int?) async {
-        guard busyJobID == nil, !startedDriving.contains(job.id),
-              MyDayRules.canStartDriving(job, canEdit: session.can("job.edit", feature: "jobs")) else { return }
+    private func commitLabel(_ title: String, symbol: String, busy: Bool) -> some View {
+        HStack(spacing: 7) {
+            if busy { ProgressView().tint(.white) } else { Image(systemName: symbol) }
+            Text(title)
+        }
+        .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+        .frame(maxWidth: .infinity).frame(height: 40)
+        .background(Theme.brand, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func loadHero(_ job: Job) async {
+        guard session.can("job.view", feature: "jobs") else { return }
+        let generation = session.generation
+        do {
+            let record = try await api.fieldJob(job.id)
+            guard session.generation == generation else { return }
+            hero = record
+        } catch is CancellationError {} catch {
+            // Without the server's transitions the band stays a link to the job.
+            guard session.generation == generation else { return }
+            hero = nil
+        }
+    }
+
+    private func progress(_ job: Job, _ request: FieldProgressRequest) async {
+        guard busyJobID == nil else { return }
         busyJobID = job.id
         defer { busyJobID = nil }
         do {
-            _ = try await api.progressFieldJob(job.id, request: .enRoute(etaMinutes: etaMinutes))
-            startedDriving.insert(job.id)
+            _ = try await api.progressFieldJob(job.id, request: request)
+            await loadHero(job)
             progressError = nil
             if await store.refresh(api) == .failed {
-                progressError = "Driving started. The latest schedule could not be refreshed."
+                progressError = "Saved. The latest schedule could not be refreshed."
             }
         } catch is CancellationError {
         } catch {

@@ -87,6 +87,8 @@ struct JobDetailView: View {
             if selectedTab == "Invoice" { await loadInvoices() }
             else { await load() }
         }
+        // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
+        .onAppear { if job != nil { Task { await load() } } }
         .onChange(of: selectedTab) { _, tab in
             if tab == "Invoice" { Task { await loadInvoices() } }
         }
@@ -769,6 +771,9 @@ struct JobDetailView: View {
         defer { busy = false }
         do {
             job = try await api.progressFieldJob(jobId, request: request)
+            // The progress response carries no allowedTransitions; re-read the job so the
+            // next step (Mark arrived, Start work, ...) appears without a manual refresh.
+            await load()
             await store.refresh(api)
             error = nil
             return true

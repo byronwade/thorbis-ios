@@ -212,7 +212,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" { enabledFeatures.append("payments") }
             let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
-        case "/v1/jobs": return ["items": jobs()]
+        // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
+        case "/v1/jobs": return ["items": jobs().map { $0.filter { $0.key != "allowedTransitions" } }]
         case "/v1/customers": return ["items": customers()]
         case "/v1/query":
             let priceBookID = "00000000-0000-4000-8000-000000009201"
