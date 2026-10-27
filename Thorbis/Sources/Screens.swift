@@ -496,14 +496,14 @@ struct MoreView: View {
                                 }
                             }
                             ForEach(local, id: \.self) { section in
-                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder", tile: Theme.muted) }
+                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder", tile: Theme.markBurnt) }
                             }
                         }
                     }
                 }
                 group("Account") {
                     NavigationLink(value: PaperRoute.customizeMenu) {
-                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.brandText)
+                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
                     }
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))

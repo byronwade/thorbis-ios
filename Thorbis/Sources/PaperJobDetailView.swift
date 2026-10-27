@@ -9,7 +9,7 @@ struct JobDetailView: View {
         self.jobId = jobId
         self.showsBack = showsBack
         #if DEBUG
-        let previewTabs = ["job-invoice": "Invoice", "job-estimates": "Estimates", "job-activity": "Activity", "job-media": "Media", "job-invoice-empty": "Invoice"]
+        let previewTabs = ["job-invoice": "Invoice", "job-estimates": "Estimates", "job-activity": "Activity", "job-media": "Photos", "job-invoice-empty": "Invoice"]
         _selectedTab = State(initialValue: PaperPreview.enabled ? previewTabs[PaperPreview.screen] ?? "Overview" : "Overview")
         #endif
     }
@@ -48,7 +48,7 @@ struct JobDetailView: View {
     @State private var customerPhone: String?
     @Environment(\.openURL) private var openURL
 
-    private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
+    private let tabs = ["Overview", "Estimates", "Invoice", "Photos", "Activity"]
 
     private var liveActivityKey: String {
         guard let job else { return "" }
@@ -60,7 +60,7 @@ struct JobDetailView: View {
             OfflineBanner().padding(.top, 4)
             if let error { ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12) }
             if let job {
-                if selectedTab == "Media" {
+                if selectedTab == "Photos" {
                     header(job, compact: true)
                     tabBar
                     JobMediaView(jobID: jobId)
@@ -1006,11 +1006,6 @@ struct JobProgressTrack: View {
         }
     }
 
-    private var tint: Color {
-        switch status {
-        case "completed": Theme.success
-        case "arrived", "in_progress", "paused": Theme.warning
-        default: Theme.brandText
-        }
-    }
+    /// One accent for progress; status is the word, not a rainbow (design.thorbis.com Color).
+    private var tint: Color { status == "completed" ? Theme.success : Theme.brandText }
 }

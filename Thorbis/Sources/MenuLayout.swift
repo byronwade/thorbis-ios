@@ -57,17 +57,14 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// Tile color in menus; one hue per kind of work so the menu scans at a glance.
+    /// Quiet mark hue in menus: a few soft families, not a rainbow (design.thorbis.com Color).
     var tint: Color {
         switch self {
-        case .schedule, .jobs: Theme.brandText
-        case .customers, .team: Color(hex: 0x8B5CF6)
-        case .attention: Theme.warning
-        case .inbox, .notices: Color(hex: 0x06B6D4)
-        case .estimates, .invoices, .billing: Theme.success
-        case .money, .reports: Color(hex: 0xEC4899)
-        case .priceBook: Color(hex: 0xF97316)
-        case .drafts: Theme.muted
+        case .schedule, .jobs, .attention: Theme.markAccent
+        case .customers, .team, .notices, .inbox: Theme.markOlive
+        case .estimates, .invoices, .billing, .money: Theme.markForest
+        case .priceBook, .reports: Theme.markPumpkin
+        case .drafts: Theme.markBurnt
         }
     }
 

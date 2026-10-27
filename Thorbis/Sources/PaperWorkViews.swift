@@ -116,42 +116,29 @@ struct ScheduleView: View {
         return first.map { "\(part), \($0)" } ?? part
     }
 
-    /// Today at a glance: the three numbers a tech or dispatcher checks first, each one tap away.
+    /// Today at a glance as chips (design.thorbis.com: a chip is a pill, a value stays a word; not a
+    /// dashboard of equal buttons). Each opens the place that answers it.
     @ViewBuilder private var todaySummary: some View {
         let today = JobFiltering.schedule(store.jobs, range: .today)
         let underWay = PaperWorkGroups.inProgress(store.jobs)
         let unscheduled = NeedsAttention.unscheduled(store.jobs)
-        HStack(spacing: 8) {
-            summaryTile("\(today.count)", "Today", symbol: "calendar", tint: Theme.brandText) { tab = "Today" }
-            if let first = underWay.first {
-                NavigationLink(value: first) {
-                    summaryLabel("\(underWay.count)", "Under way", symbol: "bolt.fill", tint: Theme.warning)
-                }.buttonStyle(.plain)
-            } else {
-                summaryLabel("0", "Under way", symbol: "bolt.fill", tint: Theme.muted)
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                Button { tab = "Today" } label: { Chip(text: "\(today.count) today", icon: "calendar") }.buttonStyle(.plain)
+                if let first = underWay.first {
+                    NavigationLink(value: first) {
+                        Chip(text: "\(underWay.count) under way", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface)
+                    }.buttonStyle(.plain)
+                }
+                if !unscheduled.isEmpty {
+                    Button { tab = "Unscheduled" } label: { Chip(text: "\(unscheduled.count) need a time", icon: "clock") }.buttonStyle(.plain)
+                }
             }
-            summaryTile("\(unscheduled.count)", "Need a time", symbol: "clock.badge.questionmark",
-                        tint: unscheduled.isEmpty ? Theme.muted : Theme.destructive) { tab = "Unscheduled" }
+            .frame(minHeight: 44)
+            .padding(.horizontal, Theme.gutter)
         }
-        .padding(.horizontal, Theme.gutter)
-        .padding(.bottom, 10)
-    }
-
-    private func summaryTile(_ value: String, _ label: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) { summaryLabel(value, label, symbol: symbol, tint: tint) }.buttonStyle(.plain)
-    }
-
-    private func summaryLabel(_ value: String, _ label: String, symbol: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(tint)
-            Text(value).font(Theme.monoFont(22, weight: .semibold)).foregroundStyle(Theme.foreground)
-            Text(label).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
-        .accessibilityElement(children: .combine)
+        .scrollIndicators(.hidden)
+        .padding(.top, -6)
     }
 
     @ViewBuilder private var dayContent: some View {

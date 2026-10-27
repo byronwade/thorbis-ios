@@ -231,7 +231,7 @@ struct CustomerMembershipSection: View {
                     if let error { Text(error).font(Theme.font(12)).foregroundStyle(Theme.destructive) }
                     ForEach(active) { membership in
                         HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: "star.circle.fill").font(.system(size: 18)).foregroundStyle(Theme.brandText).frame(width: 24)
+                            Image(systemName: "star.circle").font(.system(size: 18)).foregroundStyle(Theme.brandText).frame(width: 24)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(membership.name).font(Theme.font(15, weight: .medium))
                                 Text(membershipDetail(membership)).font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -339,7 +339,7 @@ struct MemberChip: View {
         HStack(spacing: 0) {
             Color.clear.frame(width: 0, height: 0)
             if let pricing, pricing.isMember {
-                Chip(text: pricing.discountPercent > 0 ? "Member · \(pricing.discountPercent)% off" : "Member", icon: "star.fill",
+                Chip(text: pricing.discountPercent > 0 ? "Member · \(pricing.discountPercent)% off" : "Member", icon: "star",
                      tint: Theme.brandText, bg: Theme.brandSurface)
             }
         }

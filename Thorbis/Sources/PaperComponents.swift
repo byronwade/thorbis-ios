@@ -92,7 +92,7 @@ struct PaperTabs: View {
                     Button { selection = option } label: {
                         Text(option).font(Theme.font(13, weight: selection == option ? .semibold : .medium))
                             .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(selection == option ? Theme.fill : .clear, in: Capsule())
                             .frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityAddTraits(selection == option ? .isSelected : [])
@@ -196,16 +196,16 @@ struct PaperMenuRow<Trailing: View>: View {
     let symbol: String
     var subtitle: String? = nil
     var tint: Color = Theme.foreground
-    /// A colored icon tile, so a long menu scans by color as well as by word.
+    /// A softly tinted mark, so a long menu scans by color after the word.
     var tile: Color? = nil
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
         HStack(spacing: 14) {
             if let tile {
-                Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tile)
-                    .frame(width: 32, height: 32)
-                    .background(tile.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                // D-020 outline mark at rest; quiet hue on the mark only, never a filled tile.
+                Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(tile)
+                    .frame(width: 22)
             } else {
                 Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(tint == Theme.foreground ? Theme.muted : tint)
                     .frame(width: 22)
@@ -452,11 +452,11 @@ struct PaperQuickActions: View {
         if dialable != nil || mail != nil || directions != nil {
             HStack(spacing: 8) {
                 if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
-                    action("Call", symbol: "phone.fill", label: "Call") { openURL(call) }
-                    action("Text", symbol: "message.fill", label: "Text") { openURL(text) }
+                    action("Call", symbol: "phone", label: "Call") { openURL(call) }
+                    action("Text", symbol: "message", label: "Text") { openURL(text) }
                 }
-                if let mail { action("Email", symbol: "envelope.fill", label: "Email") { openURL(mail) } }
-                if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond.fill", label: "Directions in Maps") { openURL(directions) } }
+                if let mail { action("Email", symbol: "envelope", label: "Email") { openURL(mail) } }
+                if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps") { openURL(directions) } }
             }
         }
     }

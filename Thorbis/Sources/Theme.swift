@@ -51,6 +51,13 @@ enum Theme {
     static let warning = adaptive(light: 0x895400, dark: 0xF59E0B)
     static let warningSurface = adaptive(light: 0xFFF0CB, dark: 0x2A2008)
     static let destructive = adaptive(light: 0xB3262D, dark: 0xEF4444)
+    /// Soft place-mark hues for menu icons (design.thorbis.com Color: olive, forest, pumpkin,
+    /// burnt, or accent mixed down). Only the mark is tinted; the word stays body.
+    static let markOlive = adaptive(light: 0x6E6A2E, dark: 0xB5B07A)
+    static let markForest = adaptive(light: 0x2F6B4A, dark: 0x7FB394)
+    static let markPumpkin = adaptive(light: 0x9A5A1E, dark: 0xD9A06A)
+    static let markBurnt = adaptive(light: 0x8E4630, dark: 0xC98A72)
+    static let markAccent = adaptive(light: 0x3D5FB8, dark: 0x8BA6E8)
 
     private static func adaptive(light: UInt32, dark: UInt32,
                                  highLight: UInt32? = nil, highDark: UInt32? = nil) -> Color {

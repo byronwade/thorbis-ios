@@ -92,7 +92,7 @@ struct EstimateDetailView: View {
                             if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
                                 let memberTotal = record.lines.reduce(0) { $0 + $1.quantity * memberPricing.memberPrice($1.unitPrice.amount) }
                                 HStack {
-                                    Label("Member price · \(memberPricing.discountPercent)% off", systemImage: "star.fill")
+                                    Label("Member price · \(memberPricing.discountPercent)% off", systemImage: "star")
                                         .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
                                     Spacer()
                                     Text(money(memberTotal, currency: record.lines.first?.unitPrice.currency ?? "USD"))
