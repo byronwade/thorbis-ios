@@ -812,7 +812,9 @@ struct InvoicePaymentCollectionSheet: View {
         let cents = model.pendingRequest?.amount.amount ?? min(model.outstandingCents ?? 0, 1_000_000_000_000)
         _amountText = State(initialValue: paymentAmountText(cents))
         _method = State(initialValue: model.pendingRequest?.method ?? .cash)
-        _option = State(initialValue: model.pendingRequest == nil ? .tapToPay : .alreadyCollected)
+        // Tap to Pay needs Apple's entitlement and a card-present terminal first;
+        // open on the fastest path that actually takes money today.
+        _option = State(initialValue: model.pendingRequest == nil ? .paymentLink : .alreadyCollected)
     }
 
     private var amountCents: Int? {
@@ -827,7 +829,6 @@ struct InvoicePaymentCollectionSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         amountHero
-                        tapToPayPanel
                         paymentOptions
                         receiptRow
                         if option == .alreadyCollected {
@@ -988,23 +989,23 @@ struct InvoicePaymentCollectionSheet: View {
 
     private var paymentOptions: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Other ways to pay")
+            Text("How is the customer paying?")
                 .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(Theme.muted)
                 .padding(.horizontal, 2)
             VStack(spacing: 0) {
+                optionRow(title: "Card · send payment link", subtitle: "Text or email a secure card checkout", icon: "link",
+                          selected: option == .paymentLink, busy: isCreatingPayLink) {
+                    guard !hasLockedIntent && !model.waitingForProjection else { return }
+                    option = .paymentLink
+                    amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+                }
+                Divider().overlay(Theme.border).padding(.leading, 48)
                 optionRow(title: "Check", subtitle: "Record a check already received", icon: "doc.text.viewfinder",
                           selected: option == .check) {
                     guard !hasLockedIntent && !model.waitingForProjection else { return }
                     option = .check
                     method = .check
-                }
-                Divider().overlay(Theme.border).padding(.leading, 48)
-                optionRow(title: "Send payment link", subtitle: "Share a secure Stripe checkout link", icon: "link",
-                          selected: option == .paymentLink, busy: isCreatingPayLink) {
-                    guard !hasLockedIntent && !model.waitingForProjection else { return }
-                    option = .paymentLink
-                    amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
                 }
                 Divider().overlay(Theme.border).padding(.leading, 48)
                 optionRow(title: "Cash", subtitle: "Record cash received", icon: "banknote",
