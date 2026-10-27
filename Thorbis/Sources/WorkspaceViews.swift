@@ -160,6 +160,8 @@ struct WorkspaceRevenueView: View {
 
 struct WorkspacePriceBookView: View {
     @ObservedObject var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @Environment(\.dismiss) private var dismiss
     let canList: Bool
     let canViewDetail: Bool
 
@@ -167,48 +169,130 @@ struct WorkspacePriceBookView: View {
     @State private var nextCursor: String?
     @State private var loading = false
     @State private var error: String?
+    @State private var search = ""
+    @State private var category = "All"
+
+    private var categories: [String] {
+        ["All"] + Array(Set(items.map { $0.kind.capitalized })).sorted()
+    }
+
+    private var visibleItems: [PriceBookListItem] {
+        items.filter { item in
+            (category == "All" || item.kind.capitalized == category) &&
+            (search.isEmpty || item.description.localizedCaseInsensitiveContains(search) ||
+             item.kind.localizedCaseInsensitiveContains(search) ||
+             item.unit.localizedCaseInsensitiveContains(search))
+        }
+    }
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
             if !canList {
                 ContentUnavailableView("Price Book unavailable", systemImage: "book.closed",
                                        description: Text("This account cannot view Price Book items."))
             } else {
-                List {
-                    if let error { Text(error).foregroundStyle(.red) }
-                    ForEach(items) { item in
-                        if canViewDetail {
-                            NavigationLink {
-                                WorkspacePriceBookDetailView(api: api, id: item.id)
-                            } label: { row(item) }
-                        } else {
-                            row(item)
+                HStack(alignment: .top, spacing: 12) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.foreground)
+                            .frame(width: 36, height: 36)
+                            .background(Theme.fill, in: Circle())
+                    }
+                    .accessibilityLabel("Back to More")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Price book").font(Theme.font(28, weight: .bold)).foregroundStyle(Theme.foreground)
+                        Text(nextCursor == nil ? "\(items.count) items · Company operations"
+                            : "\(items.count) items loaded · Company operations")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 0)
+                    Text(initials(session.user?.name ?? session.user?.email ?? ""))
+                        .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brand)
+                        .frame(width: 36, height: 36)
+                        .background(Theme.brandSurface, in: Circle())
+                }
+                .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 12)
+                PaperSearchField(text: $search, prompt: nextCursor == nil ? "Search \(items.count) items" : "Search loaded items")
+                ScrollView(.horizontal) {
+                    HStack(spacing: 4) {
+                        ForEach(categories, id: \.self) { option in
+                            Button { category = option } label: {
+                                Text(option == "All" ? "All · \(items.count)" : option)
+                                    .font(Theme.font(14, weight: category == option ? .semibold : .medium))
+                                    .foregroundStyle(category == option ? Theme.foreground : Theme.muted)
+                                    .padding(.horizontal, 10).padding(.vertical, 7)
+                                    .background(category == option ? Theme.fill : .clear, in: Capsule())
+                            }.buttonStyle(.plain)
+                        }
+                    }.padding(.horizontal, 20)
+                }
+                .scrollIndicators(.hidden)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let error { ErrorBanner(message: error) }
+                        if loading { ProgressView("Loading Price Book…") }
+                        ForEach(categories.filter { $0 != "All" && (category == "All" || category == $0) }, id: \.self) { groupName in
+                            let grouped = visibleItems.filter { $0.kind.capitalized == groupName }
+                            if !grouped.isEmpty {
+                                HStack(spacing: 8) {
+                                    Text(groupName).font(Theme.font(13, weight: .medium))
+                                    Text("\(grouped.count)").font(Theme.monoFont(12))
+                                    Spacer()
+                                }.foregroundStyle(Theme.muted)
+                                VStack(spacing: 0) {
+                                    ForEach(grouped) { item in
+                                        if canViewDetail {
+                                            NavigationLink {
+                                                WorkspacePriceBookDetailView(api: api, id: item.id)
+                                            } label: { row(item) }
+                                            .buttonStyle(.plain)
+                                        } else { row(item) }
+                                        if item.id != grouped.last?.id {
+                                            Rectangle().fill(Theme.border).frame(height: 1)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 14)
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                        if nextCursor != nil {
+                            Button("Load more items") { Task { await loadMore() } }
+                                .font(Theme.font(14, weight: .medium))
+                                .frame(maxWidth: .infinity).frame(height: 42)
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                                .disabled(loading)
+                        }
+                        if visibleItems.isEmpty && !loading && error == nil {
+                            ContentUnavailableView(items.isEmpty ? "No Price Book items" : "No matching items",
+                                systemImage: "book.closed")
                         }
                     }
-                    if nextCursor != nil {
-                        Button("Load more items") { Task { await loadMore() } }
-                            .disabled(loading)
-                    }
-                }
-                .overlay {
-                    if items.isEmpty && !loading && error == nil {
-                        ContentUnavailableView("No Price Book items", systemImage: "book.closed")
-                    }
+                    .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 100)
                 }
                 .refreshable { await refresh() }
                 .task { await refresh() }
             }
         }
-        .navigationTitle("Price Book")
+        .background(Theme.background)
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private func row(_ item: PriceBookListItem) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(item.description).font(.headline)
-            Text("\(item.kind.capitalized) · \(item.unit) · \(money(item.sellPrice.amount, currency: item.sellPrice.currency))")
-                .font(.subheadline).foregroundStyle(.secondary)
-            if item.archivedAt != nil { Text("Archived").font(.caption).foregroundStyle(.secondary) }
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.description).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text("\(item.kind.capitalized) · \(item.unit)")
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                if item.archivedAt != nil { Text("Archived").font(Theme.font(11)).foregroundStyle(Theme.warning) }
+            }
+            Spacer(minLength: 6)
+            Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
+                .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
         }
+        .frame(minHeight: 62)
+        .contentShape(Rectangle())
     }
 
     private func refresh() async {
@@ -259,6 +343,7 @@ private struct WorkspacePriceBookDetailView: View {
             }
         }
         .navigationTitle(detail?.revision.description ?? "Price Book item")
+        .toolbar(.visible, for: .navigationBar)
         .task {
             do { detail = try await api.priceBookItem(id); error = nil }
             catch { self.error = error.localizedDescription }
