@@ -51,9 +51,12 @@ struct ScheduleView: View {
         VStack(spacing: 0) {
             PaperHeader(title: "Schedule", icon: "calendar", subtitle: subtitle) { searchVisible.toggle() }
             if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
-            PaperTabs(options: ["Today", "Week", "Map"], selection: $tab)
+            HStack(spacing: 0) {
+                PaperTabs(options: ["Today", "Week", "Map"], selection: $tab)
+                rangeMenu
+            }
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
                     if let error = store.error { ErrorBanner(message: error) }
                     if store.loading { ProgressView("Updating schedule…") }
                     if tab == "Map" {
@@ -61,11 +64,10 @@ struct ScheduleView: View {
                             description: Text("Job list records do not include map coordinates. Use Today or Week to open a job."))
                             .frame(maxWidth: .infinity)
                     } else {
-                        rangeMenu
                         scheduleContent
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 120)
+                .padding(.top, 8).padding(.bottom, 120)
             }
             .refreshable { await store.refresh(api) }
         }
@@ -85,40 +87,37 @@ struct ScheduleView: View {
     }
 
     private var rangeMenu: some View {
-        HStack {
-            Spacer()
-            Menu {
-                Button("Today") { tab = "Today" }
-                Button("Week") { tab = "Week" }
-                Button("Unscheduled") { tab = "Unscheduled" }
-            } label: {
-                Label(tab == "Unscheduled" ? "Unscheduled" : "More ranges", systemImage: "calendar.badge.clock")
-                    .font(Theme.font(12, weight: .medium))
-                    .foregroundStyle(Theme.muted)
-            }
+        Menu {
+            Button("Today") { tab = "Today" }
+            Button("Week") { tab = "Week" }
+            Button("Unscheduled") { tab = "Unscheduled" }
+        } label: {
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 16)).foregroundStyle(tab == "Unscheduled" ? Theme.brand : Theme.muted)
+                .frame(width: 36, height: 36)
         }
+        .accessibilityLabel("Schedule range, \(tab)")
+        .padding(.trailing, 16)
+        .padding(.bottom, 12)
     }
 
     @ViewBuilder private var scheduleContent: some View {
         if let first = jobs.first {
             Text(tab == "Unscheduled" ? "Needs a time" : "Next up")
-                .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 16)
             ScheduleHero(job: first, customer: store.customerName(first.customerId))
             if jobs.count > 1 {
                 HStack {
                     Text(tab == "Today" ? "Later today" : tab == "Week" ? "Later this week" : "More jobs")
-                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    Text("\(jobs.count - 1)").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                     Spacer()
+                    Text("\(jobs.count - 1) jobs").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                 }
-                VStack(spacing: 0) {
-                    ForEach(Array(jobs.dropFirst())) { job in
-                        ScheduleCompactRow(job: job, customer: store.customerName(job.customerId))
-                        if job.id != jobs.last?.id { Rectangle().fill(Theme.border).frame(height: 1) }
-                    }
+                .padding(.horizontal, 16)
+                ForEach(Array(jobs.dropFirst())) { job in
+                    ScheduleCompactRow(job: job, customer: store.customerName(job.customerId))
                 }
-                .padding(.horizontal, 14)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
             }
         } else if !store.loading {
             VStack(spacing: 12) {
@@ -145,6 +144,7 @@ struct ScheduleView: View {
             .padding(.vertical, 44)
             .padding(.horizontal, 20)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 16)
         }
     }
 }
@@ -155,32 +155,46 @@ private struct ScheduleHero: View {
 
     var body: some View {
         NavigationLink(value: job) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
                     if let date = JobFiltering.date(job.scheduledFor) {
                         Text(date.formatted(.dateTime.hour().minute()))
-                            .font(Theme.monoFont(13, weight: .semibold)).foregroundStyle(Theme.brand)
+                            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .lineLimit(1).minimumScaleFactor(0.8)
                     } else {
-                        Text("Time not set").font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                        Text("No time").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                     }
-                    Spacer()
-                    Text(job.shortRef).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                    Capsule().fill(Theme.brand).frame(width: 22, height: 3)
                 }
-                Text(job.title).font(Theme.font(19, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .multilineTextAlignment(.leading)
-                Text(customer).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                HStack(spacing: 6) {
-                    Image(systemName: statusIcon(job.status).0)
-                    Text(job.status.statusLabel)
+                .frame(width: 56, alignment: .leading)
+                .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(job.title).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            .multilineTextAlignment(.leading)
+                        Text(customer).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                    HStack(spacing: 6) {
+                        HStack(spacing: 5) {
+                            Image(systemName: statusIcon(job.status).0)
+                            Text(job.status.statusLabel)
+                        }
+                        .font(Theme.font(12, weight: .medium))
+                        .foregroundStyle(statusIcon(job.status).1)
+                        .padding(.horizontal, 8).frame(height: 22)
+                        .background(statusIcon(job.status).1.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        Text(job.shortRef).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 8).frame(height: 22)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6))
+                    }
                 }
-                .font(Theme.font(12, weight: .medium))
-                .foregroundStyle(statusIcon(job.status).1)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(statusIcon(job.status).1.opacity(0.12), in: Capsule())
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(Theme.surface)
+            .overlay(alignment: .top) { Theme.border.frame(height: 1) }
+            .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(job.title), \(customer), \(job.status.statusLabel)")
@@ -194,22 +208,25 @@ private struct ScheduleCompactRow: View {
     var body: some View {
         NavigationLink(value: job) {
             HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
+                Group {
                     if let date = JobFiltering.date(job.scheduledFor) {
-                        Text(date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(12, weight: .medium))
-                    } else { Text("—").font(Theme.monoFont(12)) }
-                    Text(job.shortRef).font(Theme.monoFont(10)).foregroundStyle(Theme.muted)
+                        Text(date.formatted(.dateTime.hour().minute()))
+                    } else { Text("—") }
                 }
-                .frame(width: 74, alignment: .leading)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(job.title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
-                    Text("\(customer) · \(job.status.statusLabel)")
-                        .font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(width: 56, alignment: .leading)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
+                    Text("\(job.status.statusLabel) · \(customer)")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(Theme.muted)
+                Image(systemName: statusIcon(job.status).0)
+                    .font(.system(size: 16)).foregroundStyle(statusIcon(job.status).1)
             }
-            .padding(.vertical, 13)
+            .frame(minHeight: 44)
+            .padding(.horizontal, 16).padding(.vertical, 5)
         }
         .buttonStyle(.plain)
     }
@@ -283,18 +300,19 @@ struct JobsView: View {
                 Text(title).font(Theme.font(13, weight: .medium))
                 Text("\(jobs.count)").font(Theme.monoFont(12))
                 Spacer()
-                Rectangle().fill(Theme.border).frame(width: 22, height: 1)
+                Image(systemName: "plus").font(.system(size: 13)).frame(width: 20, height: 20)
             }.foregroundStyle(Theme.muted)
-            VStack(spacing: 0) {
+            .padding(.horizontal, 2).padding(.bottom, 6)
+            VStack(spacing: 2) {
                 ForEach(jobs) { job in
                     NavigationLink(value: job) {
                         HStack(spacing: 10) {
                             Image(systemName: statusIcon(job.status).0)
                                 .font(.system(size: 16)).foregroundStyle(statusIcon(job.status).1)
                                 .frame(width: 22)
-                            Text(job.shortRef).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
-                                .frame(width: 72, alignment: .leading)
-                            Text(job.title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                            Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                .frame(width: 62, alignment: .leading)
+                            Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                             if let name = job.assignedToUserId == session.user?.id ? session.user?.name : nil {
@@ -305,13 +323,12 @@ struct JobsView: View {
                             }
                         }
                         .frame(minHeight: 44)
+                        .padding(.horizontal, 2).padding(.vertical, 4)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 8)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 }
