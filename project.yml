@@ -2,59 +2,40 @@ name: Thorbis
 options:
   bundleIdPrefix: com.thorbis
   deploymentTarget:
-    iOS: '18.0'
-packages:
-  ThorbisCore:
-    path: Core
+    iOS: "17.0"
 settings:
   base:
-    SWIFT_VERSION: '6.0'
-    TARGETED_DEVICE_FAMILY: '1,2'
-    MARKETING_VERSION: '1.0'
-    CURRENT_PROJECT_VERSION: '1'
-    GENERATE_INFOPLIST_FILE: YES
-    ENABLE_USER_SCRIPT_SANDBOXING: YES
-    DEVELOPMENT_TEAM: ''
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "11"
 targets:
   Thorbis:
     type: application
     platform: iOS
-    sources: [Thorbis]
-    dependencies:
-      - package: ThorbisCore
+    sources:
+      - Thorbis/Sources
+      - path: Thorbis/Resources/Fonts
+      - path: Thorbis/Resources/Assets.xcassets
+      - path: Thorbis/Resources/PrivacyInfo.xcprivacy
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thorbis.field
-        INFOPLIST_KEY_CFBundleDisplayName: Thorbis
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.business
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
-        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        INFOPLIST_KEY_NSCameraUsageDescription: Thorbis uses the camera to take job photos you choose to attach to a job.
+        INFOPLIST_KEY_CFBundleDisplayName: Thorbis
+        INFOPLIST_FILE: Thorbis/Resources/Info.plist
+        DEVELOPMENT_TEAM: T677262U5B
+        CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-    info:
-      path: Thorbis/Resources/Info.plist
   ThorbisTests:
     type: bundle.unit-test
     platform: iOS
     sources: [ThorbisTests]
     dependencies:
       - target: Thorbis
-  ThorbisUITests:
-    type: bundle.ui-testing
-    platform: iOS
-    sources: [ThorbisUITests]
-    dependencies:
-      - target: Thorbis
-schemes:
-  Thorbis:
-    build:
-      targets:
-        Thorbis: all
-        ThorbisTests: [test]
-        ThorbisUITests: [test]
-    test:
-      targets: [ThorbisTests, ThorbisUITests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thorbis.field.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
