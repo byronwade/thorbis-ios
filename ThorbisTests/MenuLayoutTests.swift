@@ -51,4 +51,15 @@ final class MenuLayoutTests: XCTestCase {
             XCTAssertNotNil(item.route, item.rawValue)
         }
     }
+
+    func testCompanyLayoutIdsMapToMenuItems() throws {
+        XCTAssertEqual(MenuItem(serverTab: "revenue"), .money)
+        XCTAssertEqual(MenuItem.money.serverID, "revenue")
+        XCTAssertEqual(MenuItem(serverTab: "priceBook"), .priceBook)
+        XCTAssertNil(MenuItem(serverTab: "more"))
+        let json = #"{"tabs":["jobs","revenue","more"],"hiddenTabs":[],"moreMenu":[{"id":"reports","hidden":true},{"id":"future","hidden":true}],"jobTabs":["overview"],"version":3,"updatedAt":"2026-10-27T19:00:00Z","updatedBy":"u"}"#
+        let layout = try JSONDecoder().decode(CompanyMobileLayout.self, from: Data(json.utf8))
+        XCTAssertEqual(layout.tabs.compactMap(MenuItem.init(serverTab:)), [.jobs, .money])
+        XCTAssertEqual(layout.moreMenu?.filter(\.hidden).compactMap { MenuItem(serverTab: $0.id) }, [.reports])
+    }
 }

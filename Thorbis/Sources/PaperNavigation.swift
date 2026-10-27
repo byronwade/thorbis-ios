@@ -40,6 +40,14 @@ struct RootView: View {
         // The Home Screen widget reads today's jobs from the shared container.
         .onChange(of: store.jobs, initial: true) { writeTodaySnapshot() }
         .onChange(of: store.customers) { writeTodaySnapshot() }
+        // The owner's company-wide tabs and More menu, when one has been saved.
+        .task(id: session.activeOrganization?.id) {
+            guard session.activeOrganization != nil else { return }
+            #if DEBUG
+            if PaperPreview.enabled { return }
+            #endif
+            await layout.refreshCompanyLayout(api: api)
+        }
     }
 
     private func writeTodaySnapshot() {
