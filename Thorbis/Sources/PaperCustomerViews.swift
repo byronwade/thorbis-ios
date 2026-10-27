@@ -201,6 +201,11 @@ struct CustomerDetailView: View {
     @State private var isRemovingLocation = false
     @State private var locationError: String?
     @State private var tab = "Overview"
+    @State private var smsConsent: CustomerSmsConsent?
+    @State private var smsConsentLoaded = false
+    @State private var smsConsentKey = UUID().uuidString
+    @State private var smsConsentChoice: Bool?
+    @State private var smsConsentError: String?
     private var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
     private var contacts: [CustomerContactRecord] { contactState.contacts }
@@ -269,6 +274,7 @@ struct CustomerDetailView: View {
             }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
         }
         .task { await load() }
+        .task { await loadSmsConsent() }
         .onChange(of: tab) { _, selectedTab in
             if selectedTab == "Activity" { Task { await loadActivity(reset: true) } }
         }
@@ -337,9 +343,79 @@ struct CustomerDetailView: View {
                 if let industry = record.industry { detailRow("Industry", value: industry) }
                 if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel) }
                 if let terms = record.billingTerms { detailRow("Billing terms", value: terms) }
+                if smsConsentLoaded { smsConsentRow }
             }
         }.padding(.horizontal, 20).padding(.bottom, 18)
     }
+    /// Job texts: what the customer told staff about text messages for their jobs.
+    private var smsConsentRow: some View {
+        HStack {
+            Text("Job texts").foregroundStyle(Theme.muted)
+            Spacer()
+            let granted = smsConsent?.decision == "grant"
+            if canEdit {
+                Menu {
+                    Button("Customer agreed to job texts", systemImage: "checkmark.message") { smsConsentChoice = true }
+                        .disabled(granted)
+                    Button("Customer asked to stop texts", systemImage: "nosign") { smsConsentChoice = false }
+                        .disabled(smsConsent?.decision == "revoke")
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(smsConsentLabel)
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(granted ? Theme.success : Theme.foreground)
+                    .frame(minHeight: 44)
+                }
+            } else {
+                Text(smsConsentLabel).foregroundStyle(granted ? Theme.success : Theme.foreground)
+            }
+        }
+        .font(Theme.font(14))
+        .frame(minHeight: 44)
+        .confirmationDialog(smsConsentChoice == true ? "Record that the customer agreed to job texts?" : "Record that the customer asked to stop job texts?",
+                            isPresented: Binding(get: { smsConsentChoice != nil }, set: { if !$0 { smsConsentChoice = nil } }),
+                            titleVisibility: .visible) {
+            Button(smsConsentChoice == true ? "Customer agreed" : "Customer asked to stop") {
+                if let grant = smsConsentChoice { Task { await recordSmsConsent(grant) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only record what the customer told you themselves.")
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if let smsConsentError { Text(smsConsentError).font(Theme.font(11)).foregroundStyle(Theme.destructive).offset(y: 14) }
+        }
+    }
+
+    private var smsConsentLabel: String {
+        guard let smsConsent else { return "Not asked" }
+        let date = JobFiltering.date(smsConsent.recordedAt).map { " · " + $0.formatted(.dateTime.month(.abbreviated).day()) } ?? ""
+        return (smsConsent.decision == "grant" ? "Allowed" : "Stopped") + date
+    }
+
+    private func loadSmsConsent() async {
+        guard session.can("customer.view", feature: "core_crm") else { return }
+        do {
+            smsConsent = try await api.customerSmsConsent(customer.id)
+            smsConsentLoaded = true
+        } catch {
+            // An older server or no access: leave the row out rather than show a guess.
+        }
+    }
+
+    private func recordSmsConsent(_ grant: Bool) async {
+        do {
+            smsConsent = try await api.recordCustomerSmsConsent(customer.id, grant: grant, expectedVersion: smsConsent?.version,
+                                                                idempotencyKey: smsConsentKey)
+            smsConsentKey = UUID().uuidString
+            smsConsentError = nil
+        } catch is CancellationError {
+        } catch {
+            smsConsentError = error.isConnectivityFailure ? "Needs a connection" : "Couldn't save. Pull to refresh and try again."
+        }
+    }
+
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { contactSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }

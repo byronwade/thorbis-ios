@@ -1096,3 +1096,46 @@ extension APIClient {
 }
 
 private struct EmptyObject: Encodable {}
+
+/// The customer's current decision on transactional job texts (GET /v1/customers/{id}/sms-consent).
+struct CustomerSmsConsent: Codable, Hashable {
+    let decision: String
+    let version: String
+    let recordedAt: String
+}
+
+extension APIClient {
+    /// Nil until a decision has been recorded.
+    func customerSmsConsent(_ customerID: String) async throws -> CustomerSmsConsent? {
+        try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"))
+    }
+
+    /// Records an explicit decision the customer gave staff. Online only; the key makes a retry safe.
+    func recordCustomerSmsConsent(_ customerID: String, grant: Bool, expectedVersion: String?,
+                                  idempotencyKey: String) async throws -> CustomerSmsConsent {
+        struct Body: Encodable {
+            let customerId: String
+            let purpose = "transactional_job_notice"
+            let decision: String
+            let expectedVersion: String?
+            let evidenceRef: String
+            let idempotencyKey: String
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(customerId, forKey: .customerId)
+                try c.encode(purpose, forKey: .purpose)
+                try c.encode(decision, forKey: .decision)
+                try c.encode(expectedVersion, forKey: .expectedVersion)  // null is meaningful: no prior decision
+                try c.encode(evidenceRef, forKey: .evidenceRef)
+                try c.encode(idempotencyKey, forKey: .idempotencyKey)
+            }
+            enum CodingKeys: String, CodingKey { case customerId, purpose, decision, expectedVersion, evidenceRef, idempotencyKey }
+        }
+        struct Receipt: Decodable { let version: String; let decision: String; let recordedAt: String }
+        let receipt: Receipt = try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"),
+                                              body: Body(customerId: customerID.lowercased(), decision: grant ? "grant" : "revoke",
+                                                         expectedVersion: expectedVersion, evidenceRef: "Told staff in person or by phone; recorded in the Thorbis iPhone app",
+                                                         idempotencyKey: idempotencyKey))
+        return CustomerSmsConsent(decision: receipt.decision, version: receipt.version, recordedAt: receipt.recordedAt)
+    }
+}

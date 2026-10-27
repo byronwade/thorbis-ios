@@ -316,6 +316,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                      "primary": false, "createdAt": now, "updatedAt": now] as [String: Any]
                 ]]
             }
+            if path == "/v1/customers/\(id)/sms-consent" {
+                return ["decision": "grant", "version": "00000000-0000-4000-8000-000000006001", "recordedAt": "2026-10-20T15:00:00Z"]
+            }
             if path == "/v1/customers/\(id)/locations" {
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
                                     "label": "Home", "kind": "service", "address": address,
