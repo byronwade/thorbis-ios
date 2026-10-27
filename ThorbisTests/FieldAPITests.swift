@@ -237,6 +237,44 @@ final class FieldAPITests: XCTestCase {
         XCTAssertEqual(request.parking, "Rear lot")
     }
 
+    func testServiceLocationMutationRejectsAnOlderPendingRefresh() {
+        let original = serviceLocation(id: "original", label: "Before")
+        let updated = serviceLocation(id: "original", label: "After")
+        var state = ServiceLocationCollectionState()
+        state.save(original)
+
+        let pendingRefresh = state.beginLoad()
+        state.save(updated)
+
+        XCTAssertFalse(state.receive([original], generation: pendingRefresh))
+        XCTAssertEqual(state.locations, [updated])
+
+        let secondPendingRefresh = state.beginLoad()
+        state.remove(id: updated.id)
+
+        XCTAssertFalse(state.receive([updated], generation: secondPendingRefresh))
+        XCTAssertTrue(state.locations.isEmpty)
+    }
+
+    private func serviceLocation(id: String, label: String) -> ServiceLocationRecord {
+        ServiceLocationRecord(
+            id: id,
+            organizationId: org,
+            customerId: customerID,
+            label: label,
+            kind: "service",
+            address: "123 Main St",
+            notes: nil,
+            coordinates: nil,
+            gateCode: nil,
+            alarmCode: nil,
+            dogOnSite: nil,
+            parking: nil,
+            createdAt: "2026-10-27T12:00:00Z",
+            updatedAt: "2026-10-27T12:00:00Z"
+        )
+    }
+
     func testServiceLocationDraftRejectsMissingRequiredValuesAndInvalidCoordinatePairs() {
         XCTAssertThrowsError(try ServiceLocationDraft(label: " ", kind: "service", address: "123 Main").makeCreateRequest())
         XCTAssertThrowsError(try ServiceLocationDraft(label: "Home", kind: "service", address: " ").makeCreateRequest())

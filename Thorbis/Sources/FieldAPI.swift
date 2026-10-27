@@ -110,6 +110,37 @@ struct ServiceLocationRecord: Codable, Identifiable, Hashable {
     let updatedAt: String
 }
 
+struct ServiceLocationCollectionState {
+    private(set) var locations: [ServiceLocationRecord] = []
+    private var generation = 0
+
+    mutating func beginLoad() -> Int {
+        generation += 1
+        return generation
+    }
+
+    @discardableResult
+    mutating func receive(_ locations: [ServiceLocationRecord], generation: Int) -> Bool {
+        guard generation == self.generation else { return false }
+        self.locations = locations
+        return true
+    }
+
+    mutating func save(_ location: ServiceLocationRecord) {
+        generation += 1
+        if let index = locations.firstIndex(where: { $0.id == location.id }) {
+            locations[index] = location
+        } else {
+            locations.append(location)
+        }
+    }
+
+    mutating func remove(id: String) {
+        generation += 1
+        locations.removeAll { $0.id == id }
+    }
+}
+
 struct JobNoteRecord: Codable, Identifiable, Hashable {
     let id: String
     let organizationId: String

@@ -104,7 +104,7 @@ struct CustomerDetailView: View {
     @State private var record: CustomerRecord?
     @State private var contactState = CustomerContactCollectionState()
     @State private var loadGeneration = 0
-    @State private var locations: [ServiceLocationRecord] = []
+    @State private var locationState = ServiceLocationCollectionState()
     @State private var error: String?
     @State private var showNewJob = false
     @State private var showContact = false
@@ -118,6 +118,7 @@ struct CustomerDetailView: View {
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
     private var contacts: [CustomerContactRecord] { contactState.contacts }
     private var contactsLoaded: Bool { contactState.isLoaded }
+    private var locations: [ServiceLocationRecord] { locationState.locations }
 
     var body: some View {
         ScrollView {
@@ -190,11 +191,7 @@ struct CustomerDetailView: View {
         }
         .sheet(item: $locationSheet) { item in
             ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
-                if let index = locations.firstIndex(where: { $0.id == saved.id }) {
-                    locations[index] = saved
-                } else {
-                    locations.append(saved)
-                }
+                locationState.save(saved)
                 locationError = nil
             }
         }
@@ -305,7 +302,7 @@ struct CustomerDetailView: View {
         }
         do {
             try await api.removeFieldLocation(customer.id, location.id)
-            locations.removeAll { $0.id == location.id }
+            locationState.remove(id: location.id)
             locationError = nil
         } catch is CancellationError {
         } catch {
@@ -341,6 +338,7 @@ struct CustomerDetailView: View {
     private func load() async {
         loadGeneration += 1
         let requestGeneration = loadGeneration
+        let locationRequestGeneration = locationState.beginLoad()
         contactState.beginLoading()
         do {
             let loadedRecord = try await api.fieldCustomer(customer.id)
@@ -351,8 +349,9 @@ struct CustomerDetailView: View {
             contactState.receive(loadedContacts)
             let loadedLocations = try await api.fieldLocations(customer.id)
             guard loadGeneration == requestGeneration else { return }
-            locations = loadedLocations
-            locationError = nil
+            if locationState.receive(loadedLocations, generation: locationRequestGeneration) {
+                locationError = nil
+            }
             error = nil
         } catch is CancellationError {} catch {
             guard loadGeneration == requestGeneration else { return }
