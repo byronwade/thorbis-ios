@@ -1,3 +1,7 @@
+// The test bundle also compiles this file; there the shared types live in the app module.
+#if WIDGET_TESTS
+@testable import Thorbis
+#endif
 import ActivityKit
 import SwiftUI
 import WidgetKit

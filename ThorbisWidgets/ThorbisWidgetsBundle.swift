@@ -4,6 +4,7 @@ import WidgetKit
 @main
 struct ThorbisWidgetsBundle: WidgetBundle {
     var body: some Widget {
+        TodayJobsWidget()
         JobLiveActivityWidget()
     }
 }

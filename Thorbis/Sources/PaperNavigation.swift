@@ -33,6 +33,18 @@ struct RootView: View {
                 navigation(wide: geometry.size.width >= 1000)
             }.background(Theme.background)
         }
+        // The Home Screen widget reads today's jobs from the shared container.
+        .onChange(of: store.jobs, initial: true) { writeTodaySnapshot() }
+        .onChange(of: store.customers) { writeTodaySnapshot() }
+    }
+
+    private func writeTodaySnapshot() {
+        guard !store.jobs.isEmpty, session.can("job.view", feature: "jobs") else { return }
+        let items = store.jobs.map {
+            TodaySnapshot.Item(id: $0.id, at: JobFiltering.date($0.scheduledFor), title: $0.title,
+                               customer: store.customerName($0.customerId), status: $0.status)
+        }
+        TodaySnapshot.save(TodaySnapshot(items: items, writtenAt: Date()))
     }
 
     @ViewBuilder private func navigation(wide: Bool) -> some View {
