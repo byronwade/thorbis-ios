@@ -2,7 +2,16 @@
 
 Source: [current Thorbis Mobile page in Paper](https://app.paper.design/file/01KY0S86CYXENWSH216F3ZB058/B-0), token hash `2803f4aa`, exported 2026-10-26. JSON files contain original Paper JSX, not hand-measured screenshots. Inter and Geist Mono are bundled with their OFL licenses.
 
-## Implemented presentation
+## Paper redesign (branch claude/paper-redesign)
+
+- iPhone navigation is a native `TabView` with Paper's technician dock: Schedule, Jobs, Customers, More and a system Search tab. iOS 26 draws it as Paper's floating pill; the deployment target is iOS 18 for the search tab role. The overlay menu and the Done-sheets for Schedule and Customers are gone. Inbox, Estimates, Invoices, Price book, Revenue, drafts and on-device records live in More.
+- Tab roots use Paper's 34/700 large title with a filter circle and account avatar; Paper's compact 22pt switcher title is retired (one header grammar). Segment tabs are pills; the gutter is 20 pt.
+- Schedule's Next up band carries the old Arrive tab's On my way commit. Week groups by day. Paper's Map tab is replaced by Unscheduled until job records carry coordinates.
+- Job, customer, estimates, invoices and price book screens use the native navigation bar (system back and swipe-back) with Paper record headers below it.
+- Leading coloured rails (Next up underline, week bars, composer caret) are removed per design.thorbis.com D-018.
+- Every type-ramp step scales with its nearest Dynamic Type style; lanes use `@ScaledMetric` and rows stack at accessibility sizes. `Theme.brandText` (#5285FF dark, #2558E0 light) replaces brand blue as text and tint for 4.5:1 contrast.
+
+## Implemented presentation (before the redesign)
 
 - Shared colors/type, compact screen headers, the native Jobs/Arrive/Inbox tab bar with More workspace navigation, workspace selector, search and settings presentation; signed-in workspace navigation uses the official Thorbis mark, while login and customer estimate headers use the mark-and-wordmark lockup.
 - Login with the official Thorbis logo lockup and password-reset request; schedule and empty state; jobs and a Paper-styled My Day list; customer list/detail with contact create/edit, primary promotion and removal plus service-location management; job overview/media/activity/estimate/invoice tabs; price book; new-job composer for title, description, and customer, followed by job-detail scheduling and assignment; estimate/invoice detail, payment collection and reasoned full refunds with pending-status recovery, estimate creation, Paper-aligned estimate revision and option-package editor, and a token-scoped native customer estimate decision screen.

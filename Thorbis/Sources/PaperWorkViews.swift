@@ -189,6 +189,7 @@ private struct ScheduleHero<Commit: View>: View {
     let job: Job
     let customer: String
     @ViewBuilder var commit: () -> Commit
+    @ScaledMetric(relativeTo: .caption) private var laneWidth: CGFloat = 60
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -199,7 +200,7 @@ private struct ScheduleHero<Commit: View>: View {
             }
             .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
             .lineLimit(1).minimumScaleFactor(0.8)
-            .frame(width: 60, alignment: .leading).padding(.top, 3)
+            .frame(width: laneWidth, alignment: .leading).padding(.top, 3)
             VStack(alignment: .leading, spacing: 10) {
                 NavigationLink(value: job) {
                     HStack(alignment: .top) {
@@ -215,12 +216,9 @@ private struct ScheduleHero<Commit: View>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(job.title), \(customer), \(job.status.statusLabel)")
-                HStack(spacing: 6) {
-                    let (symbol, color) = statusIcon(job.status)
-                    Chip(text: job.status.statusLabel, icon: symbol, tint: color, bg: job.status == "en_route" || job.status == "dispatched" ? Theme.brandSurface : Theme.fill)
-                    Text(job.shortRef).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 9).frame(minHeight: 24)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { chips }
+                    VStack(alignment: .leading, spacing: 6) { chips }
                 }
                 commit()
             }
@@ -233,27 +231,47 @@ private struct ScheduleHero<Commit: View>: View {
     }
 }
 
+private extension ScheduleHero {
+    @ViewBuilder var chips: some View {
+        let (symbol, color) = statusIcon(job.status)
+        Chip(text: job.status.statusLabel, icon: symbol, tint: color, bg: job.status == "en_route" || job.status == "dispatched" ? Theme.brandSurface : Theme.fill)
+        Text(job.shortRef).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
+            .lineLimit(1).fixedSize()
+            .padding(.horizontal, 9).frame(minHeight: 24)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 private struct ScheduleCompactRow: View {
     enum TimeStyle { case time }
     let job: Job
     let customer: String
     var timeStyle: TimeStyle = .time
+    @ScaledMetric(relativeTo: .caption) private var laneWidth: CGFloat = 60
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var time: some View {
+        Group {
+            if let date = JobFiltering.date(job.scheduledFor) {
+                Text(date.formatted(.dateTime.hour().minute()))
+            } else { Text("—") }
+        }
+        .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
+        .lineLimit(1).minimumScaleFactor(0.8)
+    }
 
     var body: some View {
         NavigationLink(value: job) {
             HStack(alignment: .center, spacing: 10) {
-                Group {
-                    if let date = JobFiltering.date(job.scheduledFor) {
-                        Text(date.formatted(.dateTime.hour().minute()))
-                    } else { Text("—") }
+                if !typeSize.isAccessibilitySize {
+                    time.frame(width: laneWidth, alignment: .leading)
                 }
-                .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .frame(width: 60, alignment: .leading)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
+                    if typeSize.isAccessibilitySize { time }
+                    Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                     Text("\(job.status.statusLabel) · \(customer)")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                 }
                 Spacer(minLength: 0)
                 StatusRing(status: job.status)
@@ -275,6 +293,8 @@ struct JobsView: View {
     @State private var search = ""
     @State private var searchVisible = false
     @State private var showNew = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .caption) private var refWidth: CGFloat = 66
 
     private var jobs: [Job] {
         let assigned = tab == "Assigned" ? (session.user?.id ?? "") : nil
@@ -341,11 +361,19 @@ struct JobsView: View {
                     NavigationLink(value: job) {
                         HStack(spacing: 10) {
                             StatusRing(status: job.status)
-                            Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                                .frame(width: 66, alignment: .leading)
-                            Text(job.title).font(Theme.font(15, weight: .medium))
-                                .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
-                                .lineLimit(1)
+                            if typeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                    Text(job.title).font(Theme.font(15, weight: .medium))
+                                        .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
+                                }
+                            } else {
+                                Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                    .frame(width: refWidth, alignment: .leading)
+                                Text(job.title).font(Theme.font(15, weight: .medium))
+                                    .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
+                                    .lineLimit(1)
+                            }
                             Spacer(minLength: 0)
                             if job.assignedToUserId != nil {
                                 let mine = job.assignedToUserId == session.user?.id
@@ -354,6 +382,7 @@ struct JobsView: View {
                                     .foregroundStyle(mine ? Theme.brandText : Theme.muted)
                                     .frame(width: 24, height: 24)
                                     .background(mine ? Theme.brandSurface : Theme.fill, in: Circle())
+                                    .dynamicTypeSize(...DynamicTypeSize.large)
                                     .accessibilityLabel(mine ? "Assigned to you" : "Assigned")
                             }
                         }

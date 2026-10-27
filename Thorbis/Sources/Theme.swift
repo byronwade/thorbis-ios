@@ -80,7 +80,7 @@ struct Chip: View {
     var body: some View {
         HStack(spacing: 5) {
             if let icon { Image(systemName: icon).font(Theme.font( 10, weight: .semibold)) }
-            Text(text).font(Theme.font( 12, weight: .medium))
+            Text(text).font(Theme.font( 12, weight: .medium)).lineLimit(1).fixedSize()
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 9).frame(minHeight: 24)
@@ -96,6 +96,7 @@ struct Avatar: View {
             .foregroundStyle(Theme.muted)
             .frame(width: size, height: size)
             .background(Theme.fill, in: Circle())
+            .dynamicTypeSize(...DynamicTypeSize.large)
     }
 }
 

@@ -47,6 +47,7 @@ struct PaperHeader: View {
                         .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
                         .frame(width: 36, height: 36).background(Theme.brandSurface, in: Circle())
                         .frame(width: 44, height: 44).contentShape(Rectangle())
+                        .dynamicTypeSize(...DynamicTypeSize.large)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Account and settings")
