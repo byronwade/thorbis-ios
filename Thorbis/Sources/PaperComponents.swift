@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ThorbisLogoLockup: View {
     var markSize: CGFloat = 30
@@ -20,42 +21,66 @@ struct ThorbisLogoLockup: View {
     }
 }
 
-/// Native counterparts of the shared Thorbis Mobile Paper components.
+/// Paper's tab-root header (primitives sheet: 34/700 large title, 15 muted subtitle,
+/// trailing 36pt circles). The title scrolls with its content; the tab bar stays put.
 struct PaperHeader: View {
     let title: String
-    let icon: String
+    var icon: String = ""
     let subtitle: String
-    var search: () -> Void = {}
+    var search: (() -> Void)? = nil
     @EnvironmentObject private var session: SessionController
-    @Environment(\.paperShowMenu) private var showMenu
+    @Environment(\.paperShowMenu) private var openAccount
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 12) {
-                Button(action: showMenu) {
-                    HStack(spacing: 8) {
-                        Image(systemName: icon).font(.system(size: 18)).foregroundStyle(Theme.brand)
-                        Text(title).font(Theme.font(22, weight: .semibold)).tracking(-0.44)
-                        Image(systemName: "chevron.down").font(.system(size: 10)).foregroundStyle(Theme.muted)
-                    }.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("\(title), open navigation")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(title)
+                    .font(Theme.font(34, weight: .bold)).tracking(-0.68)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
-                HStack(spacing: 6) {
-                    Button(action: search) { Image(systemName: "magnifyingglass").font(.system(size: 14)).frame(width: 32, height: 32).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }
-                        .accessibilityLabel("Search \(title.lowercased())")
-                    Button(action: showMenu) {
-                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brand)
-                            .frame(width: 32, height: 32).background(Theme.brandSurface, in: Circle())
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }.accessibilityLabel("Workspace menu")
-                }.buttonStyle(.plain)
+                if let search {
+                    PaperCircleButton(symbol: "magnifyingglass", label: "Filter \(title.lowercased())", action: search)
+                }
+                Button(action: openAccount) {
+                    Text(initials(session.user?.name ?? session.user?.email ?? ""))
+                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .frame(width: 36, height: 36).background(Theme.brandSurface, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Account and settings")
             }
-            Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).frame(minHeight: 18, alignment: .leading)
-        }.foregroundStyle(Theme.foreground).padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 10)
+            Text(subtitle)
+                .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .frame(minHeight: 20, alignment: .leading)
+        }
+        .foregroundStyle(Theme.foreground)
+        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 12)
     }
 }
 
+/// A 36pt filled circle with a 44pt hit area (HIG-004).
+struct PaperCircleButton: View {
+    let symbol: String
+    let label: String
+    var size: CGFloat = 36
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.foreground)
+                .frame(width: size, height: size).background(Theme.fill, in: Circle())
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+}
+
+/// Paper's segment tabs: quiet words, the selected one sits in a fill pill.
 struct PaperTabs: View {
     let options: [String]
     @Binding var selection: String
@@ -66,13 +91,188 @@ struct PaperTabs: View {
                     Button { selection = option } label: {
                         Text(option).font(Theme.font(13, weight: selection == option ? .semibold : .medium))
                             .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(selection == option ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 8))
-                            .frame(minHeight: 44)
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .background(selection == option ? Theme.fill : .clear, in: Capsule())
+                            .frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityAddTraits(selection == option ? .isSelected : [])
                 }
+            }.padding(.horizontal, Theme.gutter - 4)
+        }.scrollIndicators(.hidden).padding(.bottom, 4)
+    }
+}
+
+/// Sentence-case group header: 13/500 muted title, mono count, optional trailing action.
+struct PaperGroupHeader<Trailing: View>: View {
+    let title: String
+    var count: Int? = nil
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title).font(Theme.font(13, weight: .medium))
+            if let count { Text("\(count)").font(Theme.monoFont(12)) }
+            Spacer(minLength: 0)
+            trailing
+        }
+        .foregroundStyle(Theme.muted)
+        .frame(minHeight: 32)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension PaperGroupHeader where Trailing == EmptyView {
+    init(title: String, count: Int? = nil) {
+        self.init(title: title, count: count) { EmptyView() }
+    }
+}
+
+/// Job status as a mark whose shape (not only colour) carries meaning, plus a spoken word.
+struct StatusRing: View {
+    let status: String
+    var size: CGFloat = 16
+
+    var body: some View {
+        let (symbol, color) = statusIcon(status)
+        Image(systemName: symbol)
+            .font(.system(size: size, weight: .regular))
+            .foregroundStyle(color)
+            .frame(width: size + 6, height: size + 6)
+            .accessibilityLabel(status.statusLabel)
+    }
+}
+
+/// Paper's quiet empty state: line icon, one sentence, an optional text action.
+struct PaperEmptyState: View {
+    let symbol: String
+    let title: String
+    let message: String
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 26, weight: .light)).foregroundStyle(Theme.muted)
+                .padding(.bottom, 6)
+            Text(title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+            Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .frame(minHeight: 44)
             }
-        }.scrollIndicators(.hidden).padding(.horizontal, 16).padding(.bottom, 12)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48).padding(.horizontal, Theme.gutter)
+    }
+}
+
+/// Paper's quick-edit value row: muted label left, value right.
+struct PaperDetailRow<Value: View>: View {
+    let label: String
+    @ViewBuilder var value: Value
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(Theme.font(14)).foregroundStyle(Theme.muted).fixedSize()
+            Spacer(minLength: 8)
+            value.font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                .multilineTextAlignment(.trailing)
+        }
+        .frame(minHeight: 42)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension PaperDetailRow where Value == Text {
+    init(_ label: String, value: String) {
+        self.init(label: label) { Text(value) }
+    }
+}
+
+/// A row in a grouped list of destinations or settings (Paper 29 / 65).
+struct PaperMenuRow<Trailing: View>: View {
+    let title: String
+    let symbol: String
+    var subtitle: String? = nil
+    var tint: Color = Theme.foreground
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(tint == Theme.foreground ? Theme.muted : tint)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(tint)
+                if let subtitle { Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted) }
+            }
+            Spacer(minLength: 8)
+            trailing
+        }
+        .frame(minHeight: 48).contentShape(Rectangle())
+    }
+}
+
+extension PaperMenuRow where Trailing == AnyView {
+    /// A navigable row with a chevron.
+    init(_ title: String, symbol: String, subtitle: String? = nil, value: String? = nil) {
+        self.init(title: title, symbol: symbol, subtitle: subtitle) {
+            AnyView(HStack(spacing: 6) {
+                if let value { Text(value).font(Theme.font(14)).foregroundStyle(Theme.muted) }
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+            })
+        }
+    }
+}
+
+/// Paper's sticky bottom bar: one blue commit, at most one quiet square beside it.
+struct PaperActionBar<Secondary: View>: View {
+    let title: String
+    var symbol: String? = nil
+    var busy = false
+    var disabled = false
+    let action: () -> Void
+    @ViewBuilder var secondary: Secondary
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: action) {
+                HStack(spacing: 7) {
+                    if busy { ProgressView().tint(.white) } else if let symbol { Image(systemName: symbol).font(.system(size: 15, weight: .semibold)) }
+                    Text(title).font(Theme.font(15, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity).frame(height: 46)
+                .foregroundStyle(.white)
+                .background(Theme.brand.opacity(disabled ? 0.45 : 1), in: RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .disabled(busy || disabled)
+            secondary
+        }
+        .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+        .background(Theme.background)
+    }
+}
+
+extension PaperActionBar where Secondary == EmptyView {
+    init(title: String, symbol: String? = nil, busy: Bool = false, disabled: Bool = false, action: @escaping () -> Void) {
+        self.init(title: title, symbol: symbol, busy: busy, disabled: disabled, action: action) { EmptyView() }
+    }
+}
+
+/// The 46pt rimmed square that sits beside a commit.
+struct PaperSquareButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Theme.foreground)
+                .frame(width: 46, height: 46)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
@@ -83,9 +283,34 @@ struct PaperSearchField: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
             TextField(prompt, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled()
-            if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search") }
-        }.font(Theme.font(14)).padding(12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border)).padding(.horizontal, 16).padding(.bottom, 12)
+            if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search") }
+        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+    }
+}
+
+enum PaperChrome {
+    /// Inter titles on the native navigation bar, so pushed screens keep system
+    /// back, swipe-back and VoiceOver escape while matching Paper's type.
+    @MainActor static func configureNavigationBar() {
+        func inter(_ size: CGFloat, _ weight: UIFont.Weight) -> UIFont {
+            let descriptor = UIFontDescriptor(fontAttributes: [
+                .family: "Inter",
+                .traits: [UIFontDescriptor.TraitKey.weight: weight]
+            ])
+            return UIFontMetrics.default.scaledFont(for: UIFont(descriptor: descriptor, size: size))
+        }
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        appearance.titleTextAttributes = [.font: inter(17, .semibold)]
+        appearance.largeTitleTextAttributes = [.font: inter(34, .bold)]
+        let scrolled = UINavigationBarAppearance()
+        scrolled.configureWithDefaultBackground()
+        scrolled.titleTextAttributes = appearance.titleTextAttributes
+        scrolled.largeTitleTextAttributes = appearance.largeTitleTextAttributes
+        UINavigationBar.appearance().standardAppearance = scrolled
+        UINavigationBar.appearance().compactAppearance = scrolled
+        UINavigationBar.appearance().scrollEdgeAppearance = appearance
     }
 }
 
@@ -93,6 +318,7 @@ private struct PaperShowMenuKey: EnvironmentKey {
     static let defaultValue: @Sendable () -> Void = {}
 }
 extension EnvironmentValues {
+    /// Opens account and settings (the More tab on iPhone, the settings sheet on iPad).
     var paperShowMenu: @Sendable () -> Void {
         get { self[PaperShowMenuKey.self] }
         set { self[PaperShowMenuKey.self] = newValue }

@@ -2,29 +2,26 @@ import XCTest
 @testable import Thorbis
 
 final class PrimaryNavigationTests: XCTestCase {
-    func testPrimaryTabsMatchNativeThorbisDestinationsInOrder() {
-        XCTAssertEqual(PrimaryTab.allCases, [.jobs, .arrive, .inbox])
-        XCTAssertEqual(PrimaryTab.allCases.map(\.title), ["Jobs", "Arrive", "Inbox"])
+    func testPrimaryTabsMatchPaperTechnicianDockInOrder() {
+        XCTAssertEqual(PrimaryTab.allCases, [.schedule, .jobs, .customers, .more, .search])
+        XCTAssertEqual(PrimaryTab.allCases.map(\.title), ["Schedule", "Jobs", "Customers", "More", "Search"])
     }
 
-    func testJobsIsTheInitialPrimaryDestination() {
-        XCTAssertEqual(PrimaryTab.initial, .jobs)
-    }
-
-    func testArriveStartsOnMyDayWhileJobsStartsOnTheFullJobList() {
-        XCTAssertEqual(JobsViewMode.arrive.initialFilter, "My Day")
-        XCTAssertEqual(JobsViewMode.jobs.initialFilter, "All jobs")
-        XCTAssertFalse(JobsViewMode.arrive.showsFilters)
-        XCTAssertTrue(JobsViewMode.jobs.showsFilters)
+    func testScheduleIsTheInitialPrimaryDestination() {
+        XCTAssertEqual(PrimaryTab.initial, .schedule)
     }
 
     func testPrimaryDestinationsRemainStableWhenRoleAccessIsLimited() {
-        let access = PrimaryTabAccess(canViewJobs: false, canViewStaffNotices: true)
+        let access = PrimaryTabAccess(canViewJobs: false, canViewCustomers: true)
 
-        XCTAssertEqual(PrimaryTab.allCases, [.jobs, .arrive, .inbox])
+        XCTAssertEqual(PrimaryTab.allCases, [.schedule, .jobs, .customers, .more, .search])
+        XCTAssertFalse(access.canOpen(.schedule))
         XCTAssertFalse(access.canOpen(.jobs))
-        XCTAssertFalse(access.canOpen(.arrive))
-        XCTAssertTrue(access.canOpen(.inbox))
-        XCTAssertEqual(access.unavailableMessage(for: .arrive), "Your role does not allow access to jobs.")
+        XCTAssertTrue(access.canOpen(.customers))
+        XCTAssertTrue(access.canOpen(.more))
+        XCTAssertTrue(access.canOpen(.search))
+        XCTAssertEqual(access.unavailableMessage(for: .schedule), "Your role does not allow access to jobs.")
+        XCTAssertEqual(PrimaryTabAccess(canViewJobs: true, canViewCustomers: false).unavailableMessage(for: .customers),
+                       "Your role does not allow access to customers.")
     }
 }

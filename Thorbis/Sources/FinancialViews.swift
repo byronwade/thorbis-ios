@@ -16,7 +16,7 @@ struct EstimatesView: View {
             ForEach(records.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) }) { record in
                 NavigationLink { EstimateDetailView(id: record.id) } label: {
                     HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "doc.text").foregroundStyle(Theme.brand).frame(width: 22)
+                        Image(systemName: "doc.text").foregroundStyle(Theme.brandText).frame(width: 22)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(record.title).font(Theme.font(14, weight: .medium))
                             Text(store.customerName(record.customerId)).font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -181,7 +181,7 @@ struct InvoicesView: View {
             ForEach(records) { record in
                 NavigationLink { InvoiceDetailView(id: record.id) } label: {
                     HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "doc.plaintext").foregroundStyle(Theme.brand).frame(width: 22)
+                        Image(systemName: "doc.plaintext").foregroundStyle(Theme.brandText).frame(width: 22)
                         VStack(alignment: .leading, spacing: 5) {
                             Text("INV-\(record.id.suffix(4).uppercased()) · \(store.customerName(record.customerId))")
                                 .font(Theme.font(14, weight: .medium))
@@ -401,7 +401,7 @@ private func commercialDetail(_ label: String, _ value: String) -> some View {
 
 private func commercialAction(_ title: String, icon: String) -> some View {
     HStack(spacing: 10) {
-        Image(systemName: icon).foregroundStyle(Theme.brand)
+        Image(systemName: icon).foregroundStyle(Theme.brandText)
         Text(title).font(Theme.font(14, weight: .medium))
         Spacer()
         Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.muted)

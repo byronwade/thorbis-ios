@@ -281,7 +281,7 @@ struct CustomerContactSheet: View {
                     Spacer()
                     Button("Save") { Task { await save() } }
                         .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandText)
                         .frame(minHeight: 44)
                         .disabled(!canSave)
                         .opacity(canSave ? 1 : 0.45)
@@ -316,7 +316,7 @@ struct CustomerContactSheet: View {
                                 usesCustomRole = true
                             }
                             .font(Theme.font(12, weight: .medium))
-                            .foregroundStyle(Theme.brand)
+                            .foregroundStyle(Theme.brandText)
                         }
                     }
 
@@ -342,7 +342,7 @@ struct CustomerContactSheet: View {
                         } label: {
                             Text("+ Add email")
                                 .font(Theme.font(14, weight: .medium))
-                                .foregroundStyle(Theme.brand)
+                                .foregroundStyle(Theme.brandText)
                                 .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
                         }
                         .buttonStyle(.plain)
@@ -453,72 +453,118 @@ struct CustomerContactSheet: View {
     }
 }
 
+/// Paper 29 and 65 together: every destination that is not a tab, then account settings.
 struct MoreView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var api: APIClient
     @State private var showWorkspaces = false
+    @State private var showNewJob = false
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                settingsGroup("Account") {
+            VStack(alignment: .leading, spacing: 0) {
+                workspaceHeader
+                group("Work") {
+                    if session.can("job.view", feature: "job_booking_notices") {
+                        NavigationLink(value: PaperRoute.inbox) { PaperMenuRow("Inbox", symbol: "tray", subtitle: "Job notices and assignments") }
+                    }
+                    if session.can("estimate.view", feature: "estimates") {
+                        NavigationLink(value: PaperRoute.estimates) { PaperMenuRow("Estimates", symbol: "doc.text") }
+                    }
+                    if session.can("invoice.view", feature: "invoicing") {
+                        NavigationLink(value: PaperRoute.invoices) { PaperMenuRow("Invoices", symbol: "doc.plaintext") }
+                    }
+                    if session.can("pricebook.view", feature: "price_book") {
+                        NavigationLink(value: PaperRoute.priceBook) { PaperMenuRow("Price book", symbol: "book.closed") }
+                    }
+                    if session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments") {
+                        NavigationLink(value: PaperRoute.revenue) { PaperMenuRow("Revenue", symbol: "chart.bar") }
+                    }
+                }
+                if session.user?.id != nil, session.activeOrganization?.id != nil {
+                    group("On this phone") {
+                        NavigationLink(value: PaperRoute.drafts) { PaperMenuRow("Message drafts", symbol: "bubble.left", subtitle: "Saved here, not sent") }
+                        ForEach(LocalWorkspaceSection.allCases, id: \.self) { section in
+                            if session.can(section.requiredCapability, feature: section.requiredFeature) {
+                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder") }
+                            }
+                        }
+                    }
+                }
+                group("Account") {
                     HStack(spacing: 12) {
-                        Avatar(name: session.user?.name ?? "", size: 36)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(session.user?.name ?? "Account").font(Theme.font(15, weight: .medium))
+                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
+                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 40, height: 40).background(Theme.brand, in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.user?.name ?? "Account").font(Theme.font(16, weight: .medium))
                             if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
                         }
                         Spacer()
-                    }.frame(minHeight: 54)
-                    LabeledContent("Workspace", value: session.activeOrganization?.name ?? "")
-                    if session.organizations.count > 1 { Button("Switch workspace") { showWorkspaces = true }.frame(minHeight: 46) }
+                    }
+                    .frame(minHeight: 56)
+                    .accessibilityElement(children: .combine)
+                    PaperMenuRow(title: "Appearance", symbol: "circle.lefthalf.filled") {
+                        Picker("Appearance", selection: $appearance) {
+                            Text("System").tag("system")
+                            Text("Light").tag("light")
+                            Text("Dark").tag("dark")
+                        }
+                        .pickerStyle(.menu).labelsHidden().tint(Theme.muted)
+                    }
+                    Button { Task { await session.signOut() } } label: {
+                        PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
+                    }
                 }
-                settingsGroup("Work") {
-                    if session.can("estimate.view", feature: "estimates") { NavigationLink { EstimatesView() } label: { settingsRow("Estimates", icon: "doc.text") } }
-                    if session.can("invoice.view", feature: "invoicing") { NavigationLink { InvoicesView() } label: { settingsRow("Invoices", icon: "doc.plaintext") } }
-                    if session.can("job.view", feature: "job_booking_notices") { NavigationLink { WorkspaceNoticesView(api: api, available: true).id(session.generation) } label: { settingsRow("Notifications", icon: "bell") } }
-                    if session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments") { NavigationLink { WorkspaceRevenueView(api: api, available: true).id(session.generation) } label: { settingsRow("Revenue report", icon: "chart.bar") } }
-                    if session.can("pricebook.view", feature: "price_book") { NavigationLink { WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation) } label: { settingsRow("Price book", icon: "book.closed") } }
-                }
-                if let actorID = session.user?.id, let organizationID = session.activeOrganization?.id {
-                    settingsGroup("On this device") {
-                        NavigationLink { InboxLocalDraftView(actorID: actorID, organizationID: organizationID) } label: { settingsRow("Message drafts", icon: "bubble.left") }
-                        ForEach(LocalWorkspaceSection.allCases, id: \.self) { section in
-                            if session.can(section.requiredCapability, feature: section.requiredFeature) { NavigationLink { LocalWorkspaceView(section: section, actorID: actorID, organizationID: organizationID) } label: { settingsRow(section.title, icon: "folder") } }
+                Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
+                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity).padding(.top, 28).padding(.bottom, 32)
+            }
+            .foregroundStyle(Theme.foreground).buttonStyle(.plain)
+        }
+        .background(Theme.background)
+        .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
+        .sheet(isPresented: $showNewJob) { NewJobSheet() }
+    }
+
+    /// Paper's workspace switcher with the compose action beside it.
+    private var workspaceHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Button { showWorkspaces = true } label: {
+                    HStack(spacing: 8) {
+                        Image("ThorbisMark").resizable().scaledToFit().padding(3)
+                            .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
+                            .accessibilityHidden(true)
+                        Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .semibold)).lineLimit(1)
+                        if session.organizations.count > 1 {
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
                         }
                     }
+                    .padding(.horizontal, 10).frame(minHeight: 44)
+                    .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
                 }
-                settingsGroup("App") {
-                    Picker("Appearance", selection: $appearance) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
-                    }
-                    .pickerStyle(.menu)
-                    .frame(minHeight: 44)
+                .allowsHitTesting(session.organizations.count > 1)
+                .accessibilityLabel("Workspace, \(session.activeOrganization?.name ?? "")")
+                Spacer()
+                if session.can("job.create", feature: "jobs") {
+                    PaperCircleButton(symbol: "square.and.pencil", label: "New job") { showNewJob = true }
+                }
+            }
+            Text("More").font(Theme.font(34, weight: .bold)).tracking(-0.68).padding(.top, 10)
+                .accessibilityAddTraits(.isHeader)
+        }
+        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 4)
+    }
 
-                    Button { Task { await session.signOut() } } label: {
-                        HStack(spacing: 12) { Image(systemName: "rectangle.portrait.and.arrow.right").frame(width: 20); Text("Sign out"); Spacer() }.foregroundStyle(Theme.destructive).frame(minHeight: 46)
-                    }
-                }
-                Text("Thorbis \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
-                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 16).padding(.bottom, 28)
-            }.font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).buttonStyle(.plain)
-        }.background(Theme.background).navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
-    }
-    private func settingsGroup<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+    private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.vertical, 10)
+            PaperGroupHeader(title: title).padding(.top, 14)
             content()
-        }.padding(.horizontal, 20)
-    }
-    private func settingsRow(_ title: String, icon: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 18)).frame(width: 20).foregroundStyle(Theme.muted)
-            Text(title)
-            Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.muted)
-        }.frame(minHeight: 46).contentShape(Rectangle())
+        }
+        .padding(.horizontal, Theme.gutter)
     }
 }

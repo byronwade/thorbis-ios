@@ -61,7 +61,7 @@ struct ServiceLocationSheet: View {
                     Spacer()
                     Button("Save") { Task { await save() } }
                         .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandText)
                         .frame(minHeight: 44)
                         .disabled(!canAttemptSave)
                         .opacity(canAttemptSave ? 1 : 0.45)

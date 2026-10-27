@@ -27,67 +27,64 @@ struct CustomersView: View {
     }
     private var activeJobs: Int { store.jobs.filter { !["completed", "canceled"].contains($0.status) }.count }
 
+    /// Paper 47: an alphabetical book, one letter per section.
+    private var sections: [(String, [CustomerRecord])] {
+        let grouped = Dictionary(grouping: items) { customer -> String in
+            let letter = customer.name.trimmingCharacters(in: .whitespaces).prefix(1).uppercased()
+            return letter.rangeOfCharacter(from: .letters) == nil ? "#" : letter
+        }
+        return grouped.keys.sorted().map { key in
+            (key, (grouped[key] ?? []).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
+        }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            PaperHeader(title: "Customers", icon: "person.2", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { showSearch.toggle() })
-            if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
-            PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
-            HStack {
-            Text("\(items.count) customers").font(Theme.font(12)).foregroundStyle(Theme.muted)
-                Spacer()
-                Menu {
-                    Picker("Customer state", selection: $stateFilter) {
-                        ForEach(["Any state", "Active", "Archived"], id: \.self) { Text($0).tag($0) }
-                    }
-                } label: {
-                    Label(stateFilter == "Any state" ? "State" : stateFilter, systemImage: "line.3.horizontal.decrease.circle")
-                        .font(Theme.font(13, weight: .medium)).frame(minHeight: 44).contentShape(Rectangle())
-                }.accessibilityLabel("Filter by customer state")
-            }.padding(.horizontal, 16)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if let error = error ?? store.error { ErrorBanner(message: error) }
-                    if recordsLoading && records.isEmpty { ProgressView("Updating customers…").padding() }
-                    ForEach(items) { customer in
-                        let activeCount = store.jobs.filter { $0.customerId == customer.id }.count
-                        let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
-                        NavigationLink(value: listCustomer) {
-                            HStack(spacing: 12) {
-                                Avatar(name: customer.name, size: 24)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
-                                    Text("\(activeCount) \(activeCount == 1 ? "job" : "jobs")").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                                }
-                                Spacer(minLength: 4)
-                                HStack(spacing: 5) {
-                                    Circle().fill(customer.archived ? Theme.muted : Theme.success).frame(width: 7, height: 7)
-                                    Text(customer.archived ? "Archived" : "Active").font(Theme.font(12)).foregroundStyle(customer.archived ? Theme.muted : Theme.success)
-                                }.accessibilityElement(children: .combine)
-                                if let job = store.jobs.first(where: { $0.customerId == customer.id && !["completed", "canceled"].contains($0.status) }) {
-                                    Image(systemName: statusIcon(job.status).0).foregroundStyle(statusIcon(job.status).1).frame(width: 16)
-                                }
-                            }.frame(minHeight: 52).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                    }
-                    if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
-                        if scope == .archived {
-                            ContentUnavailableView("No archived customers", systemImage: "archivebox", description: Text(search.isEmpty ? "Archived customers will appear here." : "Try a different search."))
-                        } else if stateFilter == "Archived" {
-                            ContentUnavailableView("No archived customers in this view", systemImage: "archivebox", description: Text("Choose All customers or Archived to see archived records."))
-                        } else if stateFilter == "Active" {
-                            ContentUnavailableView("No active customers", systemImage: "person.2", description: Text("Try a different view or state filter."))
-                        } else {
-                            ContentUnavailableView.search(text: search)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withAnimation { showSearch.toggle() } })
+                if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
+                PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
+                if let error = error ?? store.error { ErrorBanner(message: error) }
+                if recordsLoading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(sections, id: \.0) { letter, customers in
+                        PaperGroupHeader(title: letter, count: customers.count).padding(.top, 6)
+                        ForEach(customers) { customer in
+                            customerRow(customer)
                         }
                     }
-                    if session.can("customer.create", feature: "core_crm") {
-                        Button("New customer", systemImage: "plus") { showNew = true }
-                            .font(Theme.font(13, weight: .medium)).padding(.top, 20).disabled(busy)
+                }
+                .padding(.horizontal, Theme.gutter)
+                if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
+                    if scope == .archived {
+                        PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: search.isEmpty ? "Archived customers will appear here." : "Try a different search.")
+                    } else if !search.isEmpty {
+                        ContentUnavailableView.search(text: search)
+                    } else {
+                        PaperEmptyState(symbol: "person.2", title: "No customers yet", message: "Customers you add appear here, A to Z.",
+                                        actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
+                                        action: { showNew = true })
                     }
-                }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
-            }.refreshable { await store.refresh(api); await loadCustomers() }
+                }
+            }
+            .padding(.bottom, 24)
         }
+        .refreshable { await store.refresh(api); await loadCustomers() }
         .background(Theme.background).toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .bottom) {
+            if session.can("customer.create", feature: "core_crm") && !items.isEmpty {
+                HStack {
+                    Spacer()
+                    Button { showNew = true } label: {
+                        Label("New customer", systemImage: "plus").font(Theme.font(14, weight: .semibold))
+                            .padding(.horizontal, 16).frame(minHeight: 44)
+                            .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                    }
+                    .buttonStyle(.plain).disabled(busy)
+                }
+                .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+            }
+        }
         .task(id: store.customers.map(\.id).sorted().joined(separator: "|")) { await loadCustomers() }
         .alert("New customer", isPresented: $showNew) {
             TextField("Name", text: $newName)
@@ -95,6 +92,25 @@ struct CustomersView: View {
             Button("Cancel", role: .cancel) {}
         }
     }
+    private func customerRow(_ customer: CustomerRecord) -> some View {
+        let open = store.jobs.first { $0.customerId == customer.id && !["completed", "canceled"].contains($0.status) }
+        let jobCount = store.jobs.filter { $0.customerId == customer.id }.count
+        let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
+        return NavigationLink(value: listCustomer) {
+            HStack(spacing: 12) {
+                Avatar(name: customer.name, size: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(1)
+                    Text(customer.archived ? "Archived" : "\(jobCount) \(jobCount == 1 ? "job" : "jobs")").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 4)
+                if let open { StatusRing(status: open.status) }
+            }
+            .frame(minHeight: 52).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func create() async {
         busy = true
         defer { busy = false }
@@ -196,23 +212,13 @@ struct CustomerDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Button { dismiss() } label: { Image(systemName: "chevron.left").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Back")
-                    Spacer()
-                    if canEdit {
-                        Menu {
-                            Button("Add contact", systemImage: "person.badge.plus") { contactSheet = .add }
-                                .disabled(!contactsLoaded)
-                            Button("Add location", systemImage: "mappin.and.ellipse") { locationSheet = .add }
-                        } label: { Image(systemName: "ellipsis").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Customer actions")
-                    }
-                }.foregroundStyle(Theme.foreground).padding(.horizontal, 20).frame(height: 54)
                 VStack(alignment: .leading, spacing: 6) {
                     if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
                         Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
                     }
                     Text(record?.name ?? customer.name).font(Theme.font(26, weight: .semibold)).tracking(-0.39)
-                }.padding(.horizontal, 20).padding(.bottom, 12)
+                        .accessibilityAddTraits(.isHeader)
+                }.padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 12)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { metadataChips }.fixedSize()
                     VStack(alignment: .leading, spacing: 6) { metadataChips }
@@ -242,7 +248,20 @@ struct CustomerDetailView: View {
             }
         }
         .foregroundStyle(Theme.foreground).background(Theme.background)
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            if canEdit {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Add contact", systemImage: "person.badge.plus") { contactSheet = .add }
+                            .disabled(!contactsLoaded)
+                        Button("Add location", systemImage: "mappin.and.ellipse") { locationSheet = .add }
+                    } label: { Image(systemName: "ellipsis") }
+                    .accessibilityLabel("Customer actions")
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
                 if session.can("job.create", feature: "jobs") {
@@ -507,7 +526,7 @@ struct CustomerDetailView: View {
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: activitySymbol(for: event.kind))
                                 .font(Theme.font(13, weight: .medium))
-                                .foregroundStyle(Theme.brand)
+                                .foregroundStyle(Theme.brandText)
                                 .frame(width: 30, height: 30)
                                 .background(Theme.brandSurface, in: Circle())
                             VStack(alignment: .leading, spacing: 4) {

@@ -49,7 +49,7 @@ struct LoginView: View {
                     Spacer()
                     Button("Forgot?") { showingReset = true }
                         .font(Theme.font(13, weight: .medium))
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandText)
                 }
                 .padding(.top, 16)
                 SecureField("Password", text: $password)
@@ -86,7 +86,7 @@ struct LoginView: View {
                 if session.phase == .failed {
                     Button("Retry session") { Task { await session.restore() } }
                         .font(Theme.font(13, weight: .medium))
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandText)
                         .padding(.top, 20)
                 }
                 Spacer(minLength: 80)
@@ -132,7 +132,7 @@ struct LoginView: View {
 
 private extension View {
     func paperField() -> some View {
-        font(Theme.font(15))
+        font(Theme.font(16))
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)

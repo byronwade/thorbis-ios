@@ -3,12 +3,28 @@ import UIKit
 
 /// Tokens from the Paper "Thorbis Mobile" file (get_tokens).
 enum Theme {
+    /// Paper's type ramp at its default size. Each step scales with the
+    /// Dynamic Type style closest to its size (HIG-008).
     static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom("Inter-Regular", size: size, relativeTo: .body).weight(weight)
+        Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size)).weight(weight)
     }
     static func monoFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom("GeistMono-Regular", size: size, relativeTo: .caption).weight(weight)
+        Font.custom("GeistMono-Regular", size: size, relativeTo: textStyle(for: size)).weight(weight)
     }
+    static func textStyle(for size: CGFloat) -> Font.TextStyle {
+        switch size {
+        case 30...: .largeTitle
+        case 24..<30: .title
+        case 20..<24: .title2
+        case 17..<20: .headline
+        case 15..<17: .subheadline
+        case 13..<15: .footnote
+        case 12..<13: .caption
+        default: .caption2
+        }
+    }
+    /// Paper's screen gutter.
+    static let gutter: CGFloat = 20
     // Dark values retain the Paper Mobile palette. Light surfaces are the
     // design.thorbis.com warm canvas/panel/well/ink tokens converted from OKLCH.
     static let card = adaptive(light: 0xFDFCFA, dark: 0x232323)
@@ -28,6 +44,8 @@ enum Theme {
             .withAlphaComponent(high ? 0.6 : traits.userInterfaceStyle == .dark ? 0.08 : 0.12)
     })
     static let brand = Color(hex: 0x2F6BFF)
+    /// Brand used as text or a link; plain brand is below 4.5:1 on both grounds.
+    static let brandText = adaptive(light: 0x2558E0, dark: 0x5285FF)
     static let brandSurface = adaptive(light: 0xE5ECFF, dark: 0x182642)
     static let success = adaptive(light: 0x18743A, dark: 0x22C55E)
     static let warning = adaptive(light: 0x895400, dark: 0xF59E0B)
@@ -60,13 +78,13 @@ struct Chip: View {
     var tint: Color = Theme.muted
     var bg: Color = Theme.fill
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             if let icon { Image(systemName: icon).font(Theme.font( 10, weight: .semibold)) }
             Text(text).font(Theme.font( 12, weight: .medium))
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(bg, in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 9).frame(minHeight: 24)
+        .background(bg, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -96,7 +114,7 @@ struct SectionHeader: View {
             if let count { Text("\(count)").font(Theme.font( 12)).foregroundStyle(Theme.muted.opacity(0.7)) }
             Spacer()
         }
-        .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 6)
+        .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 6)
     }
 }
 

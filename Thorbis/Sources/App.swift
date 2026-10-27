@@ -32,6 +32,7 @@ struct ThorbisApp: App {
             }
         }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
+        PaperChrome.configureNavigationBar()
         _api = StateObject(wrappedValue: api)
         _store = StateObject(wrappedValue: store)
         _session = StateObject(wrappedValue: session)
@@ -73,7 +74,7 @@ struct ThorbisApp: App {
             .font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
-            .tint(Theme.brand)
+            .tint(Theme.brandText)
             #if DEBUG
             .overlay(alignment: .bottom) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
             #endif
@@ -189,40 +190,47 @@ enum StoreRefreshResult: Equatable {
     case superseded
 }
 
-enum Tab: Hashable { case schedule, jobs, customers, more }
+/// iPad sidebar sections.
+enum TabletSection: Hashable { case schedule, jobs, customers, more }
 
+/// iPhone tab bar: Paper's technician dock as native destinations (HIG-005).
+/// Search uses the system search tab role.
 enum PrimaryTab: String, CaseIterable, Identifiable {
-    case jobs, arrive, inbox
+    case schedule, jobs, customers, more, search
 
-    static let initial: PrimaryTab = .jobs
+    static let initial: PrimaryTab = .schedule
 
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
 
     var symbol: String {
         switch self {
+        case .schedule: "calendar"
         case .jobs: "briefcase"
-        case .arrive: "location.north.circle"
-        case .inbox: "tray"
+        case .customers: "person.2"
+        case .more: "ellipsis"
+        case .search: "magnifyingglass"
         }
     }
 }
 
 struct PrimaryTabAccess {
     let canViewJobs: Bool
-    let canViewStaffNotices: Bool
+    let canViewCustomers: Bool
 
     func canOpen(_ tab: PrimaryTab) -> Bool {
         switch tab {
-        case .jobs, .arrive: canViewJobs
-        case .inbox: canViewStaffNotices
+        case .schedule, .jobs: canViewJobs
+        case .customers: canViewCustomers
+        case .more, .search: true
         }
     }
 
     func unavailableMessage(for tab: PrimaryTab) -> String {
         switch tab {
-        case .jobs, .arrive: "Your role does not allow access to jobs."
-        case .inbox: "Your role does not allow access to staff notices."
+        case .schedule, .jobs: "Your role does not allow access to jobs."
+        case .customers: "Your role does not allow access to customers."
+        case .more, .search: ""
         }
     }
 }
@@ -231,9 +239,9 @@ struct ErrorBanner: View {
     let message: String
     var body: some View {
         Label(message, systemImage: "exclamationmark.triangle")
-            .font(.system(size: 13)).foregroundStyle(Theme.warning)
+            .font(Theme.font(13)).foregroundStyle(Theme.warning)
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 10))
-            .padding(.horizontal, 16).padding(.top, 8)
+            .padding(.horizontal, Theme.gutter).padding(.top, 8)
     }
 }

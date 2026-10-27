@@ -42,7 +42,7 @@ struct InvoiceLineEditorView: View {
                     Button { confirmReload = true } label: {
                         Label("Review latest invoice", systemImage: "arrow.clockwise")
                             .font(Theme.font(14, weight: .medium))
-                            .foregroundStyle(Theme.brand)
+                            .foregroundStyle(Theme.brandText)
                     }
                     .accessibilityHint("Reloads the current server version and discards these unsaved edits")
                 }

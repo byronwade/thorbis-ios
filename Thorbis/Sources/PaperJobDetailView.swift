@@ -38,7 +38,6 @@ struct JobDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            topBar
             if let error { ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12) }
             if let job {
                 if selectedTab == "Media" {
@@ -72,7 +71,7 @@ struct JobDetailView: View {
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
+        .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .task(id: session.generation) {
             invoicePaymentModel = nil
@@ -93,13 +92,9 @@ struct JobDetailView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if selectedTab == "Overview", let job, let target = availableTransitions(job).first {
-                PrimaryButton(title: transitionTitle(target), icon: "arrow.right", busy: busy) {
+                PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
                     runTransition(target)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .background(Theme.chrome)
             } else if selectedTab == "Invoice",
                       session.can("invoice.payment.create", feature: "payments"),
                       let invoice = selectedInvoice,
@@ -137,49 +132,28 @@ struct JobDetailView: View {
         }
     }
 
-    private var topBar: some View {
-        HStack {
-            if showsBack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 38, height: 38)
-                        .background(Theme.fill, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .accessibilityLabel("Back")
-            }
-            Spacer()
-            if let job {
+    /// Native bar: system back on the left, share and more on the right (HIG-005).
+    @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
+        if let job {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 ShareLink(item: "\(job.title) · \(job.id)") {
                     Image(systemName: "square.and.arrow.up")
-                        .frame(width: 38, height: 38)
-                        .background(Theme.fill, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("Share job")
                 Menu {
                     Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
-                    NavigationLink("Closeout") { JobCloseoutView(jobID: jobId).toolbar(.visible, for: .navigationBar) }
-                    NavigationLink("Follow-ups") { JobFollowUpsView(jobID: jobId).toolbar(.visible, for: .navigationBar) }
+                    NavigationLink { JobCloseoutView(jobID: jobId) } label: { Label("Closeout", systemImage: "checkmark.seal") }
+                    NavigationLink { JobFollowUpsView(jobID: jobId) } label: { Label("Follow-ups", systemImage: "list.bullet") }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .frame(width: 38, height: 38)
-                        .background(Theme.fill, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("More job actions")
             }
         }
-        .buttonStyle(.plain)
-        .font(.system(size: 16))
-        .padding(.horizontal, 20)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
     }
 
     private func header(_ job: JobRecord, compact: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("JOB-\(job.id.suffix(4).uppercased()) · \(store.customerName(job.customerId))")
                 .font(Theme.monoFont(12, weight: .medium))
                 .foregroundStyle(Theme.muted)
@@ -189,55 +163,71 @@ struct JobDetailView: View {
                 .tracking(-0.39)
                 .lineLimit(compact ? 2 : nil)
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
                     statusControl(job)
                     if let date = JobFiltering.date(job.scheduledFor) {
-                        Label(scheduleLabel(date), systemImage: "clock")
-                            .font(Theme.font(13, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 10)
-                            .frame(height: 34)
-                            .background(Theme.fill, in: Capsule())
+                        Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
+                            Label(scheduleLabel(date), systemImage: "clock")
+                                .font(Theme.font(12, weight: .medium))
+                                .foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 9)
+                                .frame(height: 24)
+                                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                                .padding(.vertical, 10).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
                     }
                 }
 
                 HStack(spacing: 8) {
                     if let assignedName = assignedDisplayName(for: job) {
-                        HStack(spacing: 7) {
+                        HStack(spacing: 6) {
                             Text(nameInitials(assignedName))
-                                .font(Theme.font(10, weight: .semibold))
-                                .foregroundStyle(Theme.brand)
-                                .frame(width: 24, height: 24)
+                                .font(Theme.font(8, weight: .semibold))
+                                .foregroundStyle(Theme.brandText)
+                                .frame(width: 16, height: 16)
                                 .background(Theme.brandSurface, in: Circle())
                             Text(shortName(assignedName))
-                                .font(Theme.font(13, weight: .medium))
+                                .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
                         }
                         .padding(.horizontal, 7)
-                        .frame(height: 34)
-                        .background(Theme.fill, in: Capsule())
+                        .frame(height: 24)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
                     }
                     if let balance = invoiceBalanceCents {
                         Text("\(money(balance, currency: "USD")) due")
-                            .font(Theme.monoFont(12, weight: .medium))
+                            .font(Theme.monoFont(11, weight: .medium))
                             .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 10)
-                            .frame(height: 34)
-                            .background(Theme.fill, in: Capsule())
+                            .padding(.horizontal, 9)
+                            .frame(height: 24)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .padding(.bottom, 16)
+        .padding(.horizontal, Theme.gutter)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder
     private func statusControl(_ job: JobRecord) -> some View {
-        let tint = job.status == "completed" ? Theme.success : Theme.warning
-        let surface = job.status == "completed" ? Theme.successSurface : Theme.warningSurface
+        let tint: Color = switch job.status {
+        case "completed": Theme.success
+        case "en_route", "dispatched": Theme.brandText
+        case "scheduled", "canceled": Theme.muted
+        default: Theme.warning
+        }
+        let surface: Color = switch job.status {
+        case "completed": Theme.successSurface
+        case "en_route", "dispatched": Theme.brandSurface
+        case "scheduled", "canceled": Theme.fill
+        default: Theme.warningSurface
+        }
         let transitions = availableTransitions(job)
         if transitions.isEmpty {
             statusChip(job, tint: tint, surface: surface, showsMenu: false)
@@ -254,18 +244,19 @@ struct JobDetailView: View {
     }
 
     private func statusChip(_ job: JobRecord, tint: Color, surface: Color, showsMenu: Bool) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: job.status == "completed" ? "checkmark.circle" : "clock")
-                .font(.system(size: 13, weight: .medium))
+        HStack(spacing: 5) {
+            Image(systemName: statusIcon(job.status).0)
+                .font(.system(size: 11, weight: .semibold))
             Text(job.status.statusLabel)
-                .font(Theme.font(13, weight: .medium))
-            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)) }
+                .font(Theme.font(12, weight: .medium))
+            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, 10)
-        .frame(height: 34)
-        .background(surface, in: Capsule())
-        .contentShape(Capsule())
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .background(surface, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
         .accessibilityLabel("Job status, \(job.status.statusLabel)")
     }
 
@@ -316,59 +307,55 @@ struct JobDetailView: View {
     }
 
     private var tabBar: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(tabs, id: \.self) { tab in
-                    Button { selectedTab = tab } label: {
-                        Text(tab)
-                            .font(Theme.font(13, weight: selectedTab == tab ? .semibold : .medium))
-                            .foregroundStyle(selectedTab == tab ? Theme.foreground : Theme.muted)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(selectedTab == tab ? Theme.fill : .clear, in: Capsule())
-                            .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 14)
-        }
-        .scrollIndicators(.hidden)
+        PaperTabs(options: tabs, selection: $selectedTab).padding(.bottom, 4)
     }
 
+    /// Paper 21: description as plain text, quiet value rows, then the job's other actions.
     private func overviewContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            sectionTitle("Details")
             if let detail = job.notes, !detail.isEmpty {
                 Text(detail)
-                    .font(Theme.font(14))
+                    .font(Theme.font(15)).lineSpacing(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .textSelection(.enabled)
             }
-            VStack(spacing: 0) {
-                detailRow("Customer", store.customerName(job.customerId))
-                if let date = JobFiltering.date(job.scheduledFor) { detailRow("Scheduled", date.formatted()) }
-                if let reason = job.pauseReason { detailRow("Pause reason", reason) }
-                if let next = job.pauseNextAction { detailRow("Next action", next) }
+            VStack(alignment: .leading, spacing: 0) {
+                PaperGroupHeader(title: "Details") {
+                    if session.can("job.assign", feature: "jobs") {
+                        Button("Edit time") { showSchedule = true }
+                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .frame(minHeight: 44)
+                    }
+                }
+                PaperDetailRow("Customer", value: store.customerName(job.customerId))
+                if let date = JobFiltering.date(job.scheduledFor) {
+                    PaperDetailRow("Scheduled", value: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                } else {
+                    PaperDetailRow("Scheduled", value: "Not scheduled")
+                }
+                PaperDetailRow("Status", value: job.status.statusLabel)
+                if let reason = job.pauseReason { PaperDetailRow("Pause reason", value: reason) }
+                if let next = job.pauseNextAction { PaperDetailRow("Next action", value: next) }
             }
-            .padding(.horizontal, 15)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-            sectionTitle("Related work")
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                PaperGroupHeader(title: "On this job")
                 ForEach(availableTransitions(job).dropFirst(), id: \.self) { target in
-                    actionButton(transitionTitle(target), icon: "arrow.right") { runTransition(target) }
+                    Button { runTransition(target) } label: {
+                        PaperMenuRow(transitionTitle(target), symbol: transitionSymbol(target))
+                    }
+                    .buttonStyle(.plain).disabled(busy)
                 }
-                NavigationLink { JobCloseoutView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Closeout", icon: "checkmark.circle") }
-                NavigationLink { JobFollowUpsView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Follow-ups", icon: "list.bullet") }
                 if session.can("job.assign", feature: "jobs") {
-                    Button { showSchedule = true } label: { actionLabel("Schedule job", icon: "calendar") }
-                    NavigationLink { JobAssignmentView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Assign job", icon: "person.crop.circle.badge.plus") }
+                    Button { showSchedule = true } label: { PaperMenuRow("Schedule", symbol: "calendar", subtitle: "Pick a day and arrival window") }
+                        .buttonStyle(.plain)
+                    NavigationLink { JobAssignmentView(jobID: jobId) } label: { PaperMenuRow("Assign technician", symbol: "person.crop.circle.badge.plus") }
+                        .buttonStyle(.plain)
                 }
+                NavigationLink { JobCloseoutView(jobID: jobId) } label: { PaperMenuRow("Wrap up", symbol: "checkmark.seal", subtitle: "Closeout checklist") }
+                    .buttonStyle(.plain)
+                NavigationLink { JobFollowUpsView(jobID: jobId) } label: { PaperMenuRow("Follow-ups", symbol: "list.bullet") }
+                    .buttonStyle(.plain)
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -479,7 +466,7 @@ struct JobDetailView: View {
             if activityFilter != "Notes" {
                 ForEach(statusEvents(job), id: \.0) { event in
                     HStack(spacing: 12) {
-                        Image(systemName: "checkmark.circle").foregroundStyle(Theme.brand)
+                        Image(systemName: "checkmark.circle").foregroundStyle(Theme.brandText)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(event.0).font(Theme.font(14, weight: .medium))
                             Text(event.1.formatted()).font(Theme.font(11)).foregroundStyle(Theme.muted)
@@ -536,7 +523,7 @@ struct JobDetailView: View {
 
     private func actionLabel(_ title: String, icon: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(Theme.brand).frame(width: 20)
+            Image(systemName: icon).foregroundStyle(Theme.brandText).frame(width: 20)
             Text(title).font(Theme.font(14, weight: .medium))
             Spacer()
             Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.muted)
@@ -567,7 +554,26 @@ struct JobDetailView: View {
     }
 
     private func transitionTitle(_ target: String) -> String {
-        target == "paused" ? "Pause job…" : "Mark \(target.statusLabel.lowercased())"
+        switch target {
+        case "paused": "Pause job…"
+        case "en_route": "On my way"
+        case "arrived": "Mark arrived"
+        case "in_progress": job?.status == "paused" ? "Resume work" : "Start work"
+        case "dispatched": "Dispatch"
+        case "scheduled": "Move back to scheduled"
+        default: "Mark \(target.statusLabel.lowercased())"
+        }
+    }
+
+    private func transitionSymbol(_ target: String) -> String {
+        switch target {
+        case "paused": "pause.circle"
+        case "en_route": "location.fill"
+        case "arrived": "mappin.and.ellipse"
+        case "in_progress": "wrench.and.screwdriver"
+        case "dispatched": "paperplane"
+        default: "arrow.uturn.backward"
+        }
     }
 
     private func runTransition(_ target: String) {

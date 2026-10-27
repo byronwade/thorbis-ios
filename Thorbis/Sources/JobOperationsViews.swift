@@ -188,7 +188,7 @@ struct JobScheduleView: View {
                     } else {
                         Button("Other time…") { showsCustomTime = true }
                             .font(Theme.font(14, weight: .medium))
-                            .foregroundStyle(Theme.brand)
+                            .foregroundStyle(Theme.brandText)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                     if let error { ErrorBanner(message: error).padding(.vertical, 8) }

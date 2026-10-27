@@ -956,7 +956,7 @@ struct InvoicePaymentCollectionSheet: View {
             HStack(spacing: 10) {
                 Image(systemName: "wave.3.right")
                     .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Theme.brand)
+                    .foregroundStyle(Theme.brandText)
                     .frame(width: 38, height: 38)
                     .background(Theme.brand.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                 VStack(alignment: .leading, spacing: 3) {
@@ -1106,7 +1106,7 @@ struct InvoicePaymentCollectionSheet: View {
                 if busy {
                     ProgressView().controlSize(.small)
                 } else if selected {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.brand)
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.brandText)
                 }
                 else {
                     Image(systemName: "chevron.right")

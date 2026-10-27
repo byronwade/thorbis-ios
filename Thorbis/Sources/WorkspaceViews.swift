@@ -11,47 +11,84 @@ struct WorkspaceNoticesView: View {
     @State private var loading = false
     @State private var error: String?
 
+    @State private var filter = "All"
+
+    private var visible: [StaffNotice] { filter == "Unread" ? items.filter { !$0.read } : items }
+
+    /// Paper 77: large title, All/Unread, unread dot, quiet rows.
     var body: some View {
-        Group {
-            if !available {
-                ContentUnavailableView("Notices unavailable", systemImage: "bell.slash",
-                                       description: Text("This account cannot view job notices."))
-            } else {
-                List {
-                    if let error { Text(error).foregroundStyle(.red) }
-                    if unreadState == .unknown {
-                        Text("Unread status is still being checked.").font(.footnote).foregroundStyle(.secondary)
-                    }
-                    if unreadState == .present || readCursor != nil {
-                        Button(readCursor == nil ? "Mark unread batch as read" : "Continue marking read") {
-                            Task { await markReadBatch() }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Inbox").font(Theme.font(34, weight: .bold)).tracking(-0.68).accessibilityAddTraits(.isHeader)
+                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                if !available {
+                    PaperEmptyState(symbol: "bell.slash", title: "Inbox unavailable", message: "This account cannot view job notices.")
+                } else {
+                    PaperTabs(options: ["All", "Unread"], selection: $filter)
+                    if let error { ErrorBanner(message: error) }
+                    ForEach(visible) { notice in
+                        HStack(alignment: .top, spacing: 12) {
+                            Circle().fill(notice.read ? Color.clear : Theme.brand).frame(width: 7, height: 7).padding(.top, 7)
+                                .accessibilityHidden(true)
+                            Image(systemName: "bell").font(.system(size: 14)).foregroundStyle(notice.read ? Theme.muted : Theme.brandText)
+                                .frame(width: 32, height: 32).background(notice.read ? Theme.fill : Theme.brandSurface, in: Circle())
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .semibold))
+                                    .foregroundStyle(notice.read ? Theme.muted : Theme.foreground)
+                                Text([notice.meta, timeLabel(notice.at)].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
+                            }
+                            Spacer(minLength: 0)
                         }
-                        .disabled(loading)
-                    }
-                    ForEach(items) { notice in
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(notice.title).font(.headline)
-                            Text(notice.meta).font(.subheadline)
-                            Text(notice.at).font(.caption).foregroundStyle(.secondary)
-                            if !notice.read { Text("Unread").font(.caption).bold() }
-                        }
+                        .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
                         .accessibilityElement(children: .combine)
+                        .accessibilityValue(notice.read ? "" : "Unread")
                     }
                     if nextCursor != nil {
-                        Button("Load more notices") { Task { await loadMore() } }
-                            .disabled(loading)
+                        Button("Load more") { Task { await loadMore() } }
+                            .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .frame(maxWidth: .infinity, minHeight: 44).disabled(loading)
+                    }
+                    if visible.isEmpty && !loading && error == nil {
+                        PaperEmptyState(symbol: "tray", title: filter == "Unread" ? "All caught up" : "No notices yet",
+                                        message: "Assignments and job changes for you land here.")
                     }
                 }
-                .overlay {
-                    if items.isEmpty && !loading && error == nil {
-                        ContentUnavailableView("No notices", systemImage: "bell")
-                    }
+            }
+            .padding(.bottom, 24)
+        }
+        .background(Theme.background)
+        .foregroundStyle(Theme.foreground)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if available && (unreadState == .present || readCursor != nil) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await markReadBatch() } } label: { Image(systemName: "checkmark.circle") }
+                        .accessibilityLabel(readCursor == nil ? "Mark all read" : "Continue marking read")
+                        .disabled(loading)
                 }
-                .refreshable { await refresh() }
-                .task { await refresh() }
             }
         }
-        .navigationTitle("Staff notices")
+        .refreshable { await refresh() }
+        .task { await refresh() }
+    }
+
+    private var subtitle: String {
+        if !available { return "Job notices" }
+        switch unreadState {
+        case .present: return "Unread notices waiting"
+        case .unknown: return loading ? "Checking for new notices…" : "Job notices"
+        default: return "All caught up"
+        }
+    }
+
+    private func timeLabel(_ raw: String) -> String {
+        guard let date = JobFiltering.date(raw) else { return raw }
+        return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
     }
 
     private func refresh() async {
@@ -210,7 +247,7 @@ struct WorkspacePriceBookView: View {
                     }
                     Spacer(minLength: 0)
                     Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                        .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brand)
+                        .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brandText)
                         .frame(width: 36, height: 36)
                         .background(Theme.brandSurface, in: Circle())
                 }
