@@ -6,6 +6,8 @@ Audit date: 2026-10-26. Read-only product audit of `thorbis-ios` against `Thorbi
 
 The Swift app is a small online scaffold, not mobile parity. It reads and creates customers/jobs and exposes part of job progression. It has four tabs, several selection controls with no content/filter behavior, no durable sync, no organization selection, and no effective capability projection. The web registry declares 28 destinations; their maturity differs substantially. Copying every route as if it were a production-backed feature would reproduce demo/local-only behavior and overstate parity.
 
+This paragraph and the matrix below record the initial source audit before the subsequent native increments documented in `docs/release/beta-coverage.md`. In particular, contact quick-add, core Paper presentation, and the first functional My Day slice have since been added. The audit remains useful for the still-open parity gaps; read the beta coverage record for current implemented scope and test evidence.
+
 The canonical OpenAPI contains 274 paths, including separate Network/community APIs, public customer document flows, internal provider/administrative operations, and staff operations. That number is not a native-screen target. The first product scope should be the staff workspace in `apps/web`, with explicit decisions for separate Network/customer-facing products.
 
 ## Feature matrix

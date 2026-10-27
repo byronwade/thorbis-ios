@@ -49,6 +49,19 @@ final class FieldAPITests: XCTestCase {
         XCTAssertEqual(bodies[1]["expectedPauseAuditId"] as? String, "00000000-0000-4000-8000-000000000005")
     }
 
+    func testProgressEnRouteEncodesOptionalEta() async throws {
+        let job = #"{"id":"00000000-0000-4000-8000-000000000001","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","title":"Repair","status":"en_route","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T13:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, job), .init(200, job)]), baseURL: "https://app.thorbis.com")
+
+        _ = try await client.progressFieldJob(jobID, request: .enRoute(etaMinutes: 45))
+        _ = try await client.progressFieldJob(jobID, request: .enRoute())
+
+        let bodies = try URLProtocolFixture.recorded.map { try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap($0.body)) as? [String: Any]) }
+        XCTAssertEqual(bodies.map { $0["to"] as? String }, ["en_route", "en_route"])
+        XCTAssertEqual(bodies[0]["etaMinutes"] as? Int, 45)
+        XCTAssertNil(bodies[1]["etaMinutes"])
+    }
+
     func testContactAndServiceLocationDecodeTheirOwnRecords() async throws {
         let contact = #"{"items":[{"id":"00000000-0000-4000-8000-000000000006","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","name":"Alex","role":"Tenant","primary":true,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}]}"#
         let location = #"{"items":[{"id":"00000000-0000-4000-8000-000000000007","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","label":"Home","kind":"service","address":"123 Main","coordinates":{"latitude":40.0,"longitude":-73.0},"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}]}"#

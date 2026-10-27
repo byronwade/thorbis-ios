@@ -30,4 +30,26 @@ enum JobFiltering {
             (search.isEmpty || job.title.localizedCaseInsensitiveContains(search) || job.shortRef.localizedCaseInsensitiveContains(search))
         }.sorted { (date($0.updatedAt) ?? .distantPast) > (date($1.updatedAt) ?? .distantPast) }
     }
+
+    static func myDay(_ jobs: [Job], actorID: String?, now: Date = Date(), calendar: Calendar = .current) -> [Job] {
+        guard let actorID, !actorID.isEmpty else { return [] }
+        return jobs.filter { job in
+            guard job.assignedToUserId == actorID, let scheduled = date(job.scheduledFor) else { return false }
+            return calendar.isDate(scheduled, inSameDayAs: now)
+        }.sorted {
+            let left = date($0.scheduledFor) ?? .distantFuture
+            let right = date($1.scheduledFor) ?? .distantFuture
+            return left == right ? $0.id < $1.id : left < right
+        }
+    }
+}
+
+enum MyDayRules {
+    static func shouldShowEmptyState(isEmpty: Bool, isLoading: Bool, hasError: Bool) -> Bool {
+        isEmpty && !isLoading && !hasError
+    }
+
+    static func canStartDriving(_ job: Job, canEdit: Bool) -> Bool {
+        canEdit && job.status == "dispatched" && job.allowedTransitions?.contains("en_route") == true
+    }
 }

@@ -40,6 +40,20 @@
 - [x] Match the customer contact quick-add to Paper with live name, role, phone, email, and first-contact primary behavior; keep unsupported approval/SMS switches out of the active form.
 - [ ] Apply exported presentation to remaining supported routes and their sheets without inventing missing backend behavior. Schedule picker `RAG-0` is now complete for the supported native contract; many other screens/forms remain.
 
+#### Task 3 continuation: My Day first functional slice
+
+**Scope:** Add a My Day view within the existing Jobs route. Show the signed-in user's jobs scheduled for the device-local day, including completed and canceled work, ordered by scheduled instant and ID, with explicit loading, refresh, error, and empty states. Add the web app's dispatched-to-en-route “On my way” action with optional ETA presets, `job.edit` gating, duplicate-submit protection, and visible errors. Open each job through the existing detail destination. Do not claim offline command replay; this client requires a live connection for mutations. Invoice follow-through and canceled-job actions remain later work.
+
+**Files:** `Thorbis/Sources/JobFiltering.swift`, `Thorbis/Sources/PaperWorkViews.swift`, `Thorbis/Sources/PaperPreview.swift`, `Thorbis/Sources/PaperNavigation.swift`, `ThorbisTests/JobFilteringTests.swift`. Reuse `APIClient.progressFieldJob`, `FieldProgressRequest.enRoute`, and the existing jobs navigation path. A read-only fixture enables visual inspection without account credentials or live writes.
+
+**Tests:** Verify local-calendar day boundaries and time ordering, actor isolation, jobs without scheduled times, and transition plus capability gating. Run the focused tests and the complete iPhone 17 Pro simulator suite.
+
+**Design ruling:** There is no dedicated My Day artboard in the current Paper Mobile file. Place the view as a tab within Jobs, use the existing Paper work-list tokens, and avoid implying screenshot parity with a missing artboard.
+
+**Steps:** (1) Add the failing filter and action-gate tests and watch them fail. (2) Implement the two pure helpers and watch them pass. (3) Add the Jobs/My Day UI with the existing detail route and canonical progress endpoint. (4) Run focused and full simulator tests, inspect the UI in the simulator, and record the remaining offline/artboard limitation.
+
+**Execution evidence:** The local-day/actor/order rules and permission/transition gate are covered, including completed/canceled rows; ETA requests encode both the selected duration and no-ETA case. Failed fetches do not display an empty-day claim. The iPhone 17 Pro suite passes 126/126. A read-only populated preview was inspected at `outputs/paper/my-day.png`. Independent code review passed; the next signed archive remains pending.
+
 ### Task 4: Verify and release
 - [x] Run Swift strict-concurrency build and relevant existing full tests; add behavioral tests only for new route/filter logic.
 - [ ] Compare simulator screenshots to Paper on iPhone and iPad, fix differences, record remaining gaps precisely.

@@ -240,8 +240,22 @@ struct JobsView: View {
     @State private var search = ""
     @State private var searchVisible = false
     @State private var showNew = false
+    @State private var busyJobID: String?
+    @State private var startedDriving: Set<String> = []
+    @State private var progressError: String?
+
+    init() {
+        #if DEBUG
+        _tab = State(initialValue: PaperPreview.enabled && PaperPreview.screen == "my-day" ? "My Day" : "Assigned")
+        #endif
+    }
 
     private var jobs: [Job] {
+        if tab == "My Day" {
+            let today = JobFiltering.myDay(store.jobs, actorID: session.user?.id)
+            guard !search.isEmpty else { return today }
+            return today.filter { $0.title.localizedCaseInsensitiveContains(search) || $0.shortRef.localizedCaseInsensitiveContains(search) }
+        }
         let assigned = tab == "Assigned" ? (session.user?.id ?? "") : nil
         return JobFiltering.jobs(store.jobs, assignedTo: assigned, search: search)
     }
@@ -250,16 +264,23 @@ struct JobsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PaperHeader(title: "Jobs", icon: "briefcase", subtitle: "\(activeCount) active · \(attentionCount) need attention") {
+            PaperHeader(title: tab == "My Day" ? "My Day" : "Jobs", icon: tab == "My Day" ? "sun.max" : "briefcase", subtitle: tab == "My Day" ? "\(jobs.count) visits · \(Date.now.formatted(date: .abbreviated, time: .omitted))" : "\(activeCount) active · \(attentionCount) need attention") {
                 searchVisible.toggle()
             }
             if searchVisible { PaperSearchField(text: $search, prompt: "Title or job reference") }
-            PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
+            PaperTabs(options: ["My Day", "Assigned", "All jobs", "Recent"], selection: $tab)
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if let error = store.error { ErrorBanner(message: error) }
+                    if let progressError { ErrorBanner(message: progressError) }
                     if store.loading { ProgressView("Updating jobs…") }
-                    if tab == "Recent" {
+                    if tab == "My Day" {
+                        Label("Today's schedule uses your local date. Job updates require a live connection.", systemImage: "wifi")
+                            .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 2)
+                        ForEach(jobs) { job in myDayJob(job) }
+                    } else if tab == "Recent" {
                         group("Recently updated", jobs: jobs)
                     } else {
                         group("In progress", jobs: PaperWorkGroups.inProgress(jobs))
@@ -267,9 +288,9 @@ struct JobsView: View {
                         group("Completed", jobs: PaperWorkGroups.completed(jobs))
                         group("Other", jobs: PaperWorkGroups.other(jobs))
                     }
-                    if jobs.isEmpty && !store.loading {
-                        ContentUnavailableView(search.isEmpty ? "No jobs" : "No matching jobs", systemImage: "briefcase",
-                            description: Text(search.isEmpty ? "Jobs in this view appear here." : "Try another title or job reference."))
+                    if MyDayRules.shouldShowEmptyState(isEmpty: jobs.isEmpty, isLoading: store.loading, hasError: store.error != nil) {
+                        ContentUnavailableView(tab == "My Day" ? "No jobs scheduled today" : (search.isEmpty ? "No jobs" : "No matching jobs"), systemImage: tab == "My Day" ? "sun.max" : "briefcase",
+                            description: Text(tab == "My Day" ? "Jobs assigned to you for today will appear here." : (search.isEmpty ? "Jobs in this view appear here." : "Try another title or job reference.")))
                     }
                 }
                 .padding(.horizontal, 16).padding(.bottom, 24)
@@ -279,6 +300,73 @@ struct JobsView: View {
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showNew) { NewJobSheet() }
+    }
+
+    @ViewBuilder private func myDayJob(_ job: Job) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                if let date = JobFiltering.date(job.scheduledFor) {
+                    Text(date.formatted(date: .omitted, time: .shortened))
+                        .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.brand)
+                }
+                Text(job.shortRef).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
+                Spacer()
+                Text(job.status.statusLabel).font(Theme.font(11, weight: .medium)).foregroundStyle(Theme.muted)
+            }
+            NavigationLink(value: job) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(job.title).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground).lineLimit(2)
+                        Text(store.customerName(job.customerId)).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.muted).padding(.top, 3)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain)
+
+            if startedDriving.contains(job.id) {
+                Label("Driving started", systemImage: "checkmark.circle.fill")
+                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.success)
+            } else if MyDayRules.canStartDriving(job, canEdit: session.can("job.edit", feature: "jobs")) {
+                Menu {
+                    Button("On my way") { Task { await startDriving(job, etaMinutes: nil) } }
+                    ForEach([15, 30, 45, 60], id: \.self) { minutes in
+                        Button("On my way · ETA \(minutes) min") { Task { await startDriving(job, etaMinutes: minutes) } }
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        if busyJobID == job.id { ProgressView().tint(.white).scaleEffect(0.8) }
+                        else { Image(systemName: "car.side.fill") }
+                        Text(busyJobID == job.id ? "Updating…" : "On my way")
+                    }
+                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 13).frame(minHeight: 38)
+                    .background(Theme.brand, in: Capsule())
+                }
+                .disabled(busyJobID != nil)
+            }
+        }
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
+    }
+
+    private func startDriving(_ job: Job, etaMinutes: Int?) async {
+        guard busyJobID == nil, !startedDriving.contains(job.id),
+              MyDayRules.canStartDriving(job, canEdit: session.can("job.edit", feature: "jobs")) else { return }
+        busyJobID = job.id
+        defer { busyJobID = nil }
+        do {
+            _ = try await api.progressFieldJob(job.id, request: .enRoute(etaMinutes: etaMinutes))
+            startedDriving.insert(job.id)
+            progressError = nil
+            if await store.refresh(api) == .failed {
+                progressError = "Driving started. The latest job list could not be refreshed."
+            }
+        } catch is CancellationError {
+        } catch {
+            progressError = error.localizedDescription
+        }
     }
 
     @ViewBuilder private func group(_ title: String, jobs: [Job]) -> some View {

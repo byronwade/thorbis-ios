@@ -22,9 +22,60 @@ final class JobFilteringTests: XCTestCase {
         XCTAssertTrue(JobFiltering.jobs([mine], assignedTo: "different", search: "").isEmpty)
     }
 
-    private func makeJob(_ id: String, time: String?) -> Job {
-        var job = Job(id: id, customerId: nil, title: id, status: "scheduled", createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+    func testMyDayUsesLocalDayCurrentActorAndScheduledOrder() {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let now = formatter.date(from: "2026-10-27T00:30:00Z")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+
+        let latePreviousUTCDate = makeJob("late", time: "2026-10-27T05:00:00Z", assignedTo: "actor")
+        let earlyPreviousUTCDate = makeJob("early", time: "2026-10-27T00:10:00Z", assignedTo: "actor")
+        let tieB = makeJob("tie-b", time: "2026-10-27T04:00:00Z", assignedTo: "actor")
+        let tieA = makeJob("tie-a", time: "2026-10-27T04:00:00Z", assignedTo: "actor")
+        let completed = makeJob("completed", time: "2026-10-27T03:00:00Z", assignedTo: "actor", status: "completed")
+        let canceled = makeJob("canceled", time: "2026-10-27T03:30:00Z", assignedTo: "actor", status: "canceled")
+        let otherActor = makeJob("other", time: "2026-10-27T01:00:00Z", assignedTo: "other")
+        let tomorrow = makeJob("tomorrow", time: "2026-10-27T08:00:00Z", assignedTo: "actor")
+        let unscheduled = makeJob("unscheduled", time: nil, assignedTo: "actor")
+
+        XCTAssertEqual(
+            JobFiltering.myDay([latePreviousUTCDate, otherActor, tomorrow, unscheduled, tieB, canceled, earlyPreviousUTCDate, completed, tieA], actorID: "actor", now: now, calendar: calendar).map(\.id),
+            ["early", "completed", "canceled", "tie-a", "tie-b", "late"]
+        )
+    }
+
+    func testMyDayWithoutActorHasNoJobs() {
+        let job = makeJob("today", time: "2026-10-27T12:00:00Z", assignedTo: "actor")
+        XCTAssertTrue(JobFiltering.myDay([job], actorID: nil).isEmpty)
+    }
+
+    func testEmptyStateRequiresSuccessfulFinishedFetch() {
+        XCTAssertFalse(MyDayRules.shouldShowEmptyState(isEmpty: true, isLoading: false, hasError: true))
+        XCTAssertFalse(MyDayRules.shouldShowEmptyState(isEmpty: true, isLoading: true, hasError: false))
+        XCTAssertFalse(MyDayRules.shouldShowEmptyState(isEmpty: false, isLoading: false, hasError: false))
+        XCTAssertTrue(MyDayRules.shouldShowEmptyState(isEmpty: true, isLoading: false, hasError: false))
+    }
+
+    func testStartDrivingRequiresEditPermissionAndServerAllowedTransition() {
+        let dispatched = makeJob("ready", time: nil, assignedTo: "actor", status: "dispatched", transitions: ["en_route"])
+        let forbidden = makeJob("forbidden", time: nil, assignedTo: "actor", status: "dispatched")
+        let scheduled = makeJob("scheduled", time: nil, assignedTo: "actor", status: "scheduled", transitions: ["dispatched"])
+        let completed = makeJob("completed", time: nil, assignedTo: "actor", status: "completed", transitions: ["en_route"])
+        let canceled = makeJob("canceled", time: nil, assignedTo: "actor", status: "canceled", transitions: ["en_route"])
+
+        XCTAssertTrue(MyDayRules.canStartDriving(dispatched, canEdit: true))
+        XCTAssertFalse(MyDayRules.canStartDriving(dispatched, canEdit: false))
+        XCTAssertFalse(MyDayRules.canStartDriving(forbidden, canEdit: true))
+        XCTAssertFalse(MyDayRules.canStartDriving(scheduled, canEdit: true))
+        XCTAssertFalse(MyDayRules.canStartDriving(completed, canEdit: true))
+        XCTAssertFalse(MyDayRules.canStartDriving(canceled, canEdit: true))
+    }
+
+    private func makeJob(_ id: String, time: String?, assignedTo: String? = nil, status: String = "scheduled", transitions: [String]? = nil) -> Job {
+        var job = Job(id: id, customerId: nil, title: id, status: status, createdAt: nil, updatedAt: nil, allowedTransitions: transitions)
         job.scheduledFor = time
+        job.assignedToUserId = assignedTo
         return job
     }
 }

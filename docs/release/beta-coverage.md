@@ -5,7 +5,7 @@ This is an initial staff beta, not full Thorbis-TanStack parity. The source refe
 ## Implemented native surfaces
 
 - Better Auth sign-in, restore, workspace selection, capability/feature hydration, expiry and sign-out; all workspace state is invalidated when authority changes.
-- Schedule and assigned-job filters; jobs, create job, notes, manual arrival/progress, pause/resume, scheduling and assignment, closeout requirements and office follow-ups.
+- Schedule and assigned-job filters; a local-day My Day list sorted by scheduled time with server-gated “On my way” and optional ETA; jobs, create job, notes, manual arrival/progress, pause/resume, scheduling and assignment, closeout requirements and office follow-ups.
 - Customer search, details and creation, plus Paper-style contact quick-add with role, phone, optional email and first-contact primary behavior; service locations.
 - Estimates: list, detail, create draft and revision-bound send/approve/decline. Invoices: list, detail and issue. Protected native PDF previews.
 - Job media: selected photos/PDFs up to 8 MiB, signed upload/confirmation and protected download/preview.
@@ -23,9 +23,10 @@ This is an initial staff beta, not full Thorbis-TanStack parity. The source refe
 ## Validation evidence
 
 - Swift 6 language mode with complete strict concurrency.
-- 121 unit/contract tests passed in the iPhone 17 Pro simulator, including the contact draft, customer contact API, and contact-load readiness cases. Latest result bundle: Xcode `DerivedData/Thorbis-*/Logs/Test` (26 October 2026).
+- 126 unit/contract tests passed in the iPhone 17 Pro simulator, including contact quick-add, My Day local-date/assignment/order rules, ETA request encoding, and error-versus-empty-state behavior. Latest result bundle: `DerivedData/Thorbis-Local/Logs/Test/Test-Thorbis-2026.10.26_23-56-28--0400.xcresult` (26 October 2026).
+- My Day was visually checked in a read-only Paper preview on iPhone 17 Pro; screenshot: `outputs/paper/my-day.png`. This verifies presentation only, not authenticated live workflow behavior.
 - 18 Release transport tests passed, including rejection of development identity in Release.
-- Signed device archive and signature verification succeeded for Build 4. The next upload must use a new archive containing the customer quick-add and any subsequent changes.
+- Signed device archive and signature verification succeeded for Build 5 (`1.0 (5)`), which includes customer quick-add and My Day. The upload log reports success and Apple processing; the build is not yet assigned to a tester group. Build 4 predates both changes.
 - iPhone and iPad native login screens launched and were visually inspected. Browser sign-in is confirmed; native authenticated end-to-end checks still await a separate app sign-in.
 - Independent review found and drove fixes for logout overlap, central 401 invalidation, late preview cleanup, draft lifetime and roster truncation. Tests cover the corresponding transport/state behavior.
 

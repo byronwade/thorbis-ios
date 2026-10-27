@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "customers", "job", "customer", "menu"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "customer", "menu"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     @MainActor static func api() -> APIClient {
@@ -117,7 +117,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     private static func jobs() -> [[String: Any]] {
         let rows: [(String, String, String, String, Int, Int)] = [
-            ("2214", "0412", "AC not cooling", "en_route", 10, 30),
+            ("2214", "0412", "AC not cooling", "dispatched", 10, 30),
             ("2212", "0413", "Kitchen sink backup — Petrov", "scheduled", 12, 15),
             ("2209", "0414", "Water heater install — Chen", "in_progress", 13, 0),
             ("2218", "0415", "Outlet replacement — Alvarez", "scheduled", 14, 30),
@@ -130,7 +130,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "assignedToUserId": PaperPreview.actorID, "scheduledFor": today(hour: hour, minute: minute),
              "createdAt": "2026-07-20T12:00:00Z", "updatedAt": today(hour: 9, minute: 0),
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
-             "allowedTransitions": status == "completed" ? [] : ["arrived", "in_progress", "paused"]] as [String: Any]
+             "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
         }
     }
     private static func customers() -> [[String: Any]] {

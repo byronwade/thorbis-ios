@@ -62,6 +62,7 @@ struct RootView: View {
             if PaperPreview.enabled {
                 switch PaperPreview.screen {
                 case "jobs": tab = .jobs
+                case "my-day": tab = .jobs
                 case "customers": tab = .customers
                 case "menu": menu = true
                 case "job": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
