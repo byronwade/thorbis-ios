@@ -168,10 +168,11 @@ struct RootView: View {
             case "estimates": primaryTab = .more; morePath.append(PaperRoute.estimates)
             case "invoices": primaryTab = .more; morePath.append(PaperRoute.invoices)
             case "price-book": primaryTab = .more; morePath.append(PaperRoute.priceBook)
-            case "job", "job-invoice", "job-estimates", "job-activity", "job-media":
+            case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout":
                 if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs
                     jobsPath.append(job)
+                    if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
                 }
             case "customer":
                 if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
@@ -273,6 +274,7 @@ struct RootView: View {
 enum PaperRoute: Hashable {
     case inbox, estimates, invoices, priceBook, revenue, drafts
     case local(LocalWorkspaceSection)
+    case closeout(jobID: String)
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -296,6 +298,7 @@ private struct PaperDestinations: ViewModifier {
                     if let actor = session.user?.id, let org = session.activeOrganization?.id {
                         InboxLocalDraftView(actorID: actor, organizationID: org)
                     }
+                case .closeout(let jobID): JobCloseoutView(jobID: jobID)
                 case .local(let section):
                     if let actor = session.user?.id, let org = session.activeOrganization?.id {
                         LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
