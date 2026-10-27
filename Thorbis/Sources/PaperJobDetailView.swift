@@ -39,6 +39,8 @@ struct JobDetailView: View {
     @State private var estimatesLoaded = false
     @State private var showNewEstimate = false
     @State private var committed = 0
+    @State private var creatingInvoice = false
+    @State private var reviewInvoiceID: String?
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
 
@@ -81,6 +83,10 @@ struct JobDetailView: View {
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .sensoryFeedback(.success, trigger: committed)
+        .navigationDestination(item: $reviewInvoiceID) { id in
+            InvoiceDetailView(id: id)
+                .onDisappear { Task { await loadInvoices() } }
+        }
         .task(id: session.generation) {
             invoicePaymentModel = nil
             loadedInvoiceModelID = nil
@@ -112,6 +118,10 @@ struct JobDetailView: View {
                             Task { await loadJobEstimates(job) }
                         }
                     }
+            } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
+                      session.can("invoice.view", feature: "invoicing") {
+                // A draft is reviewed (lines) and issued on its own screen, then collected here.
+                PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
             } else if selectedTab == "Invoice",
                       session.can("invoice.payment.create", feature: "payments"),
                       let invoice = selectedInvoice,
@@ -467,7 +477,10 @@ struct JobDetailView: View {
             } else if !invoicesLoaded {
                 ProgressView("Loading invoices…").frame(maxWidth: .infinity).padding(30)
             } else if invoices.isEmpty {
-                emptyCard("No invoice is linked to this job.")
+                PaperEmptyState(symbol: "doc.plaintext", title: "No invoice yet",
+                                message: "Start the invoice from this job. Lines come from its approved estimate; you can edit them before sending.",
+                                actionTitle: session.can("invoice.create", feature: "invoicing") ? (creatingInvoice ? "Creating…" : "Create invoice") : nil,
+                                action: { Task { await createInvoice() } })
             } else {
                 if invoices.count > 1 {
                     Menu {
@@ -735,6 +748,19 @@ struct JobDetailView: View {
             self.error = error.localizedDescription
             invoicesLoaded = true
         }
+    }
+
+    /// The job's canonical completion draft (POST /v1/jobs/{id}/completion-invoice); idempotent per job.
+    private func createInvoice() async {
+        guard !creatingInvoice, session.can("invoice.create", feature: "invoicing") else { return }
+        creatingInvoice = true
+        defer { creatingInvoice = false }
+        do {
+            let invoice = try await api.ensureFieldCompletionInvoice(jobId)
+            selectedInvoiceID = invoice.id
+            await loadInvoices()
+            committed += 1
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 
     private func loadInvoicePayments(for invoice: InvoiceRecord) async {
