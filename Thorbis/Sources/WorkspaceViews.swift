@@ -228,39 +228,23 @@ struct WorkspacePriceBookView: View {
                 ContentUnavailableView("Price Book unavailable", systemImage: "book.closed",
                                        description: Text("This account cannot view Price Book items."))
             } else {
-                HStack(alignment: .top, spacing: 12) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Theme.foreground)
-                            .frame(width: 36, height: 36)
-                            .background(Theme.fill, in: Circle())
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("Back to More")
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Price book").font(Theme.font(28, weight: .bold)).foregroundStyle(Theme.foreground)
-                        Text(nextCursor == nil ? "\(items.count) items · Company operations"
-                            : "\(items.count) items loaded · Company operations")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    }
-                    Spacer(minLength: 0)
-                    Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                        .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .frame(width: 36, height: 36)
-                        .background(Theme.brandSurface, in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Price book").font(Theme.font(34, weight: .bold)).tracking(-0.68).foregroundStyle(Theme.foreground)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("\(items.count) item\(items.count == 1 ? "" : "s")\(nextCursor == nil ? "" : " loaded")")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
-                .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 12)
-                PaperSearchField(text: $search, prompt: nextCursor == nil ? "Search \(items.count) items" : "Search loaded items")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                PaperSearchField(text: $search, prompt: "Search price book")
                 ScrollView(.horizontal) {
                     HStack(spacing: 4) {
                         ForEach(categories, id: \.self) { option in
                             Button { category = option } label: {
                                 Text(option == "All" ? "All · \(items.count)" : option)
-                                    .font(Theme.font(14, weight: category == option ? .semibold : .medium))
+                                    .font(Theme.font(13, weight: category == option ? .semibold : .medium))
                                     .foregroundStyle(category == option ? Theme.foreground : Theme.muted)
-                                    .padding(.horizontal, 10).padding(.vertical, 7)
+                                    .padding(.horizontal, 14).padding(.vertical, 6)
                                     .background(category == option ? Theme.fill : .clear, in: Capsule())
                                     .frame(minHeight: 44)
                             }.buttonStyle(.plain)
@@ -288,13 +272,8 @@ struct WorkspacePriceBookView: View {
                                             } label: { row(item) }
                                             .buttonStyle(.plain)
                                         } else { row(item) }
-                                        if item.id != grouped.last?.id {
-                                            Rectangle().fill(Theme.border).frame(height: 1)
-                                        }
                                     }
                                 }
-                                .padding(.horizontal, 14)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
                             }
                         }
                         if nextCursor != nil {
@@ -309,29 +288,29 @@ struct WorkspacePriceBookView: View {
                                 systemImage: "book.closed")
                         }
                     }
-                    .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 100)
+                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 100)
                 }
                 .refreshable { await refresh() }
                 .task { await refresh() }
             }
         }
         .background(Theme.background)
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func row(_ item: PriceBookListItem) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.description).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text(item.description).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                 Text("\(item.kind.capitalized) · \(item.unit)")
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 if item.archivedAt != nil { Text("Archived").font(Theme.font(11)).foregroundStyle(Theme.warning) }
             }
             Spacer(minLength: 6)
             Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
                 .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
         }
-        .frame(minHeight: 62)
+        .frame(minHeight: 50)
         .contentShape(Rectangle())
     }
 

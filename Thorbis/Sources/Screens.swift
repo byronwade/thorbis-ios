@@ -35,7 +35,6 @@ struct NewJobSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 2) {
-                            Rectangle().fill(Theme.brand).frame(width: 2, height: 30)
                             TextField("Job title", text: $draft.title, axis: .vertical)
                                 .font(Theme.font(26, weight: .semibold))
                                 .tracking(-0.39)

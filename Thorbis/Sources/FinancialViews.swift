@@ -9,30 +9,33 @@ struct EstimatesView: View {
     @State private var error: String?
     @State private var search = ""
     @State private var showCreate = false
+    private var visible: [EstimateRecord] { records.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) } }
+
     var body: some View {
-        List {
-            if let error { ErrorBanner(message: error) }
-            if loading { ProgressView("Loading estimates…") }
-            ForEach(records.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) }) { record in
-                NavigationLink { EstimateDetailView(id: record.id) } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "doc.text").foregroundStyle(Theme.brandText).frame(width: 22)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(record.title).font(Theme.font(14, weight: .medium))
-                            Text(store.customerName(record.customerId)).font(Theme.font(12)).foregroundStyle(Theme.muted)
-                        }
-                        Spacer(minLength: 8)
-                        Text(record.status.statusLabel).font(Theme.font(11, weight: .medium)).foregroundStyle(Theme.muted)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if let error { ErrorBanner(message: error) }
+                if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
+                    PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 6)
+                    ForEach(group) { record in
+                        NavigationLink { EstimateDetailView(id: record.id) } label: {
+                            PaperDocumentRow(reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
+                                             subtitle: store.customerName(record.customerId), status: record.status,
+                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
+                        }.buttonStyle(.plain)
                     }
-                    .padding(.vertical, 7)
-                }.listRowBackground(Theme.card).listRowSeparator(.hidden)
+                }
+                if !loading && records.isEmpty && error == nil {
+                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet", message: "Estimates you build for customers appear here.",
+                                    actionTitle: session.can("estimate.create", feature: "estimates") ? "New estimate" : nil, action: { showCreate = true })
+                }
             }
-            if !loading && records.isEmpty && error == nil { ContentUnavailableView("No estimates", systemImage: "doc.text") }
+            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("Estimates")
+        .navigationBarTitleDisplayMode(.large)
         .searchable(text: $search)
         .task { await load() }
         .refreshable { await load() }
@@ -175,31 +178,32 @@ struct InvoicesView: View {
     @State private var error: String?
     @State private var loading = true
     var body: some View {
-        List {
-            if let error { ErrorBanner(message: error) }
-            if loading { ProgressView("Loading invoices…") }
-            ForEach(records) { record in
-                NavigationLink { InvoiceDetailView(id: record.id) } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "doc.plaintext").foregroundStyle(Theme.brandText).frame(width: 22)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("INV-\(record.id.suffix(4).uppercased()) · \(store.customerName(record.customerId))")
-                                .font(Theme.font(14, weight: .medium))
-                            Text("Paid \(money(record.amountPaid, currency: record.currency))")
-                                .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                        }
-                        Spacer(minLength: 8)
-                        Text(record.status.statusLabel).font(Theme.font(11, weight: .medium)).foregroundStyle(Theme.muted)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if let error { ErrorBanner(message: error) }
+                if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                ForEach(paperDocumentGroups(records, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
+                    PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 6)
+                    ForEach(group) { record in
+                        NavigationLink { InvoiceDetailView(id: record.id) } label: {
+                            let total = paperLinesTotal(record.lines)
+                            let due = total.map { max(0, $0 - record.amountPaid) }
+                            PaperDocumentRow(reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
+                                             subtitle: record.status == "issued" ? (due.map { "\(money($0, currency: record.currency)) due" } ?? "Balance unavailable") : "Paid \(money(record.amountPaid, currency: record.currency))",
+                                             status: record.status,
+                                             amount: total.map { money($0, currency: record.currency) })
+                        }.buttonStyle(.plain)
                     }
-                    .padding(.vertical, 7)
-                }.listRowBackground(Theme.card).listRowSeparator(.hidden)
+                }
+                if !loading && records.isEmpty && error == nil {
+                    PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices created from jobs appear here.")
+                }
             }
-            if !loading && records.isEmpty && error == nil { ContentUnavailableView("No invoices", systemImage: "doc.plaintext") }
+            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("Invoices")
+        .navigationBarTitleDisplayMode(.large)
         .task { await load() }
         .refreshable { await load() }
     }
@@ -429,6 +433,70 @@ private extension View {
             .padding(.horizontal, 13)
             .frame(minHeight: 46)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// Sum of line amounts in cents, or nil on overflow or a negative line.
+func paperLinesTotal(_ lines: [FieldLine]) -> Int? {
+    var total = 0
+    for line in lines {
+        guard line.quantity >= 0 else { return nil }
+        let (amount, o1) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
+        let (next, o2) = total.addingReportingOverflow(amount)
+        guard !o1, !o2 else { return nil }
+        total = next
+    }
+    return total
+}
+
+/// Groups documents by status in a fixed order, unknown statuses last.
+func paperDocumentGroups<T>(_ records: [T], status: KeyPath<T, String>, order: [String]) -> [(String, [T])] {
+    let grouped = Dictionary(grouping: records) { $0[keyPath: status] }
+    let keys = grouped.keys.sorted { (order.firstIndex(of: $0) ?? order.count, $0) < (order.firstIndex(of: $1) ?? order.count, $1) }
+    return keys.map { ($0, grouped[$0] ?? []) }
+}
+
+/// Paper's document row: mono reference, title over a muted line, status chip, mono amount.
+struct PaperDocumentRow: View {
+    let reference: String
+    let title: String
+    let subtitle: String
+    let status: String
+    let amount: String?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(reference).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
+                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
+                Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 6) {
+                if let amount { Text(amount).font(Theme.monoFont(13, weight: .semibold)).foregroundStyle(Theme.foreground) }
+                PaperStatusChip(status: status)
+            }
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Document status as a word in a tinted chip (never colour alone).
+struct PaperStatusChip: View {
+    let status: String
+    var body: some View {
+        let (tint, ground): (Color, Color) = switch status {
+        case "approved", "paid", "completed": (Theme.success, Theme.successSurface)
+        case "sent", "issued": (Theme.warning, Theme.warningSurface)
+        case "declined", "void", "canceled": (Theme.destructive, Theme.destructiveSurface)
+        default: (Theme.muted, Theme.fill)
+        }
+        Text(status == "issued" ? "Unpaid" : status.statusLabel)
+            .font(Theme.font(11, weight: .medium)).foregroundStyle(tint)
+            .padding(.horizontal, 8).frame(minHeight: 20)
+            .background(ground, in: RoundedRectangle(cornerRadius: 6))
     }
 }
 

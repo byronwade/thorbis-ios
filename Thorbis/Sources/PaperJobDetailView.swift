@@ -9,7 +9,8 @@ struct JobDetailView: View {
         self.jobId = jobId
         self.showsBack = showsBack
         #if DEBUG
-        _selectedTab = State(initialValue: PaperPreview.enabled && PaperPreview.screen == "job-invoice" ? "Invoice" : "Overview")
+        let previewTabs = ["job-invoice": "Invoice", "job-estimates": "Estimates", "job-activity": "Activity", "job-media": "Media"]
+        _selectedTab = State(initialValue: PaperPreview.enabled ? previewTabs[PaperPreview.screen] ?? "Overview" : "Overview")
         #endif
     }
     @EnvironmentObject var api: APIClient
@@ -33,6 +34,8 @@ struct JobDetailView: View {
     @State private var showCollectPayment = false
     @State private var activityFilter = "All"
     @State private var showSchedule = false
+    @State private var linkedEstimate: EstimateRecord?
+    @State private var estimateLoadFailed = false
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
 
@@ -359,17 +362,59 @@ struct JobDetailView: View {
         }
     }
 
+    /// Paper 23: the job's estimate as a card with its total and a status word.
     private func estimatesContent(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
-            sectionTitle("Estimates")
+        VStack(alignment: .leading, spacing: 12) {
+            PaperGroupHeader(title: "Estimates", count: job.estimateId == nil ? 0 : 1)
             if let estimateID = job.estimateId, session.can("estimate.view", feature: "estimates") {
-                NavigationLink { EstimateDetailView(id: estimateID).toolbar(.visible, for: .navigationBar) } label: {
-                    actionLabel("View linked estimate", icon: "doc.text")
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                NavigationLink { EstimateDetailView(id: estimateID) } label: {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(linkedEstimate?.title ?? "Estimate").font(Theme.font(16, weight: .semibold))
+                                .foregroundStyle(Theme.foreground).multilineTextAlignment(.leading)
+                            Spacer(minLength: 8)
+                            if let estimate = linkedEstimate, let total = paperLinesTotal(estimate.lines) {
+                                Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
+                                    .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            if let estimate = linkedEstimate {
+                                PaperStatusChip(status: estimate.status)
+                                if let revision = estimate.currentRevisionNumber {
+                                    Text("Revision \(revision)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                }
+                            } else {
+                                Text(estimateLoadFailed ? "Open to view details" : "Loading…").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .padding(16)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .task(id: estimateID) { await loadEstimate(estimateID) }
             } else {
-                emptyCard("No linked estimate is available for this job.")
+                PaperEmptyState(symbol: "doc.text", title: "No estimate on this job",
+                                message: "No estimate is linked to this job yet.")
             }
+        }
+    }
+
+    private func loadEstimate(_ id: String) async {
+        guard linkedEstimate?.id != id else { return }
+        let generation = session.generation
+        do {
+            let estimate = try await api.fieldEstimate(id)
+            guard session.generation == generation else { return }
+            linkedEstimate = estimate
+        } catch is CancellationError {} catch {
+            guard session.generation == generation else { return }
+            estimateLoadFailed = true
         }
     }
 
@@ -430,63 +475,101 @@ struct JobDetailView: View {
         invoices[index] = updated
     }
 
+    /// Paper 21B: filter pills, a quiet timeline of notes and status changes, composer last.
     private func activityContent(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
-            sectionTitle("Activity")
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(["All", "Notes", "Status"], id: \.self) { filter in
-                        Button { activityFilter = filter } label: {
-                            Text(filter)
-                                .font(Theme.font(12, weight: activityFilter == filter ? .semibold : .medium))
-                                .foregroundStyle(activityFilter == filter ? Theme.foreground : Theme.muted)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 7)
-                                .background(activityFilter == filter ? Theme.fill : Theme.card, in: Capsule())
-                                .frame(minHeight: 44)
-                        }
-                        .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 6) {
+                ForEach(["All", "Notes", "Status"], id: \.self) { filter in
+                    Button { activityFilter = filter } label: {
+                        Text(filter)
+                            .font(Theme.font(12, weight: activityFilter == filter ? .semibold : .medium))
+                            .foregroundStyle(activityFilter == filter ? Theme.background : Theme.muted)
+                            .padding(.horizontal, 12).frame(height: 28)
+                            .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
+                            .frame(minHeight: 44).contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(activityFilter == filter ? .isSelected : [])
                 }
             }
-            .scrollIndicators(.hidden)
-            if activityFilter != "Status" {
-                ForEach(notes) { record in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(record.body).font(Theme.font(14))
-                        if let date = JobFiltering.date(record.createdAt) {
-                            Text(date.formatted()).font(Theme.font(11)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(timeline(job)) { entry in
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(spacing: 0) {
+                            Image(systemName: entry.symbol).font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(entry.isNote ? Theme.brandText : Theme.muted)
+                                .frame(width: 26, height: 26)
+                                .background(entry.isNote ? Theme.brandSurface : Theme.fill, in: Circle())
+                            Rectangle().fill(Theme.border).frame(width: 1).frame(maxHeight: .infinity)
                         }
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(entry.title).font(Theme.font(14, weight: .semibold))
+                                Spacer(minLength: 8)
+                                Text(entry.date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                            }
+                            if let body = entry.body {
+                                Text(body).font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+                                    .textSelection(.enabled)
+                            }
+                            Text(entry.date.formatted(.dateTime.month(.abbreviated).day())).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                        }
+                        .padding(.bottom, 16)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityElement(children: .combine)
                 }
             }
-            if activityFilter != "Notes" {
-                ForEach(statusEvents(job), id: \.0) { event in
-                    HStack(spacing: 12) {
-                        Image(systemName: "checkmark.circle").foregroundStyle(Theme.brandText)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(event.0).font(Theme.font(14, weight: .medium))
-                            Text(event.1.formatted()).font(Theme.font(11)).foregroundStyle(Theme.muted)
-                        }
-                        Spacer()
-                    }
-                    .padding(15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                }
+            if timeline(job).isEmpty {
+                PaperEmptyState(symbol: "clock", title: "No activity yet", message: "Notes and status changes on this job show up here.")
             }
-            if notes.isEmpty && statusEvents(job).isEmpty { emptyCard("No activity yet.") }
             if session.can("job.note", feature: "jobs") {
-                TextField("Add a note", text: $note, axis: .vertical)
-                    .lineLimit(3...8)
-                    .padding(13)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-                PrimaryButton(title: "Save note", busy: busy) { Task { await saveNote() } }
-                    .disabled(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || note.utf16.count > 10_000)
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Add a note or update…", text: $note, axis: .vertical)
+                        .font(Theme.font(16))
+                        .lineLimit(1...6)
+                        .padding(.horizontal, 14).padding(.vertical, 11)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22))
+                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.border))
+                    Button { Task { await saveNote() } } label: {
+                        Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold)) } }
+                            .foregroundStyle(.white).frame(width: 44, height: 44)
+                            .background(Theme.brand.opacity(canSaveNote ? 1 : 0.4), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSaveNote || busy)
+                    .accessibilityLabel("Save note")
+                }
             }
         }
+    }
+
+    private var canSaveNote: Bool {
+        !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && note.utf16.count <= 10_000
+    }
+
+    private struct TimelineEntry: Identifiable {
+        let id: String
+        let title: String
+        let body: String?
+        let date: Date
+        let symbol: String
+        var isNote: Bool { body != nil }
+    }
+
+    private func timeline(_ job: JobRecord) -> [TimelineEntry] {
+        var entries: [TimelineEntry] = []
+        if activityFilter != "Status" {
+            entries += notes.compactMap { record in
+                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble") }
+            }
+        }
+        if activityFilter != "Notes" {
+            entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill") }
+        }
+        return entries.sorted { $0.date > $1.date }
     }
 
     private func statusEvents(_ job: JobRecord) -> [(String, Date)] {
