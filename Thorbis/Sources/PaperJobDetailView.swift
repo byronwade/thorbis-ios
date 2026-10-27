@@ -268,36 +268,10 @@ struct JobDetailView: View {
     }
 
     /// Everything a tech reaches for on arrival, without leaving the job: call, text, drive.
-    @ViewBuilder private var quickActions: some View {
-        let phone = customerPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
-        let place = locations.first
-        let directions = place.flatMap { Directions.url(address: $0.address, coordinates: $0.coordinates) }
-        if phone != nil || directions != nil {
-            HStack(spacing: 8) {
-                if let phone, let call = URL(string: "tel:\(phone)"), let text = URL(string: "sms:\(phone)") {
-                    quickAction("Call", symbol: "phone.fill") { openURL(call) }
-                    quickAction("Text", symbol: "message.fill") { openURL(text) }
-                }
-                if let directions {
-                    quickAction("Directions", symbol: "arrow.triangle.turn.up.right.diamond.fill") { openURL(directions) }
-                }
-            }
+    private var quickActions: some View {
+        PaperQuickActions(phone: customerPhone,
+                          directions: locations.first.flatMap { Directions.url(address: $0.address, coordinates: $0.coordinates) })
             .padding(.top, 8)
-        }
-    }
-
-    private func quickAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
-            }
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title == "Directions" ? "Directions in Maps" : "\(title) customer")
     }
 
     @ViewBuilder

@@ -425,3 +425,46 @@ struct OutboxReviewSheet: View {
         }
     }
 }
+
+/// One row of the actions people reach for on a person or a place: call, text, email, drive.
+/// Used on the job and customer headers so the pattern is the same everywhere.
+struct PaperQuickActions: View {
+    var phone: String?
+    var email: String?
+    var directions: URL?
+    @Environment(\.openURL) private var openURL
+
+    private var dialable: String? {
+        phone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
+    }
+
+    var body: some View {
+        let dialable = dialable
+        let mail = email.flatMap { $0.contains("@") ? URL(string: "mailto:\($0)") : nil }
+        if dialable != nil || mail != nil || directions != nil {
+            HStack(spacing: 8) {
+                if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
+                    action("Call", symbol: "phone.fill", label: "Call") { openURL(call) }
+                    action("Text", symbol: "message.fill", label: "Text") { openURL(text) }
+                }
+                if let mail { action("Email", symbol: "envelope.fill", label: "Email") { openURL(mail) } }
+                if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond.fill", label: "Directions in Maps") { openURL(directions) } }
+            }
+        }
+    }
+
+    private func action(_ title: String, symbol: String, label: String, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    .frame(height: 18)
+                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+}

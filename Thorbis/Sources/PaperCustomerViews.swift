@@ -220,25 +220,24 @@ struct CustomerDetailView: View {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { metadataChips }.fixedSize()
                     VStack(alignment: .leading, spacing: 6) { metadataChips }
-                }.padding(.horizontal, 20).padding(.bottom, 14)
+                }.padding(.horizontal, 20).padding(.bottom, 10)
+                PaperQuickActions(phone: contacts.first(where: \.primary)?.phone ?? record?.phone,
+                                  email: contacts.first(where: \.primary)?.email ?? record?.email,
+                                  directions: (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
+                    .padding(.horizontal, Theme.gutter).padding(.bottom, 14)
                 if let error { ErrorBanner(message: error) }
                 if record == nil && error == nil { ProgressView("Loading customer…").padding(20) }
                 details
-                PaperTabs(options: ["Overview", "Jobs", "Billing", "Media", "Activity"], selection: $tab)
+                PaperTabs(options: ["Overview", "Jobs", "Activity"], selection: $tab)
                 VStack(alignment: .leading, spacing: 18) {
                     switch tab {
                     case "Overview":
                         contactsSection
                         locationsSection
                         if session.can("job.view", feature: "jobs") { jobsSection }
-                        unavailable("Notes", "Customer notes are not available in this workspace connection.")
                     case "Jobs":
                         if session.can("job.view", feature: "jobs") { jobsSection }
                         else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
-                    case "Billing":
-                        if let terms = record?.billingTerms { detailRow("Billing terms", value: terms) }
-                        unavailable("Billing", "Customer balances and billing history are not available here.")
-                    case "Media": unavailable("Media", "Open a customer job to view its media.")
                     case "Activity": activitySection
                     default: activitySection
                     }
@@ -267,7 +266,6 @@ struct CustomerDetailView: View {
                         Label("New job", systemImage: "plus").font(Theme.font(15, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 46).foregroundStyle(.white).background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
                     }
                 }
-                if let phone = record?.phone { CustomerContactIcon(value: phone, isPhone: true, size: 46) }
             }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
         }
         .task { await load() }
@@ -338,6 +336,7 @@ struct CustomerDetailView: View {
                 }
                 if let industry = record.industry { detailRow("Industry", value: industry) }
                 if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel) }
+                if let terms = record.billingTerms { detailRow("Billing terms", value: terms) }
             }
         }.padding(.horizontal, 20).padding(.bottom, 18)
     }
