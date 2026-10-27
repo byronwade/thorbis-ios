@@ -23,7 +23,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Team, team member, roles, role members | Done (read) | Team & permissions list with roles for owners and admins. Invites and role changes are web only. |
 | Inbox, notices | Done | Staff notices with mark-read. |
 | Search | Done (local) | Searches loaded jobs and customers. Server search (`/v1/search`) is not used yet. |
-| Settings, notice settings | Partial | Account, appearance, sign-out. Notice preferences are not native yet. |
+| Settings, notice settings | Done | Account, appearance and sign-out, plus the job-notice matrix (owner, dispatcher and technician × email and in-app). The delivery log is web only. |
 | Offline queue, sync banner | Done | Cached workspace, queued steps and notes, photos kept until uploaded. |
 | Workflows, agent / Brain | Not yet | |
 | Customer portal, document action page | Done | Public estimate decision screen. |

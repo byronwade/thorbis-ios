@@ -495,9 +495,15 @@ struct MoreView: View {
                         NavigationLink(value: PaperRoute.reports) { PaperMenuRow("Reports", symbol: "chart.xyaxis.line", subtitle: "Estimate conversion and schedule") }
                     }
                 }
-                if session.can("organization.members.manage") || session.can("organization.permissions.manage") {
+                if session.can("organization.members.manage") || session.can("organization.permissions.manage")
+                    || session.can("organization.settings.edit", feature: "job_booking_notices") {
                     group("Business") {
-                        NavigationLink(value: PaperRoute.team) { PaperMenuRow("Team & permissions", symbol: "person.2.badge.gearshape") }
+                        if session.can("organization.members.manage") || session.can("organization.permissions.manage") {
+                            NavigationLink(value: PaperRoute.team) { PaperMenuRow("Team & permissions", symbol: "person.2.badge.gearshape") }
+                        }
+                        if session.can("organization.settings.edit", feature: "job_booking_notices") {
+                            NavigationLink(value: PaperRoute.notices) { PaperMenuRow("Job notices", symbol: "bell.badge", subtitle: "Who hears about booked and changed jobs") }
+                        }
                     }
                 }
                 if session.user?.id != nil, session.activeOrganization?.id != nil {
