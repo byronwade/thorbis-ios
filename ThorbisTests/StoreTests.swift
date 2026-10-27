@@ -3,6 +3,25 @@ import XCTest
 
 @MainActor
 final class StoreTests: XCTestCase {
+    func testRefreshReportsFailureWhenWorkspaceFetchFails() async {
+        let store = Store { _ in throw URLError(.cannotConnectToHost) }
+
+        let refreshed = await store.refresh(APIClient())
+
+        XCTAssertEqual(refreshed, .failed)
+        XCTAssertNotNil(store.error)
+    }
+
+    func testRefreshReportsSuccessAfterApplyingWorkspaceFetch() async {
+        let customer = Customer(id: "current", name: "Current", archived: false, createdAt: nil)
+        let store = Store { _ in ([], [customer]) }
+
+        let refreshed = await store.refresh(APIClient())
+
+        XCTAssertEqual(refreshed, .applied)
+        XCTAssertEqual(store.customers.map(\.id), ["current"])
+    }
+
     func testInvalidationDiscardsLateWorkspaceResponse() async {
         var resume: CheckedContinuation<([Job], [Customer]), Error>?
         let store = Store { _ in
@@ -12,7 +31,8 @@ final class StoreTests: XCTestCase {
         while resume == nil { await Task.yield() }
         store.invalidate()
         resume?.resume(returning: ([Job(id: "old", customerId: nil, title: "Private", status: "scheduled", createdAt: nil, updatedAt: nil, allowedTransitions: nil)], []))
-        await task.value
+        let result = await task.value
+        XCTAssertEqual(result, .superseded)
         XCTAssertTrue(store.jobs.isEmpty)
         XCTAssertTrue(store.customers.isEmpty)
         XCTAssertFalse(store.loading)
@@ -35,9 +55,11 @@ final class StoreTests: XCTestCase {
         let second = Task { await store.refresh(APIClient()) }
         while replies.count < 2 { await Task.yield() }
         replies[1].resume(returning: ([], [Customer(id: "new", name: "New", archived: false, createdAt: nil)]))
-        await second.value
+        let secondResult = await second.value
         replies[0].resume(returning: ([], [Customer(id: "old", name: "Old", archived: false, createdAt: nil)]))
-        await first.value
+        let firstResult = await first.value
+        XCTAssertEqual(secondResult, .applied)
+        XCTAssertEqual(firstResult, .superseded)
         XCTAssertEqual(store.customers.map(\.id), ["new"])
     }
 

@@ -130,32 +130,240 @@ struct JobCloseoutView: View {
 
 struct JobScheduleView: View {
     let job: JobRecord
+    var onSaved: (JobRecord) -> Void = { _ in }
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) var dismiss
-    @State private var date = Date()
+    @State private var date: Date
     @State private var busy = false
+    @State private var saved = false
     @State private var error: String?
-    var body: some View {
-        Form {
-            DatePicker("Scheduled for", selection: $date)
-            LabeledContent("Time zone", value: TimeZone.current.identifier)
-            if let error { Text(error).foregroundStyle(Theme.destructive) }
-            Button("Save schedule") { Task { await save() } }.disabled(busy || !session.can("job.assign", feature: "jobs"))
-            if busy { ProgressView() }
-        }
-        .navigationTitle("Schedule job")
-        .onAppear { date = JobFiltering.date(job.scheduledFor) ?? Date() }
+    @State private var showsCalendar = false
+    @State private var showsCustomTime = false
+
+    private let timeOptions: [(hour: Int, minute: Int)] = [
+        (8, 0), (10, 30), (13, 0), (15, 30)
+    ]
+
+    init(job: JobRecord, onSaved: @escaping (JobRecord) -> Void = { _ in }) {
+        self.job = job
+        self.onSaved = onSaved
+        _date = State(initialValue: JobFiltering.date(job.scheduledFor) ?? Date())
+        let initialDate = JobFiltering.date(job.scheduledFor) ?? Date()
+        _showsCustomTime = State(initialValue: !Self.timeOptionsContain(initialDate))
     }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                VStack(spacing: 4) {
+                    dayOptions
+                    if showsCalendar {
+                        DatePicker("Pick date", selection: $date, in: Date.distantPast..., displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .tint(Theme.brand)
+                            .accessibilityLabel("Choose schedule date")
+                    }
+                    VStack(spacing: 0) {
+                        ForEach(timeOptions, id: \.hour) { option in
+                            timeRow(hour: option.hour, minute: option.minute)
+                        }
+                    }
+                    if showsCustomTime {
+                        HStack {
+                            Label("Other time", systemImage: "clock")
+                                .font(Theme.font(14))
+                                .foregroundStyle(Theme.muted)
+                            Spacer()
+                            DatePicker("Other time", selection: $date, displayedComponents: .hourAndMinute)
+                                .labelsHidden()
+                                .datePickerStyle(.compact)
+                                .accessibilityLabel("Choose a custom start time")
+                        }
+                        .frame(minHeight: 44)
+                    } else {
+                        Button("Other time…") { showsCustomTime = true }
+                            .font(Theme.font(14, weight: .medium))
+                            .foregroundStyle(Theme.brand)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    if let error { ErrorBanner(message: error).padding(.vertical, 8) }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+            }
+            .scrollIndicators(.hidden)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 4) {
+                    PrimaryButton(title: saved ? "Schedule saved" : "Save schedule", busy: busy) { Task { await save() } }
+                        .disabled(busy || saved || !session.can("job.assign", feature: "jobs"))
+                    Button("Cancel") { dismiss() }
+                        .font(Theme.font(15, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
+                    .background(Theme.card)
+            }
+        }
+        .background(Theme.card)
+        .foregroundStyle(Theme.foreground)
+        .presentationDetents([.height(430), .large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(20)
+        .presentationBackground(Theme.card)
+    }
+
+    private var header: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 44, height: 44)
+                .accessibilityHidden(true)
+            Spacer(minLength: 0)
+            Text("Schedule")
+                .font(Theme.font(17, weight: .semibold))
+                .tracking(-0.17)
+            Spacer(minLength: 0)
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(Theme.fill, in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close schedule picker")
+        }
+        .frame(height: 44)
+        .padding(.horizontal, 20)
+    }
+
+    private var dayOptions: some View {
+        HStack(spacing: 8) {
+            dayButton("Today", offset: 0)
+            dayButton("Tomorrow", offset: 1)
+            Button {
+                showsCalendar.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Pick date")
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
+                        .rotationEffect(.degrees(showsCalendar ? 180 : 0))
+                }
+                .font(Theme.font(13, weight: showsCalendar ? .semibold : .medium))
+                .foregroundStyle(showsCalendar ? Theme.brand : Theme.muted)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(showsCalendar ? .isSelected : [])
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+    }
+
+    private func dayButton(_ title: String, offset: Int) -> some View {
+        let calendar = Calendar.current
+        let targetDay = calendar.date(byAdding: .day, value: offset, to: Date()) ?? Date()
+        let selected = calendar.isDate(date, inSameDayAs: targetDay)
+        return Button {
+            let hour = calendar.component(.hour, from: date)
+            let minute = calendar.component(.minute, from: date)
+            if let next = JobScheduleSelection.date(on: targetDay, hour: hour, minute: minute, calendar: calendar) {
+                date = next
+            }
+        } label: {
+            Text(title)
+                .font(Theme.font(13, weight: selected ? .semibold : .medium))
+                .foregroundStyle(selected ? Theme.brand : Theme.muted)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func timeRow(hour: Int, minute: Int) -> some View {
+        let selected = JobScheduleSelection.matchesPreset(date, hour: hour, minute: minute)
+        let label = presetLabel(hour: hour, minute: minute)
+        return Button {
+            if let selectedDate = JobScheduleSelection.date(on: date, hour: hour, minute: minute) {
+                date = selectedDate
+                showsCustomTime = false
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(selected ? Theme.brand : Theme.subtle)
+                    .frame(width: 20, height: 20)
+                Text(label)
+                    .font(Theme.monoFont(14, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? Theme.brand : Theme.foreground)
+                Spacer(minLength: 8)
+                Text("2 hr window")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.muted)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(label), two hour arrival window")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func presetLabel(hour: Int, minute: Int) -> String {
+        var components = DateComponents()
+        components.hour = hour
+        components.minute = minute
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        let time = calendar.date(from: components) ?? Date()
+        return time.formatted(date: .omitted, time: .shortened)
+    }
+
+    private static func timeOptionsContain(_ date: Date) -> Bool {
+        [(8, 0), (10, 30), (13, 0), (15, 30)].contains {
+            JobScheduleSelection.matchesPreset(date, hour: $0.0, minute: $0.1)
+        }
+    }
+
     private func save() async {
+        guard session.can("job.assign", feature: "jobs"), !busy,
+              let request = JobScheduleSelection.request(for: job, selectedDate: date,
+                                                         timeZone: .current, calendar: .current) else { return }
         busy = true
         defer { busy = false }
         do {
-            _ = try await api.scheduleFieldJob(job.id, request: .init(scheduledFor: ISO8601DateFormatter().string(from: date), timeZone: TimeZone.current.identifier, expectedPrior: job.scheduledFor.map(FieldExpectedSchedule.at) ?? .unscheduled))
-            await store.refresh(api)
-            dismiss()
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+            let updated = try await api.scheduleFieldJob(job.id, request: request)
+            saved = true
+            onSaved(updated)
+            switch await store.refresh(api) {
+            case .failed:
+                self.error = "Schedule saved, but the jobs list could not refresh. Close this sheet and refresh Jobs before making another change."
+                return
+            case .applied, .superseded:
+                dismiss()
+            }
+        } catch is CancellationError {
+        } catch let problem as Problem where problem.status == 409 {
+            error = "The schedule changed. Close this sheet and reopen it to review the latest time."
+        } catch {
+            self.error = "Could not confirm this schedule. Close and refresh the job before trying again. \(error.localizedDescription)"
+        }
     }
 }
 

@@ -37,7 +37,7 @@
 
 ### Task 3: Remaining screen coverage
 - [x] Inventory all current native routes against current Paper artboards, record unimplemented contracts and empty artboards explicitly.
-- [ ] Apply exported presentation to remaining supported routes and their sheets without inventing missing backend behavior.
+- [ ] Apply exported presentation to remaining supported routes and their sheets without inventing missing backend behavior. Schedule picker `RAG-0` is now complete for the supported native contract; many other screens/forms remain.
 
 ### Task 4: Verify and release
 - [x] Run Swift strict-concurrency build and relevant existing full tests; add behavioral tests only for new route/filter logic.

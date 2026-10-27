@@ -131,7 +131,8 @@ final class Store: ObservableObject {
         loading = false
     }
 
-    func refresh(_ api: APIClient) async {
+    @discardableResult
+    func refresh(_ api: APIClient) async -> StoreRefreshResult {
         let currentGeneration = generation
         let requestID = UUID()
         refreshID = requestID
@@ -139,26 +140,35 @@ final class Store: ObservableObject {
         defer { if refreshID == requestID { loading = false } }
         do {
             let (newJobs, newCustomers) = try await fetch(api)
-            guard generation == currentGeneration, refreshID == requestID else { return }
+            guard generation == currentGeneration, refreshID == requestID else { return .superseded }
             jobs = newJobs
             customers = newCustomers
             error = nil
+            return .applied
         } catch is CancellationError {
-            return
+            return .superseded
         } catch {
-            guard generation == currentGeneration, refreshID == requestID else { return }
+            guard generation == currentGeneration, refreshID == requestID else { return .superseded }
             if let problem = error as? Problem, problem.status == 401 {
                 invalidate()
                 onUnauthorized?()
             } else {
                 self.error = error.localizedDescription
+                return .failed
             }
+            return .superseded
         }
     }
 
     func customerName(_ id: String?) -> String {
         customers.first { $0.id == id }?.name ?? "Customer"
     }
+}
+
+enum StoreRefreshResult: Equatable {
+    case applied
+    case failed
+    case superseded
 }
 
 enum Tab: Hashable { case schedule, jobs, customers, more }

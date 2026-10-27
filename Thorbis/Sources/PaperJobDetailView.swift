@@ -25,6 +25,7 @@ struct JobDetailView: View {
     @State private var invoices: [InvoiceRecord] = []
     @State private var invoicesLoaded = false
     @State private var activityFilter = "All"
+    @State private var showSchedule = false
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
 
@@ -93,6 +94,13 @@ struct JobDetailView: View {
                 }
                 .navigationTitle("Pause job")
                 .toolbar { Button("Cancel") { showPause = false }.disabled(busy) }
+            }
+        }
+        .sheet(isPresented: $showSchedule, onDismiss: { Task { await load() } }) {
+            if let job {
+                JobScheduleView(job: job) { updatedJob in
+                    self.job = updatedJob
+                }
             }
         }
     }
@@ -215,7 +223,7 @@ struct JobDetailView: View {
                 NavigationLink { JobCloseoutView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Closeout", icon: "checkmark.circle") }
                 NavigationLink { JobFollowUpsView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Follow-ups", icon: "list.bullet") }
                 if session.can("job.assign", feature: "jobs") {
-                    NavigationLink { JobScheduleView(job: job).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Schedule job", icon: "calendar") }
+                    Button { showSchedule = true } label: { actionLabel("Schedule job", icon: "calendar") }
                     NavigationLink { JobAssignmentView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Assign job", icon: "person.crop.circle.badge.plus") }
                 }
             }

@@ -18,7 +18,7 @@ The page contains 133 artboards, including unimplemented workflows and several e
 - Native messaging is device-local drafts, not delivered team chat; offline PowerSync remains unconfigured. No fake unread or offline-working badges.
 - Time clock, receipt/material scanning, onboarding/setup, role dashboards/payroll, vendors/POs, inventory/maintenance and other separate-product flows are not implemented by this presentation change.
 - Customer billing/history/notes and some job commercial summaries have no loaded native contract. These display honest unavailable states instead of sample balances/history.
-- Existing operational forms (assignment, scheduling, follow-ups, closeout, contact/location editing), document viewer, local records and parts of media/financial workflows retain native controls; they have not all been matched pixel-for-pixel to Paper.
+- The scheduling flow now uses Paper's native date/time sheet; its evidence and server constraints are in [schedule-sheet.md](schedule-sheet.md). Assignment, follow-ups, closeout, contact/location editing, document viewing, local records and parts of media/financial workflows still retain native controls and have not all been matched pixel-for-pixel to Paper.
 - Financial screens retain server-backed actions only; no decorative signing/payment controls or invented tax/stock/category data.
 - SF Symbols substitute for exported SVG line icons. Dynamic Type, localization, actual record lengths and device safe areas can alter geometry.
 
