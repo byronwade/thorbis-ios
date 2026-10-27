@@ -25,14 +25,71 @@ struct FieldEstimateOptionRequest: Encodable {
 
 struct FieldInvoiceLinesRequest: Encodable {
     let expectedLinesRevision: Int
-    let lines: [FieldEstimateLineInput]
+    let lines: [FieldInvoiceLineInput]
     let priceBookOverrideReason: String?
 
-    init(expectedLinesRevision: Int, lines: [FieldEstimateLineInput],
+    init(expectedLinesRevision: Int, lines: [FieldInvoiceLineInput],
          priceBookOverrideReason: String? = nil) {
         self.expectedLinesRevision = expectedLinesRevision
         self.lines = lines
         self.priceBookOverrideReason = priceBookOverrideReason
+    }
+}
+
+enum FieldInvoiceLineSourceInput: Hashable, Encodable {
+    case manual
+    case priceBookSelection(itemID: String, revision: Int)
+    case retainedPriceBook(FieldLineSource)
+    case estimate(id: String, revision: Int?, lineID: String, snapshot: FieldEstimateLineSourceSnapshot?)
+    case unsupported(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, priceBookItemId, priceBookRevision, estimateId
+        case estimateRevisionNumber, estimateLineId, estimateLineSource
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .manual:
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode("manual", forKey: .kind)
+        case .priceBookSelection(let itemID, let revision):
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode("price_book", forKey: .kind)
+            try values.encode(itemID, forKey: .priceBookItemId)
+            try values.encode(revision, forKey: .priceBookRevision)
+        case .retainedPriceBook(let source):
+            guard source.kind == "price_book" else {
+                throw EncodingError.invalidValue(source, .init(codingPath: encoder.codingPath,
+                    debugDescription: "Only retained Price Book evidence can be encoded here"))
+            }
+            try source.encode(to: encoder)
+        case .estimate(let id, let revision, let lineID, let snapshot):
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode("estimate", forKey: .kind)
+            try values.encode(id, forKey: .estimateId)
+            try values.encodeIfPresent(revision, forKey: .estimateRevisionNumber)
+            try values.encode(lineID, forKey: .estimateLineId)
+            try values.encodeIfPresent(snapshot, forKey: .estimateLineSource)
+        case .unsupported(let kind):
+            throw EncodingError.invalidValue(kind, .init(codingPath: encoder.codingPath,
+                debugDescription: "Unsupported invoice line provenance"))
+        }
+    }
+}
+
+struct FieldInvoiceLineInput: Encodable, Hashable {
+    let description: String
+    let quantity: Int
+    let unitPrice: FieldMoney
+    let source: FieldInvoiceLineSourceInput?
+
+    init(description: String, quantity: Int, unitPrice: FieldMoney,
+         source: FieldInvoiceLineSourceInput? = nil) {
+        self.description = description
+        self.quantity = quantity
+        self.unitPrice = unitPrice
+        self.source = source
     }
 }
 

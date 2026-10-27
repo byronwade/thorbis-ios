@@ -47,6 +47,7 @@ Consumes Task 1 client and identity generation. Produces real navigation, loadin
 ## Task 3: Estimates, invoices, documents and authority
 
 Files: feature-specific estimate/invoice/document models, services and views; fixture tests.
+- [x] Add draft invoice line editing, gated Price Book selection, lossless source evidence, and revision-bound save/issue. See `2026-10-27-draft-invoice-editor.md`; estimate editing and remaining finance flows are still outstanding.
 - [ ] Enumerate canonical DTOs and permitted action endpoints; write request fixtures for revision conflict and missing authority before implementation.
 - [ ] Implement native lists/details/forms and documents, server-derived totals, eligible real-world collection only, reports and staff notices.
 - [ ] Verify permission loss, retry/reconciliation, stale revisions and complete pagination; never synthesize settled payment state.

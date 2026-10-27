@@ -10,6 +10,8 @@ final class PaperPreviewTests: XCTestCase {
         await session.restore()
         XCTAssertEqual(session.phase, .ready, session.error ?? "")
         XCTAssertTrue(session.can("job.view", feature: "jobs"))
+        XCTAssertTrue(session.can("invoice.edit", feature: "invoicing"))
+        XCTAssertTrue(session.can("invoice.issue", feature: "invoicing"))
         let jobs = try await api.jobs()
         let customers = try await api.customers()
         XCTAssertEqual(jobs.count, 6)
@@ -24,6 +26,18 @@ final class PaperPreviewTests: XCTestCase {
         XCTAssertTrue(contacts[0].primary)
         XCTAssertFalse(contacts[1].primary)
         XCTAssertFalse(locations.isEmpty)
+    }
+
+    func testInvoiceEditorPreviewUsesReadOnlyInvoiceAndPriceBookFixtures() async throws {
+        let invoice = PaperPreview.invoice
+        XCTAssertEqual(invoice.status, "draft")
+        XCTAssertEqual(invoice.lines.count, 3)
+        XCTAssertEqual(invoice.linesRevision, 3)
+
+        let page = try await PaperPreview.api().priceBookItems(limit: 50)
+        XCTAssertEqual(page.items.first?.description, "Replace capacitor")
+        XCTAssertEqual(page.items.first?.revision, 4)
+        XCTAssertNil(page.nextCursor)
     }
 
     func testEveryRequestIsInterceptedAndUnknownHostsNeverFallThrough() async throws {

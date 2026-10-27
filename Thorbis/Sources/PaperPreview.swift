@@ -13,8 +13,12 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "customer", "menu"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "customer", "menu", "invoice-editor"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
+    }
+    static var invoice: InvoiceRecord {
+        let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"draft","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":null,"paidAt":null,"voidedAt":null,"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
+        return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
     }
     @MainActor static func api() -> APIClient {
         let api = APIClient(session: transport(), baseURL: "https://app.thorbis.com")
@@ -81,7 +85,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
-                    "capabilities": ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "invoice.view", "pricebook.view"],
+                    "capabilities": ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"],
                     "resources": [], "views": []] as [String: Any]
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
@@ -89,6 +93,20 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         case "/v1/jobs": return ["items": jobs()]
         case "/v1/customers": return ["items": customers()]
+        case "/v1/query":
+            let priceBookID = "00000000-0000-4000-8000-000000009201"
+            return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
+                    "items": [["id": priceBookID, "resourceId": "price_book_items", "label": "Replace capacitor",
+                               "subtitle": "Material · each",
+                               "fields": ["price_book_items.id": priceBookID,
+                                          "price_book_items.current_revision": 4,
+                                          "price_book_items.description": "Replace capacitor",
+                                          "price_book_items.unit": "each",
+                                          "price_book_items.sell_price_amount": 12500,
+                                          "price_book_items.currency": "USD",
+                                          "price_book_items.tax_classification": "taxable",
+                                          "price_book_items.kind": "material"]]],
+                    "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
         default: break
         }
         for job in jobs() {

@@ -202,6 +202,7 @@ struct InvoiceDetailView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirmIssue = false
+    @State private var showEditDraft = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -221,6 +222,12 @@ struct InvoiceDetailView: View {
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
+                        Button { showEditDraft = true } label: {
+                            commercialAction("Edit line items", icon: "pencil")
+                        }
+                        .buttonStyle(.plain)
+                    }
                     Text("Actions").font(Theme.font(16, weight: .semibold)).padding(.top, 8)
                     NavigationLink { CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
                         commercialAction("View PDF", icon: "doc.text")
@@ -245,6 +252,20 @@ struct InvoiceDetailView: View {
         }
         .confirmationDialog("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue, titleVisibility: .visible) {
             Button("Issue invoice") { Task { await issue() } }
+        }
+        .sheet(isPresented: $showEditDraft) {
+            if let record {
+                NavigationStack {
+                    InvoiceLineEditorView(invoice: record) { updated in
+                        self.record = updated
+                        error = nil
+                    }
+                    .environmentObject(api)
+                    .environmentObject(session)
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
         }
         .task { await load() }
         .refreshable { await load() }

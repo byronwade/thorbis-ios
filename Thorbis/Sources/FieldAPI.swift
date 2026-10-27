@@ -500,7 +500,7 @@ struct FieldMoney: Codable, Hashable {
 }
 
 /// Stored line provenance may contain additional server-derived fields.
-struct FieldLineSource: Codable, Hashable {
+struct FieldEstimateLineSourceSnapshot: Codable, Hashable {
     let kind: String
     let priceBookItemId: String?
     let priceBookRevision: Int?
@@ -509,9 +509,104 @@ struct FieldLineSource: Codable, Hashable {
     let addedByUserId: String?
     let capturedAt: String?
     let overriddenFields: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, priceBookItemId, priceBookRevision, originalDescription
+        case originalUnitPrice, addedByUserId, capturedAt, overriddenFields
+    }
+
+    init(kind: String, priceBookItemId: String? = nil, priceBookRevision: Int? = nil,
+         originalDescription: String? = nil, originalUnitPrice: FieldMoney? = nil,
+         addedByUserId: String? = nil, capturedAt: String? = nil, overriddenFields: [String]? = nil) {
+        self.kind = kind
+        self.priceBookItemId = priceBookItemId
+        self.priceBookRevision = priceBookRevision
+        self.originalDescription = originalDescription
+        self.originalUnitPrice = originalUnitPrice
+        self.addedByUserId = addedByUserId
+        self.capturedAt = capturedAt
+        self.overriddenFields = overriddenFields
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(kind, forKey: .kind)
+        try values.encodeIfPresent(priceBookItemId, forKey: .priceBookItemId)
+        try values.encodeIfPresent(priceBookRevision, forKey: .priceBookRevision)
+        try values.encodeIfPresent(originalDescription, forKey: .originalDescription)
+        try values.encodeIfPresent(originalUnitPrice, forKey: .originalUnitPrice)
+        try values.encodeIfPresent(addedByUserId, forKey: .addedByUserId)
+        try values.encodeIfPresent(capturedAt, forKey: .capturedAt)
+        try values.encodeIfPresent(overriddenFields, forKey: .overriddenFields)
+    }
+}
+
+struct FieldLineSource: Codable, Hashable {
+    let kind: String
+    let priceBookItemId: String?
+    let priceBookRevision: Int?
+    let originalDescription: String?
+    let originalUnit: String?
+    let originalUnitPrice: FieldMoney?
+    let originalTaxClassification: String?
+    let originalItemKind: String?
+    let addedByUserId: String?
+    let capturedAt: String?
+    let overriddenFields: [String]?
     let estimateId: String?
     let estimateRevisionNumber: Int?
     let estimateLineId: String?
+    let estimateLineSource: FieldEstimateLineSourceSnapshot?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, priceBookItemId, priceBookRevision, originalDescription, originalUnit
+        case originalUnitPrice, originalTaxClassification, originalItemKind
+        case addedByUserId, capturedAt, overriddenFields, estimateId
+        case estimateRevisionNumber, estimateLineId, estimateLineSource
+    }
+
+    init(kind: String, priceBookItemId: String? = nil, priceBookRevision: Int? = nil,
+         originalDescription: String? = nil, originalUnit: String? = nil,
+         originalUnitPrice: FieldMoney? = nil, originalTaxClassification: String? = nil,
+         originalItemKind: String? = nil, addedByUserId: String? = nil,
+         capturedAt: String? = nil, overriddenFields: [String]? = nil,
+         estimateId: String? = nil, estimateRevisionNumber: Int? = nil,
+         estimateLineId: String? = nil, estimateLineSource: FieldEstimateLineSourceSnapshot? = nil) {
+        self.kind = kind
+        self.priceBookItemId = priceBookItemId
+        self.priceBookRevision = priceBookRevision
+        self.originalDescription = originalDescription
+        self.originalUnit = originalUnit
+        self.originalUnitPrice = originalUnitPrice
+        self.originalTaxClassification = originalTaxClassification
+        self.originalItemKind = originalItemKind
+        self.addedByUserId = addedByUserId
+        self.capturedAt = capturedAt
+        self.overriddenFields = overriddenFields
+        self.estimateId = estimateId
+        self.estimateRevisionNumber = estimateRevisionNumber
+        self.estimateLineId = estimateLineId
+        self.estimateLineSource = estimateLineSource
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(kind, forKey: .kind)
+        try values.encodeIfPresent(priceBookItemId, forKey: .priceBookItemId)
+        try values.encodeIfPresent(priceBookRevision, forKey: .priceBookRevision)
+        try values.encodeIfPresent(originalDescription, forKey: .originalDescription)
+        try values.encodeIfPresent(originalUnit, forKey: .originalUnit)
+        try values.encodeIfPresent(originalUnitPrice, forKey: .originalUnitPrice)
+        try values.encodeIfPresent(originalTaxClassification, forKey: .originalTaxClassification)
+        try values.encodeIfPresent(originalItemKind, forKey: .originalItemKind)
+        try values.encodeIfPresent(addedByUserId, forKey: .addedByUserId)
+        try values.encodeIfPresent(capturedAt, forKey: .capturedAt)
+        try values.encodeIfPresent(overriddenFields, forKey: .overriddenFields)
+        try values.encodeIfPresent(estimateId, forKey: .estimateId)
+        try values.encodeIfPresent(estimateRevisionNumber, forKey: .estimateRevisionNumber)
+        try values.encodeIfPresent(estimateLineId, forKey: .estimateLineId)
+        try values.encodeIfPresent(estimateLineSource, forKey: .estimateLineSource)
+    }
 }
 
 struct FieldLine: Codable, Identifiable, Hashable {

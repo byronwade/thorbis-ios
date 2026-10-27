@@ -13,6 +13,9 @@ struct RootView: View {
     @State private var createJob = false
     @State private var priceBook = false
     @State private var drafts = false
+    #if DEBUG
+    @State private var previewInvoiceEditor = false
+    #endif
 
     var body: some View {
         GeometryReader { geometry in
@@ -56,10 +59,22 @@ struct RootView: View {
         .sheet(isPresented: $settings) { NavigationStack { MoreView().navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }.navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }.toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { settings = false } } } } }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
+        #if DEBUG
+        .sheet(isPresented: $previewInvoiceEditor) {
+            NavigationStack {
+                InvoiceLineEditorView(invoice: PaperPreview.invoice) { _ in }
+            }
+            .presentationDetents([.large])
+        }
+        #endif
         .task {
             await store.refresh(api)
             #if DEBUG
             if PaperPreview.enabled {
+                if PaperPreview.screen == "invoice-editor" {
+                    previewInvoiceEditor = true
+                    return
+                }
                 switch PaperPreview.screen {
                 case "jobs": tab = .jobs
                 case "my-day": tab = .jobs
