@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "offline", "offline-job", "customer", "estimates", "invoices", "team", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -199,6 +199,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     : ["kind": "tenant_role", "assignmentId": "a\(index)", "currentAssignmentVersion": 1, "assignedRoleRevision": 1,
                        "role": ["roleId": "r\(index)", "currentRevision": 1, "name": person.3, "description": ""]]] as [String: Any]
             }]
+        }
+        if path == "/v1/reports/operations" {
+            return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-month", "reportVersion": 1, "truncated": false,
+                    "estimates": ["drafts": 4, "presented": 31, "approved": 18, "declined": 6, "conversionBps": 5806],
+                    "jobs": ["booked": 86, "completed": 71, "canceled": 3, "open": 12],
+                    "months": [["month": "2026-08", "booked": 74, "completed": 70], ["month": "2026-09", "booked": 81, "completed": 77], ["month": "2026-10", "booked": 86, "completed": 71]]] as [String: Any]
+        }
+        if path == "/v1/reports/schedule" {
+            return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-day", "reportVersion": 1, "capacityModel": "booked-time-only", "truncated": false,
+                    "days": [["day": "2026-10-23", "scheduled": 9, "completed": 9], ["day": "2026-10-24", "scheduled": 11, "completed": 10],
+                             ["day": "2026-10-26", "scheduled": 8, "completed": 8], ["day": "2026-10-27", "scheduled": 7, "completed": 2]],
+                    "assignees": [], "backlog": ["unscheduledOpenJobs": 3, "overdueScheduledJobs": 1]] as [String: Any]
         }
         if path == "/v1/reports/revenue" {
             let months = [("2026-05", 3_812_000, 3_540_000), ("2026-06", 4_105_000, 3_960_000), ("2026-07", 3_980_000, 4_020_000),

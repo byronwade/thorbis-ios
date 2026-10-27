@@ -488,6 +488,9 @@ struct MoreView: View {
                     if session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments") {
                         NavigationLink(value: PaperRoute.revenue) { PaperMenuRow("Money", symbol: "chart.bar", subtitle: "Revenue, collected and overdue") }
                     }
+                    if session.can("estimate.view", feature: "estimates") || session.can("job.view", feature: "jobs") {
+                        NavigationLink(value: PaperRoute.reports) { PaperMenuRow("Reports", symbol: "chart.xyaxis.line", subtitle: "Estimate conversion and schedule") }
+                    }
                 }
                 if session.can("organization.members.manage") || session.can("organization.permissions.manage") {
                     group("Business") {

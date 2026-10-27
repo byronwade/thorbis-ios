@@ -188,6 +188,7 @@ struct RootView: View {
             case "invoices": primaryTab = .more; morePath.append(PaperRoute.invoices)
             case "price-book": primaryTab = .more; morePath.append(PaperRoute.priceBook)
             case "team": primaryTab = .more; morePath.append(PaperRoute.team)
+            case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "new-customer": primaryTab = .customers; previewNewCustomer = true
             case "revenue": primaryTab = .more; morePath.append(PaperRoute.revenue)
             case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty":
@@ -298,6 +299,7 @@ enum PaperRoute: Hashable {
     case local(LocalWorkspaceSection)
     case closeout(jobID: String)
     case team
+    case reports
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -323,6 +325,7 @@ private struct PaperDestinations: ViewModifier {
                     }
                 case .closeout(let jobID): JobCloseoutView(jobID: jobID)
                 case .team: TeamView()
+                case .reports: ReportsView()
                 case .local(let section):
                     if let actor = session.user?.id, let org = session.activeOrganization?.id {
                         LocalWorkspaceView(section: section, actorID: actor, organizationID: org)

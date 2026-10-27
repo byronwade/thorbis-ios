@@ -15,12 +15,12 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Estimates, estimate detail and workflow | Done | Build from the Price Book on a job, link, send, approve or decline, revise, option packages. |
 | Invoices, invoice detail and workflow | Done | Create from the job, edit lines, issue, collect, record payment, refund. |
 | Payments (collect) | Partial | Card payment link, cash, check and already-collected. Tap to Pay needs Apple's entitlement and a terminal. |
-| Money, reports | Partial | Money (revenue report). Operations, schedule and payment-activity reports are not native yet. |
+| Money, reports | Done (read) | Money (revenue). Reports: estimate conversion, jobs and schedule backlog. The payment-activity report and XLSX export are web only. |
 | Billing schedules | Not yet | |
 | Pipeline (requests) | Not yet | |
 | Price book, price item | Done (read) | Browse and detail; editing is web-only for now. |
 | Properties, equipment, fleet, agreements | Device-only | "On this phone" records; the server has no contracts for these yet. |
-| Team, team member, roles, role members | Not yet | APIs exist (`/v1/organization/role-members`, `/roles`). |
+| Team, team member, roles, role members | Done (read) | Team & permissions list with roles for owners and admins. Invites and role changes are web only. |
 | Inbox, notices | Done | Staff notices with mark-read. |
 | Search | Done (local) | Searches loaded jobs and customers. Server search (`/v1/search`) is not used yet. |
 | Settings, notice settings | Partial | Account, appearance, sign-out. Notice preferences are not native yet. |
