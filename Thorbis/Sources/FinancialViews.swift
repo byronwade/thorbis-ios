@@ -75,8 +75,19 @@ struct EstimateDetailView: View {
                     VStack(spacing: 0) {
                         ForEach(record.lines) { line in CommercialLineView(line: line) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
+                        if !record.lines.isEmpty, let total = paperLinesTotal(record.lines) {
+                            Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15)
+                            HStack {
+                                Text("Total").font(Theme.font(15, weight: .semibold))
+                                Spacer()
+                                Text(money(total, currency: record.lines.first?.unitPrice.currency ?? "USD"))
+                                    .font(Theme.monoFont(14, weight: .semibold))
+                            }
+                            .padding(15)
+                        }
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
                     ForEach(record.options ?? []) { option in
                         VStack(alignment: .leading, spacing: 10) {
                             Text(option.title).font(Theme.font(16, weight: .semibold))
@@ -128,9 +139,7 @@ struct EstimateDetailView: View {
         .toolbar(.visible, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
-                PrimaryButton(title: "Send estimate", busy: busy) { action = "Send"; confirm = true }
-                    .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
-                    .background(Theme.chrome)
+                PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
             }
         }
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
