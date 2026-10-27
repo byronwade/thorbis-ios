@@ -86,10 +86,8 @@ struct CustomersView: View {
             }
         }
         .task(id: store.customers.map(\.id).sorted().joined(separator: "|")) { await loadCustomers() }
-        .alert("New customer", isPresented: $showNew) {
-            TextField("Name", text: $newName)
-            Button("Create") { Task { await create() } }.disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button("Cancel", role: .cancel) {}
+        .sheet(isPresented: $showNew) {
+            NewCustomerSheet { _ in Task { await loadCustomers() } }
         }
     }
     private func customerRow(_ customer: CustomerRecord) -> some View {

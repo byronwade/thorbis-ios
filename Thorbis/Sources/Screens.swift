@@ -9,6 +9,7 @@ struct NewJobSheet: View {
     @State private var busy = false
     @State private var error: String?
     @State private var createdJobID: String?
+    @State private var showNewCustomer = false
 
     init(preselected: Customer? = nil) {
         _draft = State(initialValue: FieldJobDraft(customerID: preselected?.id ?? ""))
@@ -94,6 +95,9 @@ struct NewJobSheet: View {
                 Spacer(minLength: 0)
             }.foregroundStyle(Theme.foreground).background(Theme.background).buttonStyle(.plain)
                 .toolbar(.hidden, for: .navigationBar)
+                .sheet(isPresented: $showNewCustomer) {
+                    NewCustomerSheet { customer in draft.customerID = customer.id; error = nil }
+                }
                 .navigationDestination(isPresented: createdJobRoute) {
                     if let createdJobID { JobDetailView(jobId: createdJobID) }
                 }
@@ -102,6 +106,10 @@ struct NewJobSheet: View {
 
     private var customerPicker: some View {
         Menu {
+            if session.can("customer.create", feature: "core_crm") {
+                Button { showNewCustomer = true } label: { Label("New customer…", systemImage: "person.badge.plus") }
+                Divider()
+            }
             Button { draft.customerID = "" } label: {
                 Label("Choose a customer", systemImage: "person.crop.circle.badge.xmark")
             }

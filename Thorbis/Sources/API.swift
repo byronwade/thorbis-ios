@@ -7,6 +7,16 @@ struct Customer: Codable, Identifiable, Hashable {
     let createdAt: String?
 }
 
+/// `customers.create` input (createCustomerInputSchema); nil fields are omitted.
+struct NewCustomerRequest: Encodable, Equatable {
+    var name: String
+    var phone: String? = nil
+    var email: String? = nil
+    var address: String? = nil
+    var accountType: String? = nil
+    var preferredContact: String? = nil
+}
+
 struct Job: Codable, Identifiable, Hashable {
     let id: String
     let customerId: String?
@@ -150,8 +160,10 @@ final class APIClient: ObservableObject {
                                               body: Body(to: to, arrival: to == "arrived" ? Arrival(method: "manual") : nil))
     }
     func createCustomer(name: String) async throws -> Customer {
-        struct Body: Encodable { let name: String }
-        return try await send("POST", "/v1/customers", body: Body(name: name))
+        try await createCustomer(NewCustomerRequest(name: name))
+    }
+    func createCustomer(_ request: NewCustomerRequest) async throws -> Customer {
+        try await send("POST", "/v1/customers", body: request)
     }
     func createJob(customerId: String, title: String) async throws -> Job {
         struct Body: Encodable { let customerId: String; let title: String }
