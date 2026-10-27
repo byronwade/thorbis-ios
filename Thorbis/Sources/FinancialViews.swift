@@ -648,9 +648,6 @@ struct NewEstimateView: View {
                                                price: String(format: "%.2f", Double(item.sellPrice.amount) / 100),
                                                source: .priceBookSelection(itemID: item.id, revision: item.revision)))
                     }
-                    .navigationTitle("Price book")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showPriceBook = false } } }
                 }
                 .presentationDetents([.large])
             }
