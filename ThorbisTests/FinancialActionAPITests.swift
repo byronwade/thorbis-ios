@@ -38,6 +38,61 @@ final class FinancialActionAPITests: XCTestCase {
         XCTAssertEqual(((bodies[1]["lines"] as? [[String: Any]])?.first?["unitPrice"] as? [String: Any])?["amount"] as? Int, 2500)
     }
 
+    func testEstimateReviseRouteEncodesOptionPackageAndExactPriceBookSource() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, estimate)]), baseURL: "https://app.thorbis.com")
+        let mainLine = FieldEstimateLineInput(
+            description: "Repair", quantity: 1,
+            unitPrice: .init(amount: 2500, currency: "USD"), source: .manual
+        )
+        let optionLine = FieldEstimateLineInput(
+            description: "Premium repair", quantity: 1,
+            unitPrice: .init(amount: 5000, currency: "USD"),
+            source: .priceBookSelection(itemID: "11111111-1111-4111-8111-111111111111", revision: 7)
+        )
+        let option = FieldEstimateOptionRequest(
+            id: "00000000-0000-4000-8000-000000000010", title: "Premium",
+            description: "Higher efficiency", lines: [optionLine]
+        )
+
+        _ = try await client.reviseFieldEstimate(
+            estimateID,
+            request: .init(expectedRevisionNumber: 1, title: "Revised quote", lines: [mainLine], options: [option])
+        )
+
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.url?.path, "/v1/estimates/\(estimateID)/revise")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        XCTAssertEqual(body["expectedRevisionNumber"] as? Int, 1)
+        let options = try XCTUnwrap(body["options"] as? [[String: Any]])
+        XCTAssertEqual(options.first?["title"] as? String, "Premium")
+        let lines = try XCTUnwrap(options.first?["lines"] as? [[String: Any]])
+        let source = try XCTUnwrap(lines.first?["source"] as? [String: Any])
+        XCTAssertEqual(source["kind"] as? String, "price_book")
+        XCTAssertEqual(source["priceBookItemId"] as? String, "11111111-1111-4111-8111-111111111111")
+        XCTAssertEqual(source["priceBookRevision"] as? Int, 7)
+    }
+
+    func testStaleEstimateRevisionConflictIsReturnedWithoutAnAutomaticRetry() async throws {
+        let conflict = #"{"title":"Conflict","status":409,"detail":"estimate revision changed: expected 1, current 2"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(409, conflict)]), baseURL: "https://app.thorbis.com")
+        let line = FieldEstimateLineInput(
+            description: "Repair", quantity: 1, unitPrice: .init(amount: 2500, currency: "USD"), source: .manual
+        )
+
+        do {
+            _ = try await client.reviseFieldEstimate(
+                estimateID, request: .init(expectedRevisionNumber: 1, title: "Revised quote", lines: [line])
+            )
+            XCTFail("Expected stale estimate revision conflict")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.status, 409)
+            XCTAssertTrue(problem.localizedDescription.contains("expected 1, current 2"))
+        }
+
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.path, "/v1/estimates/\(estimateID)/revise")
+    }
+
     func testStaleInvoiceLineRevisionIsReturnedWithoutAnAutomaticRetry() async throws {
         let conflict = #"{"title":"Conflict","status":409,"detail":"stale invoice lines revision: expected 3, current 4; review the current invoice"}"#
         let client = APIClient(session: URLProtocolFixture.session([.init(409, conflict)]), baseURL: "https://app.thorbis.com")

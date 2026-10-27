@@ -57,6 +57,7 @@ struct EstimateDetailView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirm = false
+    @State private var showRevisionEditor = false
     @State private var action = ""
     var body: some View {
         ScrollView {
@@ -100,6 +101,14 @@ struct EstimateDetailView: View {
                             .buttonStyle(CommercialSecondaryButtonStyle())
                             .disabled(busy)
                     }
+                    if (record.status == "sent" || record.status == "declined"),
+                       session.can("estimate.create", feature: "estimates") {
+                        Button { showRevisionEditor = true } label: {
+                            commercialAction("Revise estimate", icon: "square.and.pencil")
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(busy)
+                    }
                     if let revision = record.currentRevisionNumber {
                         Text("Revision \(revision)").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
                     }
@@ -123,6 +132,14 @@ struct EstimateDetailView: View {
         }
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
             Button(action) { Task { await performAction() } }
+        }
+        .sheet(isPresented: $showRevisionEditor) {
+            if let record {
+                EstimateRevisionEditorView(estimate: record) { revised in
+                    self.record = revised
+                    error = nil
+                }
+            }
         }
         .task { await load() }
         .refreshable { await load() }
@@ -539,7 +556,7 @@ struct NewEstimateView: View {
         busy = true
         defer { busy = false }
         do {
-            _ = try await api.createFieldEstimate(.init(customerId: customerID, title: title.trimmingCharacters(in: .whitespacesAndNewlines), lines: lines.map { .init(description: $0.description.trimmingCharacters(in: .whitespacesAndNewlines), quantity: $0.quantity, unitPrice: .init(amount: $0.cents ?? 0, currency: "USD")) }))
+            _ = try await api.createFieldEstimate(.init(customerId: customerID, title: title.trimmingCharacters(in: .whitespacesAndNewlines), lines: lines.map { .init(description: $0.description.trimmingCharacters(in: .whitespacesAndNewlines), quantity: $0.quantity, unitPrice: .init(amount: $0.cents ?? 0, currency: "USD"), source: .manual) }))
             dismiss()
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }

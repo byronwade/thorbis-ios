@@ -170,7 +170,7 @@ struct InvoiceLineEditorView: View {
         }
         .sheet(isPresented: $showPriceBook) {
             NavigationStack {
-                InvoicePriceBookPicker(api: api, currency: invoice.currency) { item in
+                PaperPriceBookPicker(api: api, currency: invoice.currency) { item in
                     do {
                         try editor.addPriceBookItem(item)
                         error = nil
@@ -361,7 +361,7 @@ private struct EditableInvoiceLineRow: View {
     }
 }
 
-private struct InvoicePriceBookPicker: View {
+struct PaperPriceBookPicker: View {
     @ObservedObject var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss

@@ -16,6 +16,7 @@ struct RootView: View {
     #if DEBUG
     @State private var previewInvoiceEditor = false
     @State private var previewInvoiceDetail = false
+    @State private var previewEstimateRevision = false
     #endif
 
     var body: some View {
@@ -72,6 +73,12 @@ struct RootView: View {
                 InvoiceDetailView(id: PaperPreview.issuedInvoice.id)
             }
         }
+        .sheet(isPresented: $previewEstimateRevision) {
+            EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
+                .environmentObject(api)
+                .environmentObject(session)
+                .environmentObject(store)
+        }
         #endif
         .task {
             await store.refresh(api)
@@ -83,6 +90,10 @@ struct RootView: View {
                 }
                 if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" {
                     previewInvoiceDetail = true
+                    return
+                }
+                if PaperPreview.screen == "estimate-revision" {
+                    previewEstimateRevision = true
                     return
                 }
                 switch PaperPreview.screen {

@@ -714,15 +714,41 @@ struct InvoiceRecord: Codable, Identifiable, Hashable {
     let updatedAt: String
 }
 
+enum FieldEstimateLineSourceInput: Hashable, Encodable {
+    case manual
+    case priceBookSelection(itemID: String, revision: Int)
+    case unsupported(String)
+
+    private enum CodingKeys: String, CodingKey { case kind, priceBookItemId, priceBookRevision }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .manual:
+            try values.encode("manual", forKey: .kind)
+        case .priceBookSelection(let itemID, let revision):
+            try values.encode("price_book", forKey: .kind)
+            try values.encode(itemID, forKey: .priceBookItemId)
+            try values.encode(revision, forKey: .priceBookRevision)
+        case .unsupported(let kind):
+            throw EncodingError.invalidValue(kind, .init(codingPath: encoder.codingPath,
+                debugDescription: "Unsupported estimate line provenance"))
+        }
+    }
+}
+
 struct FieldEstimateLineInput: Encodable {
     let description: String
     let quantity: Int
     let unitPrice: FieldMoney
+    let source: FieldEstimateLineSourceInput?
 
-    init(description: String, quantity: Int, unitPrice: FieldMoney) {
+    init(description: String, quantity: Int, unitPrice: FieldMoney,
+         source: FieldEstimateLineSourceInput? = nil) {
         self.description = description
         self.quantity = quantity
         self.unitPrice = unitPrice
+        self.source = source
     }
 }
 

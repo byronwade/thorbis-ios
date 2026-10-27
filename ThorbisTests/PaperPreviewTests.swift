@@ -47,6 +47,21 @@ final class PaperPreviewTests: XCTestCase {
         XCTAssertTrue(payments.isEmpty)
     }
 
+    func testEstimateRevisionPreviewUsesPaperFixtureAndPreservesPriceBookRevision() throws {
+        let estimate = PaperPreview.estimate
+        let state = EstimateRevisionEditorState(estimate: estimate)
+
+        XCTAssertEqual(estimate.status, "sent")
+        XCTAssertEqual(estimate.currentRevisionNumber, 2)
+        XCTAssertEqual(estimate.lines.count, 2)
+        XCTAssertEqual(estimate.options?.count, 1)
+        XCTAssertFalse(state.hasChanges)
+        XCTAssertFalse(state.hasUnsupportedLineSources)
+        XCTAssertEqual(state.lines.last?.source, .priceBookSelection(
+            itemID: "00000000-0000-4000-8000-000000009201", revision: 4
+        ))
+    }
+
     func testEveryRequestIsInterceptedAndUnknownHostsNeverFallThrough() async throws {
         let session = PaperPreview.transport()
         for raw in ["https://example.invalid/unreachable", "https://app.thorbis.com/unknown"] {
