@@ -489,6 +489,11 @@ struct MoreView: View {
                         NavigationLink(value: PaperRoute.revenue) { PaperMenuRow("Money", symbol: "chart.bar", subtitle: "Revenue, collected and overdue") }
                     }
                 }
+                if session.can("organization.members.manage") || session.can("organization.permissions.manage") {
+                    group("Business") {
+                        NavigationLink(value: PaperRoute.team) { PaperMenuRow("Team & permissions", symbol: "person.2.badge.gearshape") }
+                    }
+                }
                 if session.user?.id != nil, session.activeOrganization?.id != nil {
                     group("On this phone") {
                         NavigationLink(value: PaperRoute.drafts) { PaperMenuRow("Message drafts", symbol: "bubble.left", subtitle: "Saved here, not sent") }

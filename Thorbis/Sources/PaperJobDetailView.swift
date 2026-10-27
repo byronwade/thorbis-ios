@@ -9,7 +9,7 @@ struct JobDetailView: View {
         self.jobId = jobId
         self.showsBack = showsBack
         #if DEBUG
-        let previewTabs = ["job-invoice": "Invoice", "job-estimates": "Estimates", "job-activity": "Activity", "job-media": "Media"]
+        let previewTabs = ["job-invoice": "Invoice", "job-estimates": "Estimates", "job-activity": "Activity", "job-media": "Media", "job-invoice-empty": "Invoice"]
         _selectedTab = State(initialValue: PaperPreview.enabled ? previewTabs[PaperPreview.screen] ?? "Overview" : "Overview")
         #endif
     }

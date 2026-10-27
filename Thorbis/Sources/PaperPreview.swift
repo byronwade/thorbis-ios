@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "offline", "offline-job", "customer", "estimates", "invoices", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "offline", "offline-job", "customer", "estimates", "invoices", "team", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -189,6 +189,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if path == "/v1/estimates/\(PaperPreview.estimate.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate))
         }
+        if path == "/v1/organization/role-members" {
+            let people: [(String, String, Bool, String)] = [("Byron Wade", "byron@acmehvac.com", true, "owner"), ("Maria Chen", "maria@acmehvac.com", false, "Office"),
+                ("Jorge Alvarez", "jorge@acmehvac.com", false, "Technician"), ("Dana Whitfield", "dana@acmehvac.com", false, "Office"), ("Sam Osei", "sam@acmehvac.com", false, "Technician")]
+            return ["items": people.enumerated().map { index, person in
+                ["member": ["memberId": "00000000-0000-4000-8000-00000000770\(index)", "userId": "00000000-0000-4000-8000-00000000880\(index)",
+                            "displayName": person.0, "email": person.1, "isLegalOwner": person.2, "legalMembershipRoles": [["id": person.3.lowercased(), "label": person.3]]],
+                 "authority": person.2 ? ["kind": "legacy_fallback", "currentAssignmentVersion": 0, "reason": "never_assigned", "roles": [["id": "owner", "label": "Owner"]]] as [String: Any]
+                    : ["kind": "tenant_role", "assignmentId": "a\(index)", "currentAssignmentVersion": 1, "assignedRoleRevision": 1,
+                       "role": ["roleId": "r\(index)", "currentRevision": 1, "name": person.3, "description": ""]]] as [String: Any]
+            }]
+        }
         if path == "/v1/reports/revenue" {
             let months = [("2026-05", 3_812_000, 3_540_000), ("2026-06", 4_105_000, 3_960_000), ("2026-07", 3_980_000, 4_020_000),
                           ("2026-08", 4_612_000, 4_230_000), ("2026-09", 4_390_000, 4_480_000), ("2026-10", 4_892_000, 4_105_000)]
@@ -196,6 +207,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "months": months.map { ["month": $0.0, "revenue": $0.1, "collected": $0.2] },
                     "receivable": ["openInvoices": 9, "balance": 733_000, "overdueInvoices": 2, "overdueBalance": 620_000]] as [String: Any]
         }
+        if path == "/v1/invoices" && PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
         if path == "/v1/invoices" { return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]] }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
@@ -209,6 +221,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
+            if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
+            if PaperPreview.screen == "job-invoice-empty" { capabilities.append("invoice.create") }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
                     "capabilities": capabilities,
                     "resources": [], "views": []] as [String: Any]

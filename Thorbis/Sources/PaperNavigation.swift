@@ -23,6 +23,7 @@ struct RootView: View {
     @State private var previewInvoiceDetail = false
     @State private var previewEstimateRevision = false
     @State private var previewNewEstimate = false
+    @State private var previewNewCustomer = false
     #endif
 
     var body: some View {
@@ -150,6 +151,7 @@ struct RootView: View {
             EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
                 .environmentObject(api).environmentObject(session).environmentObject(store)
         }
+        .sheet(isPresented: $previewNewCustomer) { NewCustomerSheet() }
         .sheet(isPresented: $previewNewEstimate) {
             NewEstimateView(customerID: PaperPreview.customerID, jobID: PaperPreview.jobID, title: "AC not cooling")
         }
@@ -185,8 +187,10 @@ struct RootView: View {
             case "estimates": primaryTab = .more; morePath.append(PaperRoute.estimates)
             case "invoices": primaryTab = .more; morePath.append(PaperRoute.invoices)
             case "price-book": primaryTab = .more; morePath.append(PaperRoute.priceBook)
+            case "team": primaryTab = .more; morePath.append(PaperRoute.team)
+            case "new-customer": primaryTab = .customers; previewNewCustomer = true
             case "revenue": primaryTab = .more; morePath.append(PaperRoute.revenue)
-            case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout":
+            case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty":
                 if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs
                     jobsPath.append(job)
@@ -293,6 +297,7 @@ enum PaperRoute: Hashable {
     case inbox, estimates, invoices, priceBook, revenue, drafts
     case local(LocalWorkspaceSection)
     case closeout(jobID: String)
+    case team
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -317,6 +322,7 @@ private struct PaperDestinations: ViewModifier {
                         InboxLocalDraftView(actorID: actor, organizationID: org)
                     }
                 case .closeout(let jobID): JobCloseoutView(jobID: jobID)
+                case .team: TeamView()
                 case .local(let section):
                     if let actor = session.user?.id, let org = session.activeOrganization?.id {
                         LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
