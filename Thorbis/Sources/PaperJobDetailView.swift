@@ -42,6 +42,9 @@ struct JobDetailView: View {
     @State private var creatingInvoice = false
     @State private var reviewInvoiceID: String?
     @State private var showDeposit = false
+    /// The customer's service locations; the first (or only) one is where the job is.
+    @State private var locations: [ServiceLocationRecord] = []
+    @Environment(\.openURL) private var openURL
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
 
@@ -117,6 +120,10 @@ struct JobDetailView: View {
             if selectedTab == "Overview", let job, let target = availableTransitions(job).first {
                 PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
                     runTransition(target)
+                } secondary: {
+                    if let place = locations.first, let url = Directions.url(address: place.address, coordinates: place.coordinates) {
+                        PaperSquareButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps") { openURL(url) }
+                    }
                 }
             } else if selectedTab == "Estimates", let job, session.can("estimate.create", feature: "estimates") {
                 PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus") { showNewEstimate = true }
@@ -363,6 +370,23 @@ struct JobDetailView: View {
                     }
                 }
                 PaperDetailRow("Customer", value: store.customerName(job.customerId))
+                if let place = locations.first {
+                    Button {
+                        if let url = Directions.url(address: place.address, coordinates: place.coordinates) { openURL(url) }
+                    } label: {
+                        PaperDetailRow(label: "Address") {
+                            HStack(spacing: 4) {
+                                Text(place.address).foregroundStyle(Theme.brandText)
+                                Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.brandText)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens driving directions in Maps")
+                    let access = [place.gateCode.map { "Gate \($0)" }, place.alarmCode.map { "Alarm \($0)" },
+                                  place.dogOnSite.map { "Dog: \($0)" }, place.parking.map { "Parking: \($0)" }].compactMap { $0 }
+                    if !access.isEmpty { PaperDetailRow("Access", value: access.joined(separator: " · ")) }
+                }
                 if let date = JobFiltering.date(job.scheduledFor) {
                     PaperDetailRow("Scheduled", value: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
                 } else {
@@ -790,6 +814,10 @@ struct JobDetailView: View {
             let loadedJob = try await api.fieldJob(jobId)
             guard session.generation == generation else { return }
             job = loadedJob
+            if locations.isEmpty, session.can("customer.view", feature: "core_crm"),
+               let places = try? await api.fieldLocations(loadedJob.customerId), session.generation == generation {
+                locations = places
+            }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
             let loadedNotes = try await api.fieldNotes(jobId)

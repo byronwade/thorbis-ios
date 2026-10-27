@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import QuickLook
 import UniformTypeIdentifiers
+import VisionKit
 
 struct JobMediaView: View {
     let jobID: String
@@ -19,6 +20,7 @@ struct JobMediaView: View {
     @StateObject private var preview = DocumentPreviewController()
     @State private var importDocument = false
     @State private var showCamera = false
+    @State private var showScanner = false
     /// Paper 21C: the stage a new photo is filed under (server tags "Before" / "After").
     @State private var stage = "Before"
     @State private var filter = "All"
@@ -194,13 +196,36 @@ struct JobMediaView: View {
                         }
                         .disabled(busy)
                         .accessibilityLabel("Choose from library")
-                        PaperSquareButton(symbol: "doc.badge.plus", label: "Add PDF") { importDocument = true }
-                            .disabled(busy)
+                        Menu {
+                            if VNDocumentCameraViewController.isSupported {
+                                Button("Scan a document", systemImage: "doc.viewfinder") { showScanner = true }
+                            }
+                            Button("Choose a PDF", systemImage: "doc") { importDocument = true }
+                        } label: {
+                            Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
+                                .frame(width: 46, height: 46)
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                        }
+                        .disabled(busy)
+                        .accessibilityLabel("Add a document")
                     }
                 }
                 .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
                 .background(Theme.background)
             }
+        }
+        .fullScreenCover(isPresented: $showScanner) {
+            DocumentScanner { pdf in
+                showScanner = false
+                guard let pdf else { return }
+                do {
+                    let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
+                    try select(pdf, mime: "application/pdf", filename: "scan-\(stamp).pdf")
+                    Task { await upload() }
+                } catch { self.error = error.localizedDescription }
+            }
+            .ignoresSafeArea()
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraCapture { image in
@@ -448,4 +473,44 @@ enum PendingPhotoStore {
     }
 
     static func clearAll() { try? FileManager.default.removeItem(at: directory) }
+}
+
+/// VisionKit's document camera: edge detection, perspective correction, multi-page.
+/// Pages come back as one PDF so they file under the job's Documents.
+struct DocumentScanner: UIViewControllerRepresentable {
+    let onFinish: (Data?) -> Void
+
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let controller = VNDocumentCameraViewController()
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        let onFinish: (Data?) -> Void
+        init(onFinish: @escaping (Data?) -> Void) { self.onFinish = onFinish }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+            let data = UIGraphicsPDFRenderer(bounds: pageRect).pdfData { context in
+                for index in 0..<scan.pageCount {
+                    context.beginPage()
+                    let image = scan.imageOfPage(at: index)
+                    let scale = min(pageRect.width / image.size.width, pageRect.height / image.size.height)
+                    let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+                    image.draw(in: CGRect(x: (pageRect.width - size.width) / 2, y: (pageRect.height - size.height) / 2,
+                                          width: size.width, height: size.height))
+                }
+            }
+            onFinish(data.count <= 8 * 1024 * 1024 ? data : nil)
+        }
+
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) { onFinish(nil) }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) { onFinish(nil) }
+    }
 }

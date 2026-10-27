@@ -204,6 +204,16 @@ struct AddressLink: View {
     }
 }
 
+/// Turn-by-turn driving directions in Apple Maps to a service location.
+enum Directions {
+    static func url(address: String, coordinates: FieldCoordinates?) -> URL? {
+        var components = URLComponents(string: "https://maps.apple.com/")
+        let destination = coordinates.map { "\($0.latitude),\($0.longitude)" } ?? address
+        components?.queryItems = [URLQueryItem(name: "daddr", value: destination), URLQueryItem(name: "dirflg", value: "d")]
+        return components?.url
+    }
+}
+
 struct CustomerContactSheet: View {
     let customerID: String
     let contact: CustomerContactRecord?
