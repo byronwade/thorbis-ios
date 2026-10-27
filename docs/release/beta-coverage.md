@@ -23,10 +23,10 @@ This is an initial staff beta, not full Thorbis-TanStack parity. The source refe
 ## Validation evidence
 
 - Swift 6 language mode with complete strict concurrency.
-- 131 unit/contract tests passed with no failures or skips in the iPhone 17 Pro simulator, including location update/clear/remove contracts and coordinate validation. Result bundle: `/Users/byronwade/Library/Developer/Xcode/DerivedData/Thorbis-dmuwxdzkujtkngcfxjqjbnvsarbv/Logs/Test/Test-Thorbis-2026.10.27_00-20-11--0400.xcresult` (27 October 2026).
+- 132 unit/contract tests passed with no failures or skips in the iPhone 17 Pro simulator, including location update/clear/remove contracts, coordinate validation, and stale-refresh protection. Result bundle: `/Users/byronwade/Library/Developer/Xcode/DerivedData/Thorbis-dmuwxdzkujtkngcfxjqjbnvsarbv/Logs/Test/Test-Thorbis-2026.10.27_00-28-03--0400.xcresult` (27 October 2026).
 - My Day and Customer detail were visually checked in read-only Paper previews on iPhone. The location editor was checked with sample data; a rejected save preserved the form values and a rejected removal preserved the location. Preview evidence verifies presentation/error handling only, not authenticated live workflow behavior.
 - 18 Release transport tests passed, including rejection of development identity in Release.
-- Signed device archive and signature verification succeeded for Build 5 (`1.0 (5)`), which includes customer quick-add and My Day. The upload log reports success and Apple processing; the build is not yet assigned to a tester group. Build 6 includes service-location management and is being prepared from this coverage update.
+- Signed device archive and signature verification succeeded for Build 6 (`1.0 (6)`), which adds customer service-location management. The upload log reports success and Apple processing; build 6 is not yet assigned to a tester group. See `build-6.md` for release evidence.
 - iPhone and iPad native login screens launched and were visually inspected. Browser sign-in is confirmed; native authenticated end-to-end checks still await a separate app sign-in.
 - Independent review found and drove fixes for logout overlap, central 401 invalidation, late preview cleanup, draft lifetime and roster truncation. Tests cover the corresponding transport/state behavior.
 
