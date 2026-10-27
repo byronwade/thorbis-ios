@@ -4,7 +4,7 @@ Date: 2026-10-26. Bundle `com.thorbis.field`, Apple app ID `6827337706`, team `T
 
 ## Changes
 
-Adds the Paper-style customer contact quick-add and the first My Day job workflow: jobs assigned to the signed-in technician on the device-local date, in scheduled-time order, with the server-authorized “On my way” action and optional ETA. Contact and My Day behavior stays backed by the canonical API. The native login mark and app icon use the authentic Thorbis shield copied from the TanStack logo source.
+Adds the Paper-style customer contact quick-add and the first My Day job workflow: jobs assigned to the signed-in technician on the device-local date, in scheduled-time order, with the server-authorized “On my way” action and optional ETA. Contact and My Day behavior stays backed by the canonical API. The native login mark uses the authentic Thorbis shield copied from the TanStack logo source. The app icon in this build was still a generic geometric T and is corrected in build 8.
 
 This remains an incremental staff beta, **not full Paper/TanStack parity**. Offline command replay, authenticated physical-device workflow validation, full artboard coverage and several financial/admin workflows remain open; see `beta-coverage.md` and `../design/README.md`.
 

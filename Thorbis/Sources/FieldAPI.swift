@@ -179,6 +179,59 @@ struct FieldContactCreate: Encodable {
     }
 }
 
+enum FieldContactPatch<Value> {
+    case unchanged
+    case clear
+    case value(Value)
+}
+
+struct FieldContactUpdate: Encodable {
+    let name: String?
+    let role: FieldContactPatch<String>
+    let email: FieldContactPatch<String>
+    let phone: FieldContactPatch<String>
+    let primary: Bool?
+
+    init(
+        name: String? = nil,
+        role: FieldContactPatch<String> = .unchanged,
+        email: FieldContactPatch<String> = .unchanged,
+        phone: FieldContactPatch<String> = .unchanged,
+        primary: Bool? = nil
+    ) {
+        self.name = name
+        self.role = role
+        self.email = email
+        self.phone = phone
+        self.primary = primary
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(name, forKey: .name)
+        try Self.encode(role, forKey: .role, in: &container)
+        try Self.encode(email, forKey: .email, in: &container)
+        try Self.encode(phone, forKey: .phone, in: &container)
+        if let primary { try container.encode(primary, forKey: .primary) }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, role, email, phone, primary
+    }
+
+    private static func encode<Value: Encodable>(
+        _ value: FieldContactPatch<Value>,
+        forKey key: CodingKeys,
+        in container: inout KeyedEncodingContainer<CodingKeys>
+    ) throws {
+        switch value {
+        case .unchanged: break
+        case .clear: try container.encodeNil(forKey: key)
+        case .value(let value): try container.encode(value, forKey: key)
+        }
+    }
+}
+
 struct CustomerContactDraft {
     let name: String
     let role: String?
@@ -195,6 +248,21 @@ struct CustomerContactDraft {
         )
     }
 
+    func makeUpdateRequest() -> FieldContactUpdate? {
+        guard let name = Self.cleaned(name) else { return nil }
+        return FieldContactUpdate(
+            name: name,
+            role: Self.updateValue(role),
+            email: Self.updateValue(email),
+            phone: Self.updateValue(phone)
+        )
+    }
+
+    private static func updateValue(_ value: String?) -> FieldContactPatch<String> {
+        guard let cleaned = cleaned(value) else { return .clear }
+        return .value(cleaned)
+    }
+
     private static func cleaned(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
             return nil
@@ -206,18 +274,67 @@ struct CustomerContactDraft {
 struct CustomerContactCollectionState {
     private(set) var contacts: [CustomerContactRecord] = []
     private(set) var isLoaded = false
+    private var generation = 0
 
-    mutating func beginLoading() { isLoaded = false }
+    mutating func beginLoading() -> Int {
+        generation += 1
+        isLoaded = false
+        return generation
+    }
 
-    mutating func receive(_ contacts: [CustomerContactRecord]) {
+    @discardableResult
+    mutating func receive(_ contacts: [CustomerContactRecord], generation: Int) -> Bool {
+        guard generation == self.generation else { return false }
         self.contacts = contacts
+        isLoaded = true
+        return true
+    }
+
+    mutating func save(_ contact: CustomerContactRecord) {
+        generation += 1
+        if contact.primary {
+            for index in contacts.indices where contacts[index].id != contact.id {
+                contacts[index] = Self.withPrimary(contacts[index], false)
+            }
+        }
+        if let index = contacts.firstIndex(where: { $0.id == contact.id }) {
+            contacts[index] = contact
+        } else {
+            contacts.append(contact)
+        }
         isLoaded = true
     }
 
-    mutating func add(_ contact: CustomerContactRecord) {
-        contacts.removeAll { $0.id == contact.id }
-        contacts.append(contact)
+    mutating func remove(id: String) {
+        generation += 1
+        let removedPrimary = contacts.first(where: { $0.id == id })?.primary == true
+        let promotedID = removedPrimary
+            ? contacts.filter { $0.id != id }.min {
+                (JobFiltering.date($0.createdAt) ?? .distantFuture) < (JobFiltering.date($1.createdAt) ?? .distantFuture)
+            }?.id
+            : nil
+        contacts.removeAll { $0.id == id }
+        if let promotedID {
+            for index in contacts.indices {
+                contacts[index] = Self.withPrimary(contacts[index], contacts[index].id == promotedID)
+            }
+        }
         isLoaded = true
+    }
+
+    private static func withPrimary(_ contact: CustomerContactRecord, _ primary: Bool) -> CustomerContactRecord {
+        CustomerContactRecord(
+            id: contact.id,
+            organizationId: contact.organizationId,
+            customerId: contact.customerId,
+            name: contact.name,
+            role: contact.role,
+            email: contact.email,
+            phone: contact.phone,
+            primary: primary,
+            createdAt: contact.createdAt,
+            updatedAt: contact.updatedAt
+        )
     }
 }
 
@@ -660,6 +777,21 @@ extension APIClient {
 
     func createFieldContact(_ customerID: String, request: FieldContactCreate) async throws -> CustomerContactRecord {
         try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/contacts"), body: request)
+    }
+
+    func updateFieldContact(_ customerID: String, _ contactID: String, request: FieldContactUpdate) async throws -> CustomerContactRecord {
+        let path = try fieldContactPath(customerID, contactID)
+        return try await send("POST", path, body: request)
+    }
+
+    func removeFieldContact(_ customerID: String, _ contactID: String) async throws {
+        let path = try fieldContactPath(customerID, contactID)
+        let _: EmptyResponse = try await send("POST", "\(path)/remove")
+    }
+
+    private func fieldContactPath(_ customerID: String, _ contactID: String) throws -> String {
+        let customerPath = try fieldPath("/v1/customers", id: customerID)
+        return try fieldPath("\(customerPath)/contacts", id: contactID)
     }
 
     func fieldLocations(_ customerID: String) async throws -> [ServiceLocationRecord] {

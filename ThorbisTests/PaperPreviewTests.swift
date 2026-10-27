@@ -20,7 +20,9 @@ final class PaperPreviewTests: XCTestCase {
         XCTAssertEqual(customer.name, "Danielle Marlowe")
         let contacts = try await api.fieldContacts(PaperPreview.customerID)
         let locations = try await api.fieldLocations(PaperPreview.customerID)
-        XCTAssertFalse(contacts.isEmpty)
+        XCTAssertEqual(contacts.map(\.name), ["Danielle Marlowe", "Taylor Marlowe"])
+        XCTAssertTrue(contacts[0].primary)
+        XCTAssertFalse(contacts[1].primary)
         XCTAssertFalse(locations.isEmpty)
     }
 

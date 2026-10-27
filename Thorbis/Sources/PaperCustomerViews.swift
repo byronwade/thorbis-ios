@@ -95,6 +95,23 @@ private enum CustomerLocationSheet: Identifiable {
     }
 }
 
+private enum CustomerContactSheetItem: Identifiable {
+    case add
+    case edit(CustomerContactRecord)
+
+    var id: String {
+        switch self {
+        case .add: "new-contact"
+        case .edit(let contact): contact.id
+        }
+    }
+
+    var contact: CustomerContactRecord? {
+        if case .edit(let contact) = self { return contact }
+        return nil
+    }
+}
+
 struct CustomerDetailView: View {
     let customer: Customer
     @EnvironmentObject var api: APIClient
@@ -107,7 +124,11 @@ struct CustomerDetailView: View {
     @State private var locationState = ServiceLocationCollectionState()
     @State private var error: String?
     @State private var showNewJob = false
-    @State private var showContact = false
+    @State private var contactSheet: CustomerContactSheetItem?
+    @State private var contactToRemove: CustomerContactRecord?
+    @State private var showRemoveContactConfirmation = false
+    @State private var isMutatingContact = false
+    @State private var contactMutationError: String?
     @State private var locationSheet: CustomerLocationSheet?
     @State private var locationToRemove: ServiceLocationRecord?
     @State private var showRemoveLocationConfirmation = false
@@ -128,7 +149,7 @@ struct CustomerDetailView: View {
                     Spacer()
                     if canEdit {
                         Menu {
-                            Button("Add contact", systemImage: "person.badge.plus") { showContact = true }
+                            Button("Add contact", systemImage: "person.badge.plus") { contactSheet = .add }
                                 .disabled(!contactsLoaded)
                             Button("Add location", systemImage: "mappin.and.ellipse") { locationSheet = .add }
                         } label: { Image(systemName: "ellipsis").frame(width: 38, height: 38).background(Theme.fill, in: Circle()) }.accessibilityLabel("Customer actions")
@@ -182,10 +203,10 @@ struct CustomerDetailView: View {
         }
         .task { await load() }.refreshable { await load() }
         .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
-        .sheet(isPresented: $showContact, onDismiss: { Task { await load() } }) {
-            CustomerContactSheet(customerID: customer.id) { contact in
-                loadGeneration += 1
-                contactState.add(contact)
+        .sheet(item: $contactSheet, onDismiss: { Task { await load() } }) { item in
+            CustomerContactSheet(customerID: customer.id, contact: item.contact) { contact in
+                contactState.save(contact)
+                contactMutationError = nil
                 error = nil
             }
         }
@@ -207,6 +228,19 @@ struct CustomerDetailView: View {
             Button("Cancel", role: .cancel) { locationToRemove = nil }
         } message: { location in
             Text("This removes the location from \(record?.name ?? customer.name).")
+        }
+        .confirmationDialog(
+            "Remove customer contact?",
+            isPresented: $showRemoveContactConfirmation,
+            titleVisibility: .visible,
+            presenting: contactToRemove
+        ) { contact in
+            Button("Remove \(contact.name)", role: .destructive) {
+                Task { await removeContact(contact) }
+            }
+            Button("Cancel", role: .cancel) { contactToRemove = nil }
+        } message: { contact in
+            Text("This removes \(contact.name) from \(record?.name ?? customer.name).")
         }
     }
     @ViewBuilder private var metadataChips: some View {
@@ -232,7 +266,13 @@ struct CustomerDetailView: View {
     }
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { showContact = true } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
+            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { contactSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
+            if let contactMutationError {
+                Text(contactMutationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 9))
+                    .accessibilityIdentifier("contact-mutation-error")
+            }
             ForEach(contacts) { contact in
                 HStack(spacing: 10) {
                     Avatar(name: contact.name, size: 28)
@@ -243,6 +283,23 @@ struct CustomerDetailView: View {
                     Spacer(minLength: 2)
                     if let phone = contact.phone { CustomerContactIcon(value: phone, isPhone: true) }
                     if let email = contact.email { CustomerContactIcon(value: email, isPhone: false) }
+                    if canEdit {
+                        Menu {
+                            Button("Edit contact", systemImage: "pencil") { contactSheet = .edit(contact) }
+                            if !contact.primary {
+                                Button("Make primary", systemImage: "star") { Task { await makeContactPrimary(contact) } }
+                                    .disabled(isMutatingContact)
+                            }
+                            Button("Remove contact", systemImage: "trash", role: .destructive) {
+                                contactToRemove = contact
+                                showRemoveContactConfirmation = true
+                            }.disabled(isMutatingContact)
+                        } label: {
+                            Image(systemName: "ellipsis").frame(width: 30, height: 32)
+                        }
+                        .accessibilityLabel("Contact actions for \(contact.name)")
+                        .disabled(isMutatingContact)
+                    }
                 }.frame(minHeight: 48)
             }
             if contacts.isEmpty { emptyText("No contacts") }
@@ -309,6 +366,37 @@ struct CustomerDetailView: View {
             locationError = error.localizedDescription
         }
     }
+
+    private func makeContactPrimary(_ contact: CustomerContactRecord) async {
+        guard canEdit, !isMutatingContact, !contact.primary else { return }
+        isMutatingContact = true
+        defer { isMutatingContact = false }
+        do {
+            let updated = try await api.updateFieldContact(customer.id, contact.id, request: .init(primary: true))
+            contactState.save(updated)
+            contactMutationError = nil
+        } catch is CancellationError {
+        } catch {
+            contactMutationError = error.localizedDescription
+        }
+    }
+
+    private func removeContact(_ contact: CustomerContactRecord) async {
+        guard canEdit, !isMutatingContact else { return }
+        isMutatingContact = true
+        defer {
+            isMutatingContact = false
+            contactToRemove = nil
+        }
+        do {
+            try await api.removeFieldContact(customer.id, contact.id)
+            contactState.remove(id: contact.id)
+            contactMutationError = nil
+        } catch is CancellationError {
+        } catch {
+            contactMutationError = error.localizedDescription
+        }
+    }
     private var jobsSection: some View {
         VStack(alignment: .leading, spacing: 2) {
             sectionTitle("Job history", count: jobs.count)
@@ -339,14 +427,14 @@ struct CustomerDetailView: View {
         loadGeneration += 1
         let requestGeneration = loadGeneration
         let locationRequestGeneration = locationState.beginLoad()
-        contactState.beginLoading()
+        let contactRequestGeneration = contactState.beginLoading()
         do {
             let loadedRecord = try await api.fieldCustomer(customer.id)
             guard loadGeneration == requestGeneration else { return }
             record = loadedRecord
             let loadedContacts = try await api.fieldContacts(customer.id)
             guard loadGeneration == requestGeneration else { return }
-            contactState.receive(loadedContacts)
+            contactState.receive(loadedContacts, generation: contactRequestGeneration)
             let loadedLocations = try await api.fieldLocations(customer.id)
             guard loadGeneration == requestGeneration else { return }
             if locationState.receive(loadedLocations, generation: locationRequestGeneration) {

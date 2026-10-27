@@ -4,7 +4,7 @@ Date: 2026-10-26. Bundle `com.thorbis.field`, Apple app ID `6827337706`, team `T
 
 ## Changes
 
-Uses the authentic Thorbis shield from `Thorbis-TanStack/apps/showcase/public/logo-source.png` for the native login mark and iOS app icon. Tightens schedule selection around daylight-saving transitions: keeping the same day preserves the selected fall-back occurrence, changing days selects the first repeated occurrence, and nonexistent spring-forward times are rejected with a consistent explanation. Accepted date/time choices clear old errors. The schedule sheet cannot be dismissed while its save request is pending.
+Uses the authentic Thorbis shield from `Thorbis-TanStack/apps/showcase/public/logo-source.png` for the native login mark. The app icon in this build was still a generic geometric T and is corrected in build 8. Tightens schedule selection around daylight-saving transitions: keeping the same day preserves the selected fall-back occurrence, changing days selects the first repeated occurrence, and nonexistent spring-forward times are rejected with a consistent explanation. Accepted date/time choices clear old errors. The schedule sheet cannot be dismissed while its save request is pending.
 
 This is an incremental presentation beta, **not full Paper/TanStack parity**. See `docs/design/README.md` and `docs/release/beta-coverage.md` for remaining gaps. This build does not claim the remaining workflows are complete.
 

@@ -94,7 +94,8 @@ struct AddressLink: View {
 
 struct CustomerContactSheet: View {
     let customerID: String
-    let onCreated: (CustomerContactRecord) -> Void
+    let contact: CustomerContactRecord?
+    let onSaved: (CustomerContactRecord) -> Void
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @Environment(\.dismiss) private var dismiss
@@ -110,15 +111,45 @@ struct CustomerContactSheet: View {
     @FocusState private var focusedField: ContactField?
 
     private enum ContactField: Hashable { case name, phone, email, customRole }
-    private let roles = ["Homeowner", "Spouse", "Tenant", "Property mgr"]
+    private static let roles = ["Homeowner", "Spouse", "Tenant", "Property mgr"]
 
-    private var request: FieldContactCreate? {
+    init(customerID: String, contact: CustomerContactRecord? = nil, onSaved: @escaping (CustomerContactRecord) -> Void) {
+        self.customerID = customerID
+        self.contact = contact
+        self.onSaved = onSaved
+        _name = State(initialValue: contact?.name ?? "")
+        _phone = State(initialValue: contact?.phone ?? "")
+        _email = State(initialValue: contact?.email ?? "")
+        _showsEmail = State(initialValue: contact?.email != nil)
+        if let existingRole = contact?.role, !existingRole.isEmpty {
+            if Self.roles.contains(existingRole) {
+                _role = State(initialValue: existingRole)
+                _customRole = State(initialValue: "")
+                _usesCustomRole = State(initialValue: false)
+            } else {
+                _role = State(initialValue: "")
+                _customRole = State(initialValue: existingRole)
+                _usesCustomRole = State(initialValue: true)
+            }
+        } else {
+            _role = State(initialValue: "")
+            _customRole = State(initialValue: "")
+            _usesCustomRole = State(initialValue: false)
+        }
+    }
+
+    private var draft: CustomerContactDraft {
         CustomerContactDraft(
             name: name,
             role: usesCustomRole ? customRole : role,
             email: showsEmail ? email : nil,
             phone: phone
-        ).makeRequest()
+        )
+    }
+
+    private var canSave: Bool {
+        guard !busy, session.can("customer.edit", feature: "core_crm") else { return false }
+        return contact == nil ? draft.makeRequest() != nil : draft.makeUpdateRequest() != nil
     }
 
     var body: some View {
@@ -128,7 +159,7 @@ struct CustomerContactSheet: View {
                 .padding(.top, 10)
 
             ZStack {
-                Text("New contact")
+                Text(contact == nil ? "New contact" : "Edit contact")
                     .font(Theme.font(17, weight: .semibold))
                 HStack {
                     Button { dismiss() } label: {
@@ -138,7 +169,7 @@ struct CustomerContactSheet: View {
                             .frame(width: 32, height: 32)
                             .background(Theme.fill, in: Circle())
                     }
-                    .accessibilityLabel("Cancel new contact")
+                    .accessibilityLabel(contact == nil ? "Cancel new contact" : "Cancel contact changes")
                     .disabled(busy)
                     Spacer()
                     Button("Save") { Task { await save() } }
@@ -160,7 +191,7 @@ struct CustomerContactSheet: View {
                             .font(Theme.font(13, weight: .medium))
                             .foregroundStyle(Theme.muted)
                         HStack(spacing: 6) {
-                            ForEach(roles, id: \.self) { option in
+                            ForEach(Self.roles, id: \.self) { option in
                                 roleChip(option, selected: !usesCustomRole && role == option) {
                                     role = option
                                     customRole = ""
@@ -224,7 +255,7 @@ struct CustomerContactSheet: View {
                 Button { Task { await save() } } label: {
                     Group {
                         if busy { ProgressView().tint(.white) }
-                        else { Text("Save contact").font(Theme.font(15, weight: .semibold)) }
+                        else { Text(contact == nil ? "Save contact" : "Save changes").font(Theme.font(15, weight: .semibold)) }
                     }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -235,10 +266,12 @@ struct CustomerContactSheet: View {
                 .disabled(!canSave)
                 .opacity(canSave ? 1 : 0.45)
 
-                Text("The first contact is set as primary automatically.")
-                    .font(Theme.font(12))
-                    .foregroundStyle(Theme.muted)
-                    .multilineTextAlignment(.center)
+                if contact == nil {
+                    Text("The first contact is set as primary automatically.")
+                        .font(Theme.font(12))
+                        .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                }
             }
         }
         .padding(.horizontal, 20)
@@ -251,10 +284,6 @@ struct CustomerContactSheet: View {
         .presentationCornerRadius(20)
         .presentationBackground(Theme.card)
         .interactiveDismissDisabled(busy)
-    }
-
-    private var canSave: Bool {
-        request != nil && !busy && session.can("customer.edit", feature: "core_crm")
     }
 
     private func contactField(_ title: String, placeholder: String, text: Binding<String>, field: ContactField) -> some View {
@@ -295,12 +324,19 @@ struct CustomerContactSheet: View {
     }
 
     private func save() async {
-        guard !busy, let request else { return }
+        guard !busy, canSave else { return }
         busy = true
         defer { busy = false }
         do {
-            let contact = try await api.createFieldContact(customerID, request: request)
-            onCreated(contact)
+            let saved: CustomerContactRecord
+            if let contact {
+                guard let request = draft.makeUpdateRequest() else { return }
+                saved = try await api.updateFieldContact(customerID, contact.id, request: request)
+            } else {
+                guard let request = draft.makeRequest() else { return }
+                saved = try await api.createFieldContact(customerID, request: request)
+            }
+            onSaved(saved)
             dismiss()
         } catch is CancellationError {} catch {
             self.error = error.localizedDescription

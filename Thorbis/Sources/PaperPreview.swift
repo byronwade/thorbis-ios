@@ -103,7 +103,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             guard let id = customer["id"] as? String, let name = customer["name"] as? String, let address = customer["address"] as? String else { continue }
             if path == "/v1/customers/\(id)" { return customer }
             if path == "/v1/customers/\(id)/contacts" {
-                return ["items": [["id": "00000000-0000-4000-8000-000000008001", "organizationId": org, "customerId": id, "name": name, "role": "Homeowner", "primary": true, "createdAt": now, "updatedAt": now] as [String: Any]]]
+                return ["items": [
+                    ["id": "00000000-0000-4000-8000-000000008001", "organizationId": org, "customerId": id,
+                     "name": name, "role": "Homeowner", "email": "danielle@example.invalid", "phone": "(415) 555-0142",
+                     "primary": true, "createdAt": now, "updatedAt": now] as [String: Any],
+                    ["id": "00000000-0000-4000-8000-000000008002", "organizationId": org, "customerId": id,
+                     "name": "Taylor Marlowe", "role": "Spouse", "phone": "(415) 555-0177",
+                     "primary": false, "createdAt": now, "updatedAt": now] as [String: Any]
+                ]]
             }
             if path == "/v1/customers/\(id)/locations" {
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,

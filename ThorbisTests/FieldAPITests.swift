@@ -159,6 +159,61 @@ final class FieldAPITests: XCTestCase {
         XCTAssertNil(locationBody["organizationId"])
     }
 
+    func testUpdateContactCanClearNullableFieldsAndPromotePrimary() async throws {
+        let contactID = "00000000-0000-4000-8000-000000000006"
+        let updated = #"{"id":"00000000-0000-4000-8000-000000000006","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","name":"Alex","role":null,"email":null,"phone":null,"primary":true,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T13:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, updated), .init(200, updated)]), baseURL: "https://app.thorbis.com")
+
+        let cleared = try await client.updateFieldContact(customerID, contactID, request: .init(
+            name: "Alex", role: .clear, email: .clear, phone: .clear
+        ))
+        let promoted = try await client.updateFieldContact(customerID, contactID, request: .init(primary: true))
+
+        XCTAssertNil(cleared.role)
+        XCTAssertNil(cleared.email)
+        XCTAssertNil(cleared.phone)
+        XCTAssertTrue(promoted.primary)
+        let sent = URLProtocolFixture.recorded
+        XCTAssertEqual(sent.map { $0.url?.path }, [
+            "/v1/customers/\(customerID)/contacts/\(contactID)",
+            "/v1/customers/\(customerID)/contacts/\(contactID)"
+        ])
+        let clearingBody = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent[0].body)) as? [String: Any])
+        XCTAssertEqual(clearingBody["name"] as? String, "Alex")
+        XCTAssertTrue(clearingBody["role"] is NSNull)
+        XCTAssertTrue(clearingBody["email"] is NSNull)
+        XCTAssertTrue(clearingBody["phone"] is NSNull)
+        XCTAssertNil(clearingBody["primary"])
+        let primaryBody = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent[1].body)) as? [String: Any])
+        XCTAssertEqual(primaryBody.count, 1)
+        XCTAssertEqual(primaryBody["primary"] as? Bool, true)
+    }
+
+    func testRemoveContactUsesBodylessPostAndAcceptsNoContent() async throws {
+        let contactID = "00000000-0000-4000-8000-000000000006"
+        let client = APIClient(session: URLProtocolFixture.session([.init(204, "")]), baseURL: "https://app.thorbis.com")
+
+        try await client.removeFieldContact(customerID, contactID)
+
+        let sent = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(sent.method, "POST")
+        XCTAssertEqual(sent.url?.path, "/v1/customers/\(customerID)/contacts/\(contactID)/remove")
+        XCTAssertNil(sent.body)
+    }
+
+    func testContactMutationRejectsInvalidPathIDsBeforeSending() async {
+        let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        do {
+            _ = try await client.updateFieldContact(customerID, "../other", request: .init(primary: true))
+            XCTFail("Expected invalid contact ID to be rejected")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Invalid record ID")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
     func testUpdateFieldLocationSendsNullableValuesToClearAndDecodesSavedRecord() async throws {
         let locationID = "00000000-0000-4000-8000-000000000007"
         let location = #"{"id":"00000000-0000-4000-8000-000000000007","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","label":"Shop","kind":"service","address":"456 Main","notes":null,"coordinates":null,"gateCode":null,"alarmCode":null,"dogOnSite":null,"parking":null,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T13:00:00Z"}"#
@@ -282,7 +337,7 @@ final class FieldAPITests: XCTestCase {
         XCTAssertThrowsError(try ServiceLocationDraft(label: "Home", kind: "service", address: "123 Main", latitude: "91", longitude: "0").makeCreateRequest())
     }
 
-    func testCustomerContactDraftTrimsFieldsAndOmitsBlankOptionals() {
+    func testCustomerContactDraftTrimsFieldsAndOmitsBlankOptionals() throws {
         let draft = CustomerContactDraft(
             name: "  Alex Morgan  ",
             role: "  Homeowner  ",
@@ -297,6 +352,14 @@ final class FieldAPITests: XCTestCase {
         XCTAssertNil(request?.email)
         XCTAssertEqual(request?.phone, "(415) 555-0134")
         XCTAssertNil(request?.primary)
+
+        let update = try XCTUnwrap(draft.makeUpdateRequest())
+        let encoded = try JSONEncoder().encode(update)
+        let updateBody = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(updateBody["name"] as? String, "Alex Morgan")
+        XCTAssertEqual(updateBody["role"] as? String, "Homeowner")
+        XCTAssertTrue(updateBody["email"] is NSNull)
+        XCTAssertEqual(updateBody["phone"] as? String, "(415) 555-0134")
     }
 
     func testCustomerContactCollectionTracksReadinessSeparatelyFromOtherCustomerData() throws {
@@ -304,16 +367,50 @@ final class FieldAPITests: XCTestCase {
         XCTAssertFalse(state.isLoaded)
 
         let contacts = try JSONDecoder().decode([CustomerContactRecord].self, from: Data(#"[{"id":"contact-1","organizationId":"org-1","customerId":"customer-1","name":"Alex","primary":true,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}]"#.utf8))
-        state.receive(contacts)
+        let generation = state.beginLoading()
+        XCTAssertTrue(state.receive(contacts, generation: generation))
 
         XCTAssertTrue(state.isLoaded)
         XCTAssertEqual(state.contacts.map(\.id), ["contact-1"])
+    }
+
+    func testRemovingPrimaryContactRejectsStaleRefreshAndPromotesOldestRemainingContact() {
+        let primary = customerContact(id: "primary", name: "Current", primary: true, createdAt: "2026-10-27T12:00:00Z")
+        let oldest = customerContact(id: "oldest", name: "First added", primary: false, createdAt: "2026-10-26T12:00:00Z")
+        let newest = customerContact(id: "newest", name: "Last added", primary: false, createdAt: "2026-10-27T13:00:00Z")
+        var state = CustomerContactCollectionState()
+        let initialLoad = state.beginLoading()
+        state.receive([primary, newest, oldest], generation: initialLoad)
+        let pendingRefresh = state.beginLoading()
+
+        state.remove(id: primary.id)
+
+        XCTAssertFalse(state.receive([primary, newest, oldest], generation: pendingRefresh))
+        XCTAssertEqual(Set(state.contacts.map(\.id)), Set([oldest.id, newest.id]))
+        XCTAssertTrue(state.contacts.first(where: { $0.id == oldest.id })?.primary == true)
+        XCTAssertFalse(state.contacts.first(where: { $0.id == newest.id })?.primary ?? true)
+    }
+
+    private func customerContact(id: String, name: String, primary: Bool, createdAt: String) -> CustomerContactRecord {
+        CustomerContactRecord(
+            id: id,
+            organizationId: org,
+            customerId: customerID,
+            name: name,
+            role: nil,
+            email: nil,
+            phone: nil,
+            primary: primary,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
     }
 
     func testCustomerContactDraftRequiresANonblankName() {
         let draft = CustomerContactDraft(name: " \n ", role: "Spouse", email: "alex@example.com", phone: "555-0100")
 
         XCTAssertNil(draft.makeRequest())
+        XCTAssertNil(draft.makeUpdateRequest())
     }
 
     func testBlankCustomerContactOptionalsAreOmittedFromRequestBody() async throws {

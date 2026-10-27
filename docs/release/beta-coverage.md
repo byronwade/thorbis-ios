@@ -6,7 +6,7 @@ This is an initial staff beta, not full Thorbis-TanStack parity. The source refe
 
 - Better Auth sign-in, restore, workspace selection, capability/feature hydration, expiry and sign-out; all workspace state is invalidated when authority changes.
 - Schedule and assigned-job filters; a local-day My Day list sorted by scheduled time with server-gated “On my way” and optional ETA; jobs, create job, notes, manual arrival/progress, pause/resume, scheduling and assignment, closeout requirements and office follow-ups.
-- Customer search, details and creation, plus Paper-style contact quick-add with role, phone, optional email and first-contact primary behavior. Service locations support create/edit/remove, address and notes, service/billing type, map pins, and access/parking details.
+- Customer search, details and creation, plus Paper-style contact create/edit, primary promotion, and confirmed removal with role, phone, and optional email. Service locations support create/edit/remove, address and notes, service/billing type, map pins, and access/parking details.
 - Estimates: list, detail, create draft and revision-bound send/approve/decline. Invoices: list, detail and issue. Protected native PDF previews.
 - Job media: selected photos/PDFs up to 8 MiB, signed upload/confirmation and protected download/preview.
 - Staff notices, revenue report with incomplete-total disclosure, and paginated Price Book with separately gated detail.
@@ -23,10 +23,10 @@ This is an initial staff beta, not full Thorbis-TanStack parity. The source refe
 ## Validation evidence
 
 - Swift 6 language mode with complete strict concurrency.
-- 132 unit/contract tests passed with no failures or skips in the iPhone 17 Pro simulator, including location update/clear/remove contracts, coordinate validation, and stale-refresh protection. Result bundle: `/Users/byronwade/Library/Developer/Xcode/DerivedData/Thorbis-dmuwxdzkujtkngcfxjqjbnvsarbv/Logs/Test/Test-Thorbis-2026.10.27_00-28-03--0400.xcresult` (27 October 2026).
-- My Day and Customer detail were visually checked in read-only Paper previews on iPhone. The location editor was checked with sample data; a rejected save preserved the form values and a rejected removal preserved the location. Preview evidence verifies presentation/error handling only, not authenticated live workflow behavior.
+- 136 unit/contract tests passed with no failures or skips in the iPhone 17 Pro simulator, including contact null clearing, primary promotion, confirmed remove transport, primary-heir behavior, location update/clear/remove contracts, coordinate validation, and stale-refresh protection. Result bundle: `/Users/byronwade/Library/Developer/Xcode/DerivedData/Thorbis-dmuwxdzkujtkngcfxjqjbnvsarbv/Logs/Test/Test-Thorbis-2026.10.27_00-47-40--0400.xcresult` (27 October 2026).
+- My Day and Customer detail were visually checked in read-only Paper previews on iPhone. The location and contact editors, contact action menu, and remove confirmation were checked with sample data. Preview evidence verifies presentation/error handling only, not authenticated live workflow behavior.
 - 18 Release transport tests passed, including rejection of development identity in Release.
-- Signed device archive and signature verification succeeded for Build 6 (`1.0 (6)`), which adds customer service-location management. The upload log reports success and Apple processing; build 6 is not yet assigned to a tester group. See `build-6.md` for release evidence.
+- Signed device archive and signature verification succeeded for Build 6 (`1.0 (6)`), Build 7 (`1.0 (7)`), and Build 8 (`1.0 (8)`). Build 7 introduced customer contact create/edit, primary promotion, and confirmed removal. Build 8 keeps those changes and replaces the generic app icon with the canonical Thorbis shield. Build 8 uploaded successfully; Apple reports that it is processing. Neither build is assigned to the external tester group; Build 8 supersedes Build 7. See `build-8.md` for current release evidence.
 - iPhone and iPad native login screens launched and were visually inspected. Browser sign-in is confirmed; native authenticated end-to-end checks still await a separate app sign-in.
 - Independent review found and drove fixes for logout overlap, central 401 invalidation, late preview cleanup, draft lifetime and roster truncation. Tests cover the corresponding transport/state behavior.
 
