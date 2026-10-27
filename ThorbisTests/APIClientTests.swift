@@ -3,6 +3,32 @@ import XCTest
 
 @MainActor
 final class APIClientTests: XCTestCase {
+    func testCookieBackedMutationsSendCanonicalOrigin() async throws {
+        let paths = ["/api/auth/sign-in/email", "/api/auth/organization/set-active", "/api/auth/sign-out", "/v1/jobs"]
+        let client = APIClient(session: URLProtocolFixture.session(paths.map { _ in .init(200, "{}") }), baseURL: "https://app.thorbis.com/")
+        for path in paths {
+            let _: APIClient.EmptyResponse = try await client.send("POST", path, body: [String: String](), authed: !path.hasPrefix("/api/auth/"))
+        }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, paths.count)
+        for request in URLProtocolFixture.recorded {
+            XCTAssertEqual(request.header("Origin"), "https://app.thorbis.com")
+        }
+    }
+
+    func testReadRequestsDoNotDeclareMutationOrigin() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        let _: APIClient.EmptyResponse = try await client.send("GET", "/api/auth/get-session", authed: false)
+        XCTAssertNil(URLProtocolFixture.recorded.first?.header("Origin"))
+    }
+
+    #if DEBUG
+    func testDebugMutationOriginRetainsValidatedLoopbackPort() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "http://localhost:3000/")
+        let _: APIClient.EmptyResponse = try await client.send("POST", "/api/auth/sign-out", body: [String: String](), authed: false)
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.header("Origin"), "http://localhost:3000")
+    }
+    #endif
+
     func testDefaultOriginUsesProduction() {
         let previous = UserDefaults.standard.object(forKey: "thorbis.apiBaseURL")
         defer {

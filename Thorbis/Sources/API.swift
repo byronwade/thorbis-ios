@@ -210,6 +210,10 @@ final class APIClient: ObservableObject {
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
         }
+        origin.path = ""
+        guard let requestOrigin = origin.url?.absoluteString else {
+            throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
+        }
         origin.path = path
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
@@ -217,6 +221,10 @@ final class APIClient: ObservableObject {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue(accept, forHTTPHeaderField: "accept")
+        // URLSession does not supply the browser Origin required for cookie-backed mutations.
+        if !["GET", "HEAD", "OPTIONS"].contains(method.uppercased()) {
+            req.setValue(requestOrigin, forHTTPHeaderField: "Origin")
+        }
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "content-type")
             req.httpBody = try JSONEncoder().encode(body)
