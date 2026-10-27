@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct ThorbisApp: App {
+    @UIApplicationDelegateAdaptor(ThorbisAppDelegate.self) private var appDelegate
     @AppStorage("thorbis.appearance") private var appearance = "system"
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var api: APIClient
@@ -46,8 +47,11 @@ struct ThorbisApp: App {
                 inboxBoard?.clear()
             }
             store?.bindCache(actorID: actorID, organizationID: organizationID)
+            PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
         }
+        PushNotifications.shared.start(api: api, store: store)
+        session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
         _api = StateObject(wrappedValue: api)

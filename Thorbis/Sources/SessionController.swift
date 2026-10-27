@@ -88,6 +88,8 @@ final class SessionController: ObservableObject {
     var onVerifiedIdentity: ((_ actorID: String?, _ organizationID: String?) -> Void)?
     /// Explicit sign-out only: device copies of work (cache, unsent changes) are deleted.
     var onSignedOut: (() -> Void)?
+    /// Awaited before sign-out or a workspace switch, while the session still authorizes requests.
+    var onWillUnbindDevice: (() async -> Void)?
 
     /// Whether the workspace has a feature on, independent of a capability.
     func isFeatureOn(_ feature: String) -> Bool {
@@ -248,6 +250,8 @@ final class SessionController: ObservableObject {
             return
         }
         let knownOrganizations = organizations
+        // Notifications for the old workspace stop before the switch.
+        await onWillUnbindDevice?()
         snapshots.clear()
         let requestGeneration = invalidate(next: .restoring)
         do {
@@ -268,6 +272,7 @@ final class SessionController: ObservableObject {
         guard !signingOut else { return }
         signingOut = true
         defer { signingOut = false }
+        await onWillUnbindDevice?()
         defaults.set(true, forKey: Self.explicitSignOutKey)
         snapshots.clear()
         onSignedOut?()
