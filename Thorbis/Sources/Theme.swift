@@ -2,6 +2,16 @@ import SwiftUI
 
 /// Tokens from the Paper "Thorbis Mobile" file (get_tokens).
 enum Theme {
+    static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        Font.custom("Inter-Regular", size: size, relativeTo: .body).weight(weight)
+    }
+    static func monoFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        Font.custom("GeistMono-Regular", size: size, relativeTo: .caption).weight(weight)
+    }
+    static let card = Color(hex: 0x232323)
+    static let subtle = Color(hex: 0x8A8A8A)
+    static let successSurface = Color(hex: 0x122B1C)
+    static let destructiveSurface = Color(hex: 0x2A1414)
     static let background = Color(hex: 0x1F1F1F)
     static let surface = Color(hex: 0x191919)
     static let chrome = Color(hex: 0x141414)
@@ -16,7 +26,7 @@ enum Theme {
     static let warning = Color(hex: 0xF59E0B)
     static let warningSurface = Color(hex: 0x2A2008)
     static let destructive = Color(hex: 0xEF4444)
-    static let mono = Font.system(size: 12, weight: .medium, design: .monospaced)
+    static let mono = monoFont(12, weight: .medium)
 }
 
 extension Color {
@@ -32,8 +42,8 @@ struct Chip: View {
     var bg: Color = Theme.fill
     var body: some View {
         HStack(spacing: 4) {
-            if let icon { Image(systemName: icon).font(.system(size: 10, weight: .semibold)) }
-            Text(text).font(.system(size: 12, weight: .medium))
+            if let icon { Image(systemName: icon).font(Theme.font( 10, weight: .semibold)) }
+            Text(text).font(Theme.font( 12, weight: .medium))
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 8).padding(.vertical, 4)
@@ -45,7 +55,7 @@ struct Avatar: View {
     let name: String
     var size: CGFloat = 24
     var body: some View {
-        Text(initials(name)).font(.system(size: size * 0.38, weight: .semibold))
+        Text(initials(name)).font(Theme.font( size * 0.38, weight: .semibold))
             .foregroundStyle(Theme.muted)
             .frame(width: size, height: size)
             .background(Theme.fill, in: Circle())
@@ -63,8 +73,8 @@ struct SectionHeader: View {
     var count: Int? = nil
     var body: some View {
         HStack {
-            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-            if let count { Text("\(count)").font(.system(size: 12)).foregroundStyle(Theme.muted.opacity(0.7)) }
+            Text(title).font(Theme.font( 13, weight: .medium)).foregroundStyle(Theme.muted)
+            if let count { Text("\(count)").font(Theme.font( 12)).foregroundStyle(Theme.muted.opacity(0.7)) }
             Spacer()
         }
         .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 6)
@@ -80,11 +90,11 @@ struct PrimaryButton: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 if busy { ProgressView().tint(.white) } else if let icon { Image(systemName: icon) }
-                Text(title).font(.system(size: 15, weight: .semibold))
+                Text(title).font(Theme.font( 15, weight: .semibold))
             }
-            .frame(maxWidth: .infinity).frame(height: 44)
+            .frame(maxWidth: .infinity).frame(height: 46)
             .foregroundStyle(.white)
-            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
         }
         .disabled(busy)
     }

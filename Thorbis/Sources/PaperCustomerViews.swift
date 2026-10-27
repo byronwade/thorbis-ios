@@ -114,10 +114,9 @@ struct CustomerDetailView: View {
                     }
                     Text(record?.name ?? customer.name).font(Theme.font(26, weight: .semibold)).tracking(-0.39)
                 }.padding(.horizontal, 20).padding(.bottom, 12)
-                HStack(spacing: 6) {
-                    if jobs.contains(where: { $0.status == "in_progress" }) { Chip(text: "Job in progress", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface) }
-                    if session.can("job.view", feature: "jobs") { Chip(text: "\(jobs.count) jobs", icon: "clock") }
-                    if let type = record?.accountType { Chip(text: type.statusLabel) }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { metadataChips }.fixedSize()
+                    VStack(alignment: .leading, spacing: 6) { metadataChips }
                 }.padding(.horizontal, 20).padding(.bottom, 14)
                 if let error { ErrorBanner(message: error) }
                 if record == nil && error == nil { ProgressView("Loading customer…").padding(20) }
@@ -159,6 +158,11 @@ struct CustomerDetailView: View {
         .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
         .sheet(isPresented: $showContact, onDismiss: { Task { await load() } }) { CustomerRecordSheet(customerID: customer.id, isLocation: false) }
         .sheet(isPresented: $showLocation, onDismiss: { Task { await load() } }) { CustomerRecordSheet(customerID: customer.id, isLocation: true) }
+    }
+    @ViewBuilder private var metadataChips: some View {
+        if jobs.contains(where: { $0.status == "in_progress" }) { Chip(text: "Job in progress", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface) }
+        if session.can("job.view", feature: "jobs") { Chip(text: "\(jobs.count) jobs", icon: "clock") }
+        if let type = record?.accountType { Chip(text: type.statusLabel) }
     }
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {

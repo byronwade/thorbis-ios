@@ -9,8 +9,13 @@ struct ThorbisApp: App {
     @StateObject private var inboxBoard: InboxLocalDrafts
 
     init() {
+        #if DEBUG
+        let api = PaperPreview.enabled ? PaperPreview.api() : APIClient()
+        let session = SessionController(api: api, defaults: PaperPreview.enabled ? PaperPreview.defaults() : .standard)
+        #else
         let api = APIClient()
         let session = SessionController(api: api)
+        #endif
         let inboxBoard = InboxLocalDrafts()
         let store = Store { [weak session] api in
             guard let session else { throw CancellationError() }
@@ -51,8 +56,13 @@ struct ThorbisApp: App {
             .environmentObject(store)
             .environmentObject(session)
             .environmentObject(inboxBoard)
+            .font(Theme.font(15))
+            .foregroundStyle(Theme.foreground)
             .preferredColorScheme(.dark)
             .tint(Theme.brand)
+            #if DEBUG
+            .overlay(alignment: .bottom) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
+            #endif
             .task { await session.restore() }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active, session.phase == .ready else { return }
@@ -151,45 +161,6 @@ final class Store: ObservableObject {
 }
 
 enum Tab: Hashable { case schedule, jobs, customers, more }
-
-struct RootView: View {
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @EnvironmentObject var session: SessionController
-    @State private var tab: Tab = .more
-
-    var body: some View {
-        TabView(selection: $tab) {
-            if session.can("job.view", feature: "jobs") {
-                destination { ScheduleView() }
-                    .tabItem { Label("Schedule", systemImage: "calendar") }.tag(Tab.schedule)
-                destination { JobsView() }
-                    .tabItem { Label("Jobs", systemImage: "briefcase") }.tag(Tab.jobs)
-            }
-            if session.can("customer.view", feature: "core_crm") {
-                destination { CustomersView() }
-                    .tabItem { Label("Customers", systemImage: "person.2") }.tag(Tab.customers)
-            }
-            destination { MoreView() }
-                .tabItem { Label("More", systemImage: "ellipsis") }.tag(Tab.more)
-        }
-        .task { await store.refresh(api) }
-        .onAppear {
-            if session.can("job.view", feature: "jobs") { tab = .schedule }
-            else if session.can("customer.view", feature: "core_crm") { tab = .customers }
-            else { tab = .more }
-        }
-    }
-
-    private func destination<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        NavigationStack {
-            content()
-                .background(Theme.background)
-                .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
-                .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
-        }
-    }
-}
 
 struct ErrorBanner: View {
     let message: String

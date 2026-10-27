@@ -15,6 +15,7 @@ struct LoginView: View {
     private enum FocusField { case email, password }
 
     var body: some View {
+        GeometryReader { geometry in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text("T")
@@ -36,7 +37,7 @@ struct LoginView: View {
                     .padding(.top, 6)
 
                 label("Email").padding(.top, 32)
-                TextField("you@company.com", text: $email)
+                TextField("", text: $email, prompt: Text("you@company.com").foregroundStyle(Theme.muted))
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -80,7 +81,7 @@ struct LoginView: View {
                     .font(Theme.font(15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 46)
+                    .frame(minHeight: 46)
                     .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .disabled(busy)
@@ -105,8 +106,9 @@ struct LoginView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, sizeClass == .regular ? 72 : 32)
-            .frame(maxWidth: 430, minHeight: sizeClass == .regular ? 620 : nil, alignment: .topLeading)
+            .frame(maxWidth: 430, minHeight: max(620, geometry.size.height - 32), alignment: .topLeading)
             .frame(maxWidth: .infinity)
+        }
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background.ignoresSafeArea())
@@ -138,7 +140,8 @@ private extension View {
         font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 14)
-            .frame(height: 46)
+            .padding(.vertical, 12)
+            .frame(minHeight: 46)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
     }
@@ -191,7 +194,7 @@ private struct PasswordResetRequestView: View {
                         .font(Theme.font(15, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 46)
+                        .frame(minHeight: 46)
                         .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
                     }
                     .disabled(busy || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

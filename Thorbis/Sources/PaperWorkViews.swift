@@ -56,7 +56,7 @@ struct ScheduleView: View {
                 rangeMenu
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 0) {
                     if let error = store.error { ErrorBanner(message: error) }
                     if store.loading { ProgressView("Updating schedule…") }
                     if tab == "Map" {
@@ -67,7 +67,7 @@ struct ScheduleView: View {
                         scheduleContent
                     }
                 }
-                .padding(.top, 8).padding(.bottom, 120)
+                .padding(.bottom, 24)
             }
             .refreshable { await store.refresh(api) }
         }
@@ -105,8 +105,8 @@ struct ScheduleView: View {
         if let first = jobs.first {
             Text(tab == "Unscheduled" ? "Needs a time" : "Next up")
                 .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 16)
-            ScheduleHero(job: first, customer: store.customerName(first.customerId))
+                .padding(.horizontal, 16).padding(.bottom, 6)
+            ScheduleHero(job: first, customer: store.customerName(first.customerId)).padding(.bottom, 14)
             if jobs.count > 1 {
                 HStack {
                     Text(tab == "Today" ? "Later today" : tab == "Week" ? "Later this week" : "More jobs")
@@ -114,7 +114,7 @@ struct ScheduleView: View {
                     Spacer()
                     Text("\(jobs.count - 1) jobs").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 16).padding(.bottom, 6)
                 ForEach(Array(jobs.dropFirst())) { job in
                     ScheduleCompactRow(job: job, customer: store.customerName(job.customerId))
                 }

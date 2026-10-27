@@ -33,12 +33,15 @@ struct JobDetailView: View {
             topBar
             if let error { ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12) }
             if let job {
-                header(job)
-                tabBar
                 if selectedTab == "Media" {
+                    header(job, compact: true)
+                    tabBar
                     JobMediaView(jobID: jobId)
                 } else {
                     ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                    header(job)
+                    tabBar
                     VStack(alignment: .leading, spacing: 16) {
                         switch selectedTab {
                         case "Estimates": estimatesContent(job)
@@ -50,6 +53,7 @@ struct JobDetailView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 22)
                     .padding(.bottom, 28)
+                    }
                     }
                 }
             } else if error == nil {
@@ -131,7 +135,7 @@ struct JobDetailView: View {
         .padding(.bottom, 10)
     }
 
-    private func header(_ job: JobRecord) -> some View {
+    private func header(_ job: JobRecord, compact: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 13) {
             Text("JOB-\(job.id.suffix(4).uppercased()) · \(store.customerName(job.customerId))")
                 .font(Theme.monoFont(12, weight: .medium))
@@ -140,6 +144,7 @@ struct JobDetailView: View {
             Text(job.title)
                 .font(Theme.font(26, weight: .semibold))
                 .tracking(-0.39)
+                .lineLimit(compact ? 2 : nil)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Text(job.status.statusLabel)
