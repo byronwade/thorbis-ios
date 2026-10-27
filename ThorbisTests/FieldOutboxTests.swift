@@ -155,4 +155,16 @@ final class FieldOutboxTests: XCTestCase {
 
         XCTAssertEqual(box.pending.map(\.command), ["jobs.addNote"])
     }
+
+    func testAStalePermissionSnapshotFallsBackToTheRESTRoute() async throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Queued offline")), policyVersion: 1))
+        let superseded = #"{"outcomes":[{"commandId":"\#(note.id)","status":"rejected","category":"policy_superseded","detail":"permission snapshot is stale; refresh permissions and retry"}]}"#
+        let saved = #"{"id":"019f0000-0000-7000-8000-0000000000c1","organizationId":"\#(org)","jobId":"\#(jobA)","authorUserId":"\#(actor)","body":"Queued offline","createdAt":"2026-10-27T13:00:00Z"}"#
+
+        await box.drain(api: api([.init(200, superseded), .init(201, saved)]), useCommandEndpoint: true)
+
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, ["/v1/commands", "/v1/jobs/\(jobA)/notes"])
+    }
 }

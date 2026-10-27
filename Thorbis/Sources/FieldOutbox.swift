@@ -40,6 +40,9 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     let createdAt: Date
     let action: Action
     var state: State = .pending
+    /// Set when the command endpoint answered policy_superseded: the change is resent
+    /// through the REST route, which authorizes against current policy itself.
+    var restOnly: Bool? = nil
 
     var jobID: String {
         switch action {
@@ -224,6 +227,8 @@ final class FieldOutbox: ObservableObject {
         var sent = 0
         if useCommandEndpoint {
             sent = await drainCommands(api: api)
+            // Changes the command endpoint refused only for a stale permission snapshot.
+            if pending.contains(where: { $0.restOnly == true }) { sent += await drainREST(api: api, onlyRestFallback: true) }
         } else {
             sent = await drainREST(api: api)
         }
@@ -253,7 +258,7 @@ final class FieldOutbox: ObservableObject {
         let stamp = ISO8601DateFormatter()
         stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         while true {
-            let batch = Array(pending.prefix(50))
+            let batch = Array(pending.filter { $0.restOnly != true }.prefix(50))
             guard !batch.isEmpty else { break }
             let envelopes = batch.map {
                 Envelope(commandId: $0.id, deviceId: $0.deviceId, actorId: $0.actorId, organizationId: $0.organizationId,
@@ -266,6 +271,9 @@ final class FieldOutbox: ObservableObject {
                     if outcome.status == "applied" || outcome.status == "duplicate" {
                         entries.removeAll { $0.id == outcome.commandId }
                         sent += 1
+                    } else if outcome.category == "policy_superseded",
+                              let index = entries.firstIndex(where: { $0.id == outcome.commandId }) {
+                        entries[index].restOnly = true
                     } else if let entry = entries.first(where: { $0.id == outcome.commandId }), outcome.category == "conflict",
                               await alreadyApplied(entry, api: api) {
                         entries.removeAll { $0.id == outcome.commandId }
@@ -284,9 +292,9 @@ final class FieldOutbox: ObservableObject {
         return sent
     }
 
-    private func drainREST(api: APIClient) async -> Int {
+    private func drainREST(api: APIClient, onlyRestFallback: Bool = false) async -> Int {
         var sent = 0
-        for entry in pending {
+        for entry in pending where !onlyRestFallback || entry.restOnly == true {
             guard entries.first(where: { $0.id == entry.id })?.state == .pending else { continue }
             do {
                 switch entry.action {
