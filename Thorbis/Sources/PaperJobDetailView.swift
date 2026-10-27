@@ -261,7 +261,10 @@ struct JobDetailView: View {
                     }
                 }
             }
-            if !compact { quickActions }
+            if !compact {
+                JobProgressTrack(status: outbox.pendingStatus(for: job.id) ?? job.status).padding(.top, 10)
+                quickActions
+            }
         }
         .padding(.horizontal, Theme.gutter)
         .padding(.top, 4)
@@ -959,6 +962,55 @@ struct JobDetailView: View {
             } else {
                 self.error = error.localizedDescription
             }
+        }
+    }
+}
+
+/// Where the visit is, in five steps: booked, on the way, on site, working, done.
+struct JobProgressTrack: View {
+    let status: String
+    private static let steps = ["Booked", "On the way", "On site", "Working", "Done"]
+
+    private var current: Int? {
+        switch status {
+        case "scheduled", "dispatched": 0
+        case "en_route": 1
+        case "arrived": 2
+        case "in_progress", "paused": 3
+        case "completed": 4
+        default: nil
+        }
+    }
+
+    var body: some View {
+        if let current {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    ForEach(Self.steps.indices, id: \.self) { index in
+                        Capsule()
+                            .fill(index <= current ? tint : Theme.fill)
+                            .frame(height: 5)
+                    }
+                }
+                HStack {
+                    Text(Self.steps[current]).font(Theme.font(12, weight: .semibold)).foregroundStyle(tint)
+                    if status == "paused" { Text("· Paused").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.warning) }
+                    Spacer()
+                    if current < Self.steps.count - 1 {
+                        Text("Next: \(Self.steps[current + 1])").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Step \(current + 1) of 5, \(Self.steps[current])")
+        }
+    }
+
+    private var tint: Color {
+        switch status {
+        case "completed": Theme.success
+        case "arrived", "in_progress", "paused": Theme.warning
+        default: Theme.brandText
         }
     }
 }

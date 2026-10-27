@@ -57,6 +57,20 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// Tile color in menus; one hue per kind of work so the menu scans at a glance.
+    var tint: Color {
+        switch self {
+        case .schedule, .jobs: Theme.brandText
+        case .customers, .team: Color(hex: 0x8B5CF6)
+        case .attention: Theme.warning
+        case .inbox, .notices: Color(hex: 0x06B6D4)
+        case .estimates, .invoices, .billing: Theme.success
+        case .money, .reports: Color(hex: 0xEC4899)
+        case .priceBook: Color(hex: 0xF97316)
+        case .drafts: Theme.muted
+        }
+    }
+
     var subtitle: String? {
         switch self {
         case .attention: "Unpaid invoices, waiting estimates, jobs without a time"

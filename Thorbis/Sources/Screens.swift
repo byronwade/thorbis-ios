@@ -492,18 +492,18 @@ struct MoreView: View {
                         group(section.rawValue) {
                             ForEach(items) { item in
                                 if let route = item.route {
-                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle) }
+                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint) }
                                 }
                             }
                             ForEach(local, id: \.self) { section in
-                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder") }
+                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder", tile: Theme.muted) }
                             }
                         }
                     }
                 }
                 group("Account") {
                     NavigationLink(value: PaperRoute.customizeMenu) {
-                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here")
+                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.brandText)
                     }
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))

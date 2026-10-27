@@ -196,12 +196,20 @@ struct PaperMenuRow<Trailing: View>: View {
     let symbol: String
     var subtitle: String? = nil
     var tint: Color = Theme.foreground
+    /// A colored icon tile, so a long menu scans by color as well as by word.
+    var tile: Color? = nil
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(tint == Theme.foreground ? Theme.muted : tint)
-                .frame(width: 22)
+            if let tile {
+                Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tile)
+                    .frame(width: 32, height: 32)
+                    .background(tile.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(tint == Theme.foreground ? Theme.muted : tint)
+                    .frame(width: 22)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(tint)
                 if let subtitle { Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted) }
@@ -215,8 +223,8 @@ struct PaperMenuRow<Trailing: View>: View {
 
 extension PaperMenuRow where Trailing == AnyView {
     /// A navigable row with a chevron.
-    init(_ title: String, symbol: String, subtitle: String? = nil, value: String? = nil) {
-        self.init(title: title, symbol: symbol, subtitle: subtitle) {
+    init(_ title: String, symbol: String, subtitle: String? = nil, value: String? = nil, tile: Color? = nil) {
+        self.init(title: title, symbol: symbol, subtitle: subtitle, tile: tile) {
             AnyView(HStack(spacing: 6) {
                 if let value { Text(value).font(Theme.font(14)).foregroundStyle(Theme.muted) }
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)

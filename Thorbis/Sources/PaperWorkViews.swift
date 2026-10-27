@@ -70,6 +70,7 @@ struct ScheduleView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Schedule", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
                 OfflineBanner()
+                if !store.jobs.isEmpty && search.isEmpty { todaySummary }
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
                 if let error = store.error { ErrorBanner(message: error) }
@@ -102,10 +103,55 @@ struct ScheduleView: View {
         let day = Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
         let count = jobs.count
         return switch range {
-        case .today: "\(day) · \(count) job\(count == 1 ? "" : "s") today"
+        case .today: "\(greeting) · \(day)"
         case .week: "This week · \(count) job\(count == 1 ? "" : "s")"
         case .unscheduled: "\(count) job\(count == 1 ? "" : "s") need a time"
         }
+    }
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: .now)
+        let part = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
+        let first = session.user?.name?.split(separator: " ").first.map(String.init)
+        return first.map { "\(part), \($0)" } ?? part
+    }
+
+    /// Today at a glance: the three numbers a tech or dispatcher checks first, each one tap away.
+    @ViewBuilder private var todaySummary: some View {
+        let today = JobFiltering.schedule(store.jobs, range: .today)
+        let underWay = PaperWorkGroups.inProgress(store.jobs)
+        let unscheduled = NeedsAttention.unscheduled(store.jobs)
+        HStack(spacing: 8) {
+            summaryTile("\(today.count)", "Today", symbol: "calendar", tint: Theme.brandText) { tab = "Today" }
+            if let first = underWay.first {
+                NavigationLink(value: first) {
+                    summaryLabel("\(underWay.count)", "Under way", symbol: "bolt.fill", tint: Theme.warning)
+                }.buttonStyle(.plain)
+            } else {
+                summaryLabel("0", "Under way", symbol: "bolt.fill", tint: Theme.muted)
+            }
+            summaryTile("\(unscheduled.count)", "Need a time", symbol: "clock.badge.questionmark",
+                        tint: unscheduled.isEmpty ? Theme.muted : Theme.destructive) { tab = "Unscheduled" }
+        }
+        .padding(.horizontal, Theme.gutter)
+        .padding(.bottom, 10)
+    }
+
+    private func summaryTile(_ value: String, _ label: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) { summaryLabel(value, label, symbol: symbol, tint: tint) }.buttonStyle(.plain)
+    }
+
+    private func summaryLabel(_ value: String, _ label: String, symbol: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(tint)
+            Text(value).font(Theme.monoFont(22, weight: .semibold)).foregroundStyle(Theme.foreground)
+            Text(label).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var dayContent: some View {
