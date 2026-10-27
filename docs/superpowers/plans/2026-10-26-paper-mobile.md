@@ -60,11 +60,20 @@
 
 **Verification:** iPhone 17 Pro read-only preview confirms My Day, local date, visit count, and existing actions. Invoice editor and iPad schedule previews were also checked. All 147 simulator tests pass; the generic iOS Release build compiles. Accessibility runtime bounds, Dynamic Type, physical-device behavior, and iPad resizing remain open.
 
+### Task 3 continuation: Customer archive views and history timeline
+
+**Scope:** Match the web customer list's Recent, All customers, and Archived scopes plus its independent state filter and explicit Active/Archived status. Load both states through `includeArchived=true`. In Customer Activity, show the paginated history endpoint's kind glyph, summary, and relative time; request 50 items and follow `nextCursor` through “Load earlier activity.” Preserve loaded events after a next-page failure and let the user retry. The API supports archive and restore, but the current web customer UI exposes neither action; do not add either control in this parity slice.
+
+**Files:** `Thorbis/Sources/FieldAPI.swift`, `Thorbis/Sources/PaperCustomerViews.swift`, `ThorbisTests/FieldAPITests.swift`, and this API contract/coverage record.
+
+**Tests:** Verify the archived-customer query, history item decoding and endpoint, 50-item request, cursor pagination, and Recent/All/Archived predicates and ordering. Run the focused Field API tests, complete iPhone 17 Pro simulator suite, and Release iOS build.
+
 ### Task 4: Verify and release
 - [x] Run Swift strict-concurrency build and relevant existing full tests; add behavioral tests only for new route/filter logic.
 - [ ] Compare simulator screenshots to Paper on iPhone and iPad, fix differences, record remaining gaps precisely.
 - [x] Independent review of UI, permission and navigation regressions.
-- [ ] Only claim full match when verified; increment build and upload the verified implementation to TestFlight.
+- [x] Increment the build, sign and verify the archive, and upload the tested implementation to TestFlight Build 10.
+- [ ] Verify processing, assign Build 10 to the external tester group, and confirm Hayley's invitation after App Store Connect access and required beta-review details are available. Full parity remains unchecked.
 
 Execution authorization: user requested exact existing Paper design and already approved implementation and TestFlight distribution. Continue without redundant design approval.
 

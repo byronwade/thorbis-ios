@@ -7,6 +7,76 @@ final class FieldAPITests: XCTestCase {
     private let customerID = "00000000-0000-4000-8000-000000000003"
     private let jobID = "00000000-0000-4000-8000-000000000001"
 
+    func testArchivedCustomerListRequestsArchivedRecordsAndDecodesArchiveCycle() async throws {
+        let firstPage = #"{"items":[{"id":"00000000-0000-4000-8000-000000000003","organizationId":"00000000-0000-4000-8000-000000000002","name":"Archived customer","archived":true,"archiveCycleAuditId":"00000000-0000-4000-8000-000000000005","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"}],"nextCursor":"opaque-cursor"}"#
+        let secondPage = #"{"items":[{"id":"00000000-0000-4000-8000-000000000004","organizationId":"00000000-0000-4000-8000-000000000002","name":"Active customer","archived":false,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"}] }"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, firstPage), .init(200, secondPage)]), baseURL: "https://app.thorbis.com")
+
+        let customers = try await client.fieldCustomers(includeArchived: true)
+
+        XCTAssertEqual(customers.count, 2)
+        XCTAssertEqual(customers.first?.archived, true)
+        XCTAssertEqual(customers.first?.archiveCycleAuditId, "00000000-0000-4000-8000-000000000005")
+        let requests = URLProtocolFixture.recorded
+        XCTAssertEqual(requests.count, 2)
+        for (index, request) in requests.enumerated() {
+            XCTAssertEqual(request.url?.path, "/v1/customers")
+            let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+            var values = Dictionary(uniqueKeysWithValues: query.map { ($0.name, $0.value ?? "") })
+            XCTAssertEqual(values.removeValue(forKey: "includeArchived"), "true")
+            if index == 1 { XCTAssertEqual(values, ["cursor": "opaque-cursor"]) }
+            else { XCTAssertTrue(values.isEmpty) }
+        }
+    }
+
+    func testCustomerHistoryDecodesCanonicalItemsAndUsesCustomerHistoryRoute() async throws {
+        let history = #"{"items":[{"occurredAt":"2026-10-27T12:00:00.000Z","kind":"job","subjectId":"00000000-0000-4000-8000-000000000001","summary":"Job completed"}],"nextCursor":"opaque-cursor"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, history)]), baseURL: "https://app.thorbis.com")
+
+        let page = try await client.fieldCustomerHistory(customerID)
+
+        XCTAssertEqual(page.items.count, 1)
+        XCTAssertEqual(page.items[0].kind, "job")
+        XCTAssertEqual(page.items[0].subjectId, jobID)
+        XCTAssertEqual(page.items[0].summary, "Job completed")
+        XCTAssertEqual(page.nextCursor, "opaque-cursor")
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.url?.path, "/v1/customers/\(customerID)/history")
+        XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "limit", value: "50")])
+    }
+
+    func testCustomerHistoryUsesReturnedCursorForLoadEarlierPage() async throws {
+        let first = #"{"items":[{"occurredAt":"2026-10-27T12:00:00.000Z","kind":"job","subjectId":"00000000-0000-4000-8000-000000000001","summary":"Latest"}],"nextCursor":"opaque-cursor"}"#
+        let earlier = #"{"items":[{"occurredAt":"2026-10-26T12:00:00.000Z","kind":"contact","subjectId":"00000000-0000-4000-8000-000000000005","summary":"Contact added"}]}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, first), .init(200, earlier)]), baseURL: "https://app.thorbis.com")
+
+        let page = try await client.fieldCustomerHistory(customerID)
+        let earlierPage = try await client.fieldCustomerHistory(customerID, cursor: try XCTUnwrap(page.nextCursor))
+
+        XCTAssertNil(earlierPage.nextCursor)
+        XCTAssertEqual(earlierPage.items.first?.summary, "Contact added")
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.last)
+        XCTAssertEqual(request.url?.path, "/v1/customers/\(customerID)/history")
+        XCTAssertEqual(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "limit", value: "50"), URLQueryItem(name: "cursor", value: "opaque-cursor")])
+    }
+
+    func testCustomerListScopesMatchRecentAllAndArchivedViews() throws {
+        let records = #"[{"id":"00000000-0000-4000-8000-000000000002","organizationId":"00000000-0000-4000-8000-000000000002","name":"Alpha","archived":false,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"},{"id":"00000000-0000-4000-8000-000000000003","organizationId":"00000000-0000-4000-8000-000000000002","name":"Beta","archived":true,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"},{"id":"00000000-0000-4000-8000-000000000004","organizationId":"00000000-0000-4000-8000-000000000002","name":"Gamma","archived":false,"createdAt":"2026-10-27T12:00:00Z","updatedAt":"2026-10-27T13:00:00Z"}]"#
+        let customers = try JSONDecoder().decode([CustomerRecord].self, from: Data(records.utf8))
+
+        XCTAssertEqual(CustomerListScope.recent.customers(from: customers).map(\.id), [
+            "00000000-0000-4000-8000-000000000004", "00000000-0000-4000-8000-000000000002"
+        ])
+        XCTAssertEqual(CustomerListScope.all.customers(from: customers).map(\.id), [
+            "00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-000000000003", "00000000-0000-4000-8000-000000000004"
+        ])
+        XCTAssertEqual(CustomerListScope.archived.customers(from: customers).map(\.id), [
+            "00000000-0000-4000-8000-000000000003"
+        ])
+    }
+
     func testJobDetailDecodesScheduleAssignmentPauseEvidenceAndServerTransitions() async throws {
         let session = URLProtocolFixture.session([.init(200, #"{"id":"00000000-0000-4000-8000-000000000001","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","title":"Repair","status":"paused","assignedToUserId":"00000000-0000-4000-8000-000000000004","scheduledFor":"2026-10-27T13:00:00.000Z","pausedAt":"2026-10-26T13:00:00.000Z","pauseReason":"Need a part","pauseNextAction":"Return tomorrow","pauseCycleAuditId":"00000000-0000-4000-8000-000000000005","createdAt":"2026-10-26T12:00:00.000Z","updatedAt":"2026-10-26T13:00:00.000Z","allowedTransitions":["in_progress","completed","canceled"]}"#)])
         let client = APIClient(session: session, baseURL: "https://app.thorbis.com")

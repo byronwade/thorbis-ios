@@ -75,6 +75,45 @@ struct CustomerRecord: Codable, Identifiable, Hashable {
     let updatedAt: String
 }
 
+enum CustomerListScope: String, CaseIterable, Identifiable {
+    case recent = "Recent"
+    case all = "All customers"
+    case archived = "Archived"
+
+    var id: String { rawValue }
+
+    func customers(from values: [CustomerRecord]) -> [CustomerRecord] {
+        switch self {
+        case .recent:
+            values.filter { !$0.archived }.sorted { $0.id > $1.id }
+        case .all:
+            values.sorted {
+                let order = $0.name.localizedStandardCompare($1.name)
+                return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
+            }
+        case .archived:
+            values.filter(\.archived).sorted {
+                let order = $0.name.localizedStandardCompare($1.name)
+                return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
+            }
+        }
+    }
+}
+
+struct CustomerHistoryPage: Decodable {
+    let items: [CustomerHistoryEntry]
+    let nextCursor: String?
+}
+
+struct CustomerHistoryEntry: Decodable, Identifiable, Hashable {
+    let occurredAt: String
+    let kind: String
+    let subjectId: String
+    let summary: String
+
+    var id: String { "\(occurredAt)|\(kind)|\(subjectId)|\(summary)" }
+}
+
 struct CustomerContactRecord: Codable, Identifiable, Hashable {
     let id: String
     let organizationId: String
@@ -839,7 +878,7 @@ extension APIClient {
         return "\(base)/\(id)\(suffix)"
     }
 
-    private func allFieldPages<T: Decodable>(_ path: String) async throws -> [T] {
+    private func allFieldPages<T: Decodable>(_ path: String, queryItems: [URLQueryItem] = []) async throws -> [T] {
         let generation = requestGeneration
         var items: [T] = []
         var cursor: String?
@@ -847,7 +886,7 @@ extension APIClient {
         repeat {
             try Task.checkCancellation()
             guard generation == requestGeneration else { throw CancellationError() }
-            let page: FieldPage<T> = try await send("GET", path, cursor: cursor)
+            let page: FieldPage<T> = try await send("GET", path, queryItems: queryItems, cursor: cursor)
             items.append(contentsOf: page.items)
             cursor = page.nextCursor
             if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
@@ -862,8 +901,15 @@ extension APIClient {
     func createFieldJob(_ request: FieldJobCreate) async throws -> JobRecord {
         try await send("POST", "/v1/jobs", body: request)
     }
-    func fieldCustomers() async throws -> [CustomerRecord] { try await allFieldPages("/v1/customers") }
+    func fieldCustomers(includeArchived: Bool = false) async throws -> [CustomerRecord] {
+        let query = includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : []
+        return try await allFieldPages("/v1/customers", queryItems: query)
+    }
     func fieldCustomer(_ id: String) async throws -> CustomerRecord { try await send("GET", fieldPath("/v1/customers", id: id)) }
+    func fieldCustomerHistory(_ id: String, cursor: String? = nil) async throws -> CustomerHistoryPage {
+        try await send("GET", fieldPath("/v1/customers", id: id, suffix: "/history"),
+                       queryItems: [URLQueryItem(name: "limit", value: "50")], cursor: cursor)
+    }
 
     func fieldContacts(_ customerID: String) async throws -> [CustomerContactRecord] {
         let page: FieldPage<CustomerContactRecord> = try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/contacts"))
