@@ -33,7 +33,7 @@ Status: release preparation. No box below asserts a completed external action. R
 
 ## TestFlight
 
-- [ ] `APPLE_TEAM_ID=… scripts/testflight.sh` archives and uploads; record build number and upload time.
+- [ ] `APPLE_TEAM_ID=… BUILD_NUMBER=… scripts/testflight.sh` archives and uploads; record build number and upload time.
 - [ ] Build finishes processing; export compliance answered (the app declares no non-exempt encryption).
 - [ ] Internal testing group created and Byron added; build installed through the TestFlight app.
 - [ ] On device: sign in, camera permission prompt and photo attach, call/text/email/directions links,

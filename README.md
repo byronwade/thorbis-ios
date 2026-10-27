@@ -49,7 +49,7 @@ API at `http://127.0.0.1:8788` or a custom HTTPS URL. Against a loopback API the
 On a Mac signed in to the Apple Developer team that owns `com.thorbis.field`:
 
 ```sh
-APPLE_TEAM_ID=XXXXXXXXXX scripts/testflight.sh
+APPLE_TEAM_ID=XXXXXXXXXX BUILD_NUMBER=<next build> scripts/testflight.sh
 ```
 
 It regenerates the project, runs the core tests, archives a Release build with a timestamp build
