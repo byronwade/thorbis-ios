@@ -30,13 +30,25 @@ struct EstimateRevisionEditorView: View {
         editor.canRevise && session.can("estimate.create", feature: "estimates")
     }
 
+    private var optionsFeatureEnabled: Bool {
+        session.can("estimate.create", feature: "estimate_option_signing")
+    }
+
+    private var canEdit: Bool {
+        canRevise && (optionsFeatureEnabled || editor.options.isEmpty)
+    }
+
+    private var canDiscount: Bool {
+        session.can("estimate.discount", feature: "estimates")
+    }
+
     private var canUsePriceBook: Bool {
         session.can("pricebook.view", feature: "price_book")
     }
 
     private var canSave: Bool {
-        !busy && canRevise && (editor.estimate.currentRevisionNumber ?? 0) > 0 &&
-        editor.hasChanges && !editor.hasUnsupportedLineSources
+        !busy && canEdit && (editor.estimate.currentRevisionNumber ?? 0) > 0 &&
+        editor.hasChanges && !editor.hasUnsupportedLineSources && (!editor.hasCreditLines || canDiscount)
     }
 
     var body: some View {
@@ -63,9 +75,15 @@ struct EstimateRevisionEditorView: View {
                     if editor.hasUnsupportedLineSources {
                         ErrorBanner(message: EstimateRevisionEditorError.unsupportedLineSource.localizedDescription)
                     }
+                    if !optionsFeatureEnabled && !editor.options.isEmpty {
+                        ErrorBanner(message: EstimateRevisionEditorError.optionFeatureRequired.localizedDescription)
+                    }
+                    if editor.hasCreditLines && !canDiscount {
+                        ErrorBanner(message: EstimateRevisionEditorError.discountCapabilityRequired.localizedDescription)
+                    }
 
                     estimateHeading
-                    detailsCard
+                    detailsCard.disabled(busy || !canEdit)
                     lineSection
                     optionSection
                     Text("Saving creates a replacement draft for the current estimate revision. It will not be sent automatically.")
@@ -121,11 +139,11 @@ struct EstimateRevisionEditorView: View {
 
     private var estimateHeading: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("EST-\(estimate.id.suffix(4).uppercased()) · REVISION \(estimate.currentRevisionNumber ?? 0)")
+            Text("EST-\(editor.estimate.id.suffix(4).uppercased()) · REVISION \(editor.estimate.currentRevisionNumber ?? 0)")
                 .font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
             Text("New replacement draft")
                 .font(Theme.font(26, weight: .semibold)).tracking(-0.39)
-            Text(estimate.status.statusLabel)
+            Text(editor.estimate.status.statusLabel)
                 .font(Theme.font(12, weight: .medium))
                 .foregroundStyle(Theme.warning)
                 .padding(.horizontal, 9).padding(.vertical, 5)
@@ -163,7 +181,7 @@ struct EstimateRevisionEditorView: View {
                             .font(Theme.font(12, weight: .medium))
                             .frame(minHeight: 44)
                     }
-                    .disabled(busy || !canRevise || editor.lines.count >= 500)
+                    .disabled(busy || !canEdit || editor.lines.count >= 500)
                     .accessibilityLabel("Add line from Price Book")
                 }
             }
@@ -177,7 +195,7 @@ struct EstimateRevisionEditorView: View {
                         moveDown: { moveLine(line.id, offset: 1) },
                         remove: { editor.removeLine(id: line.id) }
                     )
-                    .disabled(busy || !canRevise || editor.hasUnsupportedLineSources)
+                    .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
                     if line.id != editor.lines.last?.id {
                         Rectangle().fill(Theme.border).frame(height: 1).padding(.leading, 14)
                     }
@@ -188,7 +206,7 @@ struct EstimateRevisionEditorView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).frame(minHeight: 46)
                 }
-                .disabled(busy || !canRevise || editor.lines.count >= 500 || editor.hasUnsupportedLineSources)
+                .disabled(busy || !canEdit || editor.lines.count >= 500 || editor.hasUnsupportedLineSources)
             }
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
@@ -204,7 +222,12 @@ struct EstimateRevisionEditorView: View {
                     Label("Add option", systemImage: "plus")
                         .font(Theme.font(12, weight: .medium)).frame(minHeight: 44)
                 }
-                .disabled(busy || !canRevise || editor.options.count >= 8 || editor.hasUnsupportedLineSources)
+                .disabled(busy || !canEdit || !optionsFeatureEnabled || editor.options.count >= 8 || editor.hasUnsupportedLineSources)
+            }
+            if !optionsFeatureEnabled {
+                Text("Option packages require estimate option signing access.")
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 2)
             }
             if editor.options.isEmpty {
                 Text("No alternate packages")
@@ -216,7 +239,7 @@ struct EstimateRevisionEditorView: View {
                 EstimateRevisionOptionEditor(
                     option: $option,
                     canUsePriceBook: canUsePriceBook,
-                    disabled: busy || !canRevise || editor.hasUnsupportedLineSources,
+                    disabled: busy || !canEdit || !optionsFeatureEnabled || editor.hasUnsupportedLineSources,
                     addPriceBook: { priceBookTarget = PriceBookTarget(optionID: option.id) },
                     addLine: { editor.addManualLine(optionID: option.id) },
                     removeOption: { editor.removeOption(id: option.id) },
@@ -246,7 +269,10 @@ struct EstimateRevisionEditorView: View {
         busy = true
         defer { busy = false }
         do {
-            let revised = try await api.reviseFieldEstimate(estimate.id, request: editor.makeRequest())
+            let revised = try await api.reviseFieldEstimate(
+                editor.estimate.id,
+                request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount)
+            )
             onSaved(revised)
             dismiss()
         } catch is CancellationError {
@@ -286,6 +312,7 @@ private struct EstimateRevisionOptionEditor: View {
                 TextField("Option title", text: $option.title)
                     .font(Theme.font(15, weight: .semibold))
                     .accessibilityLabel("Option package title")
+                    .disabled(disabled)
                 Button(action: removeOption) {
                     Image(systemName: "trash").foregroundStyle(Theme.destructive)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
@@ -296,6 +323,7 @@ private struct EstimateRevisionOptionEditor: View {
             TextField("What this package includes", text: $option.description, axis: .vertical)
                 .font(Theme.font(13)).lineLimit(2...4)
                 .accessibilityLabel("Option package description")
+                .disabled(disabled)
             ForEach($option.lines) { $line in
                 EstimateRevisionLineRow(
                     line: $line,

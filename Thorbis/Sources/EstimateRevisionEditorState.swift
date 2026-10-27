@@ -20,6 +20,8 @@ enum EstimateRevisionEditorError: Error, LocalizedError, Equatable {
     case optionTitleTooLong
     case optionDescriptionTooLong
     case unsupportedLineSource
+    case optionFeatureRequired
+    case discountCapabilityRequired
 
     var errorDescription: String? {
         switch self {
@@ -42,6 +44,8 @@ enum EstimateRevisionEditorError: Error, LocalizedError, Equatable {
         case .optionTitleTooLong: "Option package titles can contain up to 200 characters."
         case .optionDescriptionTooLong: "Option descriptions can contain up to 500 characters."
         case .unsupportedLineSource: "This estimate contains line provenance this app cannot safely preserve. Review it in Thorbis web before revising."
+        case .optionFeatureRequired: "This estimate includes option packages. Your account needs estimate option signing access to create a replacement draft without dropping them."
+        case .discountCapabilityRequired: "Your account cannot add credit lines to estimate revisions."
         }
     }
 }
@@ -103,13 +107,17 @@ struct EstimateRevisionEditorState: Equatable {
         }
     }
 
+    var hasCreditLines: Bool {
+        (lines + options.flatMap(\.lines)).contains { (Self.parsePrice($0.unitPrice) ?? 0) < 0 }
+    }
+
     var hasChanges: Bool {
         guard Self.cleaned(title) == estimate.title,
               Self.linesMatch(lines, originals: estimate.lines),
               options.count == (estimate.options?.count ?? 0) else { return true }
         for (draft, original) in zip(options, estimate.options ?? []) {
-            guard draft.id == original.id, draft.title == original.title,
-                  draft.description == original.description,
+            guard draft.id == original.id, Self.cleaned(draft.title) == Self.cleaned(original.title),
+                  Self.cleaned(draft.description) == Self.cleaned(original.description),
                   Self.linesMatch(draft.lines, originals: original.lines) else { return true }
         }
         return false
@@ -182,12 +190,15 @@ struct EstimateRevisionEditorState: Equatable {
         }
     }
 
-    func makeRequest() throws -> FieldEstimateReviseRequest {
+    func makeRequest(optionsFeatureEnabled: Bool, canDiscount: Bool) throws -> FieldEstimateReviseRequest {
         guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
         guard let revision = estimate.currentRevisionNumber, revision > 0 else {
             throw EstimateRevisionEditorError.missingRevision
         }
         guard !hasUnsupportedLineSources else { throw EstimateRevisionEditorError.unsupportedLineSource }
+        guard optionsFeatureEnabled || options.isEmpty else {
+            throw EstimateRevisionEditorError.optionFeatureRequired
+        }
         let cleanedTitle = Self.cleaned(title)
         guard !cleanedTitle.isEmpty else { throw EstimateRevisionEditorError.titleRequired }
         guard cleanedTitle.utf16.count <= 200 else { throw EstimateRevisionEditorError.titleTooLong }
@@ -208,6 +219,10 @@ struct EstimateRevisionEditorState: Equatable {
                 description: Self.cleaned(option.description),
                 lines: try Self.makeLines(option.lines)
             )
+        }
+        if !canDiscount,
+           (requestLines + requestOptions.flatMap(\.lines)).contains(where: { $0.unitPrice.amount < 0 }) {
+            throw EstimateRevisionEditorError.discountCapabilityRequired
         }
         return FieldEstimateReviseRequest(
             expectedRevisionNumber: revision,

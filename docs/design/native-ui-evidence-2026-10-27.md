@@ -41,7 +41,7 @@
 
 ## Verification
 
-- `xcodebuild test -project Thorbis.xcodeproj -scheme Thorbis -destination 'platform=iOS Simulator,id=2A143E1A-3061-46D1-8BE4-DF1768C4B681' -quiet`: passed, 170 tests, 0 failures, iPhone 17 Pro / iOS 26.3.1. Result bundle: `/Users/byronwade/Library/Developer/Xcode/DerivedData/Thorbis-dmuwxdzkujngcfxjqjbnvsarbv/Logs/Test/Test-Thorbis-2026.10.27_03-35-33--0400.xcresult`.
+- `xcodebuild test -project Thorbis.xcodeproj -scheme Thorbis -destination 'platform=iOS Simulator,id=2A143E1A-3061-46D1-8BE4-DF1768C4B681' -quiet`: passed, 174 tests, 0 failures, iPhone 17 Pro / iOS 26.3.1. Result bundle: `/Users/byronwade/Library/Developer/Xcode/DerivedData/Thorbis-dmuwxdzkujngcfxjqjbnvsarbv/Logs/Test/Test-Thorbis-2026.10.27_03-54-45--0400.xcresult`.
 - `xcodebuild -project Thorbis.xcodeproj -scheme Thorbis -configuration Release -destination 'generic/platform=iOS' -quiet build`: passed.
 - Read-only iPhone previews: `/private/tmp/thorbis-my-day-after-hit-targets.png` and `/private/tmp/thorbis-invoice-editor-after-hit-targets.png`.
 - Read-only iPad 13-inch schedule preview: `/private/tmp/thorbis-ipad-schedule-rotated.png` (landscape orientation).
@@ -59,6 +59,6 @@ This evidence covers the listed UI adjustments only. It is not an app-wide HIG c
 
 ## Estimate revision and option packages
 
-- Sent and declined estimates can be revised into a replacement draft under `estimate.create`. The native editor submits the reviewed revision number, preserves manual and Price Book source identity across the primary scope and all option packages, and supports up to eight alternatives. Approved estimates remain on the server-supported change-order path.
-- A stale revision conflict preserves the local form and offers an explicit reload. The read-only iPhone 17 Pro fixture is `/private/tmp/thorbis-estimate-revision.png`; it verifies presentation and disabled-save state only, not an authenticated server mutation.
-- Contract tests verify `/v1/estimates/:id/revise`, exact Price Book revision encoding, option data, limits, and no automatic retry on a 409. The current 170-test simulator suite and Release compile are recorded in `docs/release/beta-coverage.md` after merge verification.
+- Sent and declined estimates can be revised into a replacement draft under `estimate.create`. The native editor submits the reviewed revision number, preserves manual and Price Book source identity across the primary scope and all option packages, and supports up to eight alternatives. Option packages require `estimate_option_signing`; when existing packages cannot be submitted, the editor locks the revision instead of dropping them. Negative credit lines require `estimate.discount`. Approved estimates remain on the server-supported change-order path.
+- A stale revision conflict preserves the local form and offers an explicit reload. The read-only iPhone 17 Pro fixture is `/private/tmp/thorbis-estimate-revision-review-fixed.png`; it verifies presentation and disabled-save state only, not an authenticated server mutation.
+- Contract tests verify `/v1/estimates/:id/revise`, exact Price Book revision encoding, option data, limits, feature/capability gates, normalized change detection, and no automatic retry on a 409. The current 174-test simulator suite and Release compile are recorded in `docs/release/beta-coverage.md`.

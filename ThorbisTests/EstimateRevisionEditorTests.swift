@@ -20,7 +20,7 @@ final class EstimateRevisionEditorTests: XCTestCase {
         state.title = "Updated repair quote"
         state.lines[0].unitPrice = "15.75"
 
-        let request = try state.makeRequest()
+        let request = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)
 
         XCTAssertEqual(request.expectedRevisionNumber, 2)
         XCTAssertEqual(request.title, "Updated repair quote")
@@ -36,7 +36,7 @@ final class EstimateRevisionEditorTests: XCTestCase {
         let state = EstimateRevisionEditorState(estimate: try makeEstimate(lines: line))
 
         XCTAssertFalse(state.hasChanges)
-        let request = try state.makeRequest()
+        let request = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
         let encoded = try XCTUnwrap((body["lines"] as? [[String: Any]])?.first?["source"] as? [String: Any])
 
@@ -56,7 +56,7 @@ final class EstimateRevisionEditorTests: XCTestCase {
 
         try state.addPriceBookItem(item)
 
-        let selected = try XCTUnwrap(state.makeRequest().lines.last)
+        let selected = try XCTUnwrap(state.makeRequest(optionsFeatureEnabled: true, canDiscount: true).lines.last)
         XCTAssertEqual(selected.description, "Replace capacitor")
         XCTAssertEqual(selected.unitPrice.amount, 12500)
         XCTAssertEqual(selected.source, .priceBookSelection(itemID: item.id, revision: 7))
@@ -64,13 +64,13 @@ final class EstimateRevisionEditorTests: XCTestCase {
 
     func testRevisionRejectsUnsupportedStatusesAndInvalidOptionCounts() throws {
         let approved = EstimateRevisionEditorState(estimate: try makeEstimate(status: "approved"))
-        XCTAssertThrowsError(try approved.makeRequest()) {
+        XCTAssertThrowsError(try approved.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
             XCTAssertEqual($0 as? EstimateRevisionEditorError, .unsupportedStatus)
         }
 
         let noRevision = EstimateRevisionEditorState(estimate: try makeEstimate(revision: nil))
         XCTAssertTrue(noRevision.canRevise)
-        XCTAssertThrowsError(try noRevision.makeRequest()) {
+        XCTAssertThrowsError(try noRevision.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
             XCTAssertEqual($0 as? EstimateRevisionEditorError, .missingRevision)
         }
 
@@ -81,7 +81,7 @@ final class EstimateRevisionEditorTests: XCTestCase {
                 lines: [.init(description: "Line", quantity: "1", unitPrice: "1.00", source: .manual)]
             ))
         }
-        XCTAssertThrowsError(try state.makeRequest()) {
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
             XCTAssertEqual($0 as? EstimateRevisionEditorError, .tooManyOptions)
         }
 
@@ -93,18 +93,18 @@ final class EstimateRevisionEditorTests: XCTestCase {
     func testRevisionRejectsInvalidMoneyQuantityAndEmptyLines() throws {
         var state = EstimateRevisionEditorState(estimate: try makeEstimate())
         state.lines[0].quantity = "0"
-        XCTAssertThrowsError(try state.makeRequest()) {
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
             XCTAssertEqual($0 as? EstimateRevisionEditorError, .invalidQuantity)
         }
 
         state.lines[0].quantity = "1"
         state.lines[0].unitPrice = "12.345"
-        XCTAssertThrowsError(try state.makeRequest()) {
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
             XCTAssertEqual($0 as? EstimateRevisionEditorError, .invalidPrice)
         }
 
         state.lines.removeAll()
-        XCTAssertThrowsError(try state.makeRequest()) {
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
             XCTAssertEqual($0 as? EstimateRevisionEditorError, .noLines)
         }
     }
@@ -114,8 +114,54 @@ final class EstimateRevisionEditorTests: XCTestCase {
         let state = EstimateRevisionEditorState(estimate: try makeEstimate(lines: line))
 
         XCTAssertTrue(state.hasUnsupportedLineSources)
-        XCTAssertThrowsError(try state.makeRequest()) {
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
             XCTAssertEqual($0 as? EstimateRevisionEditorError, .unsupportedLineSource)
+        }
+    }
+
+    func testOptionsRequireFeatureAndExistingOptionsCannotBeSilentlyDropped() throws {
+        let option = #"[{"id":"\#(optionID)","title":"Premium","description":"Higher efficiency","lines":[{"id":"00000000-0000-4000-8000-000000000011","description":"Premium repair","quantity":1,"unitPrice":{"amount":5000,"currency":"USD"}}],"totalAmount":5000,"currency":"USD"}]"#
+        let withOptions = EstimateRevisionEditorState(estimate: try makeEstimate(options: option))
+        XCTAssertThrowsError(try withOptions.makeRequest(optionsFeatureEnabled: false, canDiscount: true)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .optionFeatureRequired)
+        }
+
+        let withoutOptions = EstimateRevisionEditorState(estimate: try makeEstimate())
+        let request = try withoutOptions.makeRequest(optionsFeatureEnabled: false, canDiscount: true)
+        XCTAssertNil(request.options)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        XCTAssertNil(body["options"])
+    }
+
+    func testCreditLinesRequireDiscountCapability() throws {
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate())
+        state.lines[0].unitPrice = "-1.00"
+
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: false)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .discountCapabilityRequired)
+        }
+        XCTAssertEqual(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true).lines[0].unitPrice.amount, -100)
+    }
+
+    func testWhitespaceOnlyOptionEditsDoNotCreateARevision() throws {
+        let option = #"[{"id":"\#(optionID)","title":"Premium","description":"Higher efficiency","lines":[{"id":"00000000-0000-4000-8000-000000000011","description":"Premium repair","quantity":1,"unitPrice":{"amount":5000,"currency":"USD"}}],"totalAmount":5000,"currency":"USD"}]"#
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate(options: option))
+        state.options[0].title = "  Premium\n"
+        state.options[0].description = "Higher efficiency  "
+
+        XCTAssertFalse(state.hasChanges)
+    }
+
+    func testDuplicateOptionIDsAreRejected() throws {
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate())
+        let duplicate = EstimateRevisionOptionDraft(
+            id: optionID, title: "First", description: "",
+            lines: [.init(description: "Part", quantity: "1", unitPrice: "1.00", source: .manual)]
+        )
+        state.options = [duplicate, duplicate]
+
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .duplicateOptionID)
         }
     }
 }

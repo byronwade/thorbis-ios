@@ -20,7 +20,7 @@ Let a technician revise a sent or declined estimate into a replacement draft and
 3. [x] Build a native revision/options editor with main lines, add/remove/reorder controls, up to eight option packages, and current-revision submission.
 4. [x] Connect estimate detail actions to the editor under the canonical entitlement/status gates; preserve edits on errors and support explicit fresh-record recovery.
 5. [x] Add preview fixture coverage for the Paper estimate revision editor and verify accessible controls and the brand asset.
-6. [ ] Run focused tests, the complete iPhone simulator suite, Release build, design preview inspection, and independent review; update parity and beta coverage evidence.
+6. [x] Run focused tests, the complete iPhone simulator suite, Release build, design preview inspection, and independent review; update parity and beta coverage evidence.
 
 ## Acceptance
 

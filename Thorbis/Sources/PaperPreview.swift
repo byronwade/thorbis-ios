@@ -97,11 +97,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
-                    "capabilities": ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"],
+                    "capabilities": ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"],
                     "resources": [], "views": []] as [String: Any]
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
-            let features = Dictionary(uniqueKeysWithValues: ["jobs", "core_crm", "estimates", "invoicing", "price_book"].map { ($0, decision) })
+            let features = Dictionary(uniqueKeysWithValues: ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"].map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         case "/v1/jobs": return ["items": jobs()]
         case "/v1/customers": return ["items": customers()]

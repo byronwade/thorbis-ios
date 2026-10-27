@@ -10,6 +10,8 @@ final class PaperPreviewTests: XCTestCase {
         await session.restore()
         XCTAssertEqual(session.phase, .ready, session.error ?? "")
         XCTAssertTrue(session.can("job.view", feature: "jobs"))
+        XCTAssertTrue(session.can("estimate.create", feature: "estimate_option_signing"))
+        XCTAssertTrue(session.can("estimate.discount", feature: "estimates"))
         XCTAssertTrue(session.can("invoice.edit", feature: "invoicing"))
         XCTAssertTrue(session.can("invoice.issue", feature: "invoicing"))
         let jobs = try await api.jobs()
