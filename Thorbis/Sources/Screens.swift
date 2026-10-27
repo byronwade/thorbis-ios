@@ -14,7 +14,7 @@ struct NewJobSheet: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 38, height: 38).background(Theme.fill, in: Circle()) }.accessibilityLabel("Cancel new job").disabled(busy)
+                    Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Cancel new job").disabled(busy)
                     Spacer()
                     HStack(spacing: 5) {
                         Text(String((session.activeOrganization?.name ?? "W").prefix(1))).font(Theme.font(9, weight: .bold)).foregroundStyle(.white)
@@ -24,7 +24,7 @@ struct NewJobSheet: View {
                     Spacer()
                     Button { Task { await create() } } label: {
                         Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up") } }
-                            .foregroundStyle(.white).frame(width: 38, height: 38).background(Theme.brand, in: Circle())
+                            .foregroundStyle(.white).frame(width: 38, height: 38).background(Theme.brand, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel("Create job")
                         .disabled(busy || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || customerId.isEmpty || !session.can("job.create", feature: "jobs"))
                 }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 10)
@@ -41,6 +41,7 @@ struct NewJobSheet: View {
                             Label(store.customers.first(where: { $0.id == customerId })?.name ?? "Customer", systemImage: "person")
                                 .font(Theme.font(12, weight: .medium)).padding(.horizontal, 10).frame(minHeight: 28)
                                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                                .frame(minHeight: 44)
                         }.padding(.vertical, 10)
                         if let error { Text(error).font(Theme.font(13)).foregroundStyle(Theme.destructive) }
                     }.padding(.horizontal, 20).padding(.vertical, 8)
@@ -68,10 +69,10 @@ struct ContactActions: View {
     var body: some View {
         if let phone, !phone.isEmpty {
             let number = phone.filter { $0.isNumber || $0 == "+" }
-            if let url = URL(string: "tel:" + number) { Link(destination: url) { Label(phone, systemImage: "phone") } }
+            if let url = URL(string: "tel:" + number) { Link(destination: url) { Label(phone, systemImage: "phone").frame(minHeight: 44) } }
         }
         if let email, let encoded = email.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), let url = URL(string: "mailto:" + encoded) {
-            Link(destination: url) { Label(email, systemImage: "envelope") }
+            Link(destination: url) { Label(email, systemImage: "envelope").frame(minHeight: 44) }
         }
     }
 }
@@ -81,7 +82,7 @@ struct AddressLink: View {
     var coordinates: FieldCoordinates? = nil
     var body: some View {
         if let url {
-            Link(destination: url) { Label(address, systemImage: "map") }
+            Link(destination: url) { Label(address, systemImage: "map").frame(minHeight: 44) }
         } else { Text(address) }
     }
     private var url: URL? {
@@ -168,6 +169,8 @@ struct CustomerContactSheet: View {
                             .foregroundStyle(Theme.foreground)
                             .frame(width: 32, height: 32)
                             .background(Theme.fill, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel(contact == nil ? "Cancel new contact" : "Cancel contact changes")
                     .disabled(busy)
@@ -175,6 +178,7 @@ struct CustomerContactSheet: View {
                     Button("Save") { Task { await save() } }
                         .font(Theme.font(15, weight: .semibold))
                         .foregroundStyle(Theme.brand)
+                        .frame(minHeight: 44)
                         .disabled(!canSave)
                         .opacity(canSave ? 1 : 0.45)
                 }
@@ -222,7 +226,7 @@ struct CustomerContactSheet: View {
                                 Image(systemName: "xmark")
                                     .font(Theme.font(12, weight: .semibold))
                                     .foregroundStyle(Theme.muted)
-                                    .frame(width: 32, height: 46)
+                                    .frame(width: 44, height: 46)
                             }
                             .accessibilityLabel("Remove email")
                             .padding(.top, 20)
@@ -318,6 +322,7 @@ struct CustomerContactSheet: View {
             .padding(.horizontal, 12)
             .frame(height: 30)
             .background(selected ? Theme.brand : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+            .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])

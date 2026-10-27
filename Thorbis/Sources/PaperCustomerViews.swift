@@ -145,14 +145,14 @@ struct CustomerDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Button { dismiss() } label: { Image(systemName: "chevron.left").frame(width: 38, height: 38).background(Theme.fill, in: Circle()) }.accessibilityLabel("Back")
+                    Button { dismiss() } label: { Image(systemName: "chevron.left").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Back")
                     Spacer()
                     if canEdit {
                         Menu {
                             Button("Add contact", systemImage: "person.badge.plus") { contactSheet = .add }
                                 .disabled(!contactsLoaded)
                             Button("Add location", systemImage: "mappin.and.ellipse") { locationSheet = .add }
-                        } label: { Image(systemName: "ellipsis").frame(width: 38, height: 38).background(Theme.fill, in: Circle()) }.accessibilityLabel("Customer actions")
+                        } label: { Image(systemName: "ellipsis").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Customer actions")
                     }
                 }.foregroundStyle(Theme.foreground).padding(.horizontal, 20).frame(height: 54)
                 VStack(alignment: .leading, spacing: 6) {
@@ -254,10 +254,10 @@ struct CustomerDetailView: View {
             if let record {
                 if let phone = record.phone { detailRow("Phone", value: phone) }
                 if let email = record.email {
-                    HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(14)).frame(minHeight: 42)
+                    HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(14)).frame(minHeight: 44)
                 }
                 if let address = record.address {
-                    HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(14)).frame(minHeight: 42)
+                    HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(14)).frame(minHeight: 44)
                 }
                 if let industry = record.industry { detailRow("Industry", value: industry) }
                 if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel) }
@@ -266,7 +266,7 @@ struct CustomerDetailView: View {
     }
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { contactSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
+            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { contactSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
             if let contactMutationError {
                 Text(contactMutationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -295,7 +295,7 @@ struct CustomerDetailView: View {
                                 showRemoveContactConfirmation = true
                             }.disabled(isMutatingContact)
                         } label: {
-                            Image(systemName: "ellipsis").frame(width: 30, height: 32)
+                            Image(systemName: "ellipsis").frame(width: 30, height: 32).frame(width: 44, height: 44).contentShape(Rectangle())
                         }
                         .accessibilityLabel("Contact actions for \(contact.name)")
                         .disabled(isMutatingContact)
@@ -307,7 +307,7 @@ struct CustomerDetailView: View {
     }
     private var locationsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { locationSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.accessibilityLabel("Add location") } }
+            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { locationSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Add location") } }
             if let locationError {
                 Text(locationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -330,6 +330,7 @@ struct CustomerDetailView: View {
                             } label: {
                                 Image(systemName: "ellipsis")
                                     .frame(width: 30, height: 30)
+                                    .frame(width: 44, height: 44)
                                     .contentShape(Rectangle())
                             }
                             .accessibilityLabel("Options for \(location.label)")
@@ -419,7 +420,7 @@ struct CustomerDetailView: View {
         HStack(spacing: 6) { Text(title).font(Theme.font(13, weight: .medium)); if let count { Text("\(count)").font(Theme.font(12)) } }.foregroundStyle(Theme.muted).padding(.bottom, 6)
     }
     private func detailRow(_ title: String, value: String) -> some View {
-        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(14)).frame(minHeight: 42)
+        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(14)).frame(minHeight: 44)
     }
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
@@ -462,6 +463,7 @@ private struct CustomerContactIcon: View {
             Link(destination: url) {
                 Image(systemName: isPhone ? "phone" : "envelope").font(Theme.font(size == 46 ? 17 : 13)).foregroundStyle(Theme.foreground)
                     .frame(width: size, height: size).background(size == 46 ? Theme.card : Theme.fill, in: RoundedRectangle(cornerRadius: size == 46 ? 12 : 15))
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel("\(isPhone ? "Call" : "Email") \(value)")
         }
     }

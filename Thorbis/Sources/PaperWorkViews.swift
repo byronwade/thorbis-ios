@@ -95,6 +95,8 @@ struct ScheduleView: View {
             Image(systemName: "calendar.badge.clock")
                 .font(.system(size: 16)).foregroundStyle(tab == "Unscheduled" ? Theme.brand : Theme.muted)
                 .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel("Schedule range, \(tab)")
         .padding(.trailing, 16)
@@ -136,7 +138,7 @@ struct ScheduleView: View {
                     Button("Create your first job") { showNew = true }
                         .font(Theme.font(14, weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(height: 42)
+                        .padding(.horizontal, 18).frame(minHeight: 44)
                         .background(Theme.brand, in: RoundedRectangle(cornerRadius: 9))
                 }
             }
@@ -236,19 +238,13 @@ struct JobsView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
-    @State private var tab = "Assigned"
+    @State private var tab = "My Day"
     @State private var search = ""
     @State private var searchVisible = false
     @State private var showNew = false
     @State private var busyJobID: String?
     @State private var startedDriving: Set<String> = []
     @State private var progressError: String?
-
-    init() {
-        #if DEBUG
-        _tab = State(initialValue: PaperPreview.enabled && PaperPreview.screen == "my-day" ? "My Day" : "Assigned")
-        #endif
-    }
 
     private var jobs: [Job] {
         if tab == "My Day" {
@@ -340,7 +336,7 @@ struct JobsView: View {
                         Text(busyJobID == job.id ? "Updating…" : "On my way")
                     }
                     .font(Theme.font(13, weight: .semibold)).foregroundStyle(.white)
-                    .padding(.horizontal, 13).frame(minHeight: 38)
+                    .padding(.horizontal, 13).frame(minHeight: 44)
                     .background(Theme.brand, in: Capsule())
                 }
                 .disabled(busyJobID != nil)
@@ -377,7 +373,7 @@ struct JobsView: View {
                 Text("\(jobs.count)").font(Theme.monoFont(12))
                 Spacer()
                 if session.can("job.create", feature: "jobs") {
-                    Button { showNew = true } label: { Image(systemName: "plus").font(.system(size: 13)).frame(width: 20, height: 20) }.accessibilityLabel("New job")
+                    Button { showNew = true } label: { Image(systemName: "plus").font(.system(size: 13)).frame(width: 20, height: 20).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("New job")
                 }
             }.foregroundStyle(Theme.muted)
             .padding(.horizontal, 2).padding(.bottom, 6)

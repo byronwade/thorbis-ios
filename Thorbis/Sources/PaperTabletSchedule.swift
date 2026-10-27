@@ -62,9 +62,10 @@ struct PaperTabletSchedule: View {
                         Button { showNewJob = true } label: {
                             Image(systemName: "plus").font(.system(size: 15)).frame(width: 26, height: 26)
                                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6))
+                                .frame(width: 44, height: 44).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityLabel("New job")
                     }
-                }.frame(minHeight: 26)
+                }.frame(minHeight: 44)
                 Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).frame(minHeight: 18, alignment: .leading)
             }
             .padding(.horizontal, 18).padding(.bottom, 12)
@@ -75,6 +76,7 @@ struct PaperTabletSchedule: View {
                             .foregroundStyle(range == item ? Theme.foreground : Theme.muted)
                             .padding(.vertical, 5).padding(.horizontal, 11)
                             .background(range == item ? Theme.fill : .clear, in: Capsule())
+                            .frame(minHeight: 44)
                     }.buttonStyle(.plain).accessibilityAddTraits(range == item ? .isSelected : [])
                 }
             }.padding(.horizontal, 14).padding(.bottom, 12)

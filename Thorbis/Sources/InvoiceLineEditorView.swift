@@ -300,7 +300,7 @@ private struct EditableInvoiceLineRow: View {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.muted)
-                        .frame(width: 30, height: 36)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .disabled(!canMoveUp)
@@ -309,7 +309,7 @@ private struct EditableInvoiceLineRow: View {
                     Image(systemName: "arrow.down")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.muted)
-                        .frame(width: 30, height: 36)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .disabled(!canMoveDown)
@@ -318,7 +318,7 @@ private struct EditableInvoiceLineRow: View {
                     Image(systemName: "trash")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.destructive)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Remove \(line.description.isEmpty ? "line item" : line.description)")

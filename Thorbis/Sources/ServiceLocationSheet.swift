@@ -53,6 +53,8 @@ struct ServiceLocationSheet: View {
                             .foregroundStyle(Theme.foreground)
                             .frame(width: 32, height: 32)
                             .background(Theme.fill, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Cancel location changes")
                     .disabled(busy)
@@ -60,11 +62,12 @@ struct ServiceLocationSheet: View {
                     Button("Save") { Task { await save() } }
                         .font(Theme.font(15, weight: .semibold))
                         .foregroundStyle(Theme.brand)
+                        .frame(minHeight: 44)
                         .disabled(!canAttemptSave)
                         .opacity(canAttemptSave ? 1 : 0.45)
                 }
             }
-            .frame(height: 40)
+            .frame(minHeight: 44)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -174,6 +177,7 @@ struct ServiceLocationSheet: View {
                 .padding(.horizontal, 12)
                 .frame(height: 30)
                 .background(selected ? Theme.brand : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])

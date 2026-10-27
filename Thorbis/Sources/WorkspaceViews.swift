@@ -198,6 +198,8 @@ struct WorkspacePriceBookView: View {
                             .foregroundStyle(Theme.foreground)
                             .frame(width: 36, height: 36)
                             .background(Theme.fill, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Back to More")
                     VStack(alignment: .leading, spacing: 4) {
@@ -223,6 +225,7 @@ struct WorkspacePriceBookView: View {
                                     .foregroundStyle(category == option ? Theme.foreground : Theme.muted)
                                     .padding(.horizontal, 10).padding(.vertical, 7)
                                     .background(category == option ? Theme.fill : .clear, in: Capsule())
+                                    .frame(minHeight: 44)
                             }.buttonStyle(.plain)
                         }
                     }.padding(.horizontal, 20)
@@ -260,7 +263,7 @@ struct WorkspacePriceBookView: View {
                         if nextCursor != nil {
                             Button("Load more items") { Task { await loadMore() } }
                                 .font(Theme.font(14, weight: .medium))
-                                .frame(maxWidth: .infinity).frame(height: 42)
+                                .frame(maxWidth: .infinity).frame(minHeight: 44)
                                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
                                 .disabled(loading)
                         }

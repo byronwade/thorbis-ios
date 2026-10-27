@@ -17,16 +17,17 @@ struct PaperHeader: View {
                         Image(systemName: icon).font(.system(size: 18)).foregroundStyle(Theme.brand)
                         Text(title).font(Theme.font(22, weight: .semibold)).tracking(-0.44)
                         Image(systemName: "chevron.down").font(.system(size: 10)).foregroundStyle(Theme.muted)
-                    }
+                    }.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("\(title), open navigation")
                 Spacer(minLength: 0)
                 HStack(spacing: 6) {
-                    Button(action: search) { Image(systemName: "magnifyingglass").font(.system(size: 14)).frame(width: 32, height: 32).background(Theme.fill, in: Circle()) }
+                    Button(action: search) { Image(systemName: "magnifyingglass").font(.system(size: 14)).frame(width: 32, height: 32).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }
                         .accessibilityLabel("Search \(title.lowercased())")
                     Button(action: showMenu) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
                             .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brand)
                             .frame(width: 32, height: 32).background(Theme.brandSurface, in: Circle())
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel("Workspace menu")
                 }.buttonStyle(.plain)
             }
@@ -47,6 +48,7 @@ struct PaperTabs: View {
                             .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(selection == option ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 8))
+                            .frame(minHeight: 44)
                     }.buttonStyle(.plain).accessibilityAddTraits(selection == option ? .isSelected : [])
                 }
             }
@@ -61,8 +63,8 @@ struct PaperSearchField: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
             TextField(prompt, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled()
-            if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }.accessibilityLabel("Clear search") }
-        }.font(Theme.font(14)).padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+            if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search") }
+        }.font(Theme.font(14)).padding(12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border)).padding(.horizontal, 16).padding(.bottom, 12)
     }
 }

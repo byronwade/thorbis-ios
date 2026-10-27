@@ -108,7 +108,7 @@ struct RootView: View {
             Button { search = true } label: {
                 HStack(spacing: 8) { Image(systemName: "magnifyingglass"); Text("Search"); Spacer() }
                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.horizontal, 10)
-                    .frame(height: 34).background(Theme.fill, in: RoundedRectangle(cornerRadius: 9))
+                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: 9))
             }.padding(.bottom, 12)
             if session.can("job.view", feature: "jobs") {
                 sidebarRow("Schedule", icon: "calendar", target: .schedule, count: JobFiltering.schedule(store.jobs, range: .today).count)
@@ -125,7 +125,7 @@ struct RootView: View {
                     Text(session.user?.name ?? "Account").font(Theme.font(14)).lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "gearshape").font(.system(size: 15)).foregroundStyle(Theme.muted)
-                }.padding(.horizontal, 8).frame(minHeight: 40)
+                }.padding(.horizontal, 8).frame(minHeight: 44)
             }
         }.padding(.vertical, 14).padding(.horizontal, 10).frame(width: 244)
             .foregroundStyle(Theme.foreground).buttonStyle(.plain)
@@ -139,7 +139,7 @@ struct RootView: View {
                 Text(title).font(Theme.font(14, weight: tab == target ? .medium : .regular))
                 Spacer()
                 if let count { Text("\(count)").font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted) }
-            }.padding(.horizontal, 8).frame(minHeight: 38).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 9))
+            }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 9))
         }.accessibilityAddTraits(tab == target ? .isSelected : [])
     }
 
@@ -152,7 +152,7 @@ struct RootView: View {
                 }
                 if session.can("customer.view", feature: "core_crm") { dockButton("Customers", icon: "person.2", target: .customers) }
                 Button { withAnimation(.easeInOut(duration: 0.18)) { menu = true } } label: {
-                    Image(systemName: "ellipsis").frame(width: 48, height: 38)
+                    Image(systemName: "ellipsis").frame(width: 48, height: 44)
                 }.accessibilityLabel("More")
             }.padding(6).background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
             Button { search = true } label: {
@@ -166,7 +166,7 @@ struct RootView: View {
     private func dockButton(_ title: String, icon: String, target: Tab) -> some View {
         Button { path = NavigationPath(); tab = target } label: {
             Image(systemName: icon).foregroundStyle(tab == target ? Theme.foreground : Theme.muted)
-                .frame(width: 48, height: 38).background(tab == target ? Theme.fill : .clear, in: Capsule())
+                .frame(width: 48, height: 44).background(tab == target ? Theme.fill : .clear, in: Capsule())
         }.accessibilityLabel(title).accessibilityAddTraits(tab == target ? .isSelected : [])
     }
 
@@ -182,13 +182,13 @@ struct RootView: View {
                                 .frame(width: 20, height: 20).background(Theme.fill, in: RoundedRectangle(cornerRadius: 6))
                             Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(14, weight: .semibold)).lineLimit(1)
                             Image(systemName: "chevron.down").font(.system(size: 10))
-                        }.padding(.horizontal, 12).frame(height: 40).background(Theme.card, in: Capsule())
+                        }.padding(.horizontal, 12).frame(minHeight: 44).background(Theme.card, in: Capsule())
                     }
                     Spacer(minLength: 0)
                     if session.can("job.create", feature: "jobs") {
-                        Button { menu = false; createJob = true } label: { Image(systemName: "square.and.pencil").frame(width: 40, height: 40).background(Theme.card, in: Circle()) }.accessibilityLabel("New job")
+                        Button { menu = false; createJob = true } label: { Image(systemName: "square.and.pencil").frame(width: 40, height: 40).background(Theme.card, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("New job")
                     }
-                    Button { menu = false; settings = true } label: { Image(systemName: "gearshape").frame(width: 40, height: 40).background(Theme.card, in: Circle()) }.accessibilityLabel("Settings")
+                    Button { menu = false; settings = true } label: { Image(systemName: "gearshape").frame(width: 40, height: 40).background(Theme.card, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Settings")
                 }.padding(.horizontal, 14).padding(.top, 4)
                 Spacer()
                 HStack(alignment: .bottom) {
@@ -217,7 +217,7 @@ struct RootView: View {
                 Image(systemName: icon).font(.system(size: 18)).frame(width: 18).foregroundStyle(Theme.muted)
                 Text(title).font(Theme.font(15, weight: selected ? .medium : .regular))
                 Spacer(minLength: 0)
-            }.padding(.horizontal, 10).frame(minHeight: 42).background(selected ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 12))
+            }.padding(.horizontal, 10).frame(minHeight: 44).background(selected ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 }
@@ -236,10 +236,10 @@ private struct PaperGlobalSearch: View {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
                         TextField("Search jobs and customers", text: $query).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    }.font(Theme.font(15)).padding(.horizontal, 12).frame(height: 40)
+                    }.font(Theme.font(15)).padding(.horizontal, 12).frame(minHeight: 44)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
                         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.brand))
-                    Button("Cancel") { dismiss() }.font(Theme.font(15, weight: .medium))
+                    Button("Cancel") { dismiss() }.font(Theme.font(15, weight: .medium)).frame(minWidth: 44, minHeight: 44)
                 }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 14)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {

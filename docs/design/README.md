@@ -24,6 +24,8 @@ The page contains 133 artboards, including unimplemented workflows and several e
 
 ## Verification
 
+The 2026-10-27 My Day default and 44 pt native interaction-frame evidence is recorded in [native-ui-evidence-2026-10-27.md](native-ui-evidence-2026-10-27.md). It covers the changed surfaces and leaves whole-app and physical-device checks open.
+
 DEBUG-only `--paper-preview --paper-preview-screen schedule|jobs|my-day|customers|job|customer|menu` fixtures allow populated visual checks without credentials. Every fixture request is intercepted; writes and unknown routes fail, and Release excludes the harness. Preview is visibly labeled sample data/read only. The My Day visual check is at `outputs/paper/my-day.png`.
 
 Final build/test/upload evidence belongs in `docs/release/build-3.md`. Do not claim exact whole-app parity based on the preview or passing unit tests.

@@ -113,6 +113,7 @@ struct JobDetailView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .frame(width: 38, height: 38)
                         .background(Theme.fill, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("Back")
             }
@@ -122,6 +123,7 @@ struct JobDetailView: View {
                     Image(systemName: "square.and.arrow.up")
                         .frame(width: 38, height: 38)
                         .background(Theme.fill, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("Share job")
                 Menu {
@@ -132,6 +134,7 @@ struct JobDetailView: View {
                     Image(systemName: "ellipsis")
                         .frame(width: 38, height: 38)
                         .background(Theme.fill, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("More job actions")
             }
@@ -186,6 +189,7 @@ struct JobDetailView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(selectedTab == tab ? Theme.fill : .clear, in: Capsule())
+                            .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
@@ -278,6 +282,7 @@ struct JobDetailView: View {
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 7)
                                 .background(activityFilter == filter ? Theme.fill : Theme.card, in: Capsule())
+                                .frame(minHeight: 44)
                         }
                         .buttonStyle(.plain)
                     }

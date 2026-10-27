@@ -54,6 +54,12 @@
 
 **Execution evidence:** The local-day/actor/order rules and permission/transition gate are covered, including completed/canceled rows; ETA requests encode both the selected duration and no-ETA case. Failed fetches do not display an empty-day claim. The iPhone 17 Pro suite passes 126/126. A read-only populated preview was inspected at `outputs/paper/my-day.png`. Independent code review passed; the next signed archive remains pending.
 
+### Task 3 continuation: My Day default and native hit targets
+
+**Scope:** Open production Jobs on My Day, matching the first Paper destination, and enforce Thorbis's 44 pt minimum on app-authored controls in the affected mobile surfaces while preserving the visible Paper sizing. See [native-ui-evidence-2026-10-27.md](../../design/native-ui-evidence-2026-10-27.md) for the HIG-001–022 matrix.
+
+**Verification:** iPhone 17 Pro read-only preview confirms My Day, local date, visit count, and existing actions. Invoice editor and iPad schedule previews were also checked. All 147 simulator tests pass; the generic iOS Release build compiles. Accessibility runtime bounds, Dynamic Type, physical-device behavior, and iPad resizing remain open.
+
 ### Task 4: Verify and release
 - [x] Run Swift strict-concurrency build and relevant existing full tests; add behavioral tests only for new route/filter logic.
 - [ ] Compare simulator screenshots to Paper on iPhone and iPad, fix differences, record remaining gaps precisely.
