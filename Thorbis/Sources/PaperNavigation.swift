@@ -219,6 +219,7 @@ struct RootView: View {
             case "team": primaryTab = .more; morePath.append(PaperRoute.team)
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
+            case "attention": primaryTab = .more; morePath.append(PaperRoute.attention)
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
             case "notices": primaryTab = .more; morePath.append(PaperRoute.notices)
@@ -394,6 +395,7 @@ enum PaperRoute: Hashable {
     case invoice(String)
     case followUps(jobID: String)
     case customizeMenu
+    case attention
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -438,6 +440,7 @@ struct PaperRouteView: View {
         case .invoice(let id): InvoiceDetailView(id: id)
         case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
         case .customizeMenu: CustomizeMenuView()
+        case .attention: NeedsAttentionView()
         case .local(let section):
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
