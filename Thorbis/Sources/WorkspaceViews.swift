@@ -188,7 +188,6 @@ struct WorkspaceRevenueView: View {
                 Text("Collected · \(current.map { monthName($0.month, long: true) } ?? "this month")")
                     .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                 Spacer()
-                Text("UTC MONTHS").font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted).tracking(0.5)
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(money(current?.collected ?? 0, currency: "USD"))
@@ -205,6 +204,8 @@ struct WorkspaceRevenueView: View {
         }
         .padding(.bottom, 18)
 
+        // The tiles open the invoices behind the numbers, so nobody has to go looking for them.
+        NavigationLink(value: PaperRoute.invoices) {
         HStack(spacing: 10) {
             tile("Outstanding", money(report.receivable.balance, currency: "USD"),
                  detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")", alert: nil)
@@ -212,6 +213,9 @@ struct WorkspaceRevenueView: View {
                  detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
                  alert: report.receivable.overdueInvoices > 0 ? Theme.destructive : nil)
         }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens invoices")
         .padding(.bottom, 18)
 
         PaperGroupHeader(title: "By month", count: months.count)
@@ -227,7 +231,6 @@ struct WorkspaceRevenueView: View {
             .frame(minHeight: 48)
             .accessibilityElement(children: .combine)
         }
-        Text("Live server report · v\(report.reportVersion)").font(Theme.monoFont(11)).foregroundStyle(Theme.muted).padding(.top, 14)
     }
 
     private func bars(_ months: [RevenueReport.Month]) -> some View {
