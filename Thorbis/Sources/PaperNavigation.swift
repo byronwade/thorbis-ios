@@ -113,6 +113,8 @@ struct RootView: View {
             }
             #endif
         }
+        .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: false) }
+        .onChange(of: store.jobs) { openRequestedJob(phone: false) }
         .onAppear {
             if session.can("job.view", feature: "jobs") { path = NavigationPath(); tab = .schedule }
             else if session.can("customer.view", feature: "core_crm") { path = NavigationPath(); tab = .customers }
@@ -139,6 +141,8 @@ struct RootView: View {
         }
         .environment(\.paperShowMenu, { Task { @MainActor in primaryTab = .more } })
         .background(Theme.background)
+        .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
+        .onChange(of: store.jobs) { openRequestedJob(phone: true) }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
         #if DEBUG
@@ -224,6 +228,22 @@ struct RootView: View {
     }
 
     /// Tabs stay stable for every role; a tab the role cannot use says so (HIG-005).
+    /// Opens the job a Live Activity tap asked for, once the job list has it.
+    private func openRequestedJob(phone: Bool) {
+        guard let id = store.requestedJobID, session.can("job.view", feature: "jobs"),
+              let job = store.jobs.first(where: { $0.id == id }) else { return }
+        store.requestedJobID = nil
+        if phone {
+            primaryTab = .schedule
+            schedulePath = NavigationPath()
+            schedulePath.append(job)
+        } else {
+            tab = .schedule
+            path = NavigationPath()
+            path.append(job)
+        }
+    }
+
     @ViewBuilder private func gated<Content: View>(_ destination: PrimaryTab, @ViewBuilder content: () -> Content) -> some View {
         if primaryAccess.canOpen(destination) {
             content()

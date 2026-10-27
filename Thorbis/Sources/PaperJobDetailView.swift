@@ -48,6 +48,11 @@ struct JobDetailView: View {
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
 
+    private var liveActivityKey: String {
+        guard let job else { return "" }
+        return [job.id, job.status, outbox.pendingStatus(for: job.id) ?? "", locations.first?.address ?? ""].joined(separator: "|")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
@@ -106,6 +111,13 @@ struct JobDetailView: View {
         .refreshable {
             if selectedTab == "Invoice" { await loadInvoices() }
             else { await load() }
+        }
+        // The Lock Screen card follows the status shown here, queued steps included.
+        .task(id: liveActivityKey) {
+            guard let job else { return }
+            let pending = outbox.pendingStatus(for: job.id)
+            await JobLiveActivity.sync(job: job, status: pending ?? job.status, waitingToSync: pending != nil,
+                                       customer: store.customerName(job.customerId), address: locations.first?.address)
         }
         // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
         .onAppear { if job != nil { Task { await load() } } }

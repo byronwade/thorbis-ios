@@ -36,6 +36,7 @@ struct ThorbisApp: App {
             outbox?.clearAll()
             PendingPhotoStore.clearAll()
             JobDetailCache.clearAll()
+            Task { await JobLiveActivity.endAll() }
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
             if let actorID, let organizationID {
@@ -124,6 +125,8 @@ struct ThorbisApp: App {
             .onOpenURL { url in
                 if let token = PublicEstimateActionLink.token(from: url) {
                     publicEstimateToken = token
+                } else if let jobID = JobActivityLink.jobID(from: url) {
+                    store.requestedJobID = jobID
                 }
             }
         }
@@ -164,6 +167,8 @@ struct WorkspaceSelectionView: View {
 @MainActor
 final class Store: ObservableObject {
     @Published var jobs: [Job] = []
+    /// A job a Live Activity or link asked to open; RootView pushes it and clears this.
+    @Published var requestedJobID: String?
     @Published var customers: [Customer] = []
     @Published var error: String?
     @Published var loading = false
