@@ -34,6 +34,7 @@ struct ThorbisApp: App {
         session.onSignedOut = { [weak store, weak outbox] in
             store?.cache.clearAll()
             outbox?.clearAll()
+            PendingPhotoStore.clearAll()
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
             if let actorID, let organizationID {
@@ -119,6 +120,7 @@ extension ThorbisApp {
         if !outbox.pending.isEmpty {
             await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
         }
+        await PendingPhotoStore.uploadAll(api: api)
         await store.refresh(api)
     }
 }

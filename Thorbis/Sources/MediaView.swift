@@ -22,6 +22,8 @@ struct JobMediaView: View {
     /// Paper 21C: the stage a new photo is filed under (server tags "Before" / "After").
     @State private var stage = "Before"
     @State private var filter = "All"
+    /// Photos taken but not yet confirmed by the server; kept on disk until they are.
+    @State private var waiting: [PendingPhoto] = []
     private var visible: [MediaAssetRecord] { records.filter { !$0.archived } }
     private var allPhotos: [MediaAssetRecord] { visible.filter { $0.kind == "photo" } }
     private var photos: [MediaAssetRecord] {
@@ -73,6 +75,27 @@ struct JobMediaView: View {
                             .buttonStyle(.plain)
                             .accessibilityAddTraits(filter == option ? .isSelected : [])
                         }
+                    }
+                }
+                if !waiting.isEmpty {
+                    PaperGroupHeader(title: "Waiting to upload", count: waiting.count) {
+                        Button("Retry") { Task { await retryWaiting() } }
+                            .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .frame(minHeight: 44).disabled(busy)
+                    }
+                    ForEach(waiting) { photo in
+                        HStack(spacing: 12) {
+                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(Theme.warning)
+                                .frame(width: 32, height: 32).background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(photo.tags.first.map { "\($0) photo" } ?? "Photo").font(Theme.font(15, weight: .medium))
+                                Text("Saved on this phone · \(photo.takenAt.formatted(date: .omitted, time: .shortened))")
+                                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                        }
+                        .frame(minHeight: 48)
+                        .accessibilityElement(children: .combine)
                     }
                 }
                 PaperGroupHeader(title: "Photos", count: photos.count)
@@ -187,7 +210,11 @@ struct JobMediaView: View {
             }
             .ignoresSafeArea()
         }
-        .task { await load() }
+        .task {
+            waiting = PendingPhotoStore.list(jobID: jobID)
+            await load()
+            if !waiting.isEmpty { await retryWaiting() }
+        }
         .refreshable { await load() }
         .onChange(of: selection) { _, item in
             Task {
@@ -250,21 +277,45 @@ struct JobMediaView: View {
     }
     private var stageTags: [String] { stage == "Other" ? [] : [stage] }
 
-    /// Photos upload as soon as they are taken: JPEG, long edge at most 2560 pt, under the 8 MB single-PUT limit.
+    /// Photos are written to disk first (JPEG, long edge at most 2560 pt, under the 8 MB
+    /// single-PUT limit), then uploaded. No signal leaves them waiting with the same
+    /// client asset ID, so a retry can never create a second copy.
     private func uploadImage(_ image: UIImage) async {
         guard let data = Self.jpeg(image) else {
             error = MediaSelectionError.tooLarge.localizedDescription
             return
         }
+        let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
+        let photo = PendingPhoto(id: UUID().uuidString, jobID: jobID, filename: "\(stage.lowercased())-\(stamp).jpg",
+                                 tags: stageTags, takenAt: Date())
+        guard PendingPhotoStore.save(photo, data: data) else {
+            error = "This photo could not be saved on the phone."
+            return
+        }
+        waiting = PendingPhotoStore.list(jobID: jobID)
+        await send(photo)
+    }
+
+    private func send(_ photo: PendingPhoto) async {
+        guard let data = PendingPhotoStore.data(for: photo) else { return }
         busy = true
         defer { busy = false }
         do {
-            let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
-            _ = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/jpeg",
-                                                         originalFilename: "\(stage.lowercased())-\(stamp).jpg", data: data, tags: stageTags)
+            _ = try await MediaTransfer(api: api).upload(jobID: photo.jobID, clientAssetID: photo.id, kind: "photo", mime: "image/jpeg",
+                                                         originalFilename: photo.filename, data: data, tags: photo.tags)
+            PendingPhotoStore.remove(photo)
+            waiting = PendingPhotoStore.list(jobID: jobID)
             error = nil
             await load()
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {
+        } catch {
+            waiting = PendingPhotoStore.list(jobID: jobID)
+            self.error = error.isConnectivityFailure ? nil : error.localizedDescription
+        }
+    }
+
+    private func retryWaiting() async {
+        for photo in PendingPhotoStore.list(jobID: jobID) { await send(photo) }
     }
 
     static func jpeg(_ image: UIImage) -> Data? {
@@ -338,4 +389,63 @@ struct CameraCapture: UIViewControllerRepresentable {
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onFinish(nil) }
     }
+}
+
+/// A photo taken on the job that the server has not confirmed yet.
+struct PendingPhoto: Codable, Identifiable, Equatable {
+    let id: String
+    let jobID: String
+    let filename: String
+    let tags: [String]
+    let takenAt: Date
+}
+
+/// Photos waiting to upload, on disk with file protection until first unlock.
+enum PendingPhotoStore {
+    private static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PendingPhotos", isDirectory: true)
+    }
+
+    static func save(_ photo: PendingPhoto, data: Data) -> Bool {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: directory.appendingPathComponent("\(photo.id).jpg"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            try JSONEncoder().encode(photo).write(to: directory.appendingPathComponent("\(photo.id).json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            return true
+        } catch { return false }
+    }
+
+    static func list(jobID: String? = nil) -> [PendingPhoto] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "json" }
+            .compactMap { try? JSONDecoder().decode(PendingPhoto.self, from: Data(contentsOf: $0)) }
+            .filter { jobID == nil || $0.jobID == jobID }
+            .sorted { $0.takenAt < $1.takenAt }
+    }
+
+    /// Reconnect: send every waiting photo, oldest first; stop at the first network failure.
+    @MainActor static func uploadAll(api: APIClient) async {
+        for photo in list() {
+            guard let data = data(for: photo) else { remove(photo); continue }
+            do {
+                _ = try await MediaTransfer(api: api).upload(jobID: photo.jobID, clientAssetID: photo.id, kind: "photo", mime: "image/jpeg",
+                                                             originalFilename: photo.filename, data: data, tags: photo.tags)
+                remove(photo)
+            } catch {
+                if error.isConnectivityFailure || error is CancellationError { return }
+            }
+        }
+    }
+
+    static func data(for photo: PendingPhoto) -> Data? {
+        try? Data(contentsOf: directory.appendingPathComponent("\(photo.id).jpg"))
+    }
+
+    static func remove(_ photo: PendingPhoto) {
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(photo.id).jpg"))
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(photo.id).json"))
+    }
+
+    static func clearAll() { try? FileManager.default.removeItem(at: directory) }
 }
