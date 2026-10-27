@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct ThorbisApp: App {
+    @AppStorage("thorbis.appearance") private var appearance = "system"
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var api: APIClient
     @StateObject private var store: Store
@@ -58,7 +59,7 @@ struct ThorbisApp: App {
             .environmentObject(inboxBoard)
             .font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .tint(Theme.brand)
             #if DEBUG
             .overlay(alignment: .bottom) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }

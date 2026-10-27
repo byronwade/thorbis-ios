@@ -139,6 +139,7 @@ struct CustomerRecordSheet: View {
 }
 
 struct MoreView: View {
+    @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var api: APIClient
     @State private var showWorkspaces = false
@@ -173,6 +174,14 @@ struct MoreView: View {
                     }
                 }
                 settingsGroup("App") {
+                    Picker("Appearance", selection: $appearance) {
+                        Text("System").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(.menu)
+                    .frame(minHeight: 44)
+
                     Button { Task { await session.signOut() } } label: {
                         HStack(spacing: 12) { Image(systemName: "rectangle.portrait.and.arrow.right").frame(width: 20); Text("Sign out"); Spacer() }.foregroundStyle(Theme.destructive).frame(minHeight: 46)
                     }

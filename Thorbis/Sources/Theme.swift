@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Tokens from the Paper "Thorbis Mobile" file (get_tokens).
 enum Theme {
@@ -8,24 +9,42 @@ enum Theme {
     static func monoFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         Font.custom("GeistMono-Regular", size: size, relativeTo: .caption).weight(weight)
     }
-    static let card = Color(hex: 0x232323)
-    static let subtle = Color(hex: 0x8A8A8A)
-    static let successSurface = Color(hex: 0x122B1C)
-    static let destructiveSurface = Color(hex: 0x2A1414)
-    static let background = Color(hex: 0x1F1F1F)
-    static let surface = Color(hex: 0x191919)
-    static let chrome = Color(hex: 0x141414)
-    static let accent = Color(hex: 0x262626)
-    static let foreground = Color(hex: 0xEDEDED)
-    static let muted = Color(hex: 0xA0A0A0)
-    static let fill = Color(hex: 0x2A2A2A)
-    static let border = Color.white.opacity(0.08)
+    // Dark values retain the Paper Mobile palette. Light surfaces are the
+    // design.thorbis.com warm canvas/panel/well/ink tokens converted from OKLCH.
+    static let card = adaptive(light: 0xFDFCFA, dark: 0x232323)
+    static let subtle = adaptive(light: 0x59544D, dark: 0x949494, highLight: 0x201B14, highDark: 0xEDEDED)
+    static let successSurface = adaptive(light: 0xE5F3E9, dark: 0x122B1C)
+    static let destructiveSurface = adaptive(light: 0xFCE8E8, dark: 0x2A1414)
+    static let background = adaptive(light: 0xF7F4EE, dark: 0x1F1F1F)
+    static let surface = adaptive(light: 0xFDFCFA, dark: 0x191919)
+    static let chrome = adaptive(light: 0xF7F4EE, dark: 0x141414)
+    static let accent = adaptive(light: 0xEDE9E2, dark: 0x262626)
+    static let foreground = adaptive(light: 0x201B14, dark: 0xEDEDED, highLight: 0x000000, highDark: 0xFFFFFF)
+    static let muted = adaptive(light: 0x59544D, dark: 0xA0A0A0, highLight: 0x201B14, highDark: 0xEDEDED)
+    static let fill = adaptive(light: 0xEDE9E2, dark: 0x2A2A2A)
+    static let border = Color(uiColor: UIColor { traits in
+        let high = traits.accessibilityContrast == .high
+        return (traits.userInterfaceStyle == .dark ? UIColor.white : UIColor.black)
+            .withAlphaComponent(high ? 0.6 : traits.userInterfaceStyle == .dark ? 0.08 : 0.12)
+    })
     static let brand = Color(hex: 0x2F6BFF)
-    static let brandSurface = Color(hex: 0x182642)
-    static let success = Color(hex: 0x22C55E)
-    static let warning = Color(hex: 0xF59E0B)
-    static let warningSurface = Color(hex: 0x2A2008)
-    static let destructive = Color(hex: 0xEF4444)
+    static let brandSurface = adaptive(light: 0xE5ECFF, dark: 0x182642)
+    static let success = adaptive(light: 0x18743A, dark: 0x22C55E)
+    static let warning = adaptive(light: 0x895400, dark: 0xF59E0B)
+    static let warningSurface = adaptive(light: 0xFFF0CB, dark: 0x2A2008)
+    static let destructive = adaptive(light: 0xB3262D, dark: 0xEF4444)
+
+    private static func adaptive(light: UInt32, dark: UInt32,
+                                 highLight: UInt32? = nil, highDark: UInt32? = nil) -> Color {
+        Color(uiColor: UIColor { traits in
+            let isDark = traits.userInterfaceStyle == .dark
+            let high = traits.accessibilityContrast == .high
+            let value = isDark ? (high ? highDark ?? dark : dark) : (high ? highLight ?? light : light)
+            return UIColor(red: CGFloat((value >> 16) & 0xFF) / 255,
+                           green: CGFloat((value >> 8) & 0xFF) / 255,
+                           blue: CGFloat(value & 0xFF) / 255, alpha: 1)
+        })
+    }
     static let mono = monoFont(12, weight: .medium)
 }
 

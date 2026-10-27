@@ -24,7 +24,6 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Thorbis
-        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
         INFOPLIST_FILE: Thorbis/Resources/Info.plist
         DEVELOPMENT_TEAM: T677262U5B
         CODE_SIGN_STYLE: Automatic
