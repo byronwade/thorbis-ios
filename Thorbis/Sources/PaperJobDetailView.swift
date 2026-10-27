@@ -34,8 +34,9 @@ struct JobDetailView: View {
     @State private var showCollectPayment = false
     @State private var activityFilter = "All"
     @State private var showSchedule = false
-    @State private var linkedEstimate: EstimateRecord?
-    @State private var estimateLoadFailed = false
+    @State private var jobEstimates: [EstimateRecord] = []
+    @State private var estimatesLoaded = false
+    @State private var showNewEstimate = false
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
 
@@ -98,6 +99,13 @@ struct JobDetailView: View {
                 PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
                     runTransition(target)
                 }
+            } else if selectedTab == "Estimates", let job, session.can("estimate.create", feature: "estimates") {
+                PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus") { showNewEstimate = true }
+                    .sheet(isPresented: $showNewEstimate) {
+                        NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { _ in
+                            Task { await loadJobEstimates(job) }
+                        }
+                    }
             } else if selectedTab == "Invoice",
                       session.can("invoice.payment.create", feature: "payments"),
                       let invoice = selectedInvoice,
@@ -362,59 +370,86 @@ struct JobDetailView: View {
         }
     }
 
-    /// Paper 23: the job's estimate as a card with its total and a status word.
+    /// Paper 23: every estimate on the job with totals, approved vs awaiting, and one commit to build another.
     private func estimatesContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            PaperGroupHeader(title: "Estimates", count: job.estimateId == nil ? 0 : 1)
-            if let estimateID = job.estimateId, session.can("estimate.view", feature: "estimates") {
-                NavigationLink { EstimateDetailView(id: estimateID) } label: {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(linkedEstimate?.title ?? "Estimate").font(Theme.font(16, weight: .semibold))
-                                .foregroundStyle(Theme.foreground).multilineTextAlignment(.leading)
-                            Spacer(minLength: 8)
-                            if let estimate = linkedEstimate, let total = paperLinesTotal(estimate.lines) {
-                                Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
-                                    .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.foreground)
-                            }
-                        }
-                        HStack(spacing: 8) {
-                            if let estimate = linkedEstimate {
-                                PaperStatusChip(status: estimate.status)
-                                if let revision = estimate.currentRevisionNumber {
-                                    Text("Revision \(revision)").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                                }
-                            } else {
-                                Text(estimateLoadFailed ? "Open to view details" : "Loading…").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
-                        }
-                    }
-                    .padding(16)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .task(id: estimateID) { await loadEstimate(estimateID) }
+            if !session.can("estimate.view", feature: "estimates") {
+                PaperEmptyState(symbol: "doc.text", title: "Estimates unavailable", message: "Your role cannot view estimates.")
             } else {
-                PaperEmptyState(symbol: "doc.text", title: "No estimate on this job",
-                                message: "No estimate is linked to this job yet.")
+                let approved = jobEstimates.filter { $0.status == "approved" }.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
+                let waiting = jobEstimates.filter { $0.status == "sent" }.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
+                if !jobEstimates.isEmpty {
+                    HStack(spacing: 0) {
+                        summary("Awaiting approval", money(waiting, currency: "USD"))
+                        Rectangle().fill(Theme.border).frame(width: 1, height: 40).padding(.horizontal, 16)
+                        summary("Approved", money(approved, currency: "USD"))
+                    }
+                    .padding(.bottom, 6)
+                }
+                PaperGroupHeader(title: "Estimates", count: jobEstimates.count)
+                if !estimatesLoaded {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20)
+                } else if jobEstimates.isEmpty {
+                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
+                                    message: "Build one from the price book. It's added to this job automatically.")
+                }
+                ForEach(jobEstimates) { estimate in
+                    NavigationLink { EstimateDetailView(id: estimate.id) } label: {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(estimate.title).font(Theme.font(16, weight: .semibold))
+                                    .foregroundStyle(Theme.foreground).multilineTextAlignment(.leading)
+                                Spacer(minLength: 8)
+                                if let total = paperLinesTotal(estimate.lines) {
+                                    Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
+                                        .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                }
+                            }
+                            HStack(spacing: 8) {
+                                PaperStatusChip(status: estimate.status)
+                                Text("EST-\(estimate.id.suffix(4).uppercased())").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .padding(16)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+        }
+        .task(id: job.id) { await loadJobEstimates(job) }
+    }
+
+    private func summary(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text(value).font(Theme.monoFont(19, weight: .semibold))
         }
     }
 
-    private func loadEstimate(_ id: String) async {
-        guard linkedEstimate?.id != id else { return }
+    /// Linked estimates first; the job's origin estimate is included even without a link record.
+    private func loadJobEstimates(_ job: JobRecord) async {
+        guard session.can("estimate.view", feature: "estimates") else { return }
         let generation = session.generation
         do {
-            let estimate = try await api.fieldEstimate(id)
+            var ids = try await api.fieldJobEstimateLinks(job.id).map(\.estimateId)
+            if let origin = job.estimateId, !ids.contains(origin) { ids.insert(origin, at: 0) }
+            var loaded: [EstimateRecord] = []
+            for id in ids {
+                loaded.append(try await api.fieldEstimate(id))
+            }
             guard session.generation == generation else { return }
-            linkedEstimate = estimate
+            jobEstimates = loaded
+            estimatesLoaded = true
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
-            estimateLoadFailed = true
+            if let origin = job.estimateId, let single = try? await api.fieldEstimate(origin) { jobEstimates = [single] }
+            estimatesLoaded = true
+            self.error = error.localizedDescription
         }
     }
 

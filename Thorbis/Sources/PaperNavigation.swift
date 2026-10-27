@@ -21,6 +21,7 @@ struct RootView: View {
     @State private var previewInvoiceEditor = false
     @State private var previewInvoiceDetail = false
     @State private var previewEstimateRevision = false
+    @State private var previewNewEstimate = false
     #endif
 
     var body: some View {
@@ -148,11 +149,15 @@ struct RootView: View {
             EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
                 .environmentObject(api).environmentObject(session).environmentObject(store)
         }
+        .sheet(isPresented: $previewNewEstimate) {
+            NewEstimateView(customerID: PaperPreview.customerID, jobID: PaperPreview.jobID, title: "AC not cooling")
+        }
         #endif
         .task {
             await store.refresh(api)
             #if DEBUG
             guard PaperPreview.enabled else { return }
+            if PaperPreview.screen == "new-estimate" { previewNewEstimate = true; return }
             if PaperPreview.screen == "invoice-editor" { previewInvoiceEditor = true; return }
             if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
             if PaperPreview.screen == "estimate-revision" { previewEstimateRevision = true; return }

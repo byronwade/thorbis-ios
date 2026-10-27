@@ -788,6 +788,13 @@ struct FieldEstimateLineInput: Encodable {
     }
 }
 
+struct JobEstimateLink: Codable, Identifiable, Hashable {
+    let id: String
+    let jobId: String
+    let estimateId: String
+    let linkedAt: String?
+}
+
 struct FieldEstimateCreate: Encodable {
     let customerId: String
     let title: String
@@ -1044,6 +1051,15 @@ extension APIClient {
     func fieldEstimate(_ id: String) async throws -> EstimateRecord { try await send("GET", fieldPath("/v1/estimates", id: id)) }
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
+    }
+    /// Estimates related to a job (`GET /v1/jobs/{id}/estimates`), as link records.
+    func fieldJobEstimateLinks(_ jobID: String) async throws -> [JobEstimateLink] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"))
+    }
+    /// Links an existing estimate to a job without changing the job's origin.
+    func linkFieldEstimate(jobID: String, estimateID: String) async throws -> JobEstimateLink {
+        guard UUID(uuidString: estimateID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: estimateID) }
+        return try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/estimates/\(estimateID)/link"), body: [String: String]())
     }
 
     func fieldInvoices() async throws -> [InvoiceRecord] { try await allFieldPages("/v1/invoices") }

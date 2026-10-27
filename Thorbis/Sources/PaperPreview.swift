@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "customer", "estimates", "invoices", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "customer", "estimates", "invoices", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -175,6 +175,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         if path == "/v1/invoices/\(PaperPreview.refundInvoice.id)/payments" {
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.refundPayment))]]
+        }
+        if path == "/v1/jobs/\(PaperPreview.jobID)/estimates" {
+            return ["items": [["id": "00000000-0000-4000-8000-000000009301", "organizationId": org, "jobId": PaperPreview.jobID,
+                               "estimateId": PaperPreview.estimate.id, "linkedAt": now]]]
+        }
+        if path == "/v1/estimates/\(PaperPreview.estimate.id)" {
+            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate))
         }
         if path == "/v1/reports/revenue" {
             let months = [("2026-05", 3_812_000, 3_540_000), ("2026-06", 4_105_000, 3_960_000), ("2026-07", 3_980_000, 4_020_000),
