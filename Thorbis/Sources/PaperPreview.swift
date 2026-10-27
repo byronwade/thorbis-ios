@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -188,6 +188,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         if path == "/v1/estimates/\(PaperPreview.estimate.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate))
+        }
+        if path == "/v1/jobs/\(PaperPreview.jobID)/followups" {
+            return ["items": [["id": "00000000-0000-4000-8000-000000009401", "organizationId": org, "jobId": PaperPreview.jobID, "kind": "office_scheduling",
+                               "reason": "Compressor on backorder", "nextAction": "Book a return visit once the part arrives", "ownerUserId": actor,
+                               "status": "open", "createdByUserId": actor, "createdAt": now]]]
+        }
+        if path == "/v1/organization/assignees" {
+            return ["items": [["userId": actor, "displayName": "Ramon Marlowe"], ["userId": "00000000-0000-4000-8000-000000008801", "displayName": "Jorge Alvarez"],
+                              ["userId": "00000000-0000-4000-8000-000000008802", "displayName": "Sam Osei"]]]
         }
         if path == "/v1/organization/role-members" {
             let people: [(String, String, Bool, String)] = [("Byron Wade", "byron@acmehvac.com", true, "owner"), ("Maria Chen", "maria@acmehvac.com", false, "Office"),

@@ -459,41 +459,81 @@ struct JobFollowUpsView: View {
     @State private var reason = ""
     @State private var nextAction = ""
     @State private var kind: FieldFollowUpRequest.Kind = .notifyOffice
+    /// Open follow-ups first, then one short form to ask the office for the next step.
     var body: some View {
-        List {
-            if let error { ErrorBanner(message: error) }
-            if loading { ProgressView() }
-            ForEach(records) { record in
-                Section(record.kind.statusLabel) {
-                    Text(record.reason).font(.headline)
-                    Text(record.nextAction)
-                    LabeledContent("Status", value: record.status.statusLabel)
-                    if let scheduling = record.scheduling {
-                        Text(scheduling.appointment != nil ? "Visit booked" : "Office review required").foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Follow-ups").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                    .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
+                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30) }
+                if !records.isEmpty { PaperGroupHeader(title: "On this job", count: records.count) }
+                ForEach(records) { record in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(record.kind.statusLabel).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                            Spacer()
+                            PaperStatusChip(status: record.status)
+                        }
+                        Text(record.reason).font(Theme.font(15, weight: .medium))
+                        Text("Next: \(record.nextAction)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        if let scheduling = record.scheduling {
+                            Label(scheduling.appointment != nil ? "Visit booked" : "Waiting for office review",
+                                  systemImage: scheduling.appointment != nil ? "calendar.badge.checkmark" : "hourglass")
+                                .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                        }
+                        if record.status == "open", session.can("job.assign", feature: "jobs") {
+                            Button("Resolve") { Task { await resolve(record.id) } }
+                                .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                .frame(minHeight: 44).disabled(busy)
+                        }
                     }
-                    if record.status == "open", session.can("job.assign", feature: "jobs") {
-                        Button("Resolve follow-up") { Task { await resolve(record.id) } }.disabled(busy)
-                    }
+                    .padding(14)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .padding(.bottom, 8)
                 }
-            }
-            if session.can("job.edit", feature: "jobs") {
-                Section("New follow-up") {
+                if session.can("job.edit", feature: "jobs") {
+                    PaperGroupHeader(title: "New follow-up").padding(.top, 10)
                     Picker("Request", selection: $kind) {
                         Text("Notify office").tag(FieldFollowUpRequest.Kind.notifyOffice)
-                        Text("Ask office to schedule").tag(FieldFollowUpRequest.Kind.officeScheduling)
+                        Text("Schedule a return visit").tag(FieldFollowUpRequest.Kind.officeScheduling)
                     }
-                    TextField("Reason", text: $reason, axis: .vertical)
-                    TextField("Next action", text: $nextAction, axis: .vertical)
-                    Text("A scheduling request goes to the office for review. It does not reserve an appointment.").font(.caption).foregroundStyle(.secondary)
-                    Button("Create follow-up") { Task { await create() } }
-                        .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
+                    .pickerStyle(.segmented)
+                    .padding(.bottom, 10)
+                    followUpField("What happened?", text: $reason)
+                    followUpField("What needs to happen next?", text: $nextAction).padding(.top, 8)
+                    Text("A return-visit request goes to the office to book; it doesn't reserve a time.")
+                        .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
+                }
+                if !loading && records.isEmpty && !session.can("job.edit", feature: "jobs") {
+                    PaperEmptyState(symbol: "list.bullet", title: "No follow-ups", message: "Follow-ups recorded on this job appear here.")
                 }
             }
+            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
-        .navigationTitle("Follow-ups")
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if session.can("job.edit", feature: "jobs") {
+                PaperActionBar(title: "Send follow-up", symbol: "paperplane", busy: busy,
+                               disabled: reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                   || reason.utf16.count > 2000 || nextAction.utf16.count > 2000) { Task { await create() } }
+            }
+        }
         .task { await load() }
         .refreshable { await load() }
     }
+
+    private func followUpField(_ prompt: String, text: Binding<String>) -> some View {
+        TextField(prompt, text: text, axis: .vertical)
+            .font(Theme.font(16)).lineLimit(2...5)
+            .padding(12)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+    }
+
     private func load() async {
         loading = true
         defer { loading = false }

@@ -498,7 +498,7 @@ struct PaperStatusChip: View {
     var body: some View {
         let (tint, ground): (Color, Color) = switch status {
         case "approved", "paid", "completed": (Theme.success, Theme.successSurface)
-        case "sent", "issued": (Theme.warning, Theme.warningSurface)
+        case "sent", "issued", "open": (Theme.warning, Theme.warningSurface)
         case "declined", "void", "canceled": (Theme.destructive, Theme.destructiveSurface)
         default: (Theme.muted, Theme.fill)
         }

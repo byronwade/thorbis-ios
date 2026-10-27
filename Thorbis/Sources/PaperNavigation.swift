@@ -191,11 +191,13 @@ struct RootView: View {
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "new-customer": primaryTab = .customers; previewNewCustomer = true
             case "revenue": primaryTab = .more; morePath.append(PaperRoute.revenue)
-            case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty":
+            case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups":
                 if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs
                     jobsPath.append(job)
                     if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
+                    if PaperPreview.screen == "job-assign" { jobsPath.append(PaperRoute.assign(jobID: job.id)) }
+                    if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
                 }
             case "customer":
                 if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
@@ -300,6 +302,8 @@ enum PaperRoute: Hashable {
     case closeout(jobID: String)
     case team
     case reports
+    case assign(jobID: String)
+    case followUps(jobID: String)
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -326,6 +330,8 @@ private struct PaperDestinations: ViewModifier {
                 case .closeout(let jobID): JobCloseoutView(jobID: jobID)
                 case .team: TeamView()
                 case .reports: ReportsView()
+                case .assign(let jobID): JobAssignmentView(jobID: jobID)
+                case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
                 case .local(let section):
                     if let actor = session.user?.id, let org = session.activeOrganization?.id {
                         LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
