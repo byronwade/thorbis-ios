@@ -207,8 +207,8 @@ struct ScheduleView: View {
         .padding(.top, 40)
     }
 
-    /// The next field step for the Next up job, in lifecycle order.
-    private func nextStep(for job: Job) -> String? {
+    /// Use queued work or the fresh record before the list's summary.
+    private func primaryAction(for job: Job) -> JobPrimaryAction? {
         guard session.can("job.edit", feature: "jobs") else { return nil }
         let allowed: [String]
         let status: String
@@ -225,17 +225,12 @@ struct ScheduleView: View {
         } else {
             return nil
         }
-        // Only ever forward: a job already in progress never offers "Mark arrived" again.
-        let order = ["scheduled": 0, "dispatched": 0, "en_route": 1, "arrived": 2, "in_progress": 3, "paused": 3]
-        let current = order[status] ?? 0
-        return ["en_route", "arrived", "in_progress"].first {
-            allowed.contains($0) && (order[$0] ?? 0) > current && !(status == "paused" && $0 == "in_progress")
-        }
+        return JobPrimaryAction.resolve(status: status, allowedTransitions: allowed, canEdit: true)
     }
 
     @ViewBuilder private func commit(for job: Job) -> some View {
-        switch nextStep(for: job) {
-        case "en_route":
+        switch primaryAction(for: job) {
+        case .progress("en_route"):
             Menu {
                 Button("On my way") { Task { await progress(job, .enRoute(etaMinutes: nil)) } }
                 ForEach([15, 30, 45, 60], id: \.self) { minutes in
@@ -244,25 +239,24 @@ struct ScheduleView: View {
             } label: { commitLabel("On my way", symbol: "location.fill", busy: busyJobID == job.id) }
             .disabled(busyJobID != nil)
             .accessibilityHint("Tells the office and customer you are driving to this job")
-        case "arrived":
+        case .progress("arrived"):
             Button { Task { await progress(job, .arrived()) } } label: {
                 commitLabel("Mark arrived", symbol: "mappin.and.ellipse", busy: busyJobID == job.id)
             }
             .buttonStyle(PressStyle()).disabled(busyJobID != nil)
-        case "in_progress":
+        case .progress("in_progress"):
             Button { Task { await progress(job, .start) } } label: {
                 commitLabel("Start work", symbol: "wrench.and.screwdriver", busy: busyJobID == job.id)
             }
             .buttonStyle(PressStyle()).disabled(busyJobID != nil)
-        default:
-            // On the job already: the next thing is wrapping it up, so that is the commit.
-            if (outbox.pendingStatus(for: job.id) ?? job.status) == "in_progress", session.can("job.edit", feature: "jobs") {
-                NavigationLink { JobCloseoutView(jobID: job.id) } label: {
-                    commitLabel("Wrap up", symbol: "checkmark.seal", busy: false)
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityHint("Opens the closeout checklist for this job")
+        case .wrapUp:
+            NavigationLink { JobCloseoutView(jobID: job.id) } label: {
+                commitLabel("Wrap up", symbol: "checkmark.seal", busy: false)
             }
+            .buttonStyle(PressStyle())
+            .accessibilityHint("Opens the closeout checklist for this job")
+        default:
+            EmptyView()
         }
     }
 

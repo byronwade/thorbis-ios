@@ -91,7 +91,8 @@ struct PaperTabs: View {
                         Button { selection = option } label: {
                             Text(option).font(Theme.font(15, weight: .medium))
                                 .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                                .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .frame(minHeight: Theme.chipHeight + 4)
                                 .background(selection == option ? Theme.fill : .clear, in: Capsule())
                                 .frame(minHeight: 44).contentShape(Rectangle())
                         }
@@ -463,6 +464,7 @@ struct PaperQuickActions: View {
     var email: String?
     var directions: URL?
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var dialable: String? {
         phone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
@@ -472,17 +474,21 @@ struct PaperQuickActions: View {
         let dialable = dialable
         let mail = email.flatMap { $0.contains("@") ? URL(string: "mailto:\($0)") : nil }
         if dialable != nil || mail != nil || directions != nil {
-            // Glyph beside word when all of them fit at full size; otherwise every button
-            // stacks glyph over word, so none is squeezed smaller than its neighbours.
-            ViewThatFits(in: .horizontal) {
-                row(dialable: dialable, mail: mail, stacked: false)
-                row(dialable: dialable, mail: mail, stacked: true)
+            if dynamicTypeSize.isAccessibilitySize {
+                row(dialable: dialable, mail: mail, stacked: false, vertical: true)
+            } else {
+                // At standard sizes, use the compact row while every label fits.
+                ViewThatFits(in: .horizontal) {
+                    row(dialable: dialable, mail: mail, stacked: false)
+                    row(dialable: dialable, mail: mail, stacked: true)
+                }
             }
         }
     }
 
-    private func row(dialable: String?, mail: URL?, stacked: Bool) -> some View {
-        HStack(spacing: 8) {
+    private func row(dialable: String?, mail: URL?, stacked: Bool, vertical: Bool = false) -> some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
             if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
                 action("Call", symbol: "phone", label: "Call", stacked: stacked) { openURL(call) }
                 action("Text", symbol: "message", label: "Text", stacked: stacked) { openURL(text) }
@@ -502,11 +508,11 @@ struct PaperQuickActions: View {
                 Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
                     .frame(width: 22, height: 20)
                 Text(title).font(Theme.font(stacked ? 13 : 15, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1).fixedSize()
+                    .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: true)
             }
             .padding(.horizontal, stacked ? 4 : 10)
-            .padding(.vertical, stacked ? 6 : 0)
-            .frame(maxWidth: .infinity, minHeight: 44, maxHeight: .infinity)
+            .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? 8 : (stacked ? 6 : 0))
+            .frame(maxWidth: .infinity, minHeight: 44, maxHeight: dynamicTypeSize.isAccessibilitySize ? nil : .infinity)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .contentShape(Rectangle())
         }
@@ -524,7 +530,7 @@ struct FlowRow: Layout {
         let width = proposal.width ?? .infinity
         var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, widest: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = measuredSize(of: view, width: width)
             if x > 0 && x + size.width > width { x = 0; y += lineHeight + lineSpacing; lineHeight = 0 }
             x += size.width + spacing
             widest = max(widest, x - spacing)
@@ -538,7 +544,7 @@ struct FlowRow: Layout {
         var lines: [[(Subviews.Element, CGSize)]] = [[]]
         var x: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = measuredSize(of: view, width: bounds.width)
             if x > 0 && x + size.width > bounds.width { lines.append([]); x = 0 }
             lines[lines.count - 1].append((view, size))
             x += size.width + spacing
@@ -553,6 +559,12 @@ struct FlowRow: Layout {
             }
             y += height + lineSpacing
         }
+    }
+
+    private func measuredSize(of view: Subviews.Element, width: CGFloat) -> CGSize {
+        let natural = view.sizeThatFits(.unspecified)
+        guard natural.width > width else { return natural }
+        return view.sizeThatFits(ProposedViewSize(width: max(0, width), height: nil))
     }
 }
 

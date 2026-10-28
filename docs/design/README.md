@@ -2,6 +2,10 @@
 
 Source: [current Thorbis Mobile page in Paper](https://app.paper.design/file/01KY0S86CYXENWSH216F3ZB058/B-0), token hash `2803f4aa`, exported 2026-10-26. JSON files contain original Paper JSX, not hand-measured screenshots. Inter and Geist Mono are bundled with their OFL licenses.
 
+Current direction: [continuous UI and UX goal](continuous-ux-goal.md), updated
+28 October 2026. Simplify complete user flows, preserve every feature, and use
+menus or disclosures for secondary actions while keeping common work direct.
+
 ## Paper redesign (branch claude/paper-redesign)
 
 - iPhone navigation is a native `TabView` with Paper's technician dock: Schedule, Jobs, Customers, More and a system Search tab. iOS 26 draws it as Paper's floating pill; the deployment target is iOS 18 for the search tab role. The overlay menu and the Done-sheets for Schedule and Customers are gone. Inbox, Estimates, Invoices, Price book, Revenue, drafts and on-device records live in More.

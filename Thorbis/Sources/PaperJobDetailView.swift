@@ -36,6 +36,7 @@ struct JobDetailView: View {
     @State private var showCollectPayment = false
     @State private var activityFilter = "All"
     @State private var showSchedule = false
+    @State private var showWrapUp = false
     @State private var jobEstimates: [EstimateRecord] = []
     @State private var estimatesLoaded = false
     @State private var showNewEstimate = false
@@ -126,6 +127,7 @@ struct JobDetailView: View {
             InvoiceDetailView(id: id)
                 .onDisappear { Task { await loadInvoices() } }
         }
+        .navigationDestination(isPresented: $showWrapUp) { JobCloseoutView(jobID: jobId) }
         .task(id: session.generation) {
             invoicePaymentModel = nil
             loadedInvoiceModelID = nil
@@ -153,10 +155,15 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
-            if selectedTab == "Overview", let job, let target = availableTransitions(job).first {
-                // Directions now sits with Call and Text in the header; the bar carries one commit.
-                PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
-                    runTransition(target)
+            if selectedTab == "Overview", let job, let action = primaryAction(job) {
+                switch action {
+                case .wrapUp:
+                    PaperActionBar(title: "Wrap up", symbol: "checkmark.seal", disabled: busy) { showWrapUp = true }
+                        .accessibilityHint("Opens the closeout checklist for this job")
+                case .progress(let target):
+                    PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
+                        runTransition(target)
+                    }
                 }
             } else if selectedTab == "Estimates", let job, session.can("estimate.create", feature: "estimates") {
                 PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus") { showNewEstimate = true }
@@ -227,15 +234,26 @@ struct JobDetailView: View {
                 }
                 .accessibilityLabel("Share job")
                 Menu {
-                    if session.can("customer.edit", feature: "core_crm") {
-                        Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
+                    Section {
+                        if session.can("job.assign", feature: "jobs") {
+                            Button("Schedule…", systemImage: "calendar") { showSchedule = true }
+                            NavigationLink { JobAssignmentView(jobID: jobId) } label: {
+                                Label("Assign technician…", systemImage: "person.crop.circle.badge.plus")
+                            }
+                        }
+                        NavigationLink { JobCloseoutView(jobID: jobId) } label: { Label("Wrap up", systemImage: "checkmark.seal") }
+                        NavigationLink { JobFollowUpsView(jobID: jobId) } label: { Label("Follow-ups", systemImage: "list.bullet") }
                     }
-                    Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
-                    NavigationLink { JobCloseoutView(jobID: jobId) } label: { Label("Closeout", systemImage: "checkmark.seal") }
-                    NavigationLink { JobFollowUpsView(jobID: jobId) } label: { Label("Follow-ups", systemImage: "list.bullet") }
+                    Section {
+                        if session.can("customer.edit", feature: "core_crm") {
+                            Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
+                        }
+                        Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                 }
+                .disabled(busy)
                 .accessibilityLabel("More job actions")
             }
         }
@@ -262,7 +280,7 @@ struct JobDetailView: View {
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
                                 .padding(.horizontal, 10)
-                                .frame(height: Theme.chipHeight)
+                                .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
                                 .background(Theme.fill, in: Capsule())
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
@@ -284,7 +302,7 @@ struct JobDetailView: View {
                                 .foregroundStyle(Theme.muted)
                         }
                         .padding(.leading, 3).padding(.trailing, 10)
-                        .frame(height: Theme.chipHeight)
+                        .padding(.vertical, 3).frame(minHeight: Theme.chipHeight)
                         .background(Theme.fill, in: Capsule())
                     }
                     MemberChip(customerID: job.customerId)
@@ -295,7 +313,7 @@ struct JobDetailView: View {
                                 .font(Theme.monoFont(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
                                 .padding(.horizontal, 10)
-                                .frame(height: Theme.chipHeight)
+                                .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
                                 .background(Theme.fill, in: Capsule())
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
@@ -340,6 +358,7 @@ struct JobDetailView: View {
                 statusChip(job, tint: tint, showsMenu: true)
             }
             .buttonStyle(.plain)
+            .disabled(busy)
         }
     }
 
@@ -354,7 +373,7 @@ struct JobDetailView: View {
             if showsMenu { Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted) }
         }
         .padding(.horizontal, 10)
-        .frame(height: Theme.chipHeight)
+        .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
         .background(Theme.fill, in: Capsule())
         .padding(.vertical, 8)
         .contentShape(Rectangle())
@@ -421,13 +440,7 @@ struct JobDetailView: View {
                     .textSelection(.enabled)
             }
             VStack(alignment: .leading, spacing: 0) {
-                PaperGroupHeader(title: "Details") {
-                    if session.can("job.assign", feature: "jobs") {
-                        Button("Edit time") { showSchedule = true }
-                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.brandText)
-                            .frame(minHeight: 44)
-                    }
-                }
+                PaperGroupHeader(title: "Details")
                 if let customer = store.customers.first(where: { $0.id == job.customerId }),
                    session.can("customer.view", feature: "core_crm") {
                     // The customer opens from the job: history, contacts and equipment in one tap.
@@ -471,25 +484,6 @@ struct JobDetailView: View {
             }
             // What's installed at this address, so the tech arrives knowing model and serial.
             CustomerEquipmentSection(customerID: job.customerId, locations: locations, onlyLocationID: locations.first?.id)
-            VStack(alignment: .leading, spacing: 0) {
-                PaperGroupHeader(title: "On this job")
-                ForEach(availableTransitions(job).dropFirst(), id: \.self) { target in
-                    Button { runTransition(target) } label: {
-                        PaperMenuRow(transitionTitle(target), symbol: transitionSymbol(target))
-                    }
-                    .buttonStyle(RowPressStyle()).disabled(busy)
-                }
-                if session.can("job.assign", feature: "jobs") {
-                    Button { showSchedule = true } label: { PaperMenuRow("Schedule", symbol: "calendar", subtitle: "Pick a day and arrival window") }
-                        .buttonStyle(RowPressStyle())
-                    NavigationLink { JobAssignmentView(jobID: jobId) } label: { PaperMenuRow("Assign technician", symbol: "person.crop.circle.badge.plus") }
-                        .buttonStyle(RowPressStyle())
-                }
-                NavigationLink { JobCloseoutView(jobID: jobId) } label: { PaperMenuRow("Wrap up", symbol: "checkmark.seal", subtitle: "Closeout checklist") }
-                    .buttonStyle(RowPressStyle())
-                NavigationLink { JobFollowUpsView(jobID: jobId) } label: { PaperMenuRow("Follow-ups", symbol: "list.bullet") }
-                    .buttonStyle(RowPressStyle())
-            }
         }
     }
 
@@ -609,7 +603,7 @@ struct JobDetailView: View {
                         }
                         .foregroundStyle(Theme.muted)
                         .padding(.horizontal, 12)
-                        .frame(height: Theme.chipHeight)
+                        .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
                         .background(Theme.fill, in: Capsule())
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
@@ -814,6 +808,16 @@ struct JobDetailView: View {
             ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused"].contains($0)
                 && session.can(["scheduled", "dispatched"].contains($0) ? "job.assign" : "job.edit", feature: "jobs")
         }
+    }
+
+    private func primaryAction(_ job: JobRecord) -> JobPrimaryAction? {
+        JobPrimaryAction.resolve(
+            status: outbox.pendingStatus(for: job.id) ?? job.status,
+            allowedTransitions: availableTransitions(job),
+            canEdit: session.can("job.edit", feature: "jobs"),
+            canAssign: session.can("job.assign", feature: "jobs"),
+            canResume: true
+        )
     }
 
     private func transitionTitle(_ target: String) -> String {
