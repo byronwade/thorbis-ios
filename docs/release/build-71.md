@@ -1,7 +1,9 @@
 # Thorbis 1.0 (71)
 
-Uploaded to App Store Connect on 2026-10-28 at 13:44 EDT. Apple processing and
-Internal Testers availability are pending verification.
+Uploaded to App Store Connect on 2026-10-28 at 13:44 EDT. Apple processing completed; the build is assigned to Internal Testers.
+Verified in App Store Connect on 2026-10-28. The existing two-member group retains access.
+
+Build: https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/577d345e-4b9e-4a78-af58-695747158433
 
 The invoice collection flow now offers Tap to Pay only when the build policy,
 phone reader support, workspace feature and payment permission allow it. This
