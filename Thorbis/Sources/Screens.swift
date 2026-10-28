@@ -10,6 +10,13 @@ struct NewJobSheet: View {
     @State private var error: String?
     @State private var createdJobID: String?
     @State private var showNewCustomer = false
+    /// Optional time and technician, applied right after the job is created so a new job can be
+    /// booked and dispatched in one step instead of three.
+    @State private var when: Date?
+    @State private var pickingWhen = false
+    @State private var tech: FieldAssignee?
+    @State private var people: [FieldAssignee] = []
+    private var canAssign: Bool { session.can("job.assign", feature: "jobs") }
 
     init(preselected: Customer? = nil) {
         _draft = State(initialValue: FieldJobDraft(customerID: preselected?.id ?? ""))
@@ -73,14 +80,20 @@ struct NewJobSheet: View {
                                 .padding(.top, 4)
                         }
 
-                        customerPicker
-                            .padding(.top, 12)
-
-                        Text("Set the schedule and assign a technician from job details after creating the job.")
-                            .font(Theme.font(12))
-                            .foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 8)
+                        // Customer, when and who as pills in one row (a chip is a pill; values stay words).
+                        HStack(spacing: 8) {
+                            customerPicker
+                            if canAssign {
+                                Button { pickingWhen = true } label: {
+                                    pill(when.map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()) } ?? "When",
+                                         symbol: "clock", set: when != nil)
+                                }
+                                .accessibilityLabel(when == nil ? "Choose a time" : "Time: \(when!.formatted())")
+                                .disabled(busy)
+                                techPicker
+                            }
+                        }
+                        .padding(.top, 12)
 
                         if let error {
                             Label(error, systemImage: "exclamationmark.triangle")
@@ -97,6 +110,21 @@ struct NewJobSheet: View {
                 .toolbar(.hidden, for: .navigationBar)
                 .sheet(isPresented: $showNewCustomer) {
                     NewCustomerSheet { customer in draft.customerID = customer.id; error = nil }
+                }
+                .sheet(isPresented: $pickingWhen) {
+                    NavigationStack {
+                        DatePicker("When", selection: Binding(get: { when ?? Self.nextHour() }, set: { when = $0 }),
+                                   in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                            .datePickerStyle(.graphical)
+                            .padding(.horizontal, 20)
+                            .navigationTitle("When")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarLeading) { Button("Clear") { when = nil; pickingWhen = false } }
+                                ToolbarItem(placement: .topBarTrailing) { Button("Done") { if when == nil { when = Self.nextHour() }; pickingWhen = false } }
+                            }
+                    }
+                    .presentationDetents([.large])
                 }
                 .navigationDestination(isPresented: createdJobRoute) {
                     if let createdJobID { JobDetailView(jobId: createdJobID) }
@@ -131,12 +159,46 @@ struct NewJobSheet: View {
                 Image(systemName: "person")
             }
             .font(Theme.font(12, weight: .medium))
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 34)
+            .background(Theme.fill, in: Capsule())
             .frame(minHeight: 44)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
         }
         .accessibilityLabel("Customer: \(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Choose a customer")")
         .disabled(busy)
+    }
+
+    private var techPicker: some View {
+        Menu {
+            Button { tech = nil } label: { Label("No technician yet", systemImage: "person.crop.circle.badge.xmark") }
+            ForEach(people) { person in
+                Button { tech = person } label: {
+                    if person == tech { Label(person.displayName, systemImage: "checkmark") } else { Text(person.displayName) }
+                }
+            }
+        } label: {
+            pill(tech?.displayName ?? "Tech", symbol: "person.badge.clock", set: tech != nil)
+        }
+        .accessibilityLabel("Technician: \(tech?.displayName ?? "none")")
+        .disabled(busy)
+        .task { if people.isEmpty { people = (try? await api.fieldAssignees()) ?? [] } }
+    }
+
+    private func pill(_ text: String, symbol: String, set: Bool) -> some View {
+        Label { Text(text).lineLimit(1) } icon: { Image(systemName: symbol) }
+            .font(Theme.font(12, weight: .medium))
+            .foregroundStyle(set ? Theme.foreground : Theme.muted)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 34)
+            .background(Theme.fill, in: Capsule())
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+    }
+
+    private static func nextHour() -> Date {
+        let calendar = Calendar.current
+        let next = calendar.date(byAdding: .hour, value: 1, to: .now) ?? .now
+        return calendar.date(bySetting: .minute, value: 0, of: next) ?? next
     }
 
     private var createdJobRoute: Binding<Bool> {
@@ -162,6 +224,16 @@ struct NewJobSheet: View {
             let createdJob = try await api.createFieldJob(request)
             guard session.generation == sessionGeneration,
                   session.activeOrganization?.id == organizationID else { return }
+            // The job exists now; a time or tech that fails to save is left for the job screen.
+            if canAssign, let when {
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                _ = try? await api.scheduleFieldJob(createdJob.id, request: FieldScheduleRequest(scheduledFor: iso.string(from: when),
+                                                                                               timeZone: TimeZone.current.identifier))
+            }
+            if canAssign, let tech {
+                _ = try? await api.assignFieldJob(createdJob.id, request: FieldAssignRequest(userId: tech.userId))
+            }
             _ = await store.refresh(api)
             guard session.generation == sessionGeneration,
                   session.activeOrganization?.id == organizationID else { return }

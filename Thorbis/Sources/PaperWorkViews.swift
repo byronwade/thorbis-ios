@@ -95,7 +95,10 @@ struct ScheduleView: View {
         .sheet(isPresented: $showNew) { NewJobSheet() }
         .sensoryFeedback(.success, trigger: committed)
         #if DEBUG
-        .onAppear { if PaperPreview.enabled && PaperPreview.screen == "schedule-map" { tab = "Map" } }
+        .onAppear {
+            if PaperPreview.enabled && PaperPreview.screen == "schedule-map" { tab = "Map" }
+            if PaperPreview.enabled && PaperPreview.screen == "schedule-week" { tab = "Week" }
+        }
         #endif
     }
 
