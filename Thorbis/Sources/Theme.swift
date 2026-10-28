@@ -68,9 +68,9 @@ enum Theme {
     /// MA-10: controls and fields 12, cards and sheets 14; chips and pill tabs are capsules.
     static let controlRadius: CGFloat = 12
     static let cardRadius: CGFloat = 14
-    /// MA-10: chips are 28 tall.
+    /// MA-10: chips start at 28 tall and grow with accessible text.
     static let chipHeight: CGFloat = 28
-    /// MA-08: the commit is 50 tall.
+    /// MA-08: the commit starts at 50 tall and grows with accessible text.
     static let commitHeight: CGFloat = 50
     // Dark values retain the Paper Mobile palette. Light surfaces are the
     // design.thorbis.com warm canvas/panel/well/ink tokens converted from OKLCH.
@@ -140,10 +140,11 @@ struct Chip: View {
     var body: some View {
         HStack(spacing: 5) {
             if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)).foregroundStyle(tint) }
-            Text(text).font(Theme.font(12, weight: .medium)).lineLimit(1).fixedSize()
+            Text(text).font(Theme.font(12, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(tint == Theme.muted ? Theme.muted : Theme.foreground)
         }
-        .padding(.horizontal, 10).frame(minHeight: Theme.chipHeight)
+        .padding(.horizontal, 10).padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
         .background(Theme.fill, in: Capsule())
     }
 }
@@ -188,7 +189,10 @@ private struct InkCommit: ViewModifier {
         content
             .font(Theme.font(17, weight: .medium))
             .foregroundStyle(Theme.onInk)
-            .frame(maxWidth: .infinity).frame(height: height)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: height)
             .background(Theme.ink.opacity((enabled ?? isEnabled) ? 1 : 0.35), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
             .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
@@ -215,7 +219,7 @@ struct PrimaryButton: View {
 }
 
 extension View {
-    /// MA-08: the screen's one commit. Ink fill, inverse type 17/500, 50 tall, radius 12, a
+    /// MA-08: the screen's one commit. Ink fill, inverse type 17/500, at least 50 tall, radius 12, a
     /// hairline rim so it holds its edge on the dark canvas. Disabled fades the ink, never turns it grey-blue.
     /// With `enabled` left nil the commit follows the button's own `.disabled(...)`.
     func inkCommit(enabled: Bool? = nil, height: CGFloat = Theme.commitHeight) -> some View {

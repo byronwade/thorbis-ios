@@ -352,7 +352,7 @@ struct JobDetailView: View {
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
                                 .padding(.horizontal, 10)
-                                .frame(height: Theme.chipHeight)
+                                .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
                                 .background(Theme.fill, in: Capsule())
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
@@ -374,7 +374,7 @@ struct JobDetailView: View {
                                 .foregroundStyle(Theme.muted)
                         }
                         .padding(.leading, 3).padding(.trailing, 10)
-                        .frame(height: Theme.chipHeight)
+                        .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
                         .background(Theme.fill, in: Capsule())
                     }
                     MemberChip(customerID: job.customerId)
@@ -446,7 +446,7 @@ struct JobDetailView: View {
             if showsMenu { Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted) }
         }
         .padding(.horizontal, 10)
-        .frame(height: Theme.chipHeight)
+        .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
         .background(Theme.fill, in: Capsule())
         .padding(.vertical, 8)
         .contentShape(Rectangle())
@@ -684,7 +684,7 @@ struct JobDetailView: View {
                         }
                         .foregroundStyle(Theme.muted)
                         .padding(.horizontal, 12)
-                        .frame(height: Theme.chipHeight)
+                        .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
                         .background(Theme.fill, in: Capsule())
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())

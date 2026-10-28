@@ -68,3 +68,24 @@ targets:
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGET_TESTS
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
+  ThorbisUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [ThorbisUITests]
+    dependencies:
+      - target: Thorbis
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thorbis.field.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Thorbis
+        CODE_SIGNING_ALLOWED: NO
+schemes:
+  Thorbis:
+    build:
+      targets:
+        Thorbis: all
+    test:
+      targets:
+        - ThorbisTests
+        - ThorbisUITests

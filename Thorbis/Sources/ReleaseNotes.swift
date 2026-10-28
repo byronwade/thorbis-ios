@@ -13,6 +13,17 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-readable-controls",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Read buttons at your text size",
+                      detail: "Buttons, tabs and job labels grow with your text, and contact shortcuts stack at larger sizes."),
+                .init(symbol: "phone", title: "Listen to the booking call",
+                      detail: "Play the booking call, read its summary, or open the transcript from the job."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
             id: "2026-10-28-job-hours",
             date: "2026-10-28",
             highlights: [
