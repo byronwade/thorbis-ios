@@ -162,6 +162,8 @@ struct NewJobSheet: View {
                 .navigationDestination(isPresented: createdJobRoute) {
                     if let createdJobID { JobDetailView(jobId: createdJobID) }
                 }
+                .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+                .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
         }
         // A swipe never throws away a typed title (MA-16).
         .interactiveDismissDisabled(busy || (savedJobID == nil && !draft.title.isEmpty))

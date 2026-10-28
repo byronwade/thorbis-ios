@@ -426,7 +426,22 @@ struct JobDetailView: View {
                             .frame(minHeight: 44)
                     }
                 }
-                PaperDetailRow("Customer", value: store.customerName(job.customerId))
+                if let customer = store.customers.first(where: { $0.id == job.customerId }),
+                   session.can("customer.view", feature: "core_crm") {
+                    // The customer opens from the job: history, contacts and equipment in one tap.
+                    NavigationLink(value: customer) {
+                        PaperDetailRow(label: "Customer") {
+                            HStack(spacing: 4) {
+                                Text(customer.name).foregroundStyle(Theme.foreground)
+                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle)
+                            }
+                        }
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens the customer")
+                } else {
+                    PaperDetailRow("Customer", value: store.customerName(job.customerId))
+                }
                 if let place = locations.first {
                     Button {
                         if let url = Directions.url(address: place.address, coordinates: place.coordinates) { openURL(url) }
@@ -747,7 +762,7 @@ struct JobDetailView: View {
     }
 
     private func sectionTitle(_ title: String) -> some View {
-        Text(title).font(Theme.font(16, weight: .semibold))
+        Text(title).font(Theme.font(17, weight: .medium))
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {
