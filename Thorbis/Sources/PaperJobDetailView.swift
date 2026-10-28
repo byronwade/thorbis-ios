@@ -187,8 +187,10 @@ struct JobDetailView: View {
         }
         // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
         .onAppear { if job != nil { Task { await load() } } }
-        .onChange(of: selectedTab) { _, tab in
+        .onChange(of: selectedTab) { previous, tab in
             if tab == "Invoice" { Task { await loadInvoices() } }
+            // Photos added on the Photos tab show in the Overview count straight away (JS-09).
+            if previous == "Photos" { Task { await loadMediaCount() } }
         }
         .onChange(of: selectedInvoiceID) { _, selectedID in
             guard let selectedID, let invoice = invoices.first(where: { $0.id == selectedID }) else { return }
@@ -290,7 +292,8 @@ struct JobDetailView: View {
                 && job.status == "in_progress" && session.can("invoice.create", feature: "invoicing"),
             canRequestDeposit: invoicesLoaded && invoices.isEmpty && job.estimateId != nil
                 && session.can("invoice.create", feature: "progress_billing"),
-            barIsWrapUp: nextStep == .wrapUp,
+            // The bar shows only on Overview; on the other tabs Wrap up stays in the menu.
+            barIsWrapUp: selectedTab == "Overview" && nextStep == .wrapUp,
             canShowToCustomer: session.can("customer.edit", feature: "core_crm")))
     }
 
@@ -1064,6 +1067,12 @@ struct JobDetailView: View {
         guard session.generation == generation else { return }
         if let loadedMedia { mediaCount = loadedMedia.count }
         if let loadedVisits { visits = loadedVisits }
+    }
+
+    private func loadMediaCount() async {
+        let generation = session.generation
+        guard let loaded = try? await api.fieldMedia(jobId), session.generation == generation else { return }
+        mediaCount = loaded.count
     }
 
     private func loadFollowUps() async {
