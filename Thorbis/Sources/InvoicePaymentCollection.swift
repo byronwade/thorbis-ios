@@ -786,6 +786,7 @@ struct InvoicePaymentCollectionSheet: View {
     @State private var showRecordConfirmation = false
     @State private var isCreatingPayLink = false
     @State private var payLink: FieldInvoicePayLink?
+    @State private var payLinkBalanceCents: Int?
     @State private var payLinkError: String?
     @State private var showPayLinkShare = false
     @State private var receiptDestination: String?
@@ -850,41 +851,16 @@ struct InvoicePaymentCollectionSheet: View {
                 }
             }
             .navigationDestination(isPresented: $showPayLinkShare) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        if let payLink, let shareURL = payLink.shareURL {
-                            Text("Secure payment link ready")
-                                .font(Theme.font(17, weight: .medium))
-                            MoneyFigure(label: "Balance due", cents: model.outstandingCents ?? 0, currency: invoice.currency)
-                            Text("Share this link with \(customerName) to pay by card.")
-                                .font(Theme.font(15))
-                                .foregroundStyle(Theme.muted)
-                            ShareLink(item: shareURL) {
-                                Label("Share payment link", systemImage: "square.and.arrow.up")
-                                    .inkCommit()
-                            }
-                            .accessibilityIdentifier("share-invoice-payment-link")
-                            Button("Copy link") { UIPasteboard.general.string = shareURL.absoluteString }
-                                .font(Theme.font(15, weight: .medium))
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                            if let expiration = JobFiltering.date(payLink.expiresAt) {
-                                Text("Expires \(expiration.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(Theme.font(12))
-                                    .foregroundStyle(Theme.subtle)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(20)
-                    .background(Theme.background.ignoresSafeArea())
-                    .navigationTitle("Payment link")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            // MF-10: the link is made; Done goes back to the invoice.
-                            Button("Done") { dismiss() }
-                                .frame(minWidth: 44, minHeight: 44)
-                        }
-                    }
+                InvoicePaymentLinkView(
+                    model: model, payLink: payLink, requestedBalanceCents: payLinkBalanceCents,
+                    customerName: customerName, isCreating: isCreatingPayLink,
+                    canCreate: session.can("invoice.payment.create", feature: "payments") && model.canRecordPayment && !isCreatingPayLink,
+                    error: payLinkError,
+                    onCreate: {
+                        amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+                        Task { await createPayLink() }
+                    },
+                    onDone: { dismiss() })
             }
             .confirmationDialog(recordConfirmationTitle, isPresented: $showRecordConfirmation, titleVisibility: .visible) {
                 Button(primaryTitle) { Task { await recordPayment() } }
@@ -896,6 +872,14 @@ struct InvoicePaymentCollectionSheet: View {
                 // Open on the iPhone reader when this workspace and phone can take cards in person.
                 if tapToPayAvailable && model.pendingRequest == nil && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
                 await loadReceiptDestination()
+#if DEBUG
+                if let link = PaperPreview.paymentLinkPreview {
+                    option = .paymentLink
+                    payLink = link
+                    payLinkBalanceCents = model.outstandingCents
+                    showPayLinkShare = true
+                }
+#endif
             }
         }
     }
@@ -1232,7 +1216,9 @@ struct InvoicePaymentCollectionSheet: View {
         isCreatingPayLink = true
         defer { isCreatingPayLink = false }
         do {
+            let requestedBalance = model.outstandingCents
             payLink = try await api.openFieldPayLink(invoice.id)
+            payLinkBalanceCents = requestedBalance
             payLinkError = nil
             InvoiceCollectionOption.lastUsed = .paymentLink
             showPayLinkShare = true

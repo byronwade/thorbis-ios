@@ -35,6 +35,59 @@ final class InvoicePaymentUITests: XCTestCase {
         capture(app, "Card collected elsewhere")
     }
 
+    func testReadyLinkShowsScannableCheckoutAndDoneReturnsToInvoice() {
+        continueAfterFailure = false
+        let app = linkPreview()
+        let code = app.images["invoice-payment-qr"]
+        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["share-invoice-payment-link"].exists)
+        app.buttons["Copy link"].tap()
+        XCTAssertTrue(app.buttons["Link copied"].waitForExistence(timeout: 3))
+        app.buttons["check-invoice-payment-status"].tap()
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Invoice paid"].exists)
+        capture(app, "Invoice scan to pay")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(code.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(button("Collect payment", in: app).waitForExistence(timeout: 5))
+    }
+
+    func testLargestTextAndDarkModeKeepSharingReachable() {
+        continueAfterFailure = false
+        let app = linkPreview(accessibleText: true)
+        let code = app.images["invoice-payment-qr"]
+        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        capture(app, "Scan to pay with accessible text")
+        let share = app.buttons["share-invoice-payment-link"]
+        let content = app.scrollViews.containing(.image, identifier: "invoice-payment-qr").firstMatch
+        for _ in 0..<5 where !share.isHittable { content.swipeUp() }
+        XCTAssertTrue(share.isHittable)
+        XCTAssertTrue(app.buttons["Done"].isHittable)
+        capture(app, "Accessible payment sharing")
+    }
+
+    func testExpiredLinkOffersRecoveryWithoutAnActiveQRCodeOrShare() {
+        continueAfterFailure = false
+        let app = linkPreview(expired: true)
+        XCTAssertTrue(app.staticTexts["Payment link expired"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.images["invoice-payment-qr"].exists)
+        XCTAssertFalse(app.buttons["share-invoice-payment-link"].exists)
+        XCTAssertTrue(app.buttons["Create new payment link"].isEnabled)
+        capture(app, "Expired payment link recovery")
+    }
+
+    private func linkPreview(expired: Bool = false, accessibleText: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-payment",
+                               "--paper-preview-pay-link", expired ? "expired" : "ready"]
+        if accessibleText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+                                    "-thorbis.appearance", "dark"]
+        }
+        app.launch()
+        return app
+    }
+
     private func button(_ title: String, in app: XCUIApplication) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
     }

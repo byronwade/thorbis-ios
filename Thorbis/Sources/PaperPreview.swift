@@ -25,6 +25,15 @@ enum PaperPreview {
     }
     static var isWorkingJobPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-working-job") }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview }
+    static var paymentLinkPreview: FieldInvoicePayLink? {
+        let args = ProcessInfo.processInfo.arguments
+        guard enabled, screen == "invoice-payment",
+              let index = args.firstIndex(of: "--paper-preview-pay-link"), args.indices.contains(index + 1),
+              ["ready", "expired"].contains(args[index + 1]) else { return nil }
+        let offset: TimeInterval = args[index + 1] == "expired" ? -60 : 86_400
+        return .init(url: "https://pay.example.invalid/preview-invoice",
+                     expiresAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(offset)))
+    }
     static var isPaymentRefundPreview: Bool {
         ["invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation"].contains(screen)
     }

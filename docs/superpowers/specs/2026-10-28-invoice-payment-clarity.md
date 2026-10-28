@@ -43,6 +43,9 @@ Build70's signed development archive lacks the payment.acceptance entitlement.
 The Developer portal shows the Thorbis capability unchecked and exposes only
 Development provisioning support; distribution approval is unconfirmed. The
 portal and blank request form cannot establish whether a prior request exists.
+Original Apple correspondence was later found: development-only approval on
+27 October, Case23157370; distribution requires separate flow videos and checklist
+review. BYR-436 holds that evidence. No distribution approval was found.
 
 Keep the implementation, but fail closed on offering it in an unqualified
 build. A build-policy marker expresses release intent and grants no Apple
