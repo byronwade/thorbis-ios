@@ -1277,6 +1277,7 @@ private enum InvoiceCollectionOption: String, Equatable {
     }
 }
 
+@MainActor
 private func paymentDetail(_ label: String, _ value: String) -> some View {
     HStack(alignment: .firstTextBaseline, spacing: 10) {
         Text(label).foregroundStyle(Theme.muted)

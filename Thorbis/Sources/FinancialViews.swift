@@ -628,6 +628,7 @@ private func commercialHeading(ref: String, context: String? = nil, title: Strin
 }
 
 /// MF-02: a labelled amount in a card, at the total size.
+@MainActor
 private func commercialDetail(_ label: String, _ value: String) -> some View {
     HStack(alignment: .firstTextBaseline, spacing: 10) {
         Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
