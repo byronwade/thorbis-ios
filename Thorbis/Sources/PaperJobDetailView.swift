@@ -64,6 +64,7 @@ struct JobDetailView: View {
     @State private var followUps: [FieldFollowUpRecord]?
     @State private var mediaCount: Int?
     @State private var visits: [JobVisitRecord] = []
+    @State private var bookingCall: BookingCallRecord?
     @State private var showAssign = false
     @State private var showFollowUps = false
     @Environment(\.openURL) private var openURL
@@ -501,6 +502,8 @@ struct JobDetailView: View {
     private func overviewContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 22) {
             JobOfficeNote(notes: job.notes, pauseReason: job.pauseReason, pauseNextAction: job.pauseNextAction)
+            // JS-05: only when the platform recorded the call that booked this job.
+            if let bookingCall { JobBookingCallSection(call: bookingCall) }
             if session.can("customer.view", feature: "core_crm") {
                 JobContactsSection(people: JobContacts.people(contacts: contacts, customer: customerRecord),
                                    preference: JobContacts.preference(customerRecord),
@@ -1074,9 +1077,11 @@ struct JobDetailView: View {
         await loadFollowUps()
         let loadedMedia = try? await api.fieldMedia(jobId)
         let loadedVisits = try? await api.fieldVisitHistory(jobId)
+        let loadedCall = try? await api.fieldBookingCall(jobId)
         guard session.generation == generation else { return }
         if let loadedMedia { mediaCount = loadedMedia.count }
         if let loadedVisits { visits = loadedVisits }
+        if let loadedCall { bookingCall = loadedCall }
     }
 
     private func loadMediaCount() async {
