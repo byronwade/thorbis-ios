@@ -39,6 +39,29 @@ final class SetupWizardTests: XCTestCase {
         XCTAssertFalse(json.contains("emails"))
     }
 
+    func testChunksStayWithinBothServerLimits() {
+        let light = CustomerImportRow(name: "A", phones: ["1"], emails: nil, addresses: nil, notes: nil)
+        XCTAssertEqual(CustomerImportRow.chunks(Array(repeating: light, count: 250)).map(\.count), [100, 100, 50])
+        let heavy = CustomerImportRow(name: "B", phones: Array(repeating: "1", count: 5), emails: Array(repeating: "e", count: 5),
+                                      addresses: ["x"], notes: nil)
+        XCTAssertEqual(heavy.work, 12)
+        let ranges = CustomerImportRow.chunks(Array(repeating: heavy, count: 40))
+        XCTAssertEqual(ranges.map(\.count), [16, 16, 8])
+        XCTAssertTrue(ranges.allSatisfy { $0.count * heavy.work <= CustomerImportRow.maxWorkPerRequest })
+        XCTAssertEqual(CustomerImportRow.chunks([]), [])
+    }
+
+    func testRowsWithoutANameAreCountedNotDropped() {
+        let model = CustomerImportModel()
+        model.headers = ["Name", "Phone"]
+        model.records = [["Ann", "1"], ["", "2"], ["Bob", ""]]
+        model.mapping = .guess(model.headers)
+        let prepared = model.prepared
+        XCTAssertEqual(prepared.rows.map(\.name), ["Ann", "Bob"])
+        XCTAssertEqual(prepared.lines, [2, 4])
+        XCTAssertEqual(prepared.unnamed, [3])
+    }
+
     func testTradesRoundTripInListOrder() {
         let picked = SetupTrades.parse("Plumbing, Solar, HVAC")
         XCTAssertEqual(picked, ["Plumbing", "Solar", "HVAC"])

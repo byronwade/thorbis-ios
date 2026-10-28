@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 // Bring customers from other software (web onboarding "Import from your old software").
 // `POST /v1/customer-imports` {dryRun, rows}: the server never sees the file, only rows already
 // mapped to {name, phones, emails, addresses, notes}. At most 100 rows and 200 records per request
-// (domains/customers CUSTOMER_IMPORT_MAX_ROWS / MAX_WORK), so rows go in chunks of 40.
+// (domains/customers CUSTOMER_IMPORT_MAX_ROWS / MAX_WORK), so rows are chunked by both.
 
 /// A small RFC 4180 reader: quoted fields, doubled quotes, commas and line breaks inside quotes.
 enum CSVReader {
@@ -121,6 +121,28 @@ struct CustomerImportRow: Encodable, Equatable {
     var addresses: [String]?
     var notes: String?
 
+    /// Records the server counts against a request: the customer, each contact and each address.
+    var work: Int { 1 + (phones?.count ?? 0) + (emails?.count ?? 0) + (addresses?.count ?? 0) }
+
+    static let maxRowsPerRequest = 100
+    static let maxWorkPerRequest = 200
+
+    /// Splits rows so no request passes either server limit; the same rows always split the same way.
+    static func chunks(_ rows: [CustomerImportRow]) -> [Range<Int>] {
+        var ranges: [Range<Int>] = []
+        var start = 0, work = 0
+        for (index, row) in rows.enumerated() {
+            if index > start, index - start >= maxRowsPerRequest || work + row.work > maxWorkPerRequest {
+                ranges.append(start..<index)
+                start = index
+                work = 0
+            }
+            work += row.work
+        }
+        if start < rows.count { ranges.append(start..<rows.count) }
+        return ranges
+    }
+
     /// One spreadsheet row to the server's shape; nil when it has no name to import.
     static func from(_ cells: [String], mapping: CustomerImportMapping) -> CustomerImportRow? {
         func cell(_ index: Int?) -> String {
@@ -174,7 +196,6 @@ extension APIClient {
 @MainActor
 final class CustomerImportModel: ObservableObject {
     enum Phase: Equatable { case choose, map, checking, preview, importing, done }
-    static let chunkSize = 40
 
     @Published var phase: Phase = .choose
     @Published var fileName = ""
@@ -192,7 +213,20 @@ final class CustomerImportModel: ObservableObject {
     @Published var progress = 0.0
     @Published var error: String?
 
-    var rows: [CustomerImportRow] { records.compactMap { CustomerImportRow.from($0, mapping: mapping) } }
+    /// Rows to send, with the spreadsheet line each came from (line 1 is the header).
+    var prepared: (rows: [CustomerImportRow], lines: [Int], unnamed: [Int]) {
+        var rows: [CustomerImportRow] = [], lines: [Int] = [], unnamed: [Int] = []
+        for (index, cells) in records.enumerated() {
+            if let row = CustomerImportRow.from(cells, mapping: mapping) {
+                rows.append(row); lines.append(index + 2)
+            } else {
+                unnamed.append(index + 2)
+            }
+        }
+        return (rows, lines, unnamed)
+    }
+
+    var rows: [CustomerImportRow] { prepared.rows }
 
     func read(_ url: URL) {
         error = nil
@@ -222,25 +256,30 @@ final class CustomerImportModel: ObservableObject {
 
     /// Dry run every chunk: what would be new, what is already here, what cannot be read.
     func check(api: APIClient) async {
-        let all = rows
+        let (all, lines, unnamed) = prepared
         guard !all.isEmpty else { error = "No row has a customer name in the column you chose."; return }
         phase = .checking
         error = nil
         var new = 0, duplicate = 0, invalid = 0
         var reasons: [String] = []
+        if !unnamed.isEmpty {
+            let shown = unnamed.prefix(5).map(String.init).joined(separator: ", ")
+            reasons.append(unnamed.count == 1 ? "Row \(shown): no name" : "Rows \(shown)\(unnamed.count > 5 ? " and \(unnamed.count - 5) more" : ""): no name")
+        }
         do {
-            for (index, chunk) in chunks(all).enumerated() {
-                let result = try await api.importCustomers(chunk, dryRun: true)
+            for range in CustomerImportRow.chunks(all) {
+                let result = try await api.importCustomers(Array(all[range]), dryRun: true)
                 new += result.summary.new
                 duplicate += result.summary.duplicate
                 invalid += result.summary.invalid
                 for outcome in result.rows where outcome.status == "invalid" && reasons.count < 5 {
-                    let line = index * Self.chunkSize + outcome.row + 1
+                    let position = range.lowerBound + outcome.row - 1
+                    let line = lines.indices.contains(position) ? lines[position] : position + 2
                     reasons.append("Row \(line): \((outcome.reasons ?? ["could not be read"]).joined(separator: ", "))")
                 }
-                progress = Double(min((index + 1) * Self.chunkSize, all.count)) / Double(all.count)
+                progress = Double(range.upperBound) / Double(all.count)
             }
-            preview = .init(new: new, duplicate: duplicate, invalid: invalid)
+            preview = .init(new: new, duplicate: duplicate, invalid: invalid + unnamed.count)
             problems = reasons
             phase = .preview
         } catch is CancellationError {
@@ -258,14 +297,15 @@ final class CustomerImportModel: ObservableObject {
         phase = .importing
         error = nil
         if committedChunks == 0 { imported = 0 }
-        let parts = chunks(all)
-        progress = Double(min(committedChunks * Self.chunkSize, all.count)) / Double(max(all.count, 1))
+        let parts = CustomerImportRow.chunks(all)
+        progress = committedChunks > 0 && parts.indices.contains(committedChunks - 1)
+            ? Double(parts[committedChunks - 1].upperBound) / Double(max(all.count, 1)) : 0
         do {
             for index in parts.indices where index >= committedChunks {
-                let result = try await api.importCustomers(parts[index], dryRun: false)
+                let result = try await api.importCustomers(Array(all[parts[index]]), dryRun: false)
                 imported += result.summary.new
                 committedChunks = index + 1
-                progress = Double(min((index + 1) * Self.chunkSize, all.count)) / Double(all.count)
+                progress = Double(parts[index].upperBound) / Double(all.count)
             }
             phase = .done
             return true
@@ -282,10 +322,6 @@ final class CustomerImportModel: ObservableObject {
     func reset() {
         phase = .choose; fileName = ""; headers = []; records = []; mapping = .init()
         preview = nil; problems = []; imported = 0; progress = 0; error = nil; committedChunks = 0
-    }
-
-    private func chunks(_ all: [CustomerImportRow]) -> [[CustomerImportRow]] {
-        stride(from: 0, to: all.count, by: Self.chunkSize).map { Array(all[$0..<min($0 + Self.chunkSize, all.count)]) }
     }
 }
 

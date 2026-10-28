@@ -100,8 +100,12 @@ struct PropertiesView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await load() }
-        .task { await load() }
+        .refreshable {
+            if store.customers.isEmpty || store.error != nil { _ = await store.refresh(api) }
+            await load()
+        }
+        // Runs again when the customer list arrives or changes, so opening this before it loads is fine.
+        .task(id: store.customers.map(\.id).joined(separator: ",") + (store.loading ? "+loading" : "")) { await load() }
     }
 
     private var footnote: String {
@@ -113,6 +117,11 @@ struct PropertiesView: View {
 
     private func load() async {
         let generation = session.generation
+        if store.customers.isEmpty {
+            // Not loaded yet, or the customer list failed: never call that "no properties".
+            if store.loading { return }
+            if let storeError = store.error { error = storeError; return }
+        }
         let (customers, isCapped) = PropertiesUnion.customers(from: store.customers)
         var pairs: [(Customer, [ServiceLocationRecord])] = []
         var failures = 0
