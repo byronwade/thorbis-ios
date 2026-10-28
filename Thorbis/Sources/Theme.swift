@@ -162,6 +162,22 @@ struct SectionHeader: View {
     }
 }
 
+private struct InkCommit: ViewModifier {
+    let enabled: Bool?
+    let height: CGFloat
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content
+            .font(Theme.font(17, weight: .medium))
+            .foregroundStyle(Theme.onInk)
+            .frame(maxWidth: .infinity).frame(height: height)
+            .background(Theme.ink.opacity((enabled ?? isEnabled) ? 1 : 0.35), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+    }
+}
+
 struct PrimaryButton: View {
     let title: String
     var icon: String? = nil
@@ -173,6 +189,7 @@ struct PrimaryButton: View {
                 if busy { ProgressView().tint(Theme.onInk) } else if let icon { Image(systemName: icon) }
                 Text(title)
             }
+            // MA-08: follows `.disabled(...)`, from the call site or busy, so disabled looks disabled.
             .inkCommit()
         }
         .buttonStyle(PressStyle())
@@ -183,14 +200,9 @@ struct PrimaryButton: View {
 extension View {
     /// MA-08: the screen's one commit. Ink fill, inverse type 17/500, 50 tall, radius 12, a
     /// hairline rim so it holds its edge on the dark canvas. Disabled fades the ink, never turns it grey-blue.
-    func inkCommit(enabled: Bool = true, height: CGFloat = Theme.commitHeight) -> some View {
-        self
-            .font(Theme.font(17, weight: .medium))
-            .foregroundStyle(Theme.onInk)
-            .frame(maxWidth: .infinity).frame(height: height)
-            .background(Theme.ink.opacity(enabled ? 1 : 0.35), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
-            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+    /// With `enabled` left nil the commit follows the button's own `.disabled(...)`.
+    func inkCommit(enabled: Bool? = nil, height: CGFloat = Theme.commitHeight) -> some View {
+        modifier(InkCommit(enabled: enabled, height: height))
     }
 }
 
