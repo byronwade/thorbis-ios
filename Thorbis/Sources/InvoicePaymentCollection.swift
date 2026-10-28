@@ -983,13 +983,18 @@ struct InvoicePaymentCollectionSheet: View {
         case .processing: "Processing…"
         case .recording: "Approved · recording payment"
         case .paid: "Paid"
+        case .unavailable: "Choose another payment method"
         default: "Tap to Pay on iPhone"
         }
     }
 
     private var tapToPayAvailable: Bool {
-        session.isFeatureOn(TapToPayController.feature) && TapToPayController.deviceSupported
-            && session.can("invoice.payment.create", feature: "payments")
+        TapToPayReadiness.allows(
+            buildEnabled: TapToPayController.buildEnabled,
+            deviceSupported: TapToPayController.deviceSupported,
+            featureEnabled: session.isFeatureOn(TapToPayController.feature),
+            canCollect: session.can("invoice.payment.create", feature: "payments")
+        )
     }
 
     private func charge() async {

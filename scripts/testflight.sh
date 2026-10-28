@@ -37,12 +37,36 @@ xcodebuild -project Thorbis.xcodeproj -scheme Thorbis -configuration Release \
   -archivePath "$archive" CURRENT_PROJECT_VERSION="$build_number" \
   -allowProvisioningUpdates archive
 
+app="$archive/Products/Applications/Thorbis.app"
+python3 scripts/audit_tap_to_pay_build.py "$app"
+
 cp docs/release/ExportOptions.plist "$options"
 /usr/libexec/PlistBuddy -c "Set :destination $destination" "$options"
 # Keep the number we chose; Xcode would otherwise renumber the upload.
 /usr/libexec/PlistBuddy -c "Set :manageAppVersionAndBuildNumber false" "$options"
 
+# A Tap-enabled build must prove distribution allowance on an exported, signed IPA
+# before upload. The marker expresses intent; it does not confer Apple approval.
+tap_enabled=$(/usr/libexec/PlistBuddy -c 'Print :ThorbisTapToPayEnabled' "$app/Info.plist")
+audit_export() {
+  local export_dir="$1"
+  ditto -xk "$export_dir/Thorbis.ipa" "$export_dir/audit"
+  python3 scripts/audit_tap_to_pay_build.py "$export_dir/audit/Payload/Thorbis.app" --distribution
+}
+if [[ "$tap_enabled" == "true" && "$destination" == "upload" ]]; then
+  validation_options="$root/ExportOptions-validation.plist"
+  cp "$options" "$validation_options"
+  /usr/libexec/PlistBuddy -c 'Set :destination export' "$validation_options"
+  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$validation_options" \
+    -exportPath "$root/validation" -allowProvisioningUpdates
+  audit_export "$root/validation"
+fi
+
 xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
   -exportPath "$root/export" -allowProvisioningUpdates
+
+if [[ "$tap_enabled" == "true" && "$destination" == "export" ]]; then
+  audit_export "$root/export"
+fi
 
 echo "Build $build_number: $destination finished. Archive: $archive"

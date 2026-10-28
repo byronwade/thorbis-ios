@@ -17,6 +17,8 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>ThorbisTapToPayEnabled</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Thorbis uses the camera to add job photos, such as before and after shots, to the job you are working on.</string>
 	<key>NSFaceIDUsageDescription</key>

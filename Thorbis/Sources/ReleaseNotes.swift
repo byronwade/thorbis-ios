@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-tap-readiness",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "creditcard", title: "Payment choices that are ready to use",
+                      detail: "Collection starts with a secure link when Tap to Pay is not ready for this version."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-28-readable-controls",
             date: "2026-10-28",
             highlights: [
