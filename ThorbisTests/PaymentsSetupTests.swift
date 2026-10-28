@@ -48,4 +48,16 @@ final class PaymentsSetupTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.path, "/v1/organization/merchant-onboarding/return")
         XCTAssertEqual(URLProtocolFixture.recorded.first?.method, "GET")
     }
+
+    func testMoneyAvailabilityDecodesServerWording() async throws {
+        let body = #"{"version":1,"asOf":"2026-10-28T03:00:00.000Z","balances":[{"currency":"USD","available":-1200,"pending":0,"explanation":"The balance is negative."}],"payouts":[{"state":"failed","amount":5000,"currency":"USD","arrivalDate":"2026-10-27","title":"Payout failed","explanation":"The bank rejected this payout.","responsibleActor":"owner","providerCode":"account_closed"}],"attention":{"title":"Fix your bank account in Stripe","explanation":"The bank rejected this payout."}}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, body)]), baseURL: "https://app.thorbis.com")
+
+        let money = try await api.moneyAvailability()
+
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.path, "/v1/organization/money-availability")
+        XCTAssertEqual(money.balances.first?.available, -1200)
+        XCTAssertEqual(money.payouts.first?.responsibleActor, "owner")
+        XCTAssertEqual(money.attention?.title, "Fix your bank account in Stripe")
+    }
 }

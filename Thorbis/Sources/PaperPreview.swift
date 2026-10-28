@@ -249,6 +249,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                          ["id": "00000000-0000-4000-8000-000000009513", "position": 2, "description": "Start-up and balance", "scheduledAmount": ["amount": 150_000, "currency": "USD"]]],
                                "createdAt": "2026-10-01T12:00:00Z", "updatedAt": now]]]
         }
+        if path == "/v1/organization/money-availability" {
+            return ["version": 1, "asOf": now, "attention": NSNull(),
+                    "balances": [["currency": "USD", "available": 412_000, "pending": 186_500,
+                                  "explanation": "Pending is normal card settlement, not a hold. Stripe moves it to available on its own schedule, then pays it out."]],
+                    "payouts": [["state": "in_transit", "amount": 298_000, "currency": "USD", "arrivalDate": "2026-10-29", "title": "On its way",
+                                 "explanation": "This payout is on its way to your bank, expected on 2026-10-29.", "responsibleActor": "none", "providerCode": NSNull()],
+                                ["state": "paid", "amount": 512_250, "currency": "USD", "arrivalDate": "2026-10-24", "title": "Paid out",
+                                 "explanation": "Stripe sent this payout for arrival on 2026-10-24. Stripe marking it paid does not confirm your bank has posted it.", "responsibleActor": "none", "providerCode": NSNull()]]] as [String: Any]
+        }
         if path == "/v1/organization/merchant-readiness" {
             return ["state": "action_required", "chargesReady": false, "payoutsReady": false, "actionRequired": true,
                     "requirements": ["eventuallyDueCount": 1, "currentlyDueCount": 2, "pastDueCount": 0]] as [String: Any]

@@ -31,4 +31,5 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Mobile menu layout | Done | Customize menu per phone; owners can save a company-wide layout (GET/POST /v1/organization/mobile-layout). |
 | Push notifications | App side done | Registers with POST /v1/devices; the server sends once its APNs key is configured. Taps open the job, or the invoice, estimate or customer the notice names. |
 | Payments setup (Stripe) | Done | Owners see card-payment and payout readiness and what Stripe still needs, and open Stripe's hosted onboarding in a secure browser. |
+| Payouts and balance | Done | Once Stripe is connected, owners see available and pending balance and the last ten payouts with the server's plain-language explanation of each, including a warning when a payout failed or the balance is negative (BYR-315). |
 | Deep links | Done | `thorbis://job/…`, `thorbis://customer/…`, `thorbis://estimate/…`, `thorbis://invoice/…` and `thorbis://schedule`. |
