@@ -35,8 +35,7 @@ struct JobCloseoutView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("JOB-\(jobID.suffix(4).uppercased())\(job.map { " · \(store.customerName($0.customerId))" } ?? "")")
-                        .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                    PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())", text: job.map { store.customerName($0.customerId) })
                     Text(job?.status == "completed" ? "Job complete" : "Wrap up this job")
                         .font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                 }

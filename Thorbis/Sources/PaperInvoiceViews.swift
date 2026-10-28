@@ -82,10 +82,8 @@ struct PaperJobInvoiceContent: View {
 
     private var balanceHeader: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("INV-\(displayedInvoice.id.suffix(4).uppercased()) · \(balance.statusLabel == "Unpaid" || balance.statusLabel == "Partially paid" ? "Balance due" : balance.statusLabel)")
-                .font(Theme.monoFont(12, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .lineLimit(1)
+            PaperEyebrow(reference: "INV-\(displayedInvoice.id.suffix(4).uppercased())",
+                         text: balance.statusLabel == "Unpaid" || balance.statusLabel == "Partially paid" ? "Balance due" : balance.statusLabel)
 
             HStack(spacing: 12) {
                 Text(balance.balanceCents.map { money($0, currency: invoice.currency) } ?? "—")

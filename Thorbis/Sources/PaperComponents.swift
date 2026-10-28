@@ -110,6 +110,23 @@ struct PaperTabs: View {
     }
 }
 
+/// The muted line above a page title. Only the reference ("JOB-2214") is mono so its digits
+/// line up; names and words read in the 13pt body face.
+struct PaperEyebrow: View {
+    var reference: String? = nil
+    var text: String? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let reference { Text(reference).font(Theme.monoFont(12, weight: .medium)).fixedSize() }
+            if reference != nil, text != nil { Text("·").font(Theme.font(13)) }
+            if let text { Text(text).font(Theme.font(13)).lineLimit(1) }
+        }
+        .foregroundStyle(Theme.muted)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// Sentence-case group header: 13/500 muted title, mono count, optional trailing action.
 struct PaperGroupHeader<Trailing: View>: View {
     let title: String

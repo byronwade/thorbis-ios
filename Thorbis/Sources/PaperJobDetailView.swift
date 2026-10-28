@@ -244,12 +244,7 @@ struct JobDetailView: View {
     private func header(_ job: JobRecord, compact: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             // The reference is mono so its digits line up; the customer's name reads as a name.
-            HStack(spacing: 6) {
-                Text("JOB-\(job.id.suffix(4).uppercased())").font(Theme.monoFont(12, weight: .medium)).fixedSize()
-                Text("·").font(Theme.font(13))
-                Text(store.customerName(job.customerId)).font(Theme.font(13)).lineLimit(1)
-            }
-            .foregroundStyle(Theme.muted)
+            PaperEyebrow(reference: "JOB-\(job.id.suffix(4).uppercased())", text: store.customerName(job.customerId))
             Text(job.title)
                 .font(Theme.font(24, weight: .medium))
                 .tracking(-0.36)
