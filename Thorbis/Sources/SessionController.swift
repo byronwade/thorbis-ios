@@ -243,6 +243,49 @@ final class SessionController: ObservableObject {
         }
     }
 
+    /// Owner registration (Better Auth `POST /api/auth/sign-up/email`). A new account has no
+    /// workspace yet, so this lands on `.noWorkspace`, where the owner names their company.
+    func signUp(name: String, email: String, password: String) async {
+        guard !signingOut else { return }
+        let requestGeneration = invalidate(next: .signedOut)
+        defaults.set(true, forKey: Self.explicitSignOutKey)
+        api.clearSessionCookies()
+        do {
+            struct Registration: Encodable { let name: String; let email: String; let password: String }
+            let _: APIClient.EmptyResponse = try await api.send(
+                "POST", "/api/auth/sign-up/email",
+                body: Registration(name: name, email: email, password: password), authed: false
+            )
+            guard generation == requestGeneration else { return }
+            await loadSession(generation: requestGeneration)
+            guard generation == requestGeneration else { return }
+            if phase == .ready || phase == .choosingWorkspace || phase == .noWorkspace {
+                defaults.set(false, forKey: Self.explicitSignOutKey)
+            }
+        } catch {
+            fail(error, generation: requestGeneration)
+        }
+    }
+
+    /// Set when this phone just created a company, so the owner is walked through setup once.
+    @Published var startBusinessSetup = false
+
+    /// Creates a company the signed-in account owns (Better Auth `POST /api/auth/organization/create`,
+    /// which makes the creator its owner), then opens it like any other workspace.
+    /// Throws so the form can keep what was typed and say why.
+    func createCompany(name: String) async throws {
+        guard !signingOut, user != nil else { throw Problem(title: nil, status: nil, detail: "Sign in again to create a company.") }
+        struct NewCompany: Encodable { let name: String; let slug: String }
+        let created: SessionOrganization = try await api.send(
+            "POST", "/api/auth/organization/create",
+            body: NewCompany(name: name, slug: CompanySlug.make(from: name)), authed: false
+        )
+        guard !created.id.isEmpty else { throw Problem(title: nil, status: nil, detail: "The company was not created. Try again.") }
+        if !organizations.contains(where: { $0.id == created.id }) { organizations.append(created) }
+        startBusinessSetup = true
+        await selectOrganization(id: created.id)
+    }
+
     func selectOrganization(id: String) async {
         guard !signingOut else { return }
         guard organizations.contains(where: { $0.id == id }), user != nil else {
@@ -275,6 +318,7 @@ final class SessionController: ObservableObject {
         await onWillUnbindDevice?()
         defaults.set(true, forKey: Self.explicitSignOutKey)
         snapshots.clear()
+        PriceBookCatalog.shared.clear()
         onSignedOut?()
         onVerifiedIdentity?(nil, nil)
         let requestGeneration = invalidate(next: .restoring)

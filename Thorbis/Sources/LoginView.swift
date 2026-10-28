@@ -10,6 +10,7 @@ struct LoginView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var showingReset = false
+    @State private var showingSignUp = false
     @State private var showPassword = false
     @FocusState private var focused: FocusField?
 
@@ -110,14 +111,19 @@ struct LoginView: View {
                         .padding(.top, 20)
                 }
                 Spacer(minLength: 80)
-                HStack(spacing: 5) {
-                    Text("Need an account?").foregroundStyle(Theme.muted)
-                    Text("Ask your workspace administrator.").foregroundStyle(Theme.foreground)
+                // Owners register here; people joining a team accept their email invite first.
+                Button { showingSignUp = true } label: {
+                    HStack(spacing: 5) {
+                        Text("New to Thorbis?").foregroundStyle(Theme.muted)
+                        Text("Create an account").foregroundStyle(Theme.brandText)
+                    }
+                    .font(Theme.font(13, weight: .medium))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .font(Theme.font(13))
-                .frame(maxWidth: .infinity)
-                .multilineTextAlignment(.center)
+                .buttonStyle(.plain)
                 .padding(.bottom, 12)
+                .accessibilityIdentifier("login-create-account")
             }
             .padding(.horizontal, 20)
             .padding(.top, sizeClass == .regular ? 72 : 32)
@@ -127,6 +133,9 @@ struct LoginView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background.ignoresSafeArea())
+        .sheet(isPresented: $showingSignUp) {
+            SignUpView(initialEmail: email)
+        }
         .sheet(isPresented: $showingReset) {
             PasswordResetRequestView(initialEmail: email).environmentObject(api)
         }

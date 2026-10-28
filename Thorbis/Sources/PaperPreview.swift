@@ -13,7 +13,14 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "side-menu", "settings", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "side-menu", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
+        return args[index + 1]
+    }
+    /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
+    static var onboardingScreen: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
+              ["onboard-signup", "onboard-company", "onboard-details", "onboard-setup"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -295,6 +302,19 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
         }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/payments" { return ["items": []] }
+        if path == "/v1/organization/profile" {
+            let catalog: [(String, String, Int, Bool)] = [
+                ("legal_name", "Legal business name", 1, true), ("dba_names", "DBA / trade names", 1, false),
+                ("entity_type", "Entity type", 2, false), ("business_address", "Business address", 1, true),
+                ("website", "Website", 1, false), ("primary_phone", "Primary phone", 1, true),
+                ("primary_email", "Primary email", 1, false), ("industry", "Industry / trades", 1, false),
+                ("email_sender_name", "Email sender name", 1, false), ("email_sender_address", "Email reply-to address", 1, false),
+            ]
+            return ["organizationId": org, "coreReady": false, "missingCore": ["business_address", "primary_phone"],
+                    "facts": [["factKey": "legal_name", "label": "Legal business name", "tier": 1, "value": "Wade’s Plumbing LLC",
+                               "source": "user_confirmed", "confirmedAt": now, "version": 1]],
+                    "catalog": catalog.map { ["factKey": $0.0, "label": $0.1, "tier": $0.2, "required": $0.3, "confirmed": $0.0 == "legal_name"] }] as [String: Any]
+        }
         switch path {
         case "/api/auth/get-session":
             return ["user": ["id": actor, "name": "Ramon Marlowe", "email": "preview@example.invalid"], "session": ["userId": actor, "activeOrganizationId": org, "expiresAt": expiry]]
@@ -306,6 +326,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
             if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
+            if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
                     "capabilities": capabilities,
                     "resources": [], "views": []] as [String: Any]
@@ -331,19 +352,34 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": [waiting]]
         case "/v1/query":
-            let priceBookID = "00000000-0000-4000-8000-000000009201"
+            // The first item keeps the id the preview estimate's price book line points at.
+            let catalog: [(String, String, String, Int)] = [
+                ("Replace capacitor", "each", "material", 12500),
+                ("Capacitor, 45/5 MFD dual run", "each", "material", 14500),
+                ("Capacitor, 35/5 MFD dual run", "each", "material", 13500),
+                ("Hard start kit with capacitor", "each", "material", 21000),
+                ("Diagnostic visit", "visit", "service", 8900),
+                ("Condenser coil cleaning", "each", "service", 12000),
+                ("Refrigerant R-410A", "lb", "material", 9500),
+                ("Licensed technician labor", "hour", "labor", 14000),
+                ("Contactor, 30 amp single pole", "each", "material", 6800),
+                ("Surge protector, installed", "each", "assembly", 39500),
+            ]
+            let items: [[String: Any]] = catalog.enumerated().map { offset, entry in
+                let id = String(format: "00000000-0000-4000-8000-%012d", 9201 + offset)
+                return ["id": id, "resourceId": "price_book_items", "label": entry.0,
+                        "subtitle": "\(entry.2.capitalized) · \(entry.1)",
+                        "fields": ["price_book_items.id": id,
+                                   "price_book_items.current_revision": 4,
+                                   "price_book_items.description": entry.0,
+                                   "price_book_items.unit": entry.1,
+                                   "price_book_items.sell_price_amount": entry.3,
+                                   "price_book_items.currency": "USD",
+                                   "price_book_items.tax_classification": "taxable",
+                                   "price_book_items.kind": entry.2]]
+            }
             return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
-                    "items": [["id": priceBookID, "resourceId": "price_book_items", "label": "Replace capacitor",
-                               "subtitle": "Material · each",
-                               "fields": ["price_book_items.id": priceBookID,
-                                          "price_book_items.current_revision": 4,
-                                          "price_book_items.description": "Replace capacitor",
-                                          "price_book_items.unit": "each",
-                                          "price_book_items.sell_price_amount": 12500,
-                                          "price_book_items.currency": "USD",
-                                          "price_book_items.tax_classification": "taxable",
-                                          "price_book_items.kind": "material"]]],
-                    "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
+                    "items": items, "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
         default: break
         }
         for job in jobs() {
