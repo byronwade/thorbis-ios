@@ -16,6 +16,8 @@ enum ReleaseNotes {
             id: "2026-10-28-owner-setup",
             date: "2026-10-28",
             highlights: [
+                .init(symbol: "person.badge.minus", title: "Remove someone from your team",
+                      detail: "Long-press a person on Team to remove them. They keep their account and can be invited again."),
                 .init(symbol: "person.crop.circle.badge.plus", title: "Start your company from your phone",
                       detail: "Create an account, name your company and walk through setup one step at a time."),
                 .init(symbol: "square.and.arrow.down", title: "Import customers from a spreadsheet",
@@ -24,9 +26,8 @@ enum ReleaseNotes {
                       detail: "Properties shows each service address across your customers, with search."),
                 .init(symbol: "tablecells", title: "Download reports as spreadsheets",
                       detail: "Revenue, jobs, schedule and payment reports open as Excel files you can share."),
-                .init(symbol: "envelope", title: "Check which job notices went out",
-                      detail: "The delivery log shows who was told about each booked, changed or canceled job."),
-            ]
+            ],
+            fixes: 1
         ),
         ReleaseNote(
             id: "2026-10-28-job-hours",
