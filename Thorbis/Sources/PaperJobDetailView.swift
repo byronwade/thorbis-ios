@@ -43,6 +43,11 @@ struct JobDetailView: View {
     @State private var creatingInvoice = false
     @State private var reviewInvoiceID: String?
     @State private var showDeposit = false
+    /// TF-01: the estimate opened from the next step; it goes straight to the customer when asked.
+    @State private var openEstimate: OpenedEstimate?
+    /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
+    @State private var createdEstimateID: String?
+    @State private var showWrapUp = false
     /// The customer's service locations; the first (or only) one is where the job is.
     @State private var locations: [ServiceLocationRecord] = []
     /// The primary contact's phone (else the customer's), for one-tap Call and Text.
@@ -123,18 +128,37 @@ struct JobDetailView: View {
             }
         }
         .navigationDestination(item: $reviewInvoiceID) { id in
-            InvoiceDetailView(id: id)
+            InvoiceDetailView(id: id, returnsWhenPaid: true)
                 .onDisappear { Task { await loadInvoices() } }
+        }
+        .navigationDestination(item: $openEstimate) { opened in
+            EstimateDetailView(id: opened.id, jobID: jobId, presentsOnOpen: opened.present)
+                .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices() } } }
+        }
+        .navigationDestination(isPresented: $showWrapUp) { JobCloseoutView(jobID: jobId) }
+        .sheet(isPresented: $showNewEstimate, onDismiss: {
+            // A saved estimate opens next, so the tech reviews it and hands it over (TF-06).
+            if let id = createdEstimateID { createdEstimateID = nil; openEstimate = OpenedEstimate(id: id, present: false) }
+        }) {
+            if let job {
+                NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { estimate in
+                    createdEstimateID = estimate.id
+                    Task { await loadJobEstimates(job) }
+                }
+            }
         }
         .task(id: session.generation) {
             invoicePaymentModel = nil
             loadedInvoiceModelID = nil
             await load()
-            if selectedTab == "Invoice" { await loadInvoices() }
+            // The next step needs the job's paper, so it loads with the job, not only on its tab.
+            await loadInvoices()
+            if let job { await loadJobEstimates(job) }
         }
         .refreshable {
-            if selectedTab == "Invoice" { await loadInvoices() }
-            else { await load() }
+            await load()
+            await loadInvoices()
+            if let job { await loadJobEstimates(job) }
         }
         // The Lock Screen card follows the status shown here, queued steps included.
         .task(id: liveActivityKey) {
@@ -153,18 +177,14 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
-            if selectedTab == "Overview", let job, let target = availableTransitions(job).first {
-                // Directions now sits with Call and Text in the header; the bar carries one commit.
-                PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
-                    runTransition(target)
+            if selectedTab == "Overview", let step = nextStep {
+                // TF-01: the bar always carries the one next step of the call, money steps included.
+                PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
+                               busy: busy || creatingInvoice) {
+                    run(step)
                 }
-            } else if selectedTab == "Estimates", let job, session.can("estimate.create", feature: "estimates") {
+            } else if selectedTab == "Estimates", session.can("estimate.create", feature: "estimates") {
                 PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus") { showNewEstimate = true }
-                    .sheet(isPresented: $showNewEstimate) {
-                        NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { _ in
-                            Task { await loadJobEstimates(job) }
-                        }
-                    }
             } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
                       session.can("invoice.view", feature: "invoicing") {
                 // A draft is reviewed (lines) and issued on its own screen, then collected here.
@@ -460,7 +480,8 @@ struct JobDetailView: View {
             CustomerEquipmentSection(customerID: job.customerId, locations: locations, onlyLocationID: locations.first?.id)
             VStack(alignment: .leading, spacing: 0) {
                 PaperGroupHeader(title: "On this job")
-                ForEach(availableTransitions(job).dropFirst(), id: \.self) { target in
+                // Everything the bar is not carrying: pause, dispatch back, and billing without an estimate.
+                ForEach(availableTransitions(job).filter { nextStep != .transition($0) }, id: \.self) { target in
                     Button { runTransition(target) } label: {
                         PaperMenuRow(transitionTitle(target), symbol: transitionSymbol(target))
                     }
@@ -471,6 +492,13 @@ struct JobDetailView: View {
                         .buttonStyle(RowPressStyle())
                     NavigationLink { JobAssignmentView(jobID: jobId) } label: { PaperMenuRow("Assign technician", symbol: "person.crop.circle.badge.plus") }
                         .buttonStyle(RowPressStyle())
+                }
+                if invoicesLoaded, invoices.isEmpty, nextStep != .createInvoice, job.status == "in_progress",
+                   session.can("invoice.create", feature: "invoicing") {
+                    Button { run(.createInvoice) } label: {
+                        PaperMenuRow("Create invoice", symbol: "doc.plaintext", subtitle: "Bill without an estimate")
+                    }
+                    .buttonStyle(RowPressStyle()).disabled(creatingInvoice)
                 }
                 NavigationLink { JobCloseoutView(jobID: jobId) } label: { PaperMenuRow("Wrap up", symbol: "checkmark.seal", subtitle: "Closeout checklist") }
                     .buttonStyle(RowPressStyle())
@@ -790,6 +818,44 @@ struct JobDetailView: View {
             .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 
+    /// TF-01: the one next step for this job, from its status, its estimates and its invoices.
+    private var nextStep: TechJobStep? {
+        guard let job else { return nil }
+        let can = TechJobAbilities(
+            createEstimate: session.can("estimate.create", feature: "estimates"),
+            sendEstimate: session.can("estimate.send", feature: "estimates"),
+            approveEstimate: session.can("estimate.approve", feature: "estimates"),
+            createInvoice: session.can("invoice.create", feature: "invoicing"),
+            viewInvoice: session.can("invoice.view", feature: "invoicing"),
+            collectPayment: session.can("invoice.payment.create", feature: "payments"),
+            completeJob: session.can("job.complete", feature: "jobs"))
+        return TechJobFlow.nextStep(status: outbox.pendingStatus(for: job.id) ?? job.status, transitions: availableTransitions(job),
+                                    estimates: estimatesLoaded || !session.can("estimate.view", feature: "estimates") ? jobEstimates : nil,
+                                    invoices: invoicesLoaded ? invoices : nil, can: can)
+    }
+
+    private func run(_ step: TechJobStep) {
+        switch step {
+        case .transition(let target): runTransition(target)
+        case .buildEstimate: showNewEstimate = true
+        case .showEstimate(let id): openEstimate = OpenedEstimate(id: id, present: true)
+        case .createInvoice:
+            Task {
+                // TF-08: one tap makes the invoice from the approved work and opens it for review.
+                if let invoice = await createInvoice() { reviewInvoiceID = invoice.id }
+            }
+        case .reviewInvoice(let id): reviewInvoiceID = id
+        case .collect(let invoiceID, _, _):
+            Task {
+                selectedInvoiceID = invoiceID
+                if let invoice = invoices.first(where: { $0.id == invoiceID }) { await loadInvoicePayments(for: invoice) }
+                if invoicePaymentModel?.canRecordPayment == true { showCollectPayment = true }
+                else { withMotion(.snappy) { selectedTab = "Invoice" } }
+            }
+        case .wrapUp: showWrapUp = true
+        }
+    }
+
     private func availableTransitions(_ job: JobRecord) -> [String] {
         let allowed: [String]
         if let queued = outbox.pendingStatus(for: job.id) {
@@ -868,8 +934,8 @@ struct JobDetailView: View {
     }
 
     /// The job's canonical completion draft (POST /v1/jobs/{id}/completion-invoice); idempotent per job.
-    private func createInvoice() async {
-        guard !creatingInvoice, session.can("invoice.create", feature: "invoicing") else { return }
+    @discardableResult private func createInvoice() async -> InvoiceRecord? {
+        guard !creatingInvoice, session.can("invoice.create", feature: "invoicing") else { return nil }
         creatingInvoice = true
         defer { creatingInvoice = false }
         do {
@@ -878,7 +944,8 @@ struct JobDetailView: View {
             selectedInvoiceID = invoice.id
             await loadInvoices()
             committed += 1
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+            return invoice
+        } catch is CancellationError { return nil } catch { self.error = error.localizedDescription; return nil }
     }
 
     private func loadInvoicePayments(for invoice: InvoiceRecord) async {
@@ -1027,6 +1094,12 @@ struct JobDetailView: View {
 }
 
 /// Where the visit is, in five steps: booked, on the way, on site, working, done.
+/// An estimate opened from the job; `present` hands it to the customer as soon as it loads.
+struct OpenedEstimate: Identifiable, Hashable {
+    let id: String
+    let present: Bool
+}
+
 struct JobProgressTrack: View {
     let status: String
     private static let steps = ["Booked", "On the way", "On site", "Working", "Done"]
