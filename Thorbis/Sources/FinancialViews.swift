@@ -183,19 +183,7 @@ struct EstimateDetailView: View {
         .navigationTitle("Estimate")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .safeAreaInset(edge: .bottom) {
-            if let record, record.status == "draft", jobID != nil, TechJobFlow.canShow(record, can: estimateAbilities) {
-                // TF-05: on site, showing is sending. The draft is issued as it's handed over, no second step.
-                PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { Task { await handToCustomer() } }
-            } else if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
-                PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
-            } else if let record, record.status == "sent", session.can("estimate.approve", feature: "estimates"),
-                      (jobID != nil && (record.options ?? []).isEmpty) || session.can("estimate.send", feature: "estimates") {
-                // On site, the next step is the customer's yes: hand them the options to choose and sign.
-                // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
-                PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
-            }
-        }
+        .safeAreaInset(edge: .bottom) { estimateBar }
         .sensoryFeedback(.success, trigger: succeeded)
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
             Button(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }
@@ -208,13 +196,7 @@ struct EstimateDetailView: View {
                 }
             }
         }
-        .task {
-            await load()
-            if presentsOnOpen, !autoPresented, let record, TechJobFlow.canShow(record, can: estimateAbilities) {
-                autoPresented = true
-                await handToCustomer()
-            }
-        }
+        .task { await loadAndMaybePresent() }
         .refreshable { await load() }
         .fullScreenCover(isPresented: $showToCustomer) {
             if let record {
@@ -233,6 +215,32 @@ struct EstimateDetailView: View {
             }
         }
     }
+    @ViewBuilder private var estimateBar: some View {
+        if let record, record.status == "draft", jobID != nil, TechJobFlow.canShow(record, can: estimateAbilities) {
+            // TF-05: on site, showing is sending. The draft is issued as it's handed over, no second step.
+            PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { Task { await handToCustomer() } }
+        } else if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
+            PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
+        } else if let record, record.status == "sent", canShowSent(record) {
+            // On site, the next step is the customer's yes: hand them the options to choose and sign.
+            // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
+            PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
+        }
+    }
+
+    private func canShowSent(_ record: EstimateRecord) -> Bool {
+        guard session.can("estimate.approve", feature: "estimates") else { return false }
+        let singleScopeOnJob = jobID != nil && (record.options ?? []).isEmpty
+        return singleScopeOnJob || session.can("estimate.send", feature: "estimates")
+    }
+
+    private func loadAndMaybePresent() async {
+        await load()
+        guard presentsOnOpen, !autoPresented, let record, TechJobFlow.canShow(record, can: estimateAbilities) else { return }
+        autoPresented = true
+        await handToCustomer()
+    }
+
     private var estimateAbilities: TechJobAbilities {
         TechJobAbilities(sendEstimate: session.can("estimate.send", feature: "estimates"),
                          approveEstimate: session.can("estimate.approve", feature: "estimates"))
@@ -460,12 +468,7 @@ struct InvoiceDetailView: View {
         }
         .sensoryFeedback(.success, trigger: issued)
         .confirmationDialog("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue, titleVisibility: .visible) {
-            Button(issueCollects ? "Issue and collect" : "Issue invoice") {
-                Task {
-                    // TF-08: issuing and collecting are one step for the tech; payment opens right after.
-                    if await issue(), issueCollects, paymentModel?.canRecordPayment == true { showCollectPayment = true }
-                }
-            }
+            Button(issueCollects ? "Issue and collect" : "Issue invoice") { Task { await issueThenCollect() } }
         }
         .sheet(isPresented: $showEditDraft) {
             if let record {
@@ -509,9 +512,7 @@ struct InvoiceDetailView: View {
                 .environmentObject(api)
             }
         }
-        .sheet(isPresented: $showCollectPayment, onDismiss: {
-            if returnsWhenPaid, paymentModel?.invoice?.status == "paid" { dismiss() }
-        }) {
+        .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
                     .presentationDetents([.large])
@@ -528,6 +529,16 @@ struct InvoiceDetailView: View {
         }
         .refreshable { await load() }
     }
+    /// TF-08: issuing and collecting are one step for the tech; payment opens right after.
+    private func issueThenCollect() async {
+        guard await issue(), issueCollects, paymentModel?.canRecordPayment == true else { return }
+        showCollectPayment = true
+    }
+
+    private func returnIfPaid() {
+        if returnsWhenPaid, paymentModel?.invoice?.status == "paid" { dismiss() }
+    }
+
     private var issueCollects: Bool {
         session.can("invoice.issue", feature: "invoicing") && session.can("invoice.payment.create", feature: "payments")
     }

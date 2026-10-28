@@ -13,9 +13,9 @@ final class TechnicianFlowTests: XCTestCase {
                        sentAt: nil, approvedAt: nil, declinedAt: nil)
     }
 
-    private func invoice(_ id: String, _ status: String, total: Int = 48_000, paid: Int = 0) -> InvoiceRecord {
+    private func invoice(_ id: String, _ status: String, total: Int = 48_000, paid: Int = 0, origin: String = "job_completion") -> InvoiceRecord {
         InvoiceRecord(id: id, organizationId: "o", customerId: "c", jobId: "j", createdByUserId: "u", locationId: nil, scheduleId: nil,
-                      origin: "job_completion", sourceOperationKey: "k", sourceEstimateId: nil, sourceEstimateRevisionNumber: nil,
+                      origin: origin, sourceOperationKey: "k", sourceEstimateId: nil, sourceEstimateRevisionNumber: nil,
                       manualPhysicalServiceEvidence: nil, status: status, lines: [line(total)], linesRevision: 1, amountPaid: paid,
                       currency: "USD", issuedAt: nil, paidAt: nil, voidedAt: nil,
                       createdAt: "2026-10-28T00:00:00Z", updatedAt: "2026-10-28T00:00:00Z")
@@ -81,6 +81,14 @@ final class TechnicianFlowTests: XCTestCase {
         XCTAssertEqual(next("in_progress", invoices: [invoice("i", "paid", paid: 48_000)]), .wrapUp)
         XCTAssertEqual(next("in_progress", invoices: [invoice("i", "issued", paid: 48_000)]), .wrapUp)
         XCTAssertEqual(next("in_progress", invoices: [invoice("v", "void")]), .buildEstimate, "a voided invoice is not billing")
+    }
+
+    func testAPaidDepositStillLeavesTheJobToInvoice() {
+        let deposit = invoice("dep", "paid", total: 10_000, paid: 10_000, origin: "deposit")
+        XCTAssertEqual(next("in_progress", estimates: [estimate("a", "approved")], invoices: [deposit]), .createInvoice)
+        let owedDeposit = invoice("dep", "issued", total: 10_000, origin: "deposit")
+        XCTAssertEqual(next("in_progress", estimates: [estimate("a", "approved")], invoices: [owedDeposit]),
+                       .collect(invoiceID: "dep", due: 10_000, currency: "USD"))
     }
 
     func testAnOwedInvoiceThisRoleCannotCollectGoesToWrapUp() {
