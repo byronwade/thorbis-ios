@@ -60,11 +60,11 @@ struct RootView: View {
             #if DEBUG
             if PaperPreview.enabled, PaperPreview.screen != "whats-new" { return }
             #endif
-            // A link, notification or Live Activity opened the app for a reason; the notes wait
-            // for the next launch.
-            if store.requestedJobID != nil || store.requestedRecord != nil { whatsNew.skipThisLaunch = true }
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
+            // A link, notification or Live Activity opened the app for a reason, before or during
+            // the pause; the notes wait for the next launch.
+            if store.openedForRecord { whatsNew.skipThisLaunch = true }
             whatsNew.presentIfNeeded()
         }
         .sheet(item: $whatsNew.showing, onDismiss: { whatsNew.dismissed() }) { content in
@@ -621,6 +621,7 @@ enum PaperRoute: Hashable {
     case invoice(String)
     case followUps(jobID: String)
     case customizeMenu
+    case whatsNew
     case attention
     case payments
     case job(String)
@@ -668,6 +669,7 @@ struct PaperRouteView: View {
         case .invoice(let id): InvoiceDetailView(id: id)
         case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
         case .customizeMenu: CustomizeMenuView()
+        case .whatsNew: WhatsNewHistoryView()
         case .attention: NeedsAttentionView()
         case .payments: PaymentsSetupView()
         case .job(let id): JobDetailView(jobId: id)

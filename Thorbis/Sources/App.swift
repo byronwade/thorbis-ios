@@ -203,11 +203,18 @@ struct WorkspaceSelectionView: View {
 final class Store: ObservableObject {
     @Published var jobs: [Job] = []
     /// A job a Live Activity or link asked to open; RootView pushes it and clears this.
-    @Published var requestedJobID: String?
+    @Published var requestedJobID: String? {
+        didSet { if requestedJobID != nil { openedForRecord = true } }
+    }
+    /// Latched when a link, notification or Live Activity asked for a record this launch, since
+    /// RootView clears the request as soon as it opens it. What's new waits for the next launch.
+    var openedForRecord = false
     /// Bumped by the "Show my schedule" shortcut; RootView switches to Schedule.
     @Published var requestedSchedule = 0
     /// A customer, estimate or invoice a link asked to open; RootView pushes it and clears this.
-    @Published var requestedRecord: RecordLink?
+    @Published var requestedRecord: RecordLink? {
+        didSet { if requestedRecord != nil { openedForRecord = true } }
+    }
     @Published var customers: [Customer] = []
     @Published var error: String?
     @Published var loading = false

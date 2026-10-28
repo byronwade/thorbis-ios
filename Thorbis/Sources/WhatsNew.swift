@@ -31,22 +31,24 @@ final class WhatsNew: ObservableObject {
     /// `signedInThisLaunch`: the person came through the sign-in screen, so with nothing recorded
     /// this is a fresh install (or a first sign-in) and every note counts as seen silently.
     /// Without it, nothing recorded means an update from a build before What's new existed:
-    /// show only the newest entry.
+    /// the older entries are recorded as seen now, so only the newest one is ever shown.
     func pending(signedInThisLaunch: Bool) -> [ReleaseNote] {
         guard let seen else {
             if signedInThisLaunch {
                 markSeen(notes)
                 return []
             }
+            markSeen(Array(notes.dropFirst()))
             return Array(notes.prefix(1))
         }
         return notes.filter { !seen.contains($0.id) }
     }
 
     func presentIfNeeded(build: String = WhatsNew.currentBuild) {
-        guard presented == nil, !skipThisLaunch else { return }
+        guard presented == nil else { return }
+        // Runs first even when skipping, so a fresh install still records what it has seen.
         let unseen = pending(signedInThisLaunch: signedInThisLaunch)
-        guard !unseen.isEmpty else { return }
+        guard !unseen.isEmpty, !skipThisLaunch else { return }
         presented = WhatsNewSheetContent(notes: unseen, build: build)
         showing = presented
     }

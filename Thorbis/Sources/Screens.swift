@@ -710,6 +710,10 @@ struct MoreView: View {
                     NavigationLink(value: PaperRoute.customizeMenu) {
                         PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
                     }
+                    // MA-19: the notes stay one tap away on iPad too, where the gear opens More.
+                    NavigationLink(value: PaperRoute.whatsNew) {
+                        PaperMenuRow("What's new", symbol: "sparkles", subtitle: "What changed in recent updates", tile: Theme.markAccent)
+                    }
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
                             .font(Theme.font(15, weight: .medium)).foregroundStyle(.white)

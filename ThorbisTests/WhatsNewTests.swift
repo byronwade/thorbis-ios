@@ -53,9 +53,29 @@ final class WhatsNewTests: XCTestCase {
 
     // MA-19: updating from a build before What's new shows the newest notes only.
     func testUpdateFromBeforeWhatsNewShowsTheNewestEntry() {
-        let whatsNew = WhatsNew(defaults: defaults(), notes: [note("b"), note("a")])
+        let store = defaults()
+        let whatsNew = WhatsNew(defaults: store, notes: [note("b"), note("a")])
         whatsNew.presentIfNeeded(build: "66")
         XCTAssertEqual(whatsNew.showing?.notes.map(\.id), ["b"])
+        whatsNew.dismissed()
+        // The older entry never surfaces on the next launch.
+        let relaunch = WhatsNew(defaults: store, notes: [note("b"), note("a")])
+        relaunch.presentIfNeeded(build: "66")
+        XCTAssertNil(relaunch.showing)
+    }
+
+    // A fresh install opened from a link still records its baseline, so the next normal
+    // launch shows nothing.
+    func testFreshInstallFromALinkRecordsTheBaseline() {
+        let store = defaults()
+        let whatsNew = WhatsNew(defaults: store, notes: [note("b"), note("a")])
+        whatsNew.signedInThisLaunch = true
+        whatsNew.skipThisLaunch = true
+        whatsNew.presentIfNeeded(build: "66")
+        XCTAssertNil(whatsNew.showing)
+        let relaunch = WhatsNew(defaults: store, notes: [note("b"), note("a")])
+        relaunch.presentIfNeeded(build: "66")
+        XCTAssertNil(relaunch.showing)
     }
 
     // MA-19, MA-22: skipped builds fold together, and once dismissed they never come back.
