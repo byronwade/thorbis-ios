@@ -856,6 +856,9 @@ struct JobDetailView: View {
             let loadedJob = try await api.fieldJob(jobId)
             guard session.generation == generation else { return }
             job = loadedJob
+            // Record before the follow-up requests below, while the identity is known to match.
+            RecentItems.shared.record(.job, id: loadedJob.id, title: loadedJob.title,
+                                      subtitle: "JOB-\(loadedJob.id.suffix(4).uppercased()) · \(store.customerName(loadedJob.customerId))")
             if locations.isEmpty, session.can("customer.view", feature: "core_crm"),
                let places = try? await api.fieldLocations(loadedJob.customerId), session.generation == generation {
                 locations = places
@@ -868,8 +871,6 @@ struct JobDetailView: View {
             }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
-            RecentItems.shared.record(.job, id: loadedJob.id, title: loadedJob.title,
-                                      subtitle: "JOB-\(loadedJob.id.suffix(4).uppercased()) · \(store.customerName(loadedJob.customerId))")
             let loadedNotes = try await api.fieldNotes(jobId)
             guard session.generation == generation else { return }
             notes = loadedNotes

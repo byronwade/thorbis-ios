@@ -12,6 +12,9 @@ struct RootView: View {
     /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
     @State private var customPaths: [String: NavigationPath] = [:]
     @State private var drawerOpen = false
+    /// Live finger travel while dragging the menu open or closed.
+    @State private var drawerDrag: CGFloat = 0
+    @State private var showSettings = false
     @State private var path = NavigationPath()
     @State private var schedulePath = NavigationPath()
     @State private var jobsPath = NavigationPath()
@@ -149,7 +152,79 @@ struct RootView: View {
         }
     }
 
+    /// ChatGPT-style push: the menu sits underneath and the whole app slides right as a rounded
+    /// card, following the finger both ways. Motion is transform-only (design.thorbis.com Motion).
     private func phoneNavigation() -> some View {
+        GeometryReader { geometry in
+            let width = min(geometry.size.width * 0.82, 330)
+            let base: CGFloat = drawerOpen ? width : 0
+            let offset = min(max(base + drawerDrag, 0), width)
+            let progress = width > 0 ? offset / width : 0
+            ZStack(alignment: .leading) {
+                SideMenu(open: { item in closeDrawer(); open(item) },
+                         openRecent: { item in closeDrawer(); openRecent(item) },
+                         search: { closeDrawer(); selectedTab = PrimaryTab.search.rawValue },
+                         newJob: { closeDrawer(); createJob = true },
+                         settings: { closeDrawer(); showSettings = true },
+                         close: closeDrawer)
+                    .frame(width: width)
+                    .opacity(progress > 0 ? 1 : 0)
+                    .accessibilityHidden(!drawerOpen)
+                phoneTabs()
+                    .clipShape(RoundedRectangle(cornerRadius: progress > 0 ? 28 : 0, style: .continuous))
+                    .overlay {
+                        if progress > 0 {
+                            // D-021: a dim mix over the card, tap or drag it to close.
+                            Color.black.opacity(0.4 * progress)
+                                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                                .onTapGesture { closeDrawer() }
+                                .accessibilityLabel("Close menu")
+                                .accessibilityAddTraits(.isButton)
+                        }
+                    }
+                    .offset(x: offset)
+                    .simultaneousGesture(drawerOpen ? closeDrag(width: width) : nil)
+                    .overlay(alignment: .leading) {
+                        // Swipe in from the left edge at a tab's first screen; elsewhere the
+                        // system back swipe keeps that edge.
+                        if !drawerOpen && atTabRoot {
+                            Color.clear.frame(width: 20).contentShape(Rectangle())
+                                .gesture(openDrag(width: width))
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .ignoresSafeArea(edges: progress > 0 ? .vertical : [])
+            }
+            .background(Theme.surface.ignoresSafeArea())
+        }
+    }
+
+    private func openDrag(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { drawerDrag = max(0, $0.translation.width) }
+            .onEnded { value in
+                let open = value.translation.width > width * 0.35 || value.predictedEndTranslation.width > width * 0.6
+                settleDrawer(open: open)
+            }
+    }
+
+    private func closeDrag(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { drawerDrag = min(0, $0.translation.width) }
+            .onEnded { value in
+                let close = -value.translation.width > width * 0.3 || -value.predictedEndTranslation.width > width * 0.5
+                settleDrawer(open: !close)
+            }
+    }
+
+    private func settleDrawer(open: Bool) {
+        withAnimation(.spring(duration: 0.28, bounce: 0)) {
+            drawerOpen = open
+            drawerDrag = 0
+        }
+    }
+
+    private func phoneTabs() -> some View {
         TabView(selection: $selectedTab) {
             ForEach(layout.visibleTabs(session)) { item in
                 Tab(item.tabTitle, systemImage: item.symbol, value: item.rawValue) { tabRoot(item) }
@@ -161,9 +236,9 @@ struct RootView: View {
                 PaperGlobalSearch(embedded: true)
             }
         }
-        // The avatar opens the side menu; settings are one more tap from there.
-        .environment(\.paperShowMenu, { Task { @MainActor in withAnimation(.easeOut(duration: 0.2)) { drawerOpen = true } } })
-        .overlay { sideMenu }
+        // The menu button and the avatar open the side menu.
+        .environment(\.paperShowMenu, { Task { @MainActor in settleDrawer(open: true) } })
+        .sheet(isPresented: $showSettings) { SettingsView() }
         .background(Theme.background)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
@@ -225,6 +300,7 @@ struct RootView: View {
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
             case "new-job": createJob = true
+            case "settings": showSettings = true
             case "side-menu":
                 RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
                 RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
@@ -269,31 +345,18 @@ struct RootView: View {
     }
 
     /// Tabs stay stable for every role; a tab the role cannot use says so (HIG-005).
-    /// D-021: the overlay is a mix (a dim fill), not a blur; the menu enters from its edge.
-    @ViewBuilder private var sideMenu: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                if drawerOpen {
-                    Color.black.opacity(0.45).ignoresSafeArea()
-                        .onTapGesture { closeDrawer() }
-                        .transition(.opacity)
-                        .accessibilityLabel("Close menu")
-                        .accessibilityAddTraits(.isButton)
-                    SideMenu(open: { item in closeDrawer(); open(item) },
-                             openRecent: { item in closeDrawer(); openRecent(item) },
-                             search: { closeDrawer(); selectedTab = PrimaryTab.search.rawValue },
-                             newJob: { closeDrawer(); createJob = true },
-                             settings: { closeDrawer(); primaryTab = .more },
-                             close: closeDrawer)
-                        .frame(width: min(geometry.size.width * 0.84, 340))
-                        .transition(.move(edge: .leading))
-                        .gesture(DragGesture().onEnded { if $0.translation.width < -60 { closeDrawer() } })
-                }
-            }
+    private var atTabRoot: Bool {
+        switch selectedTab {
+        case PrimaryTab.schedule.rawValue: schedulePath.isEmpty
+        case PrimaryTab.jobs.rawValue: jobsPath.isEmpty
+        case PrimaryTab.customers.rawValue: customersPath.isEmpty
+        case PrimaryTab.more.rawValue: morePath.isEmpty
+        case PrimaryTab.search.rawValue: false
+        default: customPaths[selectedTab]?.isEmpty ?? true
         }
     }
 
-    private func closeDrawer() { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
+    private func closeDrawer() { settleDrawer(open: false) }
 
     /// A tab if it is one; otherwise More with that place pushed.
     private func open(_ item: MenuItem) {
@@ -309,7 +372,26 @@ struct RootView: View {
     private func openRecent(_ item: RecentItems.Item) {
         switch item.kind {
         case .job:
-            store.requestedJobID = item.id
+            guard session.can("job.view", feature: "jobs") else { return }
+            if store.jobs.contains(where: { $0.id == item.id }) {
+                store.requestedJobID = item.id
+                return
+            }
+            // A job opened from company search may not be in the loaded list yet; open it by ID.
+            let tabs = layout.visibleTabs(session)
+            if tabs.contains(.schedule) {
+                primaryTab = .schedule
+                schedulePath = NavigationPath()
+                schedulePath.append(PaperRoute.job(item.id))
+            } else if tabs.contains(.jobs) {
+                primaryTab = .jobs
+                jobsPath = NavigationPath()
+                jobsPath.append(PaperRoute.job(item.id))
+            } else {
+                primaryTab = .more
+                morePath = NavigationPath()
+                morePath.append(PaperRoute.job(item.id))
+            }
         case .customer:
             guard session.can("customer.view", feature: "core_crm") else { return }
             // The list cache leaves out archived customers, so fall back to the saved entry and let
@@ -496,6 +578,7 @@ enum PaperRoute: Hashable {
     case customizeMenu
     case attention
     case payments
+    case job(String)
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -542,6 +625,7 @@ struct PaperRouteView: View {
         case .customizeMenu: CustomizeMenuView()
         case .attention: NeedsAttentionView()
         case .payments: PaymentsSetupView()
+        case .job(let id): JobDetailView(jobId: id)
         case .local(let section):
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
