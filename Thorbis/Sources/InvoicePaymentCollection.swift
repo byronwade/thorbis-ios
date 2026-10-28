@@ -339,7 +339,7 @@ struct InvoicePaymentsSection: View {
             VStack(alignment: .trailing, spacing: 4) {
                 let amount = payment.netAmount ?? payment.amount
                 Text(money(amount.amount, currency: amount.currency))
-                    .font(Theme.font(14, weight: .semibold))
+                    .font(Theme.font(14, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                 if payment.status == .refunded {
                     Text("Refunded").font(Theme.font(11)).foregroundStyle(Theme.warning)
@@ -421,7 +421,7 @@ private struct InvoicePaymentDetailSheet: View {
                     VStack(alignment: .leading, spacing: 6) {
                         let received = refundModel.payment.netAmount ?? refundModel.payment.amount
                         Text(money(received.amount, currency: received.currency))
-                            .font(Theme.font(30, weight: .semibold))
+                            .font(Theme.font(30, weight: .medium))
                             .tracking(-0.45)
                         Text("Net received")
                             .font(Theme.font(13))
@@ -523,7 +523,7 @@ private struct InvoicePaymentDetailSheet: View {
                     .foregroundStyle(Theme.destructive)
                     .frame(width: 26)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(Theme.font(14, weight: .semibold))
+                    Text(title).font(Theme.font(14, weight: .medium))
                     Text("Full payment · \(money(refundModel.payment.amount.amount, currency: refundModel.payment.amount.currency))")
                         .font(Theme.font(12))
                         .foregroundStyle(Theme.muted)
@@ -580,7 +580,7 @@ private struct InvoicePaymentRefundForm: View {
                 if model.didComplete {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("Refund confirmed", systemImage: "checkmark.circle.fill")
-                            .font(Theme.font(18, weight: .semibold))
+                            .font(Theme.font(18, weight: .medium))
                             .foregroundStyle(Theme.success)
                         Text("Thorbis confirmed the full refund of \(amountText).")
                             .font(Theme.font(14))
@@ -663,7 +663,7 @@ private struct InvoicePaymentRefundForm: View {
                     .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(Theme.warning)
                 Text(amountText)
-                    .font(Theme.font(30, weight: .semibold))
+                    .font(Theme.font(30, weight: .medium))
                     .tracking(-0.45)
                 Text("This refunds the entire recorded payment. Partial refunds are not available here.")
                     .font(Theme.font(13))
@@ -674,7 +674,7 @@ private struct InvoicePaymentRefundForm: View {
             .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
 
             Text("Reason for refund")
-                .font(Theme.font(14, weight: .semibold))
+                .font(Theme.font(14, weight: .medium))
                 .accessibilityAddTraits(.isHeader)
             TextEditor(text: Binding(
                 get: { model.reasonDraft },
@@ -722,7 +722,7 @@ private struct InvoicePaymentRefundStatusPanel: View {
         if let intent = model.intent {
             VStack(alignment: .leading, spacing: 12) {
                 Label(title(for: intent.state), systemImage: symbol(for: intent.state))
-                    .font(Theme.font(15, weight: .semibold))
+                    .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.warning)
                 Text(message(for: intent.state))
                     .font(Theme.font(13))
@@ -857,7 +857,7 @@ struct InvoicePaymentCollectionSheet: View {
                     VStack(alignment: .leading, spacing: 18) {
                         if let payLink, let shareURL = payLink.shareURL {
                             Text("Secure payment link ready")
-                                .font(Theme.font(18, weight: .semibold))
+                                .font(Theme.font(18, weight: .medium))
                             Text("Share the invoice balance with \(customerName).")
                                 .font(Theme.font(13))
                                 .foregroundStyle(Theme.muted)
@@ -918,7 +918,7 @@ struct InvoicePaymentCollectionSheet: View {
                 TextField("0.00", text: $amountText)
                     .keyboardType(.decimalPad)
                     .focused($amountFocused)
-                    .font(Theme.monoFont(32, weight: .semibold))
+                    .font(Theme.monoFont(32, weight: .medium))
                     .tracking(-0.7)
                     .multilineTextAlignment(.leading)
                     .fixedSize()
@@ -961,7 +961,7 @@ struct InvoicePaymentCollectionSheet: View {
                     .frame(width: 60, height: 60)
                     .overlay(Circle().stroke(Theme.brand, lineWidth: 1.5))
                 Text(tapToPayHeadline)
-                    .font(Theme.font(17, weight: .semibold))
+                    .font(Theme.font(17, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                 Text("Accepts contactless cards, Apple Pay and other wallets")
                     .font(Theme.font(13))

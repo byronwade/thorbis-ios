@@ -352,7 +352,7 @@ private struct ScheduleHero<Commit: View>: View {
                 NavigationLink(value: job) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(job.title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            Text(job.title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .multilineTextAlignment(.leading)
                             Text(customer).font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }

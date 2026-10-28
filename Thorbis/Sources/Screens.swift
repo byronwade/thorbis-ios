@@ -48,7 +48,7 @@ struct NewJobSheet: View {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 2) {
                             TextField("Job title", text: $draft.title, axis: .vertical)
-                                .font(Theme.font(26, weight: .semibold))
+                                .font(Theme.font(26, weight: .medium))
                                 .tracking(-0.39)
                                 .textFieldStyle(.plain)
                                 .accessibilityLabel("Job title")
@@ -455,7 +455,7 @@ struct CustomerContactSheet: View {
 
             ZStack {
                 Text(contact == nil ? "New contact" : "Edit contact")
-                    .font(Theme.font(17, weight: .semibold))
+                    .font(Theme.font(17, weight: .medium))
                 // MA-16: Cancel leading; the one commit is the ink button at the bottom.
                 HStack {
                     Button("Cancel") { dismiss() }
@@ -508,7 +508,7 @@ struct CustomerContactSheet: View {
                                 showsEmail = false
                             } label: {
                                 Image(systemName: "xmark")
-                                    .font(Theme.font(12, weight: .semibold))
+                                    .font(Theme.font(12, weight: .medium))
                                     .foregroundStyle(Theme.muted)
                                     .frame(width: 44, height: 46)
                             }
@@ -712,7 +712,7 @@ struct MoreView: View {
                     }
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(.white)
                             .frame(width: 40, height: 40).background(Theme.brandText, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
                             Text(session.user?.name ?? "Account").font(Theme.font(16, weight: .medium))
