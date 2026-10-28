@@ -19,6 +19,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Thorbis uses the camera to add job photos, such as before and after shots, to the job you are working on.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Thorbis uses Face ID so only you can leave customer mode after handing your device to a customer.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

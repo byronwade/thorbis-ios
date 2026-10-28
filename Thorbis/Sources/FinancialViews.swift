@@ -706,7 +706,7 @@ struct NewEstimateView: View {
             }
             .sheet(isPresented: $showPriceBook) {
                 NavigationStack {
-                    PaperPriceBookPicker(api: api, currency: "USD") { item in
+                    PaperPriceBookPicker(api: api, currency: "USD", customerID: customerID.isEmpty ? nil : customerID) { item in
                         guard lines.count < 500, item.sellPrice.currency == "USD", item.revision > 0 else { return }
                         lines.append(DraftLine(description: item.description, quantity: 1,
                                                price: String(format: "%.2f", Double(item.sellPrice.amount) / 100),
