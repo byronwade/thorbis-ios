@@ -69,10 +69,10 @@ final class JobHoursTests: XCTestCase {
     // MARK: JH-05 My week
 
     private func listJob(_ id: String, assignee: String?, enRoute: String?, arrived: String?, completed: String?,
-                         status: String = "completed") -> Job {
+                         status: String = "completed", resumed: String? = nil) -> Job {
         Job(id: id, customerId: "cust", title: "Job \(id)", status: status, createdAt: nil, updatedAt: nil,
             allowedTransitions: nil, scheduledFor: nil, assignedToUserId: assignee, locationId: nil,
-            enRouteAt: enRoute, arrivedAt: arrived, pausedAt: nil, completedAt: completed)
+            enRouteAt: enRoute, arrivedAt: arrived, pausedAt: nil, lastResumeAuditId: resumed, completedAt: completed)
     }
 
     func testMyWeekListsOnlyMyJobsByTheDayIStartedThem() {
@@ -98,5 +98,13 @@ final class JobHoursTests: XCTestCase {
     func testMyWeekIsEmptyWithoutASignedInTech() {
         let jobs = [listJob("a001", assignee: nil, enRoute: "2026-10-28T13:00:00Z", arrived: nil, completed: nil, status: "en_route")]
         XCTAssertEqual(JobWeek.make(jobs, userID: nil, now: now).minutes, 0)
+    }
+
+    func testAResumedListJobSaysItIncludesPausedTimeLikeTheDetail() {
+        let listed = listJob("a001", assignee: "me", enRoute: nil, arrived: "2026-10-28T13:00:00Z", completed: nil,
+                             status: "in_progress", resumed: "audit")
+        let record = job("in_progress", arrived: "2026-10-28T13:00:00Z", resumed: "audit")
+        XCTAssertEqual(JobHours.make(listed, now: now)?.line, JobHours.make(record, now: now)?.line)
+        XCTAssertEqual(JobHours.make(listed, now: now)?.line.hasSuffix("includes paused time"), true)
     }
 }

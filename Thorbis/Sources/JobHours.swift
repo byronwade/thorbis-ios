@@ -21,7 +21,7 @@ struct JobHours: Equatable {
 
     static func make(_ job: Job, now: Date = Date()) -> JobHours? {
         make(status: job.status, enRouteAt: job.enRouteAt, arrivedAt: job.arrivedAt, completedAt: job.completedAt,
-             wasPaused: job.pausedAt != nil, now: now)
+             wasPaused: job.pausedAt != nil || job.lastResumeAuditId != nil, now: now)
     }
 
     /// Nil when the job hasn't started moving yet.
@@ -34,11 +34,12 @@ struct JobHours: Equatable {
         guard enRoute != nil || arrived != nil || completed != nil else { return nil }
 
         var parts: [String] = []
-        var seconds: TimeInterval = 0
+        var total = 0
         var durations = 0
         func span(_ name: String, _ interval: TimeInterval, soFar: Bool = false) {
             parts.append("\(name) \(duration(interval))\(soFar ? " so far" : "")")
-            seconds += max(0, interval)
+            // Add the same rounded-down minutes the label shows, so totals match the parts.
+            total += max(0, Int(interval / 60))
             durations += 1
         }
 
@@ -65,7 +66,7 @@ struct JobHours: Equatable {
         guard !parts.isEmpty else { return nil }
         // JH-04: pausing doesn't stop the count in this slice, so say so.
         if arrived != nil, wasPaused { parts.append("includes paused time") }
-        return JobHours(line: parts.joined(separator: " · "), hasDuration: durations > 0, minutes: Int(seconds / 60))
+        return JobHours(line: parts.joined(separator: " · "), hasDuration: durations > 0, minutes: total)
     }
 
     /// Hours and minutes, rounded down to the minute: "0 h 24 min" (JH-02).

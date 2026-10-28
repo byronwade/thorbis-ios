@@ -32,6 +32,7 @@ struct Job: Codable, Identifiable, Hashable {
     var enRouteAt: String? = nil
     var arrivedAt: String? = nil
     var pausedAt: String? = nil
+    var lastResumeAuditId: String? = nil
     var completedAt: String? = nil
 
     var shortRef: String { "JOB-" + String(id.suffix(4)).uppercased() }

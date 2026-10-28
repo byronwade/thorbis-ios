@@ -21,36 +21,15 @@ struct MyWeekView: View {
                     }
                     .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
 
-                    PaperDetailRow(label: "Total") {
-                        Text(JobHours.minutes(week.minutes)).font(Theme.monoFont(15, weight: .medium))
+                    if let error = store.error {
+                        ErrorBanner(message: error) { _ = await store.refresh(api) }
+                            .padding(.bottom, 12)
                     }
-                    .padding(.horizontal, Theme.gutter)
-
-                    ForEach(week.days.reversed()) { day in
-                        PaperGroupHeader(title: day.start.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) {
-                            if !day.rows.isEmpty {
-                                Text(JobHours.minutes(day.minutes)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                            }
-                        }
-                        .padding(.horizontal, Theme.gutter).padding(.top, 16)
-                        if day.rows.isEmpty {
-                            Text("No jobs recorded").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                                .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                        }
-                        ForEach(day.rows) { row in
-                            NavigationLink(value: PaperRoute.job(row.id)) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(row.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                    Text("\(row.reference) · \(row.hours.line)")
-                                        .font(row.hours.hasDuration ? Theme.monoFont(12) : Theme.font(13))
-                                        .foregroundStyle(Theme.muted)
-                                }
-                                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                                .padding(.horizontal, Theme.gutter)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
+                    // Nothing loaded yet is not a week of zero hours.
+                    if store.jobs.isEmpty, store.loading, store.error == nil {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
+                    } else if !store.jobs.isEmpty || store.error == nil {
+                        weekList(week)
                     }
                 }
                 .padding(.bottom, 24)
@@ -59,5 +38,40 @@ struct MyWeekView: View {
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .refreshable { _ = await store.refresh(api) }
+    }
+
+    @ViewBuilder
+    private func weekList(_ week: JobWeek) -> some View {
+        PaperDetailRow(label: "Total") {
+            Text(JobHours.minutes(week.minutes)).font(Theme.monoFont(15, weight: .medium))
+        }
+        .padding(.horizontal, Theme.gutter)
+
+        ForEach(week.days.reversed()) { day in
+            PaperGroupHeader(title: day.start.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) {
+                if !day.rows.isEmpty {
+                    Text(JobHours.minutes(day.minutes)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.horizontal, Theme.gutter).padding(.top, 16)
+            if day.rows.isEmpty {
+                Text("No jobs recorded").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+            }
+            ForEach(day.rows) { row in
+                NavigationLink(value: PaperRoute.job(row.id)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                        Text("\(row.reference) · \(row.hours.line)")
+                            .font(row.hours.hasDuration ? Theme.monoFont(12) : Theme.font(13))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
