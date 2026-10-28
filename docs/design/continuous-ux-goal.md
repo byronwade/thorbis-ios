@@ -37,3 +37,15 @@ where an artboard is incomplete or a native interaction requires adaptation.
 
 This is ongoing product work. A successful build or one polished screen does
 not establish whole-application completion.
+
+## Payment and delivery priorities
+
+Continue researching and simplifying the invoice/payment flow, and add payment
+methods supported by the canonical backend and connected provider. Distinguish
+collecting funds from recording a payment taken elsewhere. Preserve accurate
+pending, failed and confirmed states and all existing financial authority.
+
+Upload a new TestFlight build after each verified, useful batch of user-visible
+changes. Confirm processing and distribution to the intended testers, and keep
+release notes current. Do not wait for whole-app perfection to deliver a scoped
+beta for device testing. Keep unverified native behavior explicit.

@@ -87,5 +87,5 @@ The Task 1 largest-text visual check exposed existing fixed-height clipping. Fix
 - [x] Stop the initial archive before upload; compare the latest uploaded source and main.
 - [x] Preserve main's TechJobFlow, JobMenu, onboarding, estimate builder, money hierarchy, record sections, fitted tabs and Reduce Motion. Remove the superseded JobPrimaryAction and its tests; restore main Schedule unchanged.
 - [x] Carry forward adaptive shared controls and local metadata heights. Adapt native tests to the current guided payment step and menu labels. Add the required What's new entry, including missing booking-call release coverage.
-- [ ] Generate and run the integrated full scheme. Inspect current screenshots. Expected: all tests pass, the payment step remains primary, all secondary actions remain reachable, text grows without clipping.
-- [ ] Archive and upload a new sequential TestFlight build using existing Xcode signing, verify processing and tester-group availability in App Store Connect, and record actual status.
+- [x] Generate and run the integrated full scheme. Inspect current screenshots. Expected: all tests pass, the payment step remains primary, all secondary actions remain reachable, text grows without clipping.
+- [x] Archive and upload a new sequential TestFlight build using existing Xcode signing, verify processing and tester-group availability in App Store Connect, and record actual status.

@@ -1,6 +1,6 @@
 # Thorbis 1.0 (70)
 
-28 October 2026 · TestFlight beta · uploaded, Apple processing
+28 October 2026 · TestFlight beta · processed and available to Internal Testers
 
 ## Source and scope
 
@@ -33,8 +33,8 @@ coverage, plus the existing notes for newer main features.
 - [x] Release archive succeeded at `/private/tmp/thorbis-70-integrated.5FVKb2/Thorbis.xcarchive`; app and widget both contain build 70.
 - [x] `codesign --verify --deep --strict` passed for `com.thorbis.field`, version 1.0 (70).
 - [x] App Store Connect accepted the upload at 12:31 EDT; Xcode reported `Uploaded Thorbis` and `EXPORT SUCCEEDED`.
-- [ ] Apple finishes processing build 70.
-- [ ] Confirm build 70 is assigned to the intended tester group and available.
+- [x] Apple finished processing; build 70 appears in the processed build list.
+- [x] Build 70 is assigned to **Internal Testers**, whose membership includes both existing testers. Automatic distribution for Xcode builds is enabled. [App Store Connect build](https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/d92397cb-fad9-4d6d-8c4e-26ced0219f79).
 
 No backend deployment or schema migration is included. The preceding beta
 remains available for comparison; a blocking regression warrants expiring
