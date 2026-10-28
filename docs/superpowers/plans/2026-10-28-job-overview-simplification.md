@@ -62,7 +62,7 @@ The older `/mobile-app` URL in the audit currently returns 404. Use the live Nat
 - [x] Implement the policy and wire it into Schedule and Job Detail, including the fresher Schedule hero status. Consolidate secondary actions and keep existing handlers and capability checks.
 - [x] Run the policy tests plus `JobFilteringTests`, `FieldOutboxTests`, `FieldAPITests`, and `JobActionAPITests`. Expected: all pass.
 - [x] Run the native interaction checks for secondary-menu reachability, scheduling presentation, and in-progress Wrap up navigation. Visually check dispatched/in-progress Job Overview and the More/status menus on iPhone, plus the adaptive iPad record view. Check light/dark and accessibility text size; record native checks separately from unit tests.
-- [ ] Run the full iOS test target and `git diff --check`, record the evidence and feature-access map in the UX audit, then commit the batch. Expected: zero test failures and no whitespace errors. Record existing warnings and untested physical-device/assistive-input checks honestly.
+- [x] Run the full iOS test target and `git diff --check`, record the evidence and feature-access map in the UX audit, then commit the batch. Expected: zero test failures and no whitespace errors. Record existing warnings and untested physical-device/assistive-input checks honestly.
 
 ### Task 2: Let controls grow with accessible text
 
@@ -75,5 +75,5 @@ The Task 1 largest-text visual check exposed existing fixed-height clipping. Fix
 - [x] Add hosted layout tests comparing standard/enlarged primary-button and tab heights, and wide/narrow long-label wrapping in Chip and FlowRow. Add a native check that the largest text size stacks contact actions and grows the primary action.
 - [x] Run these new checks before changing the controls. Expected: assertions fail for fixed heights and unbounded horizontal content.
 - [x] Replace fixed text-control heights with padded minimums, permit multiline chip labels, constrain oversized FlowRow measurements, and use the existing accessibility-size stacking convention for the whole quick-action group. Keep decorative avatar/glyph dimensions and all actions.
-- [ ] Re-run layout, appearance, and native interaction checks. Expected: all pass; inspect the enlarged dark preview and the wide iPad record layout.
-- [ ] Run the full app scheme once after both tasks, record the HIG matrix and remaining manual-device gaps, then commit and request the whole-branch review.
+- [x] Re-run layout, appearance, and native interaction checks. Expected: all pass; inspect the enlarged dark preview and the wide iPad record layout.
+- [x] Run the full app scheme once after both tasks, record the HIG matrix and remaining manual-device gaps, then commit and request the whole-branch review.

@@ -47,7 +47,8 @@ iPhone 17 Pro Simulator, iOS 26.0 (23A343), arm64, 28 October 2026:
   passed after vertical layout. Standard More and Wrap up navigation also pass.
 - Focused action/layout/appearance/native checks: **20 passed, zero failures**.
   [Machine-readable summary](evidence/2026-10-28-job-overview/focused-tests.json).
-- Full scheme verification and the final review are recorded below when complete.
+- Full app scheme: **323 passed, zero failures, zero skipped**, including all three native UI tests and the scroll-reachability check. [Machine-readable summary](evidence/2026-10-28-job-overview/full-tests.json).
+- `git diff --check`: passed. The final review is recorded below when complete.
 
 The native tests use read-only DEBUG preview fixtures. They prove local
 navigation and layout, not a successful live dispatch, payment, or closeout.
@@ -61,10 +62,11 @@ Inspected Simulator screenshots separately from automated assertions:
 
 - [Standard light Overview](evidence/2026-10-28-job-overview/overview-light.png).
 - [Native More menu](evidence/2026-10-28-job-overview/more-menu.png).
+- [Wide iPad Schedule and record](evidence/2026-10-28-job-overview/ipad-wide.png), iPad Pro 13-inch (M5), iPadOS 26.0. The raw Simulator framebuffer is rotated; the three-column view and inner More toolbar are visible.
 - Largest dark text: [before](evidence/2026-10-28-job-overview/accessible-before.png)
   and [after](evidence/2026-10-28-job-overview/accessible-dark.png).
 
-The enlarged layout requires scrolling to subsequent content; the primary
+The [native scroll check](evidence/2026-10-28-job-overview/accessible-scrolled.png) confirms Directions remains reachable. The enlarged layout requires scrolling to subsequent content; the primary
 action remains pinned. A screenshot alone does not establish focus order,
 gesture behavior, or physical-device performance.
 
