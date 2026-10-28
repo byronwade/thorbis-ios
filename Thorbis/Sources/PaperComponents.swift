@@ -518,3 +518,87 @@ struct FlowRow: Layout {
     }
 }
 
+
+/// One "more" control for an editable line (MA-12): keeps the description wide instead of
+/// three icon buttons beside it.
+struct LineItemActions: View {
+    let name: String
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let moveUp: () -> Void
+    let moveDown: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        Menu { LineItemMenuItems(canMoveUp: canMoveUp, canMoveDown: canMoveDown, moveUp: moveUp, moveDown: moveDown, remove: remove) } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Actions for \(name.isEmpty ? "line item" : name)")
+    }
+}
+
+struct LineItemMenuItems: View {
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let moveUp: () -> Void
+    let moveDown: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        if canMoveUp { Button(action: moveUp) { Label("Move up", systemImage: "arrow.up") } }
+        if canMoveDown { Button(action: moveDown) { Label("Move down", systemImage: "arrow.down") } }
+        Button(role: .destructive, action: remove) { Label("Remove line", systemImage: "trash") }
+    }
+}
+
+/// A number field on a line: a 44-tall well so the thumb can hit it, readable mono type.
+struct LineNumberField: View {
+    let label: String
+    let placeholder: String
+    @Binding var text: String
+    var prefix: String?
+    var decimal = false
+    var width: CGFloat = 64
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let prefix { Text(prefix).font(Theme.monoFont(15)).foregroundStyle(Theme.muted) }
+            TextField(placeholder, text: $text)
+                .keyboardType(decimal ? .decimalPad : .numberPad)
+                .font(Theme.monoFont(15, weight: .medium))
+                .multilineTextAlignment(.trailing)
+                .accessibilityLabel(label)
+        }
+        .padding(.horizontal, 10)
+        .frame(width: width, height: 44)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+    }
+}
+
+extension View {
+    /// Number pads have no return key: one Done above the keyboard (MA-16).
+    func keyboardDoneButton() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                .frame(minWidth: 44, minHeight: 44)
+            }
+        }
+    }
+
+    /// Cancel and swipe never throw away edits silently (MA-16, MA-17).
+    func discardChangesGuard(hasChanges: Bool, busy: Bool, isPresented: Binding<Bool>, discard: @escaping () -> Void) -> some View {
+        interactiveDismissDisabled(busy || hasChanges)
+            .confirmationDialog("Discard your changes?", isPresented: isPresented, titleVisibility: .visible) {
+                Button("Discard changes", role: .destructive, action: discard)
+                Button("Keep editing", role: .cancel) {}
+            }
+    }
+}

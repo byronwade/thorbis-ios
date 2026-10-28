@@ -60,15 +60,9 @@ struct PaperJobInvoiceContent: View {
         Group {
             switch PaperInvoiceContentState.resolve(invoiceID: invoice.id, model: paymentModel) {
             case .loading:
-                ProgressView("Loading invoice…")
-                    .frame(maxWidth: .infinity, minHeight: 100)
+                SkeletonRows(count: 4, leading: false, inset: 0)
             case .failed(let message):
-                VStack(alignment: .leading, spacing: 8) {
-                    ErrorBanner(message: message)
-                    Button("Retry invoice") { Task { await paymentModel.load() } }
-                        .font(Theme.font(13, weight: .medium))
-                        .frame(minHeight: 44, alignment: .leading)
-                }
+                ErrorBanner(message: message) { await paymentModel.load() }
             case .ready:
                 VStack(alignment: .leading, spacing: 18) {
                     balanceHeader

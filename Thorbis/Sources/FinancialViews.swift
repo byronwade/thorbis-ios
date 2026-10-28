@@ -24,7 +24,7 @@ struct EstimatesView: View {
                             PaperDocumentRow(reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
                                              subtitle: store.customerName(record.customerId), status: record.status,
                                              amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(RowPressStyle())
                     }
                 }
                 if !loading && records.isEmpty && error == nil {
@@ -76,7 +76,7 @@ struct EstimateDetailView: View {
                     commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased()) · \(store.customerName(record.customerId))", title: record.title,
                                       status: record.status.statusLabel, date: record.createdAt)
                     Text("Line items")
-                        .font(Theme.font(16, weight: .semibold))
+                        .font(Theme.font(17, weight: .medium))
                         .padding(.top, 8)
                     VStack(spacing: 0) {
                         ForEach(record.lines) { line in CommercialLineView(line: line) }
@@ -108,7 +108,7 @@ struct EstimateDetailView: View {
                     .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                     ForEach(record.options ?? []) { option in
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(option.title).font(Theme.font(16, weight: .semibold))
+                            Text(option.title).font(Theme.font(17, weight: .medium))
                             Text(option.description).font(Theme.font(13)).foregroundStyle(Theme.muted)
                             ForEach(option.lines) { line in CommercialLineView(line: line) }
                             HStack {
@@ -121,7 +121,7 @@ struct EstimateDetailView: View {
                         }
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     }
-                    Text("Actions").font(Theme.font(16, weight: .semibold)).padding(.top, 8)
+                    Text("Actions").font(Theme.font(17, weight: .medium)).padding(.top, 8)
                     NavigationLink { CommercialDocumentView(path: "/v1/estimates/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
                         commercialAction("View PDF", icon: "doc.text")
                     }
@@ -145,7 +145,7 @@ struct EstimateDetailView: View {
                     if let revision = record.currentRevisionNumber {
                         Text("Revision \(revision)").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
                     }
-                } else if error == nil { ProgressView("Loading estimate…").frame(maxWidth: .infinity) }
+                } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
             .padding(.horizontal, 20)
             .padding(.top, 24)
@@ -167,7 +167,7 @@ struct EstimateDetailView: View {
             }
         }
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
-            Button(action) { Task { await performAction() } }
+            Button(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }
         }
         .sheet(isPresented: $showRevisionEditor) {
             if let record {
@@ -242,7 +242,7 @@ struct InvoicesView: View {
                                              subtitle: record.status == "issued" ? (due.map { "\(money($0, currency: record.currency)) due" } ?? "Balance unavailable") : "Paid \(money(record.amountPaid, currency: record.currency))",
                                              status: record.status,
                                              amount: total.map { money($0, currency: record.currency) })
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(RowPressStyle())
                     }
                 }
                 if !loading && records.isEmpty && error == nil {
@@ -303,7 +303,7 @@ struct InvoiceDetailView: View {
                         Button { showSignature = true } label: { commercialAction("Get customer signature", icon: "signature") }
                             .buttonStyle(.plain)
                     }
-                    Text("Line items").font(Theme.font(16, weight: .semibold)).padding(.top, 8)
+                    Text("Line items").font(Theme.font(17, weight: .medium)).padding(.top, 8)
                     VStack(spacing: 0) {
                         ForEach(record.lines) { line in CommercialLineView(line: line) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
@@ -323,7 +323,7 @@ struct InvoiceDetailView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Text("Actions").font(Theme.font(16, weight: .semibold)).padding(.top, 8)
+                    Text("Actions").font(Theme.font(17, weight: .medium)).padding(.top, 8)
                     if record.status != "draft", record.status != "void" {
                         Button { showToCustomer = true } label: { commercialAction("Show to customer", icon: "person.crop.rectangle") }
                             .buttonStyle(.plain)
@@ -331,7 +331,7 @@ struct InvoiceDetailView: View {
                     NavigationLink { CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
                         commercialAction("View PDF", icon: "doc.text")
                     }
-                } else if error == nil { ProgressView("Loading invoice…").frame(maxWidth: .infinity) }
+                } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
             .padding(.horizontal, 20)
             .padding(.top, 24)
@@ -513,9 +513,9 @@ private func commercialDetail(_ label: String, _ value: String) -> some View {
 private func commercialAction(_ title: String, icon: String) -> some View {
     HStack(spacing: 10) {
         Image(systemName: icon).foregroundStyle(Theme.brandText)
-        Text(title).font(Theme.font(14, weight: .medium))
+        Text(title).font(Theme.font(15, weight: .medium))
         Spacer()
-        Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.muted)
+        Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
     }
     .foregroundStyle(Theme.foreground)
     .padding(15)

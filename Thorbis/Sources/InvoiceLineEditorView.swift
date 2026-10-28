@@ -12,6 +12,7 @@ struct InvoiceLineEditorView: View {
     @State private var showPriceBook = false
     @State private var confirmReload = false
     @State private var confirmIssue = false
+    @State private var confirmDiscard = false
     @State private var busy = false
     @State private var error: String?
     @State private var staleRevision = false
@@ -140,17 +141,20 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }.disabled(busy)
+                Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
             }
         }
+        .keyboardDoneButton()
+        .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
                 if canIssue {
                     Button("Save draft") { Task { await save() } }
-                        .font(Theme.font(15, weight: .semibold))
+                        .font(Theme.font(17, weight: .medium))
                         .foregroundStyle(Theme.foreground)
-                        .frame(width: 132, height: 46)
+                        .frame(width: 132, height: Theme.commitHeight)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                        .buttonStyle(PressStyle())
                         .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
                     PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
                         .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
@@ -293,68 +297,31 @@ private struct EditableInvoiceLineRow: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .center, spacing: 8) {
                 TextField("Line item description", text: $line.description, axis: .vertical)
-                    .font(Theme.font(14, weight: .medium))
+                    .font(Theme.font(15, weight: .medium))
                     .lineLimit(1...3)
                     .accessibilityLabel("Line item description")
-                Button(action: moveUp) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .disabled(!canMoveUp)
-                .accessibilityLabel("Move \(line.description.isEmpty ? "line item" : line.description) up")
-                Button(action: moveDown) {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .disabled(!canMoveDown)
-                .accessibilityLabel("Move \(line.description.isEmpty ? "line item" : line.description) down")
-                Button(action: remove) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.destructive)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("Remove \(line.description.isEmpty ? "line item" : line.description)")
+                LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
+                                moveUp: moveUp, moveDown: moveDown, remove: remove)
             }
-            HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Text("Qty").font(Theme.font(12)).foregroundStyle(Theme.muted)
-                    TextField("1", text: $line.quantity)
-                        .keyboardType(.numberPad)
-                        .font(Theme.monoFont(12))
-                        .frame(width: 48)
-                        .accessibilityLabel("Quantity")
-                }
+            HStack(spacing: 8) {
+                Text("Qty").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                LineNumberField(label: "Quantity", placeholder: "1", text: $line.quantity)
                 if let unit = line.unitLabel, !unit.isEmpty {
-                    Text("/ \(unit)").font(Theme.font(11)).foregroundStyle(Theme.muted)
+                    Text("/ \(unit)").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 8)
-                HStack(spacing: 4) {
-                    Text("$").foregroundStyle(Theme.muted)
-                    TextField("0.00", text: $line.unitPrice)
-                        .keyboardType(.decimalPad)
-                        .font(Theme.monoFont(13, weight: .medium))
-                        .multilineTextAlignment(.trailing)
-                        .frame(minWidth: 78, maxWidth: 112)
-                        .accessibilityLabel("Unit price in dollars")
-                }
+                LineNumberField(label: "Unit price in dollars", placeholder: "0.00", text: $line.unitPrice,
+                                prefix: "$", decimal: true, width: 128)
             }
             if case .priceBookSelection = line.source {
                 Text("Price Book selection · server verifies the revision")
-                    .font(Theme.font(11)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
             } else if case .retainedPriceBook = line.source {
                 Text("Price Book source retained")
-                    .font(Theme.font(11)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
             } else if case .estimate = line.source {
                 Text("Estimate source retained")
-                    .font(Theme.font(11)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
