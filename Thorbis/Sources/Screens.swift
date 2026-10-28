@@ -703,6 +703,14 @@ struct MoreView: View {
                 }
                 group("Account") {
                     if session.can("organization.settings.edit") {
+                        NavigationLink(value: PaperRoute.businessSetup) {
+                            PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Company details, payments, services and team", tile: Theme.markAccent)
+                        }
+                        NavigationLink(value: PaperRoute.companyDetails) {
+                            PaperMenuRow("Company details", symbol: "building.2", subtitle: "Name, address and phone customers see", tile: Theme.markOlive)
+                        }
+                    }
+                    if session.can("organization.settings.edit") {
                         NavigationLink(value: PaperRoute.payments) {
                             PaperMenuRow("Payments", symbol: "creditcard", subtitle: "Stripe setup, card payments and payouts", tile: Theme.markForest)
                         }

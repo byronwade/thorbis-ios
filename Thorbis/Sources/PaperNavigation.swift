@@ -607,6 +607,8 @@ enum PaperRoute: Hashable {
     case customizeMenu
     case attention
     case payments
+    case businessSetup
+    case companyDetails
     case job(String)
 }
 
@@ -654,6 +656,8 @@ struct PaperRouteView: View {
         case .customizeMenu: CustomizeMenuView()
         case .attention: NeedsAttentionView()
         case .payments: PaymentsSetupView()
+        case .businessSetup: BusinessSetupView()
+        case .companyDetails: CompanyDetailsView()
         case .job(let id): JobDetailView(jobId: id)
         case .local(let section):
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
