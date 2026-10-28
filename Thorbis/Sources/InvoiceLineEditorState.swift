@@ -184,6 +184,30 @@ struct InvoiceLineEditorState: Equatable {
         ))
     }
 
+    func quantity(ofPriceBookItem itemID: String) -> Int? {
+        var total = 0
+        for line in lines {
+            let sourceItemID: String?
+            let sourceRevision: Int?
+            switch line.source {
+            case .priceBookSelection(let id, let revision):
+                sourceItemID = id
+                sourceRevision = revision
+            case .retainedPriceBook(let source) where source.kind == "price_book":
+                sourceItemID = source.priceBookItemId
+                sourceRevision = source.priceBookRevision
+            default: continue
+            }
+            guard sourceItemID == itemID, let sourceRevision, (1...Int(Int32.max)).contains(sourceRevision),
+                  let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  (1...100_000).contains(quantity) else { continue }
+            let sum = total.addingReportingOverflow(quantity)
+            guard !sum.overflow else { return nil }
+            total = sum.partialValue
+        }
+        return total > 0 ? total : nil
+    }
+
     func makeRequest() throws -> FieldInvoiceLinesRequest {
         guard invoice.currency == "USD" else { throw InvoiceLineEditorError.unsupportedCurrency }
         guard !lines.isEmpty else { throw InvoiceLineEditorError.noLines }
