@@ -243,6 +243,8 @@ struct CustomerDetailView: View {
                                   email: contacts.first(where: \.primary)?.email ?? record?.email,
                                   directions: (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
                     .padding(.horizontal, Theme.gutter).padding(.bottom, 14)
+                // Next visit sits above everything else: it's why most people open a customer.
+                if session.can("job.view", feature: "jobs") { nextVisit.padding(.horizontal, Theme.gutter).padding(.bottom, 8) }
                 if let error { ErrorBanner(message: error) }
                 if record == nil && error == nil { ProgressView("Loading customer…").padding(20) }
                 details
@@ -363,6 +365,32 @@ struct CustomerDetailView: View {
             }
         }.padding(.horizontal, 20).padding(.bottom, 18)
     }
+    /// The customer's open job first: what a dispatcher or tech opens a customer to find.
+    @ViewBuilder private var nextVisit: some View {
+        let open = jobs.filter { !["completed", "canceled"].contains($0.status) }
+            .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
+        if let job = open.first {
+            VStack(alignment: .leading, spacing: 0) {
+                PaperGroupHeader(title: open.count > 1 ? "Next visit · \(open.count) open" : "Next visit")
+                NavigationLink(value: job) {
+                    HStack(spacing: 12) {
+                        StatusRing(status: job.status).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                            Text([JobFiltering.date(job.scheduledFor).map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()) } ?? "No time yet",
+                                  job.status.statusLabel].joined(separator: " · "))
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle)
+                    }
+                    .frame(minHeight: 52).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     /// Job texts: what the customer told staff about text messages for their jobs.
     private var smsConsentRow: some View {
         HStack {
