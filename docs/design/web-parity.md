@@ -23,7 +23,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Billing schedules | Done | List, schedule progress (billed, remaining, deposits, retainage), bill the remainder, release retainage, and deposit request on a job. Each command keeps its idempotency key until the server answers. Gated by `progress_billing`. |
 | Pipeline (requests) | Not applicable | The web page is a "Pipeline is on the way" placeholder with no data behind it. |
 | Price book, price item | Done | Browse, detail, and for owners: add, edit (new revision) and remove items. |
-| Properties, equipment, fleet, agreements | Partial | Equipment and memberships are on the server (customer equipment with warranty, membership plans, member pricing on estimates). Fleet and properties stay "On this phone" records. |
+| Properties, equipment, fleet, agreements | Partial | Equipment and memberships are on the server (customer equipment with warranty, membership plans, member pricing on estimates). Properties lists every service and billing address across customers (the same bounded union of `/v1/customers/{id}/locations` the web page uses) and opens the customer. Fleet stays an "On this phone" record, as on the web. |
 | Team, team member, roles, role members | Done | Team & permissions list; owners change a person's role from the phone. Invite people by email with a role, see and cancel pending invites, edit roles and per-person access. |
 | Inbox, notices | Done | Staff notices with mark-read. |
 | Search | Done | Searches the whole company through the Search Gateway (`GET /v1/search`): jobs, customers, estimates, invoices and billing schedules. Offline, or if the gateway fails, it searches the jobs and customers saved on the phone and says so. |

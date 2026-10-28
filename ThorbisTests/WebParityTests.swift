@@ -28,4 +28,24 @@ final class WebParityTests: XCTestCase {
         let day = ISO8601DateFormatter().date(from: "2026-10-28T12:00:00Z")!
         XCTAssertEqual(ReportExport.all[3].fileName(on: day), "thorbis-revenue-2026-10-28.xlsx")
     }
+
+    func testPropertiesUnionSkipsArchivedCapsAtFiftyAndSortsByAddress() {
+        let customers = (0..<60).map { Customer(id: "c\($0)", name: "Customer \($0)", archived: $0 == 0, createdAt: nil) }
+        let union = PropertiesUnion.customers(from: customers)
+        XCTAssertEqual(union.included.count, 50)
+        XCTAssertEqual(union.included.first?.id, "c1")
+        XCTAssertTrue(union.capped)
+
+        func location(_ id: String, _ address: String, kind: String = "service") -> ServiceLocationRecord {
+            ServiceLocationRecord(id: id, organizationId: "o", customerId: "c1", label: "Home", kind: kind, address: address,
+                                  notes: nil, coordinates: nil, gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil,
+                                  createdAt: "2026-10-28T12:00:00Z", updatedAt: "2026-10-28T12:00:00Z")
+        }
+        let rows = PropertiesUnion.rows([(customers[1], [location("b", "9 Oak St"), location("a", "12 Elm St", kind: "billing")])])
+        XCTAssertEqual(rows.map(\.id), ["a", "b"])
+        XCTAssertEqual(rows[0].kindLabel, "Billing")
+        XCTAssertTrue(rows[1].matches("oak"))
+        XCTAssertTrue(rows[1].matches("customer 1"))
+        XCTAssertFalse(rows[1].matches("pine"))
+    }
 }
