@@ -283,28 +283,35 @@ enum StaffUnlock {
     }
 }
 
-/// Customer-facing type and touch sizes: 20 pt body, 56 pt commit buttons.
+/// Customer-facing sizes (design.thorbis.com customer presentation): 20 pt body, 17 pt smallest
+/// text, 56 pt tap targets, commits 56 pt on iPhone and 60 pt on iPad.
 enum CustomerModeStyle {
     static let body: CGFloat = 20
+    static let smallest: CGFloat = 17
+    static let target: CGFloat = 56
     static let commitHeight: CGFloat = 56
+    static let regularCommitHeight: CGFloat = 60
     static let readableWidth: CGFloat = 560
 }
 
-/// The one commit on a customer-facing screen: 56 pt tall, full readable width.
+/// The one commit on a customer-facing screen: ink fill (blue is only a pointer), full readable
+/// width, 56 pt on iPhone and 60 pt on iPad.
 struct CustomerCommitButton: View {
     let title: String
     var icon: String? = nil
     var busy = false
     let action: () -> Void
+    @Environment(\.horizontalSizeClass) private var sizeClass
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                if busy { ProgressView().tint(.white) } else if let icon { Image(systemName: icon) }
+                if busy { ProgressView().tint(Theme.background) } else if let icon { Image(systemName: icon) }
                 Text(title).font(Theme.font(CustomerModeStyle.body, weight: .semibold))
             }
-            .frame(maxWidth: .infinity).frame(height: CustomerModeStyle.commitHeight)
-            .foregroundStyle(.white)
-            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 14))
+            .frame(maxWidth: .infinity)
+            .frame(height: sizeClass == .regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
+            .foregroundStyle(Theme.background)
+            .background(Theme.foreground, in: RoundedRectangle(cornerRadius: 14))
         }
         .disabled(busy)
     }
@@ -332,7 +339,8 @@ struct CustomerModeContainer<Content: View>: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Task { await unlock() } } label: {
-                        Image(systemName: "lock").frame(width: 44, height: 44).contentShape(Rectangle())
+                        Image(systemName: "lock").font(.system(size: 20))
+                            .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target).contentShape(Rectangle())
                     }
                     .accessibilityLabel("Technician: unlock to leave customer mode")
                     .disabled(unlocking)
@@ -355,7 +363,8 @@ struct CustomerModeContainer<Content: View>: View {
             VStack(spacing: 8) {
                 CustomerCommitButton(title: "Technician: unlock", icon: "faceid", busy: unlocking) { Task { await unlock() } }
                 Button("Go back") { handingBack = false }
-                    .font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.brandText).frame(minHeight: 44)
+                    .font(Theme.font(CustomerModeStyle.body, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target)
             }
             .frame(maxWidth: CustomerModeStyle.readableWidth)
         }
@@ -452,7 +461,7 @@ struct CustomerSelfEditView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Text me about my appointments").font(Theme.font(CustomerModeStyle.body, weight: .medium))
                                 Text("On my way, arrival and job updates. Reply STOP any time.")
-                                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                    .font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
                             }
                         }
                         .tint(Theme.brand)
@@ -479,7 +488,7 @@ struct CustomerSelfEditView: View {
                             }
                             .padding(.bottom, 12)
                         }
-                        Text("Add someone").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 2)
+                        Text("Add someone").font(Theme.font(CustomerModeStyle.smallest, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 2)
                         field("Name", text: draft.newContactName, content: .name,
                               error: showErrors ? draft.wrappedValue.newContactError : nil)
                         field("Phone", text: draft.newContactPhone, content: .telephoneNumber, keyboard: .phonePad)
@@ -568,7 +577,7 @@ struct CustomerSelfEditView: View {
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+            Text(title).font(Theme.font(CustomerModeStyle.smallest, weight: .semibold)).foregroundStyle(Theme.muted)
                 .accessibilityAddTraits(.isHeader)
             content()
         }
@@ -579,7 +588,7 @@ struct CustomerSelfEditView: View {
                        keyboard: UIKeyboardType = .default, axis: Axis = .horizontal, error: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                Text(label).font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
                 TextField("", text: text, axis: axis)
                     .font(Theme.font(CustomerModeStyle.body))
                     .textContentType(content)
@@ -591,10 +600,10 @@ struct CustomerSelfEditView: View {
                     .accessibilityLabel(label)
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
-            .frame(minHeight: 60, alignment: .leading)
+            .frame(minHeight: 68, alignment: .leading)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(error == nil ? Theme.border : Theme.destructive))
-            if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
+            if let error { Text(error).font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.destructive) }
         }
     }
 
