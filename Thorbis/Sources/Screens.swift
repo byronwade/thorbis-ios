@@ -48,7 +48,7 @@ struct NewJobSheet: View {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 2) {
                             TextField("Job title", text: $draft.title, axis: .vertical)
-                                .font(Theme.font(26, weight: .medium))
+                                .font(Theme.font(24, weight: .medium))
                                 .tracking(-0.39)
                                 .textFieldStyle(.plain)
                                 .accessibilityLabel("Job title")
@@ -521,7 +521,7 @@ struct CustomerContactSheet: View {
                             focusedField = .email
                         } label: {
                             Text("+ Add email")
-                                .font(Theme.font(14, weight: .medium))
+                                .font(Theme.font(15, weight: .medium))
                                 .foregroundStyle(Theme.brandText)
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
@@ -715,7 +715,7 @@ struct MoreView: View {
                             .font(Theme.font(15, weight: .medium)).foregroundStyle(.white)
                             .frame(width: 40, height: 40).background(Theme.brandText, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(session.user?.name ?? "Account").font(Theme.font(16, weight: .medium))
+                            Text(session.user?.name ?? "Account").font(Theme.font(15, weight: .medium))
                             if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
                         }
                         Spacer()

@@ -403,10 +403,10 @@ struct CustomerDetailView: View {
             if let record {
                 if let phone = record.phone { detailRow("Phone", value: phone) }
                 if let email = record.email {
-                    HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(14)).frame(minHeight: 44)
+                    HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(15)).frame(minHeight: 44)
                 }
                 if let address = record.address {
-                    HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(14)).frame(minHeight: 44)
+                    HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(15)).frame(minHeight: 44)
                 }
                 if let industry = record.industry { detailRow("Industry", value: industry) }
                 if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel) }
@@ -465,7 +465,7 @@ struct CustomerDetailView: View {
                 Text(smsConsentLabel).foregroundStyle(Theme.foreground)
             }
         }
-        .font(Theme.font(14))
+        .font(Theme.font(15))
         .frame(minHeight: 44)
         .confirmationDialog(smsConsentChoice == true ? "Record that the customer agreed to job texts?" : "Record that the customer asked to stop job texts?",
                             isPresented: Binding(get: { smsConsentChoice != nil }, set: { if !$0 { smsConsentChoice = nil } }),
@@ -478,7 +478,7 @@ struct CustomerDetailView: View {
             Text("Only record what the customer told you themselves.")
         }
         .overlay(alignment: .bottomTrailing) {
-            if let smsConsentError { Text(smsConsentError).font(Theme.font(11)).foregroundStyle(Theme.destructive).offset(y: 14) }
+            if let smsConsentError { Text(smsConsentError).font(Theme.font(12)).foregroundStyle(Theme.destructive).offset(y: 14) }
         }
     }
 
@@ -523,7 +523,7 @@ struct CustomerDetailView: View {
                 HStack(spacing: 10) {
                     Avatar(name: contact.name, size: 28)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(contact.name).font(Theme.font(14, weight: .medium))
+                        Text(contact.name).font(Theme.font(15, weight: .medium))
                         Text([contact.role, contact.primary ? "Primary" : nil].compactMap { $0 }.joined(separator: " · ")).font(Theme.font(12)).foregroundStyle(Theme.muted)
                     }
                     Spacer(minLength: 2)
@@ -563,7 +563,7 @@ struct CustomerDetailView: View {
             ForEach(locations) { location in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(location.label).font(Theme.font(14, weight: .medium)).lineLimit(1)
+                        Text(location.label).font(Theme.font(15, weight: .medium)).lineLimit(1)
                         Spacer(minLength: 4)
                         Text(location.kind.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         if canEdit {
@@ -590,7 +590,7 @@ struct CustomerDetailView: View {
                         Image(systemName: location.coordinates == nil ? "mappin.slash" : "mappin.and.ellipse")
                         Text(location.coordinates.map { String(format: "%.4f, %.4f", $0.latitude, $0.longitude) } ?? "No map pin")
                     }
-                    .font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                 }.padding(.vertical, 5)
             }
             if locations.isEmpty { emptyText("No locations") }
@@ -691,7 +691,7 @@ struct CustomerDetailView: View {
                                 .background(Theme.fill, in: Circle())
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(event.summary).font(Theme.font(14, weight: .medium)).lineLimit(3)
+                                Text(event.summary).font(Theme.font(15, weight: .medium)).lineLimit(3)
                                 Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
                             }
                         }
@@ -768,7 +768,7 @@ struct CustomerDetailView: View {
         }
     }
     private func detailRow(_ title: String, value: String) -> some View {
-        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(14)).frame(minHeight: 44)
+        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(15)).frame(minHeight: 44)
     }
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }

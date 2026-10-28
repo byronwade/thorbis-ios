@@ -289,7 +289,7 @@ extension PaperMenuRow where Trailing == AnyView {
     init(_ title: String, symbol: String, subtitle: String? = nil, value: String? = nil, tile: Color? = nil) {
         self.init(title: title, symbol: symbol, subtitle: subtitle, tile: tile) {
             AnyView(HStack(spacing: 6) {
-                if let value { Text(value).font(Theme.font(14)).foregroundStyle(Theme.muted) }
+                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted) }
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
             })
         }
@@ -452,7 +452,7 @@ struct OutboxReviewSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("These changes were made without signal and the server didn't accept them. Open the job to redo what's still needed.")
-                        .font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.bottom, 12)
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 12)
                     ForEach(outbox.needsReview) { entry in
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.destructive).padding(.top, 2)
@@ -460,7 +460,7 @@ struct OutboxReviewSheet: View {
                                 Text("\(entry.summary) · \(store.jobs.first { $0.id == entry.jobID }?.title ?? "Job")")
                                     .font(Theme.font(15, weight: .medium))
                                 Text(reason(entry)).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                             }
                             Spacer(minLength: 8)
                             if case .rejected = entry.state {

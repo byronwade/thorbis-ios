@@ -536,7 +536,7 @@ struct RootView: View {
                         .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
                         .accessibilityHidden(true)
-                    Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(14, weight: .medium)).lineLimit(1)
+                    Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .medium)).lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.down").font(.system(size: 10))
                 }.padding(.horizontal, 8).frame(minHeight: 44)
@@ -558,7 +558,7 @@ struct RootView: View {
             Button { settings = true } label: {
                 HStack(spacing: 9) {
                     Avatar(name: session.user?.name ?? "", size: 26)
-                    Text(session.user?.name ?? "Account").font(Theme.font(14)).lineLimit(1)
+                    Text(session.user?.name ?? "Account").font(Theme.font(15)).lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "gearshape").font(.system(size: 15)).foregroundStyle(Theme.muted)
                 }.padding(.horizontal, 8).frame(minHeight: 44)
@@ -572,9 +572,9 @@ struct RootView: View {
         Button { path = NavigationPath(); tab = target } label: {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.system(size: 17)).frame(width: 18).foregroundStyle(Theme.muted)
-                Text(title).font(Theme.font(14, weight: tab == target ? .medium : .regular))
+                Text(title).font(Theme.font(15, weight: tab == target ? .medium : .regular))
                 Spacer()
-                if let count { Text("\(count)").font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted) }
+                if let count { Text("\(count)").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted) }
             }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
         }.accessibilityAddTraits(tab == target ? .isSelected : [])
     }
@@ -583,7 +583,7 @@ struct RootView: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.system(size: 17)).frame(width: 18).foregroundStyle(Theme.muted)
-                Text(title).font(Theme.font(14))
+                Text(title).font(Theme.font(15))
                 Spacer(minLength: 0)
             }.padding(.horizontal, 8).frame(minHeight: 44).contentShape(Rectangle())
         }
