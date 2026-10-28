@@ -92,7 +92,7 @@ struct ThorbisApp: App {
             case .choosingWorkspace, .noWorkspace:
                 WorkspaceSelectionView()
             case .ready:
-                RootView().id(session.generation)
+                RootView().id(session.generation).businessSetupPrompt()
             }
         }
     }
@@ -103,6 +103,8 @@ struct ThorbisApp: App {
                 #if DEBUG
                 if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
                     CustomerPresentationPreview(screen: PaperPreview.screen)
+                } else if PaperPreview.enabled, let screen = PaperPreview.onboardingScreen {
+                    OnboardingPreview(screen: screen)
                 } else {
                     appContent
                 }
@@ -183,19 +185,8 @@ extension ThorbisApp {
 struct WorkspaceSelectionView: View {
     @EnvironmentObject var session: SessionController
     var body: some View {
-        NavigationStack {
-            List {
-                if session.organizations.isEmpty {
-                    ContentUnavailableView("No workspace yet", systemImage: "building.2", description: Text("Your account has no workspace membership. Ask your workspace administrator for an invitation."))
-                } else {
-                    ForEach(session.organizations) { organization in
-                        Button(organization.name) { Task { await session.selectOrganization(id: organization.id) } }
-                    }
-                }
-                Button("Sign out", role: .destructive) { Task { await session.signOut() } }
-            }
-            .navigationTitle("Choose workspace")
-        }
+        // A new owner names their company here; see Onboarding.swift.
+        WorkspaceGateView()
     }
 }
 
