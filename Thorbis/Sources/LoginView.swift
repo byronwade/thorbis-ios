@@ -10,6 +10,7 @@ struct LoginView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var showingReset = false
+    @State private var showPassword = false
     @FocusState private var focused: FocusField?
 
     private enum FocusField { case email, password }
@@ -32,7 +33,7 @@ struct LoginView: View {
                     .padding(.top, 6)
 
                 label("Email").padding(.top, 32)
-                TextField("you@company.com", text: $email)
+                TextField("Work email", text: $email)
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -52,14 +53,32 @@ struct LoginView: View {
                         .foregroundStyle(Theme.brandText)
                 }
                 .padding(.top, 16)
-                SecureField("Password", text: $password)
+                HStack(spacing: 0) {
+                    Group {
+                        if showPassword {
+                            TextField("Password", text: $password)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        } else {
+                            SecureField("Password", text: $password)
+                        }
+                    }
                     .textContentType(.password)
                     .textFieldStyle(.plain)
                     .focused($focused, equals: .password)
                     .submitLabel(.go)
                     .onSubmit { Task { await signIn() } }
-                    .paperField()
-                    .padding(.top, 8)
+                    // Typing a password on a phone in a truck is error-prone; let people check it.
+                    Button { showPassword.toggle(); focused = .password } label: {
+                        Image(systemName: showPassword ? "eye.slash" : "eye").foregroundStyle(Theme.muted)
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(showPassword ? "Hide password" : "Show password")
+                    // Full 44pt target without making this field taller than Email.
+                    .padding(.vertical, -10).padding(.trailing, -10)
+                }
+                .paperField()
+                .padding(.top, 8)
 
                 if let message = error ?? session.error {
                     // MA-15: plain words in body colour; only the mark is tinted.
