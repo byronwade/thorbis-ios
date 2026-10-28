@@ -247,16 +247,12 @@ struct InvoicePaymentsSection: View {
             VStack(spacing: 0) {
                 if let loadError = model.loadError {
                     VStack(alignment: .leading, spacing: 8) {
-                        ErrorBanner(message: loadError)
-                        Button("Retry payment history") { Task { await model.load() } }
-                            .font(Theme.font(13, weight: .medium))
-                            .frame(minHeight: 44, alignment: .leading)
+                        ErrorBanner(message: loadError) { await model.load() }
                     }
                     .padding(15)
                 } else if model.isLoading && !model.historyComplete {
-                    ProgressView("Loading payments…")
-                        .font(Theme.font(13))
-                        .frame(maxWidth: .infinity, minHeight: 72)
+                    SkeletonRows(count: 2, leading: false, inset: 15)
+                        .padding(.vertical, 8)
                 } else if model.payments.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("No payments recorded yet.")
