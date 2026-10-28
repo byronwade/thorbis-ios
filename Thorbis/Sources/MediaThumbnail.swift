@@ -51,6 +51,7 @@ final class MediaThumbnailCache {
 
 struct MediaThumbnail: View {
     let record: MediaAssetRecord
+    var attempt = 0
     @EnvironmentObject private var api: APIClient
     @Environment(\.displayScale) private var scale
     @State private var image: UIImage?
@@ -68,13 +69,14 @@ struct MediaThumbnail: View {
         }
         .clipped()
         .accessibilityHidden(true)
-        // Keyed on upload state too: a photo first seen mid-upload loads once the server confirms it.
-        .task(id: "\(record.id)|\(record.uploadState)") {
+        // Keyed on upload state (a photo first seen mid-upload loads once stored) and on the
+        // refresh attempt (pull-to-refresh retries a failed download; cached ones return at once).
+        .task(id: "\(record.id)|\(record.uploadState)|\(attempt)") {
             guard record.uploadState == "stored", MediaThumbnailCache.isImage(record) else { return }
             if let cached = MediaThumbnailCache.shared.image(for: record.id) { image = cached; return }
             let loaded = await MediaThumbnailCache.shared.load(record, api: api, pixelSize: 240 * scale)
             withAnimation(.easeOut(duration: 0.15)) { image = loaded }
-            failed = loaded == nil
+            failed = loaded == nil && !Task.isCancelled
         }
     }
 }
