@@ -32,11 +32,11 @@ Info.plist; a release-artifact audit helper and testflight.sh.
 permission. Build intent defaults false. Release helper verifies an enabled build's signed
 payment.acceptance entitlement and provisioning allowance; it never grants them.
 
-- [ ] Write meaningful tests proving an unqualified build overrides other eligibility and starts no provider request. Run RED before implementation.
-- [ ] Add the fail-closed policy and guard both UI selection and controller entry. Use clear unavailable copy; keep all Terminal implementation paths.
-- [ ] Add artifact audit to release preparation. Verify legacy archive70 is rejected as unverifiable, the next explicit-disabled archive passes, and enabled-policy fixtures missing signed/profile allowance fail.
-- [ ] Run readiness/API/payment-state checks. Expected: green, no new provider request in unavailable cases.
-- [ ] For this first useful release, run the full scheme and a fresh review, archive/audit/upload the next unused build, and verify internal distribution before starting the QR/receipt feature batch.
+- [x] Write meaningful tests proving an unqualified build overrides other eligibility and starts no provider request. Run RED before implementation.
+- [x] Add the fail-closed policy and guard both UI selection and controller entry. Use clear unavailable copy; keep all Terminal implementation paths.
+- [x] Add artifact audit to release preparation. Verify legacy archive70 is rejected as unverifiable, the next explicit-disabled archive passes, and enabled-policy fixtures missing signed/profile allowance fail.
+- [x] Run readiness/API/payment-state checks. Expected: green, no new provider request in unavailable cases.
+- [x] For this first useful release, run the full scheme and a fresh review, archive/audit/upload the next unused build, and verify internal distribution before starting the QR/receipt feature batch.
 
 ### Task 2: Clarify received-payment choices
 
@@ -46,11 +46,11 @@ FinancialActionAPI.swift display names; choice/API tests; native UI checks.
 **Interface:** received ACH maps to existing .ach, external card to .card. Pending requests
 restore their same method and amount. Retained last-used behavior stays cash/check/link.
 
-- [ ] Add tests for pending-method restoration and bank/card receipt mapping; run RED.
-- [ ] Keep Cash and Check direct. Replace the duplicate advanced row/picker with one native
+- [x] Add tests for pending-method restoration and bank/card receipt mapping; run RED.
+- [x] Keep Cash and Check direct. Replace the duplicate advanced row/picker with one native
   menu for ACH transfer received and card collected elsewhere, retaining all four tenders.
-- [ ] Use received-payment copy and confirmations; keep mutation/idempotency/recovery handlers.
-- [ ] Verify native selection/reachability and canonical API payloads without submitting real payments.
+- [x] Use received-payment copy and confirmations; keep mutation/idempotency/recovery handlers.
+- [x] Verify native selection/reachability and canonical API payloads without submitting real payments.
 
 ### Task 3: Add scan-to-pay handoff
 
@@ -61,10 +61,10 @@ sheet destination; DEBUG-only ready-link preview; native UI checks; ReleaseNotes
 returns a bounded scannable image or nil. Destination uses the existing model and recreate/share/copy
 handlers; cancellation and Done preserve invoice context.
 
-- [ ] Write expiry/invalid-URL and independent QR decode tests; run RED.
-- [ ] Extract the existing destination, add QR with Share/Copy alternatives, clear expiry/error
+- [x] Write expiry/invalid-URL and independent QR decode tests; run RED.
+- [x] Extract the existing destination, add QR with Share/Copy alternatives, clear expiry/error
   recovery, and canonical invoice refresh. Avoid duplicate link/provider attempts.
-- [ ] Verify normal, enlarged and dark layouts and the native handoff/receipt menu paths.
-- [ ] Add current What's new notes. Run the appropriate focused checks, then one full scheme.
-- [ ] Fresh review; resolve blocking findings with tests. Archive/upload next unused build and
+- [x] Verify normal, enlarged and dark layouts and the native handoff/receipt menu paths.
+- [x] Add current What's new notes. Run the appropriate focused checks, then one full scheme.
+- [x] Fresh review; resolve blocking findings with tests. Archive/upload next unused build and
   verify Apple processing and intended group distribution. Record native test gaps honestly.

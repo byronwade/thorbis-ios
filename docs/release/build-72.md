@@ -1,7 +1,9 @@
 # Thorbis 1.0 (72)
 
-Uploaded to App Store Connect on 2026-10-28 at14:15EDT. Apple processing and
-Internal Testers assignment are pending verification.
+Uploaded to App Store Connect on 2026-10-28 at14:15EDT. Apple processing completed; the build is assigned to Internal Testers (two existing members).
+What to Test notes are saved.
+
+Build: https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/70ac097b-acb6-49ff-a4c8-55c7ae9a5dc1
 
 Customers can scan a QR code to open the existing secure card checkout on their
 own phone. Share and Copy remain alternatives. Expired or malformed links offer
