@@ -512,7 +512,7 @@ struct CustomerDetailView: View {
 
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { contactSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
+            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { contactSheet = .add } label: { Image(systemName: "plus").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle()) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
             if let contactMutationError {
                 Text(contactMutationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -541,7 +541,7 @@ struct CustomerDetailView: View {
                                 showRemoveContactConfirmation = true
                             }.disabled(isMutatingContact)
                         } label: {
-                            Image(systemName: "ellipsis").frame(width: 30, height: 32).frame(width: 44, height: 44).contentShape(Rectangle())
+                            Image(systemName: "ellipsis").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
                         }
                         .accessibilityLabel("Contact actions for \(contact.name)")
                         .disabled(isMutatingContact)
@@ -553,7 +553,7 @@ struct CustomerDetailView: View {
     }
     private var locationsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { locationSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Add location") } }
+            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { locationSheet = .add } label: { Image(systemName: "plus").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle()) }.accessibilityLabel("Add location") } }
             if let locationError {
                 Text(locationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
