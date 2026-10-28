@@ -134,6 +134,11 @@ struct TeamView: View {
                 if roles.count > 2 { PaperTabs(options: roles, selection: $filter) }
                 if let error { ErrorBanner(message: error) { await load() } }
                 if loading && members.isEmpty { SkeletonRows(count: 6) }
+                if visible.isEmpty && !members.isEmpty {
+                    PaperEmptyState(symbol: "magnifyingglass", title: "No one matches",
+                                    message: "Nobody on the team matches that search or role.",
+                                    actionTitle: "Clear filters") { search = ""; filter = "All" }
+                }
                 VStack(alignment: .leading, spacing: 0) {
                     if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count) }
                     ForEach(visible) { member in

@@ -439,6 +439,13 @@ struct WorkspacePriceBookView: View {
         }
         .frame(minHeight: 50)
         .contentShape(Rectangle())
+        // MA-12: the quick copies people reach for while quoting on the phone.
+        .contextMenu {
+            Button { UIPasteboard.general.string = money(item.sellPrice.amount, currency: item.sellPrice.currency) } label: {
+                Label("Copy price", systemImage: "dollarsign")
+            }
+            Button { UIPasteboard.general.string = item.description } label: { Label("Copy name", systemImage: "doc.on.doc") }
+        }
     }
 
     private func refresh() async {
