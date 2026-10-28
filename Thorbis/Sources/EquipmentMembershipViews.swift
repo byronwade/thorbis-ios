@@ -131,7 +131,7 @@ struct EquipmentEditor: View {
                 if existing != nil {
                     Section { Button("Remove equipment", role: .destructive) { confirmRemove = true } }
                 }
-                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+                if let error { Section { ListErrorRow(message: error) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.background)
