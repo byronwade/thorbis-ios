@@ -246,6 +246,7 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var usage: [String: PriceBookUsage] = [:]
     private(set) var organizationID: String?
     private var lastRefresh: Date?
+    private var loadingOrganizationID: String?
 
     /// Shows the cached catalog for `organizationID` right away, then reloads every page.
     func refresh(api: APIClient, organizationID: String?, force: Bool = false) async {
@@ -257,9 +258,17 @@ final class PriceBookCatalog: ObservableObject {
             lastRefresh = nil
         }
         if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < 60 { return }
-        guard !loading else { return }
+        // One load per organization: switching workspaces starts the new one's load, and the
+        // old load's result is dropped below because the organization no longer matches.
+        guard loadingOrganizationID != organizationID else { return }
+        loadingOrganizationID = organizationID
         loading = true
-        defer { loading = false }
+        defer {
+            if loadingOrganizationID == organizationID {
+                loadingOrganizationID = nil
+                loading = false
+            }
+        }
         do {
             var all: [PriceBookListItem] = []
             var seen = Set<String>()
@@ -340,6 +349,8 @@ final class PriceBookCatalog: ObservableObject {
     func clear() {
         organizationID = nil
         lastRefresh = nil
+        loadingOrganizationID = nil
+        loading = false
         usage = [:]
         apply([])
         if let directory = Self.directory { try? FileManager.default.removeItem(at: directory) }

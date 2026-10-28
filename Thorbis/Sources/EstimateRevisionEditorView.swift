@@ -141,6 +141,7 @@ struct EstimateRevisionEditorView: View {
                 if canEdit {
                     EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
                                       prompt: searchPrompt, finish: finishSearch)
+                        .disabled(busy)
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -283,6 +284,7 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func add(_ item: PriceBookListItem) {
+        guard !busy else { return }
         var addedLine = false
         withAnimation(EstimateLineGroupsEditor.spring) {
             mutateTargetLines { addedLine = $0.addPriceBookItem(item, to: target.group) != nil }
@@ -297,6 +299,7 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func addCustom(_ text: String) {
+        guard !busy else { return }
         let group = target.group ?? (kind == .material ? .material : .work)
         var lineID: UUID?
         mutateTargetLines { lineID = $0.addCustomLine(text, to: group) }
@@ -365,6 +368,7 @@ struct EstimateRevisionEditorView: View {
         do {
             let latest = try await api.fieldEstimate(estimate.id)
             editor = EstimateRevisionEditorState(estimate: latest)
+            classifyLines()
             staleRevision = false
             error = nil
         } catch is CancellationError {

@@ -130,4 +130,25 @@ final class EstimateBuilderTests: XCTestCase {
         let request = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)
         XCTAssertEqual(request.lines.map(\.description), ["Repair", "Capacitor"], "saved order is the order on screen")
     }
+
+    func testACatalogRefreshNeverUndoesAGroupThePersonChose() throws {
+        let estimateJSON = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"sent","currentRevisionNumber":2,"title":"Repair","lines":[{"id":"00000000-0000-4000-8000-000000000011","description":"Capacitor","quantity":1,"unitPrice":{"amount":14500,"currency":"USD"},"source":{"kind":"price_book","priceBookItemId":"00000000-0000-4000-8000-000000000001","priceBookRevision":3,"addedByUserId":"00000000-0000-4000-8000-000000000004","capturedAt":"2026-10-26T12:00:00Z"}},{"id":"00000000-0000-4000-8000-000000000012","description":"Repair","quantity":1,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000004","capturedAt":"2026-10-26T12:00:00Z"}}],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let estimate = try JSONDecoder().decode(EstimateRecord.self, from: Data(estimateJSON.utf8))
+        var state = EstimateRevisionEditorState(estimate: estimate)
+        let kinds = ["00000000-0000-4000-8000-000000000001": "material"]
+
+        // The person drags the capacitor ahead of Repair in Work before the catalog arrives.
+        let capacitor = state.lines[0].id, repair = state.lines[1].id
+        state.lines.moveLine(id: capacitor, before: repair, group: .work)
+        state.classify(kinds: kinds)
+        XCTAssertEqual(state.lines.map(\.description), ["Capacitor", "Repair"])
+        XCTAssertEqual(state.lines.map(\.group), [.work, .work])
+
+        // A line the catalog already sorted keeps the person's later move too.
+        var loaded = EstimateRevisionEditorState(estimate: estimate)
+        loaded.classify(kinds: kinds)
+        loaded.lines.setGroup(id: loaded.lines[1].id, .work)
+        loaded.classify(kinds: kinds)
+        XCTAssertEqual(loaded.lines.map(\.group), [.work, .work])
+    }
 }
