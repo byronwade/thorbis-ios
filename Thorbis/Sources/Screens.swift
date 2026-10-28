@@ -20,6 +20,8 @@ struct NewJobSheet: View {
     @State private var savedJobID: String?
     @State private var timeSaved = false
     @State private var techSaved = false
+    @State private var pickingCustomer = false
+    @FocusState private var titleFocused: Bool
     private var canAssign: Bool { session.can("job.assign", feature: "jobs") }
 
     init(preselected: Customer? = nil) {
@@ -37,15 +39,9 @@ struct NewJobSheet: View {
                         Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(13, weight: .medium)).lineLimit(1)
                     }.padding(.horizontal, 12).frame(height: 30).background(Theme.fill, in: Capsule())
                     Spacer()
-                    Button { Task { await create() } } label: {
-                        // MA-08: the create commit is ink; an icon-only control is a circle.
-                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .medium)) } }
-                            .foregroundStyle(Theme.onInk).frame(width: 38, height: 38)
-                            .background(Theme.ink.opacity(draft.canCreate ? 1 : 0.35), in: Circle())
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }.buttonStyle(PressStyle()).accessibilityLabel("Create job")
-                        .disabled(busy || !draft.canCreate || !session.can("job.create", feature: "jobs"))
-                }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 10)
+                    // Balances the close button so the workspace pill stays centred.
+                    Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
+                }.padding(.horizontal, Theme.gutter).padding(.top, 6).padding(.bottom, 10)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 2) {
@@ -54,6 +50,7 @@ struct NewJobSheet: View {
                                 .tracking(-0.39)
                                 .textFieldStyle(.plain)
                                 .accessibilityLabel("Job title")
+                                .focused($titleFocused)
                                 .disabled(busy || savedJobID != nil)
                         }
                         .padding(.top, 8)
@@ -86,8 +83,9 @@ struct NewJobSheet: View {
                                 .padding(.top, 4)
                         }
 
-                        // Customer, when and who as pills in one row (a chip is a pill; values stay words).
-                        HStack(spacing: 8) {
+                        // Customer, when and who as pills that wrap on narrow phones (a chip is a pill;
+                        // values stay words).
+                        FlowRow(spacing: 8, lineSpacing: 8) {
                             customerPicker
                             if canAssign {
                                 Button { pickingWhen = true } label: {
@@ -110,15 +108,39 @@ struct NewJobSheet: View {
                                 .accessibilityIdentifier("new-job-error")
                             if let savedJobID, session.can("job.view", feature: "jobs") {
                                 Button("Open the job") { createdJobID = savedJobID }
-                                    .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
                                     .frame(minHeight: 44)
                             }
                         }
-                    }.padding(.horizontal, 20).padding(.vertical, 8)
+                    }.padding(.horizontal, Theme.gutter).padding(.vertical, 8)
                 }
+                .scrollDismissesKeyboard(.interactively)
                 Spacer(minLength: 0)
             }.foregroundStyle(Theme.foreground).background(Theme.background).buttonStyle(.plain)
+                // MA-12: the form finishes where the thumb is. The commit rides above the keyboard.
+                .safeAreaInset(edge: .bottom) {
+                    Button { Task { await create() } } label: {
+                        Group {
+                            if busy { ProgressView().tint(Theme.onInk) }
+                            else { Text(savedJobID == nil ? "Create job" : "Try again") }
+                        }
+                        .inkCommit(enabled: draft.canCreate)
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel(savedJobID == nil ? "Create job" : "Try saving again")
+                    .disabled(busy || !draft.canCreate || !session.can("job.create", feature: "jobs"))
+                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
+                    .background(Theme.background)
+                }
+                .onAppear { if draft.title.isEmpty { titleFocused = true } }
                 .toolbar(.hidden, for: .navigationBar)
+                .sheet(isPresented: $pickingCustomer) {
+                    CustomerPickerSheet(selectedID: draft.customerID,
+                                        canCreate: session.can("customer.create", feature: "core_crm"),
+                                        onNew: { pickingCustomer = false; showNewCustomer = true }) { id in
+                        draft.customerID = id; error = nil; pickingCustomer = false
+                    }
+                }
                 .sheet(isPresented: $showNewCustomer) {
                     NewCustomerSheet { customer in draft.customerID = customer.id; error = nil }
                 }
@@ -146,36 +168,10 @@ struct NewJobSheet: View {
     }
 
     private var customerPicker: some View {
-        Menu {
-            if session.can("customer.create", feature: "core_crm") {
-                Button { showNewCustomer = true } label: { Label("New customer…", systemImage: "person.badge.plus") }
-                Divider()
-            }
-            Button { draft.customerID = "" } label: {
-                Label("Choose a customer", systemImage: "person.crop.circle.badge.xmark")
-            }
-            ForEach(store.customers.filter { $0.archived != true }) { customer in
-                Button { draft.customerID = customer.id; error = nil } label: {
-                    if customer.id == draft.customerID {
-                        Label(customer.name, systemImage: "checkmark")
-                    } else {
-                        Text(customer.name)
-                    }
-                }
-            }
-        } label: {
-            Label {
-                Text(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Customer")
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            } icon: {
-                Image(systemName: "person")
-            }
-            .font(Theme.font(12, weight: .medium))
-            .padding(.horizontal, 12)
-            .frame(minHeight: 34)
-            .background(Theme.fill, in: Capsule())
-            .frame(minHeight: 44)
+        // A menu can't search; with hundreds of customers the picker is a searchable sheet.
+        Button { pickingCustomer = true } label: {
+            pill(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Customer",
+                 symbol: "person", set: !draft.customerID.isEmpty)
         }
         .accessibilityLabel("Customer: \(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Choose a customer")")
         // Once the job exists its title, description and customer are fixed; edit them on the job.
@@ -199,11 +195,12 @@ struct NewJobSheet: View {
     }
 
     private func pill(_ text: String, symbol: String, set: Bool) -> some View {
-        Label { Text(text).lineLimit(1) } icon: { Image(systemName: symbol) }
-            .font(Theme.font(12, weight: .medium))
+        Label { Text(text).lineLimit(1).truncationMode(.tail) } icon: { Image(systemName: symbol) }
+            .font(Theme.font(13, weight: .medium))
             .foregroundStyle(set ? Theme.foreground : Theme.muted)
             .padding(.horizontal, 12)
-            .frame(minHeight: 34)
+            .frame(height: Theme.chipHeight + 4)
+            .frame(maxWidth: 240)
             .background(Theme.fill, in: Capsule())
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -266,7 +263,7 @@ struct NewJobSheet: View {
                   session.activeOrganization?.id == organizationID else { return }
             if !failed.isEmpty {
                 // Say exactly what didn't save; the arrow retries just that on the same job.
-                error = "The job was created, but the \(failed.joined(separator: " and ")) didn't save. Tap the arrow to try again, or open the job to set it there."
+                error = "The job was created, but the \(failed.joined(separator: " and ")) didn't save. Tap Try again, or open the job to set it there."
                 return
             }
             if session.can("job.view", feature: "jobs") {
@@ -275,6 +272,69 @@ struct NewJobSheet: View {
                 dismiss()
             }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Searchable customer list for the new-job form. Recent customers come first when the
+/// search is empty, so the common case is one tap.
+struct CustomerPickerSheet: View {
+    let selectedID: String
+    let canCreate: Bool
+    let onNew: () -> Void
+    let onPick: (String) -> Void
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var matches: [Customer] {
+        let active = store.customers.filter { $0.archived != true }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            return active.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
+        }
+        return active.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if canCreate {
+                    Button(action: onNew) {
+                        Label(query.isEmpty ? "New customer" : "New customer “\(query)”", systemImage: "person.badge.plus")
+                            .font(Theme.font(15, weight: .medium)).frame(minHeight: 44, alignment: .leading)
+                    }
+                }
+                Section(query.isEmpty ? "Recently added" : "\(matches.count) found") {
+                    ForEach(matches) { customer in
+                        Button { onPick(customer.id) } label: {
+                            HStack {
+                                Text(customer.name).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(1)
+                                Spacer()
+                                if customer.id == selectedID {
+                                    Image(systemName: "checkmark").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
+                                }
+                            }
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                        }
+                        .accessibilityAddTraits(customer.id == selectedID ? .isSelected : [])
+                    }
+                }
+                if matches.isEmpty {
+                    Text(query.isEmpty ? "No customers yet." : "No customer matches “\(query)”.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search customers")
+            .navigationTitle("Customer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationCornerRadius(Theme.cardRadius)
     }
 }
 
