@@ -28,6 +28,12 @@ struct Job: Codable, Identifiable, Hashable {
     var scheduledFor: String? = nil
     var assignedToUserId: String? = nil
     var locationId: String? = nil
+    /// Visit milestones the list carries, for job hours (design.thorbis.com/job-hours).
+    var enRouteAt: String? = nil
+    var arrivedAt: String? = nil
+    var pausedAt: String? = nil
+    var lastResumeAuditId: String? = nil
+    var completedAt: String? = nil
 
     var shortRef: String { "JOB-" + String(id.suffix(4)).uppercased() }
 }

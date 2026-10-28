@@ -18,7 +18,9 @@ final class JobHoursTests: XCTestCase {
     func testAFinishedJobShowsDriveAndOnSiteRoundedDown() {
         let hours = JobHours.make(job("completed", enRoute: "2026-10-28T13:00:00Z", arrived: "2026-10-28T13:24:40Z",
                                       completed: "2026-10-28T14:37:10Z"), now: now)
-        XCTAssertEqual(hours, JobHours(line: "Drive 0 h 24 min · On site 1 h 12 min", hasDuration: true))
+        XCTAssertEqual(hours?.line, "Drive 0 h 24 min · On site 1 h 12 min")
+        XCTAssertEqual(hours?.hasDuration, true)
+        XCTAssertEqual(hours?.minutes, 96)
     }
 
     func testAScheduledJobHasNoTimeRow() {
@@ -37,7 +39,9 @@ final class JobHoursTests: XCTestCase {
 
     func testAMissingArrivalIsNamedNotGuessed() {
         let hours = JobHours.make(job("completed", enRoute: "2026-10-28T13:00:00Z", completed: "2026-10-28T14:00:00Z"), now: now)
-        XCTAssertEqual(hours, JobHours(line: "Arrived not recorded", hasDuration: false))
+        XCTAssertEqual(hours?.line, "Arrived not recorded")
+        XCTAssertEqual(hours?.hasDuration, false)
+        XCTAssertEqual(hours?.minutes, 0)
     }
 
     func testAMissingOnMyWayIsNamed() {
@@ -60,5 +64,47 @@ final class JobHoursTests: XCTestCase {
         XCTAssertEqual(JobHours.duration(59), "0 h 0 min")
         XCTAssertEqual(JobHours.duration(3_660), "1 h 1 min")
         XCTAssertEqual(JobHours.duration(-30), "0 h 0 min")
+    }
+
+    // MARK: JH-05 My week
+
+    private func listJob(_ id: String, assignee: String?, enRoute: String?, arrived: String?, completed: String?,
+                         status: String = "completed", resumed: String? = nil) -> Job {
+        Job(id: id, customerId: "cust", title: "Job \(id)", status: status, createdAt: nil, updatedAt: nil,
+            allowedTransitions: nil, scheduledFor: nil, assignedToUserId: assignee, locationId: nil,
+            enRouteAt: enRoute, arrivedAt: arrived, pausedAt: nil, lastResumeAuditId: resumed, completedAt: completed)
+    }
+
+    func testMyWeekListsOnlyMyJobsByTheDayIStartedThem() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        calendar.firstWeekday = 2
+        let jobs = [
+            listJob("a001", assignee: "me", enRoute: "2026-10-26T13:00:00Z", arrived: "2026-10-26T13:30:00Z", completed: "2026-10-26T15:00:00Z"),
+            listJob("a002", assignee: "me", enRoute: "2026-10-28T13:00:00Z", arrived: "2026-10-28T13:20:00Z", completed: "2026-10-28T14:00:00Z"),
+            listJob("a003", assignee: "someone", enRoute: "2026-10-28T13:00:00Z", arrived: "2026-10-28T13:20:00Z", completed: "2026-10-28T14:00:00Z"),
+            listJob("a004", assignee: "me", enRoute: "2026-10-19T13:00:00Z", arrived: "2026-10-19T13:20:00Z", completed: "2026-10-19T14:00:00Z"),
+        ]
+        let week = JobWeek.make(jobs, userID: "me", now: now, calendar: calendar)
+        XCTAssertEqual(week.days.count, 3) // Mon, Tue, Wed (today).
+        XCTAssertEqual(week.days[0].rows.map(\.id), ["a001"])
+        XCTAssertEqual(week.days[0].minutes, 120)
+        XCTAssertTrue(week.days[1].rows.isEmpty)
+        XCTAssertEqual(week.days[2].rows.map(\.id), ["a002"])
+        XCTAssertEqual(week.minutes, 180)
+        XCTAssertEqual(JobHours.minutes(week.minutes), "3 h 0 min")
+    }
+
+    func testMyWeekIsEmptyWithoutASignedInTech() {
+        let jobs = [listJob("a001", assignee: nil, enRoute: "2026-10-28T13:00:00Z", arrived: nil, completed: nil, status: "en_route")]
+        XCTAssertEqual(JobWeek.make(jobs, userID: nil, now: now).minutes, 0)
+    }
+
+    func testAResumedListJobSaysItIncludesPausedTimeLikeTheDetail() {
+        let listed = listJob("a001", assignee: "me", enRoute: nil, arrived: "2026-10-28T13:00:00Z", completed: nil,
+                             status: "in_progress", resumed: "audit")
+        let record = job("in_progress", arrived: "2026-10-28T13:00:00Z", resumed: "audit")
+        XCTAssertEqual(JobHours.make(listed, now: now)?.line, JobHours.make(record, now: now)?.line)
+        XCTAssertEqual(JobHours.make(listed, now: now)?.line.hasSuffix("includes paused time"), true)
     }
 }

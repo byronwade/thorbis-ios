@@ -3,7 +3,7 @@ import SwiftUI
 /// Everything an owner can place in the tab bar or the More menu. Search and More stay fixed so
 /// nothing can be lost: whatever is not in the tab bar is in More (or under Hidden in Customize).
 enum MenuItem: String, CaseIterable, Codable, Identifiable {
-    case schedule, jobs, customers, attention, inbox, estimates, invoices, billing, priceBook, money, reports, team, notices, drafts
+    case schedule, jobs, customers, attention, inbox, estimates, invoices, billing, priceBook, money, reports, myWeek, team, notices, drafts
 
     var id: String { rawValue }
 
@@ -20,6 +20,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .priceBook: "Price book"
         case .money: "Money"
         case .reports: "Reports"
+        case .myWeek: "My week"
         case .team: "Team & permissions"
         case .notices: "Job notices"
         case .drafts: "Message drafts"
@@ -51,6 +52,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .priceBook: "book.closed"
         case .money: "chart.bar"
         case .reports: "chart.xyaxis.line"
+        case .myWeek: "clock"
         case .team: "person.2.badge.gearshape"
         case .notices: "bell.badge"
         case .drafts: "bubble.left"
@@ -60,7 +62,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     /// Quiet mark hue in menus: a few soft families, not a rainbow (design.thorbis.com Color).
     var tint: Color {
         switch self {
-        case .schedule, .jobs, .attention: Theme.markAccent
+        case .schedule, .jobs, .attention, .myWeek: Theme.markAccent
         case .customers, .team, .notices, .inbox: Theme.markOlive
         case .estimates, .invoices, .billing, .money: Theme.markForest
         case .priceBook, .reports: Theme.markPumpkin
@@ -75,6 +77,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .billing: "Progress billing, deposits, retainage"
         case .money: "Revenue, collected and overdue"
         case .reports: "Estimate conversion and schedule"
+        case .myWeek: "Your drive and on-site time"
         case .notices: "Who hears about booked and changed jobs"
         case .drafts: "Saved here, not sent"
         default: nil
@@ -103,6 +106,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .priceBook: .priceBook
         case .money: .revenue
         case .reports: .reports
+        case .myWeek: .myWeek
         case .team: .team
         case .notices: .notices
         case .drafts: .drafts
@@ -128,6 +132,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .priceBook: session.can("pricebook.view", feature: "price_book")
         case .money: session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")
         case .reports: session.can("estimate.view", feature: "estimates") || session.can("job.view", feature: "jobs")
+        case .myWeek: session.user?.id != nil && session.can("job.view", feature: "jobs")
         case .team: session.can("organization.members.manage") || session.can("organization.permissions.manage")
         case .notices: session.can("organization.settings.edit", feature: "job_booking_notices")
         case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil
