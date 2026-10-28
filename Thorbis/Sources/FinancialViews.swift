@@ -86,7 +86,7 @@ struct EstimateDetailView: View {
     @State private var action = ""
     @State private var showToCustomer = false
     @State private var memberPricing: MemberPricing?
-    var body: some View {
+    private var scrollContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
@@ -173,6 +173,10 @@ struct EstimateDetailView: View {
             .padding(.top, 24)
             .padding(.bottom, 28)
         }
+    }
+
+    var body: some View {
+        scrollContent
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Estimate")
@@ -194,20 +198,24 @@ struct EstimateDetailView: View {
         .task { await loadAndMaybePresent() }
         .refreshable { await load() }
         .fullScreenCover(isPresented: $showToCustomer) {
-            if let record {
-                CustomerModeContainer(onUnlocked: {
-                    showToCustomer = false
-                    Task {
-                        await load()
-                        // TF-06: approved from the job's next step, the job (and its invoice step) comes back.
-                        if presentsOnOpen, record?.status == "approved" { dismiss() }
-                    }
-                }) { handBack in
-                    CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
-                                                 onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
-                }
-                .environmentObject(api)
-            }
+            if let record { customerMode(record) }
+        }
+    }
+
+    private func customerMode(_ record: EstimateRecord) -> some View {
+        CustomerModeContainer(onUnlocked: { customerModeClosed() }) { handBack in
+            CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
+                                         onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
+        }
+        .environmentObject(api)
+    }
+
+    private func customerModeClosed() {
+        showToCustomer = false
+        Task {
+            await load()
+            // TF-06: approved from the job's next step, the job (and its invoice step) comes back.
+            if presentsOnOpen, record?.status == "approved" { dismiss() }
         }
     }
     @ViewBuilder private var estimateBar: some View {
