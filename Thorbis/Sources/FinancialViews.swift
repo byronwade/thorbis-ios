@@ -65,6 +65,7 @@ struct EstimateDetailView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirm = false
+    @State private var succeeded = 0
     @State private var showRevisionEditor = false
     @State private var action = ""
     @State private var showToCustomer = false
@@ -165,6 +166,7 @@ struct EstimateDetailView: View {
                 PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
             }
         }
+        .sensoryFeedback(.success, trigger: succeeded)
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
             Button(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }
         }
@@ -207,6 +209,7 @@ struct EstimateDetailView: View {
             default: return
             }
             error = nil
+            if action != "Decline" { succeeded += 1 }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     private func load() async {
@@ -274,6 +277,7 @@ struct InvoiceDetailView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirmIssue = false
+    @State private var issued = 0
     @State private var showEditDraft = false
     @State private var showCollectPayment = false
     @State private var paymentModel: InvoicePaymentCollectionModel?
@@ -372,6 +376,7 @@ struct InvoiceDetailView: View {
                     .background(Theme.chrome)
             }
         }
+        .sensoryFeedback(.success, trigger: issued)
         .confirmationDialog("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue, titleVisibility: .visible) {
             Button("Issue invoice") { Task { await issue() } }
         }
@@ -443,6 +448,7 @@ struct InvoiceDetailView: View {
             record = issued
             paymentModel?.acceptInvoiceMutationResponse(issued)
             error = nil
+            self.issued += 1
             await paymentModel?.load()
             if let invoice = paymentModel?.invoice { record = invoice }
         }
