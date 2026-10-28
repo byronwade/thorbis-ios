@@ -199,7 +199,7 @@ struct PaperEmptyState: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 26, weight: .light)).foregroundStyle(Theme.muted)
+            Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(Theme.muted)
                 .padding(.bottom, 6)
             Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                 .multilineTextAlignment(.center)
