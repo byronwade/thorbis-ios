@@ -16,6 +16,10 @@ struct NewJobSheet: View {
     @State private var pickingWhen = false
     @State private var tech: FieldAssignee?
     @State private var people: [FieldAssignee] = []
+    /// Set once the job exists, so retrying never creates a second job.
+    @State private var savedJobID: String?
+    @State private var timeSaved = false
+    @State private var techSaved = false
     private var canAssign: Bool { session.can("job.assign", feature: "jobs") }
 
     init(preselected: Customer? = nil) {
@@ -102,6 +106,11 @@ struct NewJobSheet: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.top, 14)
                                 .accessibilityIdentifier("new-job-error")
+                            if let savedJobID, session.can("job.view", feature: "jobs") {
+                                Button("Open the job") { createdJobID = savedJobID }
+                                    .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .frame(minHeight: 44)
+                            }
                         }
                     }.padding(.horizontal, 20).padding(.vertical, 8)
                 }
@@ -113,7 +122,7 @@ struct NewJobSheet: View {
                 }
                 .sheet(isPresented: $pickingWhen) {
                     NavigationStack {
-                        DatePicker("When", selection: Binding(get: { when ?? Self.nextHour() }, set: { when = $0 }),
+                        DatePicker("When", selection: Binding(get: { when ?? Self.nextHour() }, set: { when = $0; timeSaved = false }),
                                    in: Date()..., displayedComponents: [.date, .hourAndMinute])
                             .datePickerStyle(.graphical)
                             .padding(.horizontal, 20)
@@ -172,7 +181,7 @@ struct NewJobSheet: View {
         Menu {
             Button { tech = nil } label: { Label("No technician yet", systemImage: "person.crop.circle.badge.xmark") }
             ForEach(people) { person in
-                Button { tech = person } label: {
+                Button { tech = person; techSaved = false } label: {
                     if person == tech { Label(person.displayName, systemImage: "checkmark") } else { Text(person.displayName) }
                 }
             }
@@ -213,32 +222,50 @@ struct NewJobSheet: View {
     }
 
     private func create() async {
-        guard !busy, let request = draft.request,
-              session.can("job.create", feature: "jobs") else { return }
+        guard !busy, session.can("job.create", feature: "jobs") else { return }
         let sessionGeneration = session.generation
         let organizationID = session.activeOrganization?.id
         error = nil
         busy = true
         defer { busy = false }
         do {
-            let createdJob = try await api.createFieldJob(request)
+            // A retry after a failed time or tech reuses the job already created, never a second one.
+            let jobID: String
+            if let savedJobID {
+                jobID = savedJobID
+            } else {
+                guard let request = draft.request else { return }
+                jobID = try await api.createFieldJob(request).id
+                savedJobID = jobID
+            }
             guard session.generation == sessionGeneration,
                   session.activeOrganization?.id == organizationID else { return }
-            // The job exists now; a time or tech that fails to save is left for the job screen.
-            if canAssign, let when {
+            var failed: [String] = []
+            if canAssign, let when, !timeSaved {
                 let iso = ISO8601DateFormatter()
                 iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                _ = try? await api.scheduleFieldJob(createdJob.id, request: FieldScheduleRequest(scheduledFor: iso.string(from: when),
-                                                                                               timeZone: TimeZone.current.identifier))
+                do {
+                    _ = try await api.scheduleFieldJob(jobID, request: FieldScheduleRequest(scheduledFor: iso.string(from: when),
+                                                                                         timeZone: TimeZone.current.identifier))
+                    timeSaved = true
+                } catch is CancellationError { return } catch { failed.append("time") }
             }
-            if canAssign, let tech {
-                _ = try? await api.assignFieldJob(createdJob.id, request: FieldAssignRequest(userId: tech.userId))
+            if canAssign, let tech, !techSaved {
+                do {
+                    _ = try await api.assignFieldJob(jobID, request: FieldAssignRequest(userId: tech.userId))
+                    techSaved = true
+                } catch is CancellationError { return } catch { failed.append("technician") }
             }
             _ = await store.refresh(api)
             guard session.generation == sessionGeneration,
                   session.activeOrganization?.id == organizationID else { return }
+            if !failed.isEmpty {
+                // Say exactly what didn't save; the arrow retries just that on the same job.
+                error = "The job was created, but the \(failed.joined(separator: " and ")) didn't save. Tap the arrow to try again, or open the job to set it there."
+                return
+            }
             if session.can("job.view", feature: "jobs") {
-                createdJobID = createdJob.id
+                createdJobID = jobID
             } else {
                 dismiss()
             }
