@@ -916,12 +916,16 @@ struct JobDetailView: View {
         guard session.can("invoice.view", feature: "invoicing") else { return }
         let generation = session.generation
         do {
-            let all = try await api.fieldInvoices()
-            guard session.generation == generation else { return }
-            var mine = all.filter { $0.jobId == jobId }
-            // Technicians' invoice list is empty by design; re-read the ones this phone has seen
-            // for the job by id, which the server allows through the assigned job.
+            var mine: [InvoiceRecord]
             var missed = false
+            if let forJob = try? await api.fieldJobInvoices(jobId) {
+                mine = forJob
+            } else {
+                // A server without the job invoice read: the organization list, which is empty
+                // for technicians by design, then the ones this phone has seen for the job by id.
+                mine = try await api.fieldInvoices().filter { $0.jobId == jobId }
+            }
+            guard session.generation == generation else { return }
             if mine.isEmpty {
                 for id in JobInvoiceMemory.ids(jobId) {
                     if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) } else { missed = true }
