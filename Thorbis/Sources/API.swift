@@ -232,6 +232,17 @@ final class APIClient: ObservableObject {
         return response.data
     }
 
+    /// A server-rendered Excel workbook (`/v1/reports/*.xlsx`), checked to be a zip before it is saved.
+    func spreadsheetData(_ path: String) async throws -> Data {
+        let mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        let response = try await sendData("GET", path, body: Optional<String>.none, accept: mime)
+        guard response.contentType?.lowercased().split(separator: ";").first.map(String.init) == mime,
+              response.data.starts(with: Data("PK".utf8)), response.data.count <= 50 * 1024 * 1024 else {
+            throw Problem(title: "Invalid spreadsheet", status: response.status, detail: "The server did not return an Excel file.")
+        }
+        return response.data
+    }
+
     private struct DataResponse {
         let data: Data
         let status: Int
