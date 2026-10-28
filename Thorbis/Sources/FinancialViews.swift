@@ -16,6 +16,7 @@ struct EstimatesView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) }
                 if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if !records.isEmpty { summaryLine(estimates: records) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
@@ -231,6 +232,7 @@ struct InvoicesView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) }
                 if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if !records.isEmpty { summaryLine(invoices: records) }
                 ForEach(paperDocumentGroups(records, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
@@ -787,4 +789,21 @@ struct NewEstimateView: View {
             dismiss()
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
+}
+
+/// The one line an office reads first on a document list: what's outstanding and how much.
+@ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
+    let waiting = estimates.filter { $0.status == "sent" }
+    let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
+    Text(waiting.isEmpty ? "Nothing waiting on customers" : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))")
+        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+        .padding(.bottom, 6)
+}
+
+@ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
+    let unpaid = invoices.filter { $0.status == "issued" }
+    let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
+    Text(unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD")) owed · \(unpaid.count) unpaid")
+        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+        .padding(.bottom, 6)
 }
