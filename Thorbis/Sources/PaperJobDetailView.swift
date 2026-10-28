@@ -552,6 +552,14 @@ struct JobDetailView: View {
             if let created = JobFiltering.date(job.createdAt) {
                 PaperDetailRow("Booked", value: created.formatted(.dateTime.month(.abbreviated).day().year()))
             }
+            // JH-02: drive and on-site time from the visit steps, live each minute while open (JH-04).
+            TimelineView(.everyMinute) { context in
+                if let hours = JobHours.make(job, now: context.date) {
+                    PaperDetailRow(label: "Time") {
+                        Text(hours.line).font(hours.hasDuration ? Theme.monoFont(15, weight: .medium) : Theme.font(15, weight: .medium))
+                    }
+                }
+            }
             PaperDetailRow(label: "Job ID") { Text("JOB-\(job.id.suffix(4).uppercased())").font(Theme.monoFont(15, weight: .medium)) }
                 .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
         }
