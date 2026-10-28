@@ -130,7 +130,10 @@ struct JobDetailView: View {
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .sensoryFeedback(.success, trigger: committed)
-        .fullScreenCover(isPresented: $showCustomerMode) {
+        // The customer may have changed a phone, an email or a contact in their own hands.
+        .fullScreenCover(isPresented: $showCustomerMode, onDismiss: {
+            if let job { Task { await loadContacts(job) } }
+        }) {
             if let customerID = job?.customerId {
                 CustomerSelfEditView(customerID: customerID) { showCustomerMode = false }
             }
@@ -175,6 +178,7 @@ struct JobDetailView: View {
         }
         .refreshable {
             await load()
+            if let job { await loadContacts(job) }
             await loadInvoices()
             if let job { await loadJobEstimates(job) }
         }
