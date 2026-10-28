@@ -703,12 +703,24 @@ struct MoreView: View {
                 }
                 group("Account") {
                     if session.can("organization.settings.edit") {
+                        NavigationLink(value: PaperRoute.businessSetup) {
+                            PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Company details, payments, services and team", tile: Theme.markAccent)
+                        }
+                        NavigationLink(value: PaperRoute.companyDetails) {
+                            PaperMenuRow("Company details", symbol: "building.2", subtitle: "Name, address and phone customers see", tile: Theme.markOlive)
+                        }
+                    }
+                    if session.can("organization.settings.edit") {
                         NavigationLink(value: PaperRoute.payments) {
                             PaperMenuRow("Payments", symbol: "creditcard", subtitle: "Stripe setup, card payments and payouts", tile: Theme.markForest)
                         }
                     }
                     NavigationLink(value: PaperRoute.customizeMenu) {
                         PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
+                    }
+                    // MA-19: the notes stay one tap away on iPad too, where the gear opens More.
+                    NavigationLink(value: PaperRoute.whatsNew) {
+                        PaperMenuRow("What's new", symbol: "sparkles", subtitle: "What changed in recent updates", tile: Theme.markAccent)
                     }
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))

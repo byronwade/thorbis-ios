@@ -4,6 +4,10 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 
 | Web feature (apps/web/src/features) | iOS | Notes |
 | --- | --- | --- |
+| Owner registration (account + company) | Done | Create an account on the phone (Better Auth `sign-up/email`), name the company (`organization/create`, the creator is the owner) and open it. People joining a team still accept their email invite first. The web app has no sign-up screen; the server endpoints are the same ones its integration tests use. |
+| Setup checklist (Today's setup guide) | Done | Set up your business: company details, card payments (Stripe), price book and team invites, each ticked from the server's own state. Opens once after a company is created and stays in More. |
+| Settings › Organization | Done | Company details: every fact in the server's catalog (`GET /v1/organization/profile`, `POST /v1/organization/facts`), required ones first, legal details folded away. |
+| Settings › Features | Done | Plan and features, read only, from `/v1/features`. |
 | My day, Schedule, Unscheduled | Done | Schedule tab with Today, Week and Unscheduled. Next up carries the next lifecycle step. |
 | Schedule map | Done | Schedule → Map: the day's stops as numbered pins from each job's service location, with Open job and Directions. |
 | Jobs list, Job detail, job flow | Done | Overview, Estimates, Invoice, Media and Activity. The lifecycle runs from the server's transitions. |
@@ -17,7 +21,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Payments (collect) | Partial | Card payment link, cash, check and already-collected. Tap to Pay (Stripe Terminal) is built and the server is live; it stays hidden until Apple grants the entitlement. |
 | Money, reports | Done (read) | Money (revenue). Reports: estimate conversion, jobs, schedule backlog and payment activity (payments, refunds and invoice credits by month). XLSX export is web only. |
 | Billing schedules | Done | List, schedule progress (billed, remaining, deposits, retainage), bill the remainder, release retainage, and deposit request on a job. Each command keeps its idempotency key until the server answers. Gated by `progress_billing`. |
-| Pipeline (requests) | Not yet | |
+| Pipeline (requests) | Not applicable | The web page is a "Pipeline is on the way" placeholder with no data behind it. |
 | Price book, price item | Done | Browse, detail, and for owners: add, edit (new revision) and remove items. |
 | Properties, equipment, fleet, agreements | Partial | Equipment and memberships are on the server (customer equipment with warranty, membership plans, member pricing on estimates). Fleet and properties stay "On this phone" records. |
 | Team, team member, roles, role members | Done | Team & permissions list; owners change a person's role from the phone. Invite people by email with a role, see and cancel pending invites, edit roles and per-person access. |

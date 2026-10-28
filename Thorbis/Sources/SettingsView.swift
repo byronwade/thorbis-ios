@@ -54,6 +54,12 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink { WhatsNewHistoryView() } label: {
+                        row("What's new", symbol: "sparkles", value: nil)
+                    }
+                }
+
+                Section {
                     Button(role: .destructive) { confirmSignOut = true } label: {
                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right").foregroundStyle(Theme.destructive)
                     }
