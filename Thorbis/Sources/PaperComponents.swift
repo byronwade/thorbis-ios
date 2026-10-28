@@ -625,3 +625,25 @@ extension View {
             }
     }
 }
+
+/// The list's create action, in the thumb zone above the tab bar (MA-02): the same pill on
+/// Jobs and Customers instead of a plus on one screen and a pill on the other.
+struct FloatingCreateButton: View {
+    let title: String
+    var disabled = false
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Spacer()
+            Button(action: action) {
+                Label(title, systemImage: "plus").font(Theme.font(15, weight: .medium))
+                    .padding(.horizontal, 16).frame(minHeight: 44)
+                    .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle()).disabled(disabled)
+        }
+        .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+    }
+}

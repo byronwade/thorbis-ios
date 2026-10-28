@@ -80,16 +80,7 @@ struct CustomersView: View {
         .background(Theme.background).toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             if session.can("customer.create", feature: "core_crm") && !items.isEmpty {
-                HStack {
-                    Spacer()
-                    Button { showNew = true } label: {
-                        Label("New customer", systemImage: "plus").font(Theme.font(14, weight: .semibold))
-                            .padding(.horizontal, 16).frame(minHeight: 44)
-                            .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
-                    }
-                    .buttonStyle(.plain).disabled(busy)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                FloatingCreateButton(title: "New customer", disabled: busy) { showNew = true }
             }
         }
         .task(id: store.customers.map(\.id).sorted().joined(separator: "|")) { await loadCustomers() }

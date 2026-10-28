@@ -468,6 +468,11 @@ struct JobsView: View {
         .refreshable { await store.refresh(api) }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .bottom) {
+            if session.can("job.create", feature: "jobs") && !jobs.isEmpty {
+                FloatingCreateButton(title: "New job") { showNew = true }
+            }
+        }
         .sheet(isPresented: $showNew) { NewJobSheet() }
     }
 
@@ -485,20 +490,11 @@ struct JobsView: View {
         return parts.joined(separator: " · ")
     }
 
-    /// One "New job" entry point, on the first group shown, instead of a plus on every group.
+    /// A titled group of job rows; New job is the floating pill, not a plus on a group.
     @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool = false) -> some View {
         if !jobs.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                PaperGroupHeader(title: title, count: jobs.count) {
-                    if session.can("job.create", feature: "jobs") && first {
-                        Button { showNew = true } label: {
-                            Image(systemName: "plus").font(.system(size: 14, weight: .medium))
-                                .frame(width: 44, height: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("New job")
-                    }
-                }
+                PaperGroupHeader(title: title, count: jobs.count)
                 ForEach(jobs) { job in
                     let customer = store.customerName(job.customerId)
                     NavigationLink(value: job) {

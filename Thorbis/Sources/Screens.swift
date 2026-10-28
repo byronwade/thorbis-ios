@@ -647,7 +647,7 @@ struct MoreView: View {
                     .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity).padding(.top, 28).padding(.bottom, 32)
             }
-            .foregroundStyle(Theme.foreground).buttonStyle(.plain)
+            .foregroundStyle(Theme.foreground).buttonStyle(RowPressStyle())
         }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
@@ -660,35 +660,10 @@ struct MoreView: View {
         }
     }
 
-    /// Paper's workspace switcher with the compose action beside it.
+    /// MA-05: the same header as every tab root (menu button, 30/500 title). Switching
+    /// workspace and New job live in the side menu, so they are not repeated here.
     private var workspaceHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Button { showWorkspaces = true } label: {
-                    HStack(spacing: 8) {
-                        Image("ThorbisMark").resizable().scaledToFit().padding(3)
-                            .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
-                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
-                            .accessibilityHidden(true)
-                        Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .semibold)).lineLimit(1)
-                        if session.organizations.count > 1 {
-                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
-                        }
-                    }
-                    .padding(.horizontal, 10).frame(minHeight: 44)
-                    .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
-                }
-                .allowsHitTesting(session.organizations.count > 1)
-                .accessibilityLabel("Workspace, \(session.activeOrganization?.name ?? "")")
-                Spacer()
-                if session.can("job.create", feature: "jobs") {
-                    PaperCircleButton(symbol: "square.and.pencil", label: "New job") { showNewJob = true }
-                }
-            }
-            Text("More").font(Theme.font(30, weight: .medium)).tracking(-0.6).padding(.top, 10)
-                .accessibilityAddTraits(.isHeader)
-        }
-        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 4)
+        PaperHeader(title: "More", subtitle: session.activeOrganization?.name ?? "Workspace")
     }
 
     private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
