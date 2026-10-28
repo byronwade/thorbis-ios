@@ -1,344 +1,582 @@
 import SwiftUI
 
-func statusIcon(_ s: String) -> (String, Color) {
-    switch s {
-    case "completed": return ("checkmark.circle.fill", Theme.success)
-    case "in_progress", "arrived": return ("circle.lefthalf.filled", Theme.warning)
-    case "en_route", "dispatched": return ("arrow.right.circle", Theme.brand)
-    case "canceled": return ("xmark.circle", Theme.destructive)
-    default: return ("circle", Theme.muted)
-    }
-}
-
-struct JobRow: View {
-    let job: Job
-    let customer: String
-    var body: some View {
-        let (icon, tint) = statusIcon(job.status)
-        HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(tint).font(.system(size: 14))
-            Text(job.shortRef).font(Theme.mono).foregroundStyle(Theme.muted)
-            Text("\(job.title) — \(customer.split(separator: " ").last.map(String.init) ?? customer)")
-                .font(.system(size: 14, weight: .medium)).lineLimit(1)
-                .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
-            Spacer()
-            Avatar(name: customer, size: 22)
-        }
-        .padding(.horizontal, 16).frame(height: 44).contentShape(Rectangle())
-    }
-}
-
-struct ScheduleView: View {
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @State private var range = "Today"
-    var active: [Job] { store.jobs.filter { !["completed", "canceled"].contains($0.status) } }
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ScreenHeader(icon: "calendar", title: "Schedule",
-                             subtitle: "\(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) · \(active.count) jobs open")
-                SegmentTabs(options: ["Today", "Week", "Map"], selected: $range)
-                if let e = store.error { ErrorBanner(message: e) }
-                if let next = active.first {
-                    HStack { Text("Next up").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-                        Text("updated \(relativeDay(next.updatedAt))").font(Theme.mono).foregroundStyle(Theme.muted.opacity(0.7)); Spacer() }
-                        .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
-                    NavigationLink(value: next) { NextUpCard(job: next, customer: store.customerName(next.customerId)) }.buttonStyle(.plain)
-                }
-                SectionHeader(title: "Later", count: max(active.count - 1, 0))
-                ForEach(active.dropFirst()) { j in
-                    NavigationLink(value: j) {
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(j.status.statusLabel).font(Theme.mono).foregroundStyle(Theme.muted).frame(width: 74, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(j.title) — \(store.customerName(j.customerId))").font(.system(size: 14, weight: .medium)).lineLimit(1)
-                                Text(j.shortRef).font(.system(size: 12)).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            Image(systemName: statusIcon(j.status).0).foregroundStyle(statusIcon(j.status).1).font(.system(size: 13))
-                        }.padding(.horizontal, 16).padding(.vertical, 8).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                }
-                if active.isEmpty && !store.loading {
-                    Text("Nothing scheduled. New jobs from the API show up here.").font(.system(size: 14)).foregroundStyle(Theme.muted).padding(16)
-                }
-                Spacer(minLength: 100)
-            }
-        }
-        .refreshable { await store.refresh(api) }
-    }
-}
-
-struct NextUpCard: View {
-    let job: Job
-    let customer: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Text(job.status.statusLabel).font(Theme.mono).frame(width: 74, alignment: .leading)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(job.title).font(.system(size: 15, weight: .semibold))
-                    Text(customer).font(.system(size: 13)).foregroundStyle(Theme.muted)
-                    HStack { Chip(text: job.status.statusLabel, icon: "arrow.right", tint: Theme.brand, bg: Theme.brandSurface); Chip(text: job.shortRef) }
-                }
-            }
-            HStack(spacing: 8) {
-                Label("Open job", systemImage: "location.north.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).frame(height: 34).background(Theme.brand, in: RoundedRectangle(cornerRadius: 8))
-                Image(systemName: "phone").frame(width: 34, height: 34).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
-                Image(systemName: "bubble.left").frame(width: 34, height: 34).overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border))
-            }.padding(.leading, 86).font(.system(size: 13))
-        }
-        .padding(16).background(Theme.chrome)
-    }
-}
-
-struct JobsView: View {
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @State private var filter = "Assigned"
-    @State private var showNew = false
-    let groups: [(String, Set<String>)] = [
-        ("In progress", ["in_progress", "arrived", "en_route", "dispatched"]),
-        ("Scheduled", ["scheduled", "unscheduled", "draft"]),
-        ("Done", ["completed"]),
-    ]
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ScreenHeader(icon: "briefcase", title: "Jobs",
-                             subtitle: "\(store.jobs.filter { $0.status != "completed" }.count) active · \(store.jobs.count) total")
-                SegmentTabs(options: ["Assigned", "All jobs", "Recent"], selected: $filter)
-                if let e = store.error { ErrorBanner(message: e) }
-                ForEach(groups, id: \.0) { g in
-                    let items = store.jobs.filter { g.1.contains($0.status) }
-                    if !items.isEmpty {
-                        HStack { SectionHeader(title: g.0, count: items.count)
-                            if g.0 != "Done" { Button { showNew = true } label: { Image(systemName: "plus") }.foregroundStyle(Theme.muted).padding(.trailing, 16).padding(.top, 12) } }
-                        ForEach(items) { j in NavigationLink(value: j) { JobRow(job: j, customer: store.customerName(j.customerId)) }.buttonStyle(.plain) }
-                    }
-                }
-                Spacer(minLength: 100)
-            }
-        }
-        .refreshable { await store.refresh(api) }
-        .sheet(isPresented: $showNew) { NewJobSheet().presentationDetents([.medium]) }
-    }
-}
-
 struct NewJobSheet: View {
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @Environment(\.dismiss) var dismiss
-    var preselected: Customer? = nil
-    @State private var title = ""
-    @State private var customerId = ""
-    @State private var error: String?
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New job").font(.system(size: 20, weight: .bold))
-            TextField("What's the job?", text: $title).padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-            Picker("Customer", selection: $customerId) {
-                ForEach(store.customers) { Text($0.name).tag($0.id) }
-            }.pickerStyle(.menu)
-            if let error { Text(error).foregroundStyle(Theme.destructive).font(.system(size: 13)) }
-            PrimaryButton(title: "Create job", icon: "plus") {
-                Task {
-                    do { _ = try await api.createJob(customerId: customerId, title: title); await store.refresh(api); dismiss() }
-                    catch { self.error = error.localizedDescription }
-                }
-            }
-            Spacer()
-        }
-        .padding(20).background(Theme.background)
-        .onAppear { customerId = preselected?.id ?? store.customers.first?.id ?? "" }
-    }
-}
-
-struct JobDetailView: View {
-    let jobId: String
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @State private var job: Job?
-    @State private var tab = "Overview"
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var store: Store
+    @EnvironmentObject private var session: SessionController
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: FieldJobDraft
     @State private var busy = false
     @State private var error: String?
+    @State private var createdJobID: String?
+    @State private var showNewCustomer = false
 
-    var nextStep: String? {
-        guard let t = job?.allowedTransitions else { return nil }
-        for s in ["en_route", "arrived", "in_progress"] where t.contains(s) { return s }
-        return nil
+    init(preselected: Customer? = nil) {
+        _draft = State(initialValue: FieldJobDraft(customerID: preselected?.id ?? ""))
     }
+
     var body: some View {
-        ScrollView {
-            if let job {
-                let customer = store.customerName(job.customerId)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("\(job.shortRef) · \(customer)").font(Theme.mono).foregroundStyle(Theme.muted).padding(.horizontal, 16)
-                    Text(job.title).font(.system(size: 24, weight: .bold)).padding(.horizontal, 16).padding(.top, 4)
-                    HStack {
-                        let (icon, tint) = statusIcon(job.status)
-                        Chip(text: job.status.statusLabel, icon: icon, tint: tint, bg: tint.opacity(0.15))
-                        Chip(text: "Updated \(relativeDay(job.updatedAt))", icon: "clock")
-                    }.padding(.horizontal, 16).padding(.top, 10)
-                    SegmentTabs(options: ["Overview", "Estimates", "Invoice", "Media", "Activity"], selected: $tab)
-                    if let error { ErrorBanner(message: error) }
-                    HStack { Text("Details").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted); Spacer() }
-                        .padding(.horizontal, 16).padding(.top, 18)
-                    detail("Customer", customer)
-                    detail("Status", job.status.statusLabel)
-                    detail("Created", relativeDay(job.createdAt))
-                    detail("Job ID", String(job.id.prefix(13)) + "…", mono: true)
-                    SectionHeader(title: "Next steps", count: job.allowedTransitions?.count)
-                    FlowChips(items: (job.allowedTransitions ?? []).map { $0.statusLabel })
-                    Spacer(minLength: 120)
-                }.padding(.top, 8)
-            } else if let error { ErrorBanner(message: error) } else { ProgressView().padding(40) }
-        }
-        .background(Theme.background)
-        .safeAreaInset(edge: .bottom) {
-            if let step = nextStep {
-                HStack(spacing: 8) {
-                    PrimaryButton(title: "Mark \(step.statusLabel.lowercased())", icon: "checkmark.circle", busy: busy) { Task { await advance(step) } }
-                    Image(systemName: "phone").frame(width: 44, height: 44).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
-                }.padding(.horizontal, 16).padding(.vertical, 10).background(Theme.background)
-            }
-        }
-        .toolbarBackground(Theme.background, for: .navigationBar)
-        .task { await load() }
-    }
-
-    func detail(_ k: String, _ v: String, mono: Bool = false) -> some View {
-        HStack { Text(k).foregroundStyle(Theme.muted); Spacer(); Text(v).font(mono ? Theme.mono : .system(size: 14, weight: .medium)) }
-            .font(.system(size: 14)).padding(.horizontal, 16).frame(height: 40)
-    }
-    func load() async {
-        do { job = try await api.job(jobId) } catch { self.error = error.localizedDescription }
-    }
-    func advance(_ step: String) async {
-        busy = true; defer { busy = false }
-        do { try await api.progress(jobId, to: step); await load(); await store.refresh(api); error = nil }
-        catch { self.error = error.localizedDescription }
-    }
-}
-
-struct FlowChips: View {
-    let items: [String]
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack { ForEach(items, id: \.self) { Chip(text: $0) } }.padding(.horizontal, 16)
-        }
-    }
-}
-
-struct CustomersView: View {
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @State private var showNew = false
-    @State private var newName = ""
-    var grouped: [(String, [Customer])] {
-        Dictionary(grouping: store.customers.filter { $0.archived != true }) { String($0.name.prefix(1)).uppercased() }
-            .sorted { $0.key < $1.key }.map { ($0.key, $0.value.sorted { $0.name < $1.name }) }
-    }
-    var body: some View {
-        ScrollView {
+        NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
-                ScreenHeader(icon: "person.2", title: "Customers",
-                             subtitle: "\(store.customers.count) customers · \(store.jobs.filter { $0.status != "completed" }.count) active jobs")
-                if let e = store.error { ErrorBanner(message: e) }
-                ForEach(grouped, id: \.0) { letter, items in
-                    SectionHeader(title: letter, count: items.count)
-                    ForEach(items) { c in
-                        NavigationLink(value: c) {
-                            HStack(spacing: 12) {
-                                Avatar(name: c.name, size: 28)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(c.name).font(.system(size: 14, weight: .medium))
-                                    Text("\(store.jobs.filter { $0.customerId == c.id }.count) jobs").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                                }
-                                Spacer()
-                                if let open = store.jobs.first(where: { $0.customerId == c.id && $0.status != "completed" }) {
-                                    Image(systemName: statusIcon(open.status).0).foregroundStyle(statusIcon(open.status).1)
-                                }
-                            }.padding(.horizontal, 16).frame(height: 48).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
+                HStack {
+                    Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Cancel new job").disabled(busy)
+                    Spacer()
+                    HStack(spacing: 5) {
+                        Text(String((session.activeOrganization?.name ?? "W").prefix(1))).font(Theme.font(9, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 16, height: 16).background(Theme.brand, in: RoundedRectangle(cornerRadius: 5))
+                        Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(13, weight: .medium)).lineLimit(1)
+                    }.padding(.horizontal, 12).frame(height: 30).background(Theme.fill, in: Capsule())
+                    Spacer()
+                    Button { Task { await create() } } label: {
+                        Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up") } }
+                            .foregroundStyle(.white).frame(width: 38, height: 38).background(Theme.brand, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle())
+                    }.accessibilityLabel("Create job")
+                        .disabled(busy || !draft.canCreate || !session.can("job.create", feature: "jobs"))
+                }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 10)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 2) {
+                            TextField("Job title", text: $draft.title, axis: .vertical)
+                                .font(Theme.font(26, weight: .semibold))
+                                .tracking(-0.39)
+                                .textFieldStyle(.plain)
+                                .accessibilityLabel("Job title")
+                                .disabled(busy)
+                        }
+                        .padding(.top, 8)
+                        if draft.titleIsTooLong {
+                            Text("Job titles can be up to 200 characters.")
+                                .font(Theme.font(12))
+                                .foregroundStyle(Theme.destructive)
+                                .padding(.top, 4)
+                        }
+
+                        TextField(
+                            text: $draft.notes,
+                            prompt: Text("Add description — what's the problem, where, anything the tech should know…")
+                                .foregroundStyle(Theme.muted),
+                            axis: .vertical
+                        ) {
+                            Text("Job description")
+                        }
+                            .font(Theme.font(15))
+                            .foregroundStyle(Theme.foreground)
+                            .lineLimit(2...6)
+                            .textFieldStyle(.plain)
+                            .accessibilityLabel("Job description")
+                            .padding(.top, 8)
+                            .disabled(busy)
+                        if draft.notesAreTooLong {
+                            Text("Descriptions can be up to 10,000 characters.")
+                                .font(Theme.font(12))
+                                .foregroundStyle(Theme.destructive)
+                                .padding(.top, 4)
+                        }
+
+                        customerPicker
+                            .padding(.top, 12)
+
+                        Text("Set the schedule and assign a technician from job details after creating the job.")
+                            .font(Theme.font(12))
+                            .foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 8)
+
+                        if let error {
+                            Label(error, systemImage: "exclamationmark.triangle")
+                                .font(Theme.font(13))
+                                .foregroundStyle(Theme.destructive)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 14)
+                                .accessibilityIdentifier("new-job-error")
+                        }
+                    }.padding(.horizontal, 20).padding(.vertical, 8)
+                }
+                Spacer(minLength: 0)
+            }.foregroundStyle(Theme.foreground).background(Theme.background).buttonStyle(.plain)
+                .toolbar(.hidden, for: .navigationBar)
+                .sheet(isPresented: $showNewCustomer) {
+                    NewCustomerSheet { customer in draft.customerID = customer.id; error = nil }
+                }
+                .navigationDestination(isPresented: createdJobRoute) {
+                    if let createdJobID { JobDetailView(jobId: createdJobID) }
+                }
+        }
+    }
+
+    private var customerPicker: some View {
+        Menu {
+            if session.can("customer.create", feature: "core_crm") {
+                Button { showNewCustomer = true } label: { Label("New customer…", systemImage: "person.badge.plus") }
+                Divider()
+            }
+            Button { draft.customerID = "" } label: {
+                Label("Choose a customer", systemImage: "person.crop.circle.badge.xmark")
+            }
+            ForEach(store.customers.filter { $0.archived != true }) { customer in
+                Button { draft.customerID = customer.id; error = nil } label: {
+                    if customer.id == draft.customerID {
+                        Label(customer.name, systemImage: "checkmark")
+                    } else {
+                        Text(customer.name)
                     }
                 }
-                Spacer(minLength: 100)
             }
+        } label: {
+            Label {
+                Text(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Customer")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } icon: {
+                Image(systemName: "person")
+            }
+            .font(Theme.font(12, weight: .medium))
+            .padding(.horizontal, 10)
+            .frame(minHeight: 44)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
         }
-        .refreshable { await store.refresh(api) }
-        .alert("New customer", isPresented: $showNew) {
-            TextField("Name", text: $newName)
-            Button("Create") { Task { _ = try? await api.createCustomer(name: newName); newName = ""; await store.refresh(api) } }
-            Button("Cancel", role: .cancel) {}
+        .accessibilityLabel("Customer: \(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Choose a customer")")
+        .disabled(busy)
+    }
+
+    private var createdJobRoute: Binding<Bool> {
+        Binding(
+            get: { createdJobID != nil },
+            set: { isPresented in
+                guard !isPresented, createdJobID != nil else { return }
+                createdJobID = nil
+                dismiss()
+            }
+        )
+    }
+
+    private func create() async {
+        guard !busy, let request = draft.request,
+              session.can("job.create", feature: "jobs") else { return }
+        let sessionGeneration = session.generation
+        let organizationID = session.activeOrganization?.id
+        error = nil
+        busy = true
+        defer { busy = false }
+        do {
+            let createdJob = try await api.createFieldJob(request)
+            guard session.generation == sessionGeneration,
+                  session.activeOrganization?.id == organizationID else { return }
+            _ = await store.refresh(api)
+            guard session.generation == sessionGeneration,
+                  session.activeOrganization?.id == organizationID else { return }
+            if session.can("job.view", feature: "jobs") {
+                createdJobID = createdJob.id
+            } else {
+                dismiss()
+            }
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+}
+
+struct ContactActions: View {
+    let phone: String?
+    let email: String?
+    var body: some View {
+        if let phone, !phone.isEmpty {
+            let number = phone.filter { $0.isNumber || $0 == "+" }
+            if let url = URL(string: "tel:" + number) { Link(destination: url) { Label(phone, systemImage: "phone").frame(minHeight: 44) } }
         }
-        .overlay(alignment: .bottomTrailing) {
-            Button { showNew = true } label: { Image(systemName: "plus").font(.system(size: 16, weight: .semibold)) }
-                .foregroundStyle(Theme.foreground).frame(width: 46, height: 46).background(Theme.surface, in: Circle())
-                .overlay(Circle().stroke(Theme.border)).padding(.trailing, 16).padding(.bottom, 64)
+        if let email, let encoded = email.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), let url = URL(string: "mailto:" + encoded) {
+            Link(destination: url) { Label(email, systemImage: "envelope").frame(minHeight: 44) }
         }
     }
 }
 
-struct CustomerDetailView: View {
-    let customer: Customer
+struct AddressLink: View {
+    let address: String
+    var coordinates: FieldCoordinates? = nil
+    var body: some View {
+        if let url {
+            Link(destination: url) { Label(address, systemImage: "map").frame(minHeight: 44) }
+        } else { Text(address) }
+    }
+    private var url: URL? {
+        var components = URLComponents(string: "https://maps.apple.com/")
+        let destination = coordinates.map { "\($0.latitude),\($0.longitude)" } ?? address
+        components?.queryItems = [URLQueryItem(name: "q", value: destination)]
+        return components?.url
+    }
+}
+
+/// Turn-by-turn driving directions in Apple Maps to a service location.
+enum Directions {
+    static func url(address: String, coordinates: FieldCoordinates?) -> URL? {
+        var components = URLComponents(string: "https://maps.apple.com/")
+        let destination = coordinates.map { "\($0.latitude),\($0.longitude)" } ?? address
+        components?.queryItems = [URLQueryItem(name: "daddr", value: destination), URLQueryItem(name: "dirflg", value: "d")]
+        return components?.url
+    }
+}
+
+struct CustomerContactSheet: View {
+    let customerID: String
+    let contact: CustomerContactRecord?
+    let onSaved: (CustomerContactRecord) -> Void
     @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @State private var tab = "Overview"
-    @State private var showNew = false
-    var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
+    @EnvironmentObject var session: SessionController
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var role = ""
+    @State private var customRole = ""
+    @State private var usesCustomRole = false
+    @State private var phone = ""
+    @State private var email = ""
+    @State private var showsEmail = false
+    @State private var busy = false
+    @State private var error: String?
+    @FocusState private var focusedField: ContactField?
+
+    private enum ContactField: Hashable { case name, phone, email, customRole }
+    private static let roles = ["Homeowner", "Spouse", "Tenant", "Property mgr"]
+
+    init(customerID: String, contact: CustomerContactRecord? = nil, onSaved: @escaping (CustomerContactRecord) -> Void) {
+        self.customerID = customerID
+        self.contact = contact
+        self.onSaved = onSaved
+        _name = State(initialValue: contact?.name ?? "")
+        _phone = State(initialValue: contact?.phone ?? "")
+        _email = State(initialValue: contact?.email ?? "")
+        _showsEmail = State(initialValue: contact?.email != nil)
+        if let existingRole = contact?.role, !existingRole.isEmpty {
+            if Self.roles.contains(existingRole) {
+                _role = State(initialValue: existingRole)
+                _customRole = State(initialValue: "")
+                _usesCustomRole = State(initialValue: false)
+            } else {
+                _role = State(initialValue: "")
+                _customRole = State(initialValue: existingRole)
+                _usesCustomRole = State(initialValue: true)
+            }
+        } else {
+            _role = State(initialValue: "")
+            _customRole = State(initialValue: "")
+            _usesCustomRole = State(initialValue: false)
+        }
+    }
+
+    private var draft: CustomerContactDraft {
+        CustomerContactDraft(
+            name: name,
+            role: usesCustomRole ? customRole : role,
+            email: showsEmail ? email : nil,
+            phone: phone
+        )
+    }
+
+    private var canSave: Bool {
+        guard !busy, session.can("customer.edit", feature: "core_crm") else { return false }
+        return contact == nil ? draft.makeRequest() != nil : draft.makeUpdateRequest() != nil
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Capsule().fill(Theme.border)
+                .frame(width: 36, height: 4)
+                .padding(.top, 10)
+
+            ZStack {
+                Text(contact == nil ? "New contact" : "Edit contact")
+                    .font(Theme.font(17, weight: .semibold))
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(Theme.font(13, weight: .semibold))
+                            .foregroundStyle(Theme.foreground)
+                            .frame(width: 32, height: 32)
+                            .background(Theme.fill, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(contact == nil ? "Cancel new contact" : "Cancel contact changes")
+                    .disabled(busy)
+                    Spacer()
+                    Button("Save") { Task { await save() } }
+                        .font(Theme.font(15, weight: .semibold))
+                        .foregroundStyle(Theme.brandText)
+                        .frame(minHeight: 44)
+                        .disabled(!canSave)
+                        .opacity(canSave ? 1 : 0.45)
+                }
+            }
+            .frame(height: 40)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    contactField("Name", placeholder: "Full name", text: $name, field: .name)
+                    contactField("Phone", placeholder: "(555) 555-5555", text: $phone, field: .phone)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Role")
+                            .font(Theme.font(13, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                        HStack(spacing: 6) {
+                            ForEach(Self.roles, id: \.self) { option in
+                                roleChip(option, selected: !usesCustomRole && role == option) {
+                                    role = option
+                                    customRole = ""
+                                    usesCustomRole = false
+                                }
+                            }
+                        }
+                        if usesCustomRole {
+                            contactField("Custom role", placeholder: "Enter a role", text: $customRole, field: .customRole)
+                                .padding(.top, 2)
+                        } else {
+                            Button("Enter custom role") {
+                                role = ""
+                                usesCustomRole = true
+                            }
+                            .font(Theme.font(12, weight: .medium))
+                            .foregroundStyle(Theme.brandText)
+                        }
+                    }
+
+                    if showsEmail {
+                        HStack(alignment: .center, spacing: 8) {
+                            contactField("Email", placeholder: "name@example.com", text: $email, field: .email)
+                            Button {
+                                email = ""
+                                showsEmail = false
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(Theme.font(12, weight: .semibold))
+                                    .foregroundStyle(Theme.muted)
+                                    .frame(width: 44, height: 46)
+                            }
+                            .accessibilityLabel("Remove email")
+                            .padding(.top, 20)
+                        }
+                    } else {
+                        Button {
+                            showsEmail = true
+                            focusedField = .email
+                        } label: {
+                            Text("+ Add email")
+                                .font(Theme.font(14, weight: .medium))
+                                .foregroundStyle(Theme.brandText)
+                                .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.bottom, 4)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .disabled(busy)
+
+            VStack(spacing: 8) {
+                if let error {
+                    Text(error)
+                        .font(Theme.font(13))
+                        .foregroundStyle(Theme.destructive)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button { Task { await save() } } label: {
+                    Group {
+                        if busy { ProgressView().tint(.white) }
+                        else { Text(contact == nil ? "Save contact" : "Save changes").font(Theme.font(15, weight: .semibold)) }
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSave)
+                .opacity(canSave ? 1 : 0.45)
+
+                if contact == nil {
+                    Text("The first contact is set as primary automatically.")
+                        .font(Theme.font(12))
+                        .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.card)
+        .toolbar(.hidden, for: .navigationBar)
+        .presentationDetents([.height(600), .large])
+        .presentationDragIndicator(.hidden)
+        .presentationCornerRadius(20)
+        .presentationBackground(Theme.card)
+        .interactiveDismissDisabled(busy)
+    }
+
+    private func contactField(_ title: String, placeholder: String, text: Binding<String>, field: ContactField) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(Theme.font(13, weight: .medium))
+                .foregroundStyle(Theme.muted)
+            TextField(placeholder, text: text)
+                .font(field == .phone ? Theme.monoFont(14) : Theme.font(15))
+                .keyboardType(field == .phone ? .phonePad : field == .email ? .emailAddress : .default)
+                .textInputAutocapitalization(field == .email || field == .phone ? .never : .words)
+                .autocorrectionDisabled()
+                .focused($focusedField, equals: field)
+                .padding(.horizontal, 14)
+                .frame(height: 46)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(focusedField == field ? Theme.brand : Theme.border,
+                                lineWidth: focusedField == field ? 1.5 : 1)
+                }
+        }
+    }
+
+    private func roleChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if selected { Image(systemName: "checkmark").font(Theme.font(10, weight: .semibold)) }
+                Text(title).font(Theme.font(13, weight: selected ? .semibold : .medium))
+            }
+            .foregroundStyle(selected ? Color.white : Theme.muted)
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(selected ? Theme.brand : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+            .frame(minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func save() async {
+        guard !busy, canSave else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let saved: CustomerContactRecord
+            if let contact {
+                guard let request = draft.makeUpdateRequest() else { return }
+                saved = try await api.updateFieldContact(customerID, contact.id, request: request)
+            } else {
+                guard let request = draft.makeRequest() else { return }
+                saved = try await api.createFieldContact(customerID, request: request)
+            }
+            onSaved(saved)
+            dismiss()
+        } catch is CancellationError {} catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Paper 29 and 65 together: every destination that is not a tab, then account settings.
+struct MoreView: View {
+    @AppStorage("thorbis.appearance") private var appearance = "system"
+    @EnvironmentObject var session: SessionController
+    @EnvironmentObject private var layout: MenuLayout
+    @EnvironmentObject var api: APIClient
+    @State private var showWorkspaces = false
+    @State private var showNewJob = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("CUS-\(String(customer.id.suffix(4)).uppercased()) · Customer since \(relativeDay(customer.createdAt))").font(Theme.mono).foregroundStyle(Theme.muted).padding(.horizontal, 16)
-                Text(customer.name).font(.system(size: 24, weight: .bold)).padding(.horizontal, 16).padding(.top, 4)
-                HStack {
-                    if jobs.contains(where: { $0.status == "in_progress" }) { Chip(text: "Job in progress", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface) }
-                    Chip(text: "\(jobs.count) jobs", icon: "clock")
-                }.padding(.horizontal, 16).padding(.top, 10)
-                SegmentTabs(options: ["Overview", "Jobs", "Billing", "Media", "Activity"], selected: $tab)
-                SectionHeader(title: "Job history", count: jobs.count)
-                ForEach(jobs) { j in NavigationLink(value: j) { JobRow(job: j, customer: customer.name) }.buttonStyle(.plain) }
-                if jobs.isEmpty { Text("No jobs yet.").font(.system(size: 14)).foregroundStyle(Theme.muted).padding(.horizontal, 16) }
-                Spacer(minLength: 120)
-            }.padding(.top, 8)
+                workspaceHeader
+                // Items placed in the tab bar or hidden in Customize menu are left out here.
+                ForEach(MenuItem.Group.allCases, id: \.self) { section in
+                    let items = layout.moreItems(in: section, session: session)
+                    let local = section == .phone && session.user?.id != nil && session.activeOrganization?.id != nil
+                        ? LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) } : []
+                    if !items.isEmpty || !local.isEmpty {
+                        group(section.rawValue) {
+                            ForEach(items) { item in
+                                if let route = item.route {
+                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint) }
+                                }
+                            }
+                            ForEach(local, id: \.self) { section in
+                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder", tile: Theme.markBurnt) }
+                            }
+                        }
+                    }
+                }
+                group("Account") {
+                    NavigationLink(value: PaperRoute.customizeMenu) {
+                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
+                    }
+                    HStack(spacing: 12) {
+                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
+                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 40, height: 40).background(Theme.brand, in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.user?.name ?? "Account").font(Theme.font(16, weight: .medium))
+                            if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
+                        }
+                        Spacer()
+                    }
+                    .frame(minHeight: 56)
+                    .accessibilityElement(children: .combine)
+                    PaperMenuRow(title: "Appearance", symbol: "circle.lefthalf.filled") {
+                        Picker("Appearance", selection: $appearance) {
+                            Text("System").tag("system")
+                            Text("Light").tag("light")
+                            Text("Dark").tag("dark")
+                        }
+                        .pickerStyle(.menu).labelsHidden().tint(Theme.muted)
+                    }
+                    Button { Task { await session.signOut() } } label: {
+                        PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
+                    }
+                }
+                Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
+                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity).padding(.top, 28).padding(.bottom, 32)
+            }
+            .foregroundStyle(Theme.foreground).buttonStyle(.plain)
         }
         .background(Theme.background)
-        .safeAreaInset(edge: .bottom) {
-            PrimaryButton(title: "New job", icon: "plus") { showNew = true }.padding(.horizontal, 16).padding(.vertical, 10).background(Theme.background)
-        }
-        .sheet(isPresented: $showNew) { NewJobSheet(preselected: customer).presentationDetents([.medium]) }
+        .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
+        .sheet(isPresented: $showNewJob) { NewJobSheet() }
     }
-}
 
-struct MoreView: View {
-    @EnvironmentObject var api: APIClient
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                HStack(spacing: 6) {
-                    Text("T").font(.system(size: 11, weight: .bold)).foregroundStyle(.white).frame(width: 20, height: 20).background(Theme.brand, in: RoundedRectangle(cornerRadius: 5))
-                    Text(api.displayName.isEmpty ? "Workspace" : api.displayName).font(.system(size: 14, weight: .semibold))
-                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 10)).foregroundStyle(Theme.muted)
-                }.padding(.horizontal, 10).frame(height: 34).background(Theme.surface, in: Capsule())
+    /// Paper's workspace switcher with the compose action beside it.
+    private var workspaceHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Button { showWorkspaces = true } label: {
+                    HStack(spacing: 8) {
+                        Image("ThorbisMark").resizable().scaledToFit().padding(3)
+                            .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
+                            .accessibilityHidden(true)
+                        Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .semibold)).lineLimit(1)
+                        if session.organizations.count > 1 {
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .padding(.horizontal, 10).frame(minHeight: 44)
+                    .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                }
+                .allowsHitTesting(session.organizations.count > 1)
+                .accessibilityLabel("Workspace, \(session.activeOrganization?.name ?? "")")
                 Spacer()
-            }.padding(16)
-            VStack(alignment: .leading, spacing: 2) {
-                row("calendar", "Schedule"); row("briefcase", "Jobs"); row("person.2", "Customers")
-                row("bubble.left", "Messages"); row("book.closed", "Price book"); row("clock", "Time clock")
-                Divider().overlay(Theme.border).padding(.vertical, 4)
-                Button { api.signOut() } label: { rowLabel("rectangle.portrait.and.arrow.right", "Sign out") }.foregroundStyle(Theme.destructive)
+                if session.can("job.create", feature: "jobs") {
+                    PaperCircleButton(symbol: "square.and.pencil", label: "New job") { showNewJob = true }
+                }
             }
-            .padding(6).background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border)).padding(.horizontal, 16)
-            Spacer()
+            Text("More").font(Theme.font(34, weight: .bold)).tracking(-0.68).padding(.top, 10)
+                .accessibilityAddTraits(.isHeader)
         }
+        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 4)
     }
-    func row(_ icon: String, _ t: String) -> some View { rowLabel(icon, t).foregroundStyle(Theme.foreground) }
-    func rowLabel(_ icon: String, _ t: String) -> some View {
-        HStack(spacing: 10) { Image(systemName: icon).frame(width: 20).foregroundStyle(Theme.muted); Text(t).font(.system(size: 15)); Spacer() }
-            .padding(.horizontal, 10).frame(height: 40)
+
+    private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaperGroupHeader(title: title).padding(.top, 14)
+            content()
+        }
+        .padding(.horizontal, Theme.gutter)
     }
 }
