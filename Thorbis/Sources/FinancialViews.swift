@@ -211,6 +211,7 @@ struct EstimateDetailView: View {
     private func customerMode(_ record: EstimateRecord) -> some View {
         CustomerModeContainer(onUnlocked: { customerModeClosed() }) { handBack in
             CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
+                                         financing: session.can("organization.view", feature: FinancingWords.feature),
                                          onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
         }
         .environmentObject(api)
@@ -377,6 +378,8 @@ struct InvoiceDetailView: View {
     @State private var showToCustomer = false
     /// Set when the customer pressed Pay and the technician unlocked: collect once customer mode closes.
     @State private var collectAfterCustomer = false
+    @State private var financingApplications: [FinancingApplication] = []
+    @State private var confirmCancelFinancing = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -398,6 +401,27 @@ struct InvoiceDetailView: View {
                         }
                         .padding(.horizontal, 15)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    }
+                    // CP-17: the financing application in words, never a credit reason.
+                    if let application = financingApplications.first, let words = FinancingWords.status(application, forCustomer: false) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Label(words, systemImage: "calendar.badge.clock").font(Theme.font(15))
+                            Spacer(minLength: 8)
+                            Text(money(application.amount.amount, currency: application.amount.currency))
+                                .font(Theme.monoFont(15)).fixedSize()
+                        }
+                        .padding(15)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        .accessibilityElement(children: .combine)
+                        if application.isOpen, session.can("invoice.payment.create", feature: FinancingWords.feature) {
+                            Button { confirmCancelFinancing = true } label: { commercialAction("Cancel financing application", icon: "xmark.circle") }
+                                .buttonStyle(.plain)
+                                .confirmationDialog("Cancel this application? The customer's link stops working.",
+                                                    isPresented: $confirmCancelFinancing, titleVisibility: .visible) {
+                                    Button("Cancel application", role: .destructive) { Task { await cancelFinancing(application) } }
+                                    Button("Keep it", role: .cancel) {}
+                                }
+                        }
                     }
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
@@ -497,6 +521,7 @@ struct InvoiceDetailView: View {
         }
         .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
             if collectAfterCustomer { collectAfterCustomer = false; showCollectPayment = true }
+            Task { await loadFinancing() }
         }) {
             if let record {
                 CustomerModeContainer(onUnlocked: { showToCustomer = false }) { handBack in
@@ -512,6 +537,7 @@ struct InvoiceDetailView: View {
                                 }
                             }
                         } : nil,
+                        financing: session.can("invoice.payment.create", feature: FinancingWords.feature),
                         onSigned: { updated in
                             self.record = updated
                             paymentModel?.acceptInvoiceMutationResponse(updated)
@@ -578,6 +604,29 @@ struct InvoiceDetailView: View {
             error = nil
         } else if let loadError = paymentModel.loadError {
             error = loadError
+        }
+        await loadFinancing()
+    }
+
+    private func cancelFinancing(_ application: FinancingApplication) async {
+        do {
+            let canceled = try await api.cancelFinancingApplication(invoiceID: id, applicationID: application.id)
+            financingApplications = financingApplications.map { $0.id == canceled.id ? canceled : $0 }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Reads applications back from the lender; a newly funded loan reloads the payments.
+    private func loadFinancing() async {
+        guard let record, record.status != "draft", record.status != "void",
+              session.can("invoice.view", feature: FinancingWords.feature),
+              let latest = try? await api.refreshFinancingApplications(invoiceID: id) else { return }
+        let newlyFunded = latest.contains { $0.status == "funded" } && !financingApplications.contains { $0.status == "funded" }
+        financingApplications = latest
+        if newlyFunded, let paymentModel {
+            await paymentModel.load()
+            if let invoice = paymentModel.invoice { self.record = invoice }
         }
     }
 }
