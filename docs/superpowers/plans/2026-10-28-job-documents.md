@@ -78,7 +78,7 @@ existing collection. Old contact self-edit is retained as Customer details.
   zero failures/skips. Investigate failures; never hide them with automatic retries.
 - [x] Fresh most-capable review of this batch. Fix blockers RED→GREEN and full suite;
   ledger minors/rulings. Preserve contracts and current released features.
-- [ ] Archive/audit/upload next unused build, verify Apple processing/Internal
+- [x] Archive/audit/upload next unused build, verify Apple processing/Internal
   Testers and save testing notes. Record evidence, push and attach a draft PR.
 - [ ] Continue technician catalog/cart and explicit customer quote work under
   BYR-1580; do not mark that umbrella complete after Stage A alone.

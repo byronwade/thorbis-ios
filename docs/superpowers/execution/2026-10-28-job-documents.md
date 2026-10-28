@@ -44,10 +44,10 @@ with the existing job-invoice preview; other cases retain tab-navigation coverag
 That exact selection check passed 1/1 after the fix. No failing run was counted as
 passing or hidden behind automatic retries.
 
-Final full-scheme verification:443/443 passed,0 failures/skips. Additional iPad
-largest-text/dark customer-document check:1/1 passed,0 failures/skips.
-Release-boundary/signing Python checks:12/12 passed. The final source fingerprint
-is held during verification; no source edits are made during a build/test run.
+Final full-scheme verification: 443/443 passed, 0 failures/skips. Additional iPad
+largest-text/dark customer-document check: 1/1 passed, 0 failures/skips.
+Release-boundary/signing Python checks: 12/12 passed. The final full run used frozen source
+fingerprints; no Swift source changed during that run or the signed archive.
 
 The preview intercepts all requests and rejects writes. Deterministic owner-auth
 fixtures exist only in DEBUG preview. Release uses device-owner authentication;
@@ -58,15 +58,21 @@ remain available under their existing server authority.
 
 ## Delivery
 
-Signed archive, upload, Apple processing, tester assignment and testing notes:
-pending. No TestFlight73 availability is claimed yet.
+Source commit 5f48e17 archived as 1.0 (73); strict code-signature, app/widget version
+and Release preview-boundary checks passed. Xcode upload succeeded at 17:08 EDT
+on 2026-10-28. Apple processing completed; Internal Testers is assigned with two
+testers, and What to Test shows Saved. Build 1.0 (73) is available internally.
+The build ID is 5fb0132f-70ba-4806-ac29-53dd4a1a063a. Archive artifacts remain at
+/private/tmp/thorbis-73.xwH9Zr. A preexisting WidgetKit actor-isolation warning and
+Stripe Terminal missing-dSYM warning are non-blocking; the upload succeeded.
 
 ## Prepared demo data
 
 The separate local kit contains 300 customers, 600 jobs, 400 estimates, 350 invoice
 lifecycle plans, 30 synthetic technician profiles and 500 catalog entries. Descriptions
-and authored demo USD rates are prepared. All 500 logical entries map to 24
-representative image families: 18 sourced photos and 6 labelled generated images.
+and authored demo USD rates are prepared. All 500 logical entries now map to 24
+representative sourced-photo families, with no active generated images. The six
+earlier generated originals/provenance remain excluded and preserved.
 Independent record/image checks passed; source bytes and credits are preserved.
 
 No tenant import, login account, invitation, signature, approval, payment or
@@ -74,3 +80,5 @@ provider action was created. The workspace choice remains pending. Catalog photo
 attachment and a no-send assignable technician fixture need their governed owner
 interfaces; BYR-861 remains post-stage under BYR-138. No issue-ID substitution or
 stage bypass was used.
+
+Release: [App Store Connect build73](https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/5fb0132f-70ba-4806-ac29-53dd4a1a063a). Draft source PR: [#75](https://github.com/byronwade/thorbis-ios/pull/75).
