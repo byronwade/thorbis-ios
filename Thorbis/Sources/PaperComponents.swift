@@ -86,11 +86,13 @@ struct PaperTabs: View {
     @State private var moreTrailing = true
     var body: some View {
         // Every tab shows in full when it can: first at the normal padding, then a little
-        // tighter (five job tabs on a 6.1" phone). Only past that does the row scroll, and
+        // tighter, then tighter still (five job tabs on a 6.1" phone). Only past that does the row scroll, and
         // then the chosen tab scrolls fully into view and the cut edge fades out.
         ViewThatFits(in: .horizontal) {
             row(padding: 12).padding(.horizontal, Theme.gutter - 4)
             row(padding: 8).padding(.horizontal, Theme.gutter - 8)
+            // The job's five tabs need this on a 402pt phone; a cut-off "Acti" reads as a bug.
+            row(padding: 6).padding(.horizontal, Theme.gutter - 6)
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     row(padding: 12).padding(.horizontal, Theme.gutter - 4)
