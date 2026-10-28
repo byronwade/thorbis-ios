@@ -12,6 +12,7 @@ struct ThorbisApp: App {
     @StateObject private var connectivity = ConnectivityMonitor()
     @StateObject private var outbox: FieldOutbox
     @StateObject private var menuLayout = MenuLayout()
+    @StateObject private var whatsNew: WhatsNew
     @State private var publicEstimateToken: String?
 
     init() {
@@ -58,6 +59,11 @@ struct ThorbisApp: App {
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
+        #if DEBUG
+        _whatsNew = StateObject(wrappedValue: PaperPreview.enabled ? WhatsNew(defaults: PaperPreview.defaults()) : WhatsNew())
+        #else
+        _whatsNew = StateObject(wrappedValue: WhatsNew())
+        #endif
         _api = StateObject(wrappedValue: api)
         _store = StateObject(wrappedValue: store)
         _session = StateObject(wrappedValue: session)
@@ -82,6 +88,7 @@ struct ThorbisApp: App {
                 ProgressView("Opening your workspace…")
             case .signedOut, .failed:
                 LoginView()
+                    .onAppear { whatsNew.signedInThisLaunch = true }
             case .choosingWorkspace, .noWorkspace:
                 WorkspaceSelectionView()
             case .ready:
@@ -112,6 +119,7 @@ struct ThorbisApp: App {
             .environmentObject(connectivity)
             .environmentObject(outbox)
             .environmentObject(menuLayout)
+            .environmentObject(whatsNew)
             .font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
@@ -145,6 +153,7 @@ struct ThorbisApp: App {
                 Task { await resync() }
             }
             .onOpenURL { url in
+                whatsNew.skipThisLaunch = true
                 if let token = PublicEstimateActionLink.token(from: url) {
                     publicEstimateToken = token
                 } else if let jobID = JobActivityLink.jobID(from: url) {
