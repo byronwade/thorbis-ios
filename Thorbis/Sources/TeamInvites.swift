@@ -59,6 +59,7 @@ struct InviteMemberSheet: View {
     @State private var role = "technician"
     @State private var busy = false
     @State private var error: String?
+    @FocusState private var emailFocused: Bool
 
     private var roles: [(id: String, label: String)] {
         TeamInvitation.roles.filter { $0.id != "admin" || session.can("organization.permissions.manage") }
@@ -75,6 +76,9 @@ struct InviteMemberSheet: View {
                     TextField("Email", text: $email)
                         .keyboardType(.emailAddress).textContentType(.emailAddress)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .focused($emailFocused)
+                        .submitLabel(.send)
+                        .onSubmit { if valid { Task { await send() } } }
                     Picker("Role", selection: $role) {
                         ForEach(roles, id: \.id) { Text($0.label).tag($0.id) }
                     }
@@ -88,11 +92,16 @@ struct InviteMemberSheet: View {
             .navigationTitle("Invite to team")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ToolbarItem(placement: .topBarTrailing) { Button("Send invite") { Task { await send() } }.disabled(!valid || busy) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .confirmationAction) {
+                    if busy { ProgressView() } else { Button("Send invite") { Task { await send() } }.disabled(!valid) }
+                }
             }
+            .onAppear { emailFocused = true }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+        // MA-16: a typed address is not lost to a stray swipe.
+        .interactiveDismissDisabled(busy || !email.isEmpty)
     }
 
     private func send() async {

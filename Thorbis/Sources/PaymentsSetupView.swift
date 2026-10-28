@@ -135,18 +135,19 @@ struct PaymentsSetupView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("BUSINESS SETTINGS").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                    Text("Payments").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
+                    // MA-05: large title and one muted subtitle line; the Stripe note follows as body.
+                    Text("Payments").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
+                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     Text("Card payments and payouts run through Stripe. Stripe holds your bank and identity details; Thorbis never sees them.")
-                        .font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.top, 4)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                 }
                 .padding(.bottom, 12)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -Theme.gutter) }
                 if readiness == nil && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
                 if let readiness {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(readiness.headline).font(Theme.font(17, weight: .semibold))
-                        Text(readiness.detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        Text(readiness.headline).font(Theme.font(17, weight: .medium))
+                        Text(readiness.detail).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
                     .padding(.vertical, 8)
                     PaperGroupHeader(title: "Status").padding(.top, 10)
@@ -159,12 +160,6 @@ struct PaymentsSetupView: View {
                         if readiness.requirements.eventuallyDueCount > 0 { countRow("Due later", readiness.requirements.eventuallyDueCount, urgent: false) }
                     }
                     if let availability { moneySection(availability) }
-                    if let title = readiness.actionTitle {
-                        PrimaryButton(title: title, icon: "arrow.up.forward.square", busy: busy) { Task { await openStripe() } }
-                            .padding(.top, 20)
-                        Text("Opens Stripe in a secure browser. Tap Done when you finish to come back here.")
-                            .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
-                    }
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
@@ -172,6 +167,19 @@ struct PaymentsSetupView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        // MA-08: the one commit sits in a bottom bar within thumb reach, not at the end of the scroll.
+        .safeAreaInset(edge: .bottom) {
+            if let title = readiness?.actionTitle {
+                VStack(spacing: 8) {
+                    PrimaryButton(title: title, icon: "arrow.up.forward.square", busy: busy) { Task { await openStripe() } }
+                    Text("Opens Stripe in a secure browser. Tap Done there to come back.")
+                        .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+                .background(Theme.background)
+                .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+            }
+        }
         .refreshable { await load() }
         .task { await load() }
         .sheet(item: Binding(get: { hosted.map(HostedPage.init) }, set: { if $0 == nil { hosted = nil } }),
@@ -180,14 +188,22 @@ struct PaymentsSetupView: View {
         }
     }
 
+    private var subtitle: String {
+        guard let readiness else { return error == nil ? "Checking with Stripe…" : "Stripe status unavailable" }
+        if readiness.chargesReady && readiness.payoutsReady { return "Taking cards and paying out" }
+        if readiness.chargesReady { return "Taking cards · payouts not set up" }
+        return "Not taking cards yet"
+    }
+
     private struct HostedPage: Identifiable { let url: URL; var id: String { url.absoluteString } }
 
     private func statusRow(_ title: String, on: Bool) -> some View {
         HStack {
             Text(title).font(Theme.font(15, weight: .medium))
             Spacer()
-            Label(on ? "On" : "Off", systemImage: on ? "checkmark.circle.fill" : "circle")
-                .font(Theme.font(14)).foregroundStyle(on ? Theme.brand : Theme.muted)
+            // Status is a word with a shape; colour is not the signal.
+            Label(on ? "On" : "Not yet", systemImage: on ? "checkmark.circle.fill" : "circle.dashed")
+                .font(Theme.font(15)).foregroundStyle(on ? Theme.foreground : Theme.muted)
         }
         .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
@@ -195,13 +211,17 @@ struct PaymentsSetupView: View {
 
     @ViewBuilder private func moneySection(_ snapshot: MoneyAvailability) -> some View {
         if let attention = snapshot.attention {
-            VStack(alignment: .leading, spacing: 4) {
-                Label(attention.title, systemImage: "exclamationmark.triangle").font(Theme.font(15, weight: .semibold))
-                Text(attention.explanation).font(Theme.font(13))
+            // MA-15: body-colour words, only the mark is tinted.
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(attention.title).font(Theme.font(15, weight: .medium))
+                    Text(attention.explanation).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
             }
-            .foregroundStyle(Theme.warning)
+            .foregroundStyle(Theme.foreground)
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             .padding(.top, 14)
         }
         ForEach(snapshot.balances) { balance in
@@ -215,8 +235,11 @@ struct PaymentsSetupView: View {
             ForEach(Array(snapshot.payouts.enumerated()), id: \.offset) { _, payout in
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
+                        if payout.responsibleActor == "owner" {
+                            Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
+                                .accessibilityLabel("Needs you")
+                        }
                         Text(payout.title).font(Theme.font(15, weight: .medium))
-                            .foregroundStyle(payout.responsibleActor == "owner" ? Theme.warning : Theme.foreground)
                         Spacer()
                         Text(money(payout.amount, currency: payout.currency)).font(Theme.monoFont(14, weight: .medium))
                     }
