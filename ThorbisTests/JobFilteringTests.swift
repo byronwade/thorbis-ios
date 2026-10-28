@@ -2,6 +2,14 @@ import XCTest
 @testable import Thorbis
 
 final class JobFilteringTests: XCTestCase {
+    func testUnscheduledLaneShowsHowLongTheJobHasWaited() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertEqual(ScheduleCompactRow.age(since: now, now: now), "Today")
+        XCTAssertEqual(ScheduleCompactRow.age(since: now.addingTimeInterval(-3 * 86400), now: now), "3d")
+        XCTAssertEqual(ScheduleCompactRow.age(since: now.addingTimeInterval(-21 * 86400), now: now), "3w")
+        XCTAssertEqual(ScheduleCompactRow.age(since: now.addingTimeInterval(-150 * 86400), now: now), "5mo")
+    }
+
     func testTodayUsesScheduledTimeAndKeepsUnscheduledSeparate() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         var calendar = Calendar(identifier: .gregorian)
