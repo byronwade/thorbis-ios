@@ -38,4 +38,21 @@ final class RouteBodyTests: XCTestCase {
         XCTAssertEqual(body["description"] as? String, "Replace compressor")
         XCTAssertEqual((body["sellPrice"] as? [String: Any])?["amount"] as? Int, 85_000)
     }
+
+    func testRoleChangeNamesTheVersionsAndKeepsTheMemberInTheRoute() async throws {
+        let memberJSON = #"{"member":{"memberId":"mem_42","userId":"u","displayName":"Alex","email":"a@example.invalid","isLegalOwner":false,"legalMembershipRoles":[]},"authority":{"kind":"tenant_role","assignmentId":"as1","currentAssignmentVersion":3,"assignedRoleRevision":1,"role":{"roleId":"r1","currentRevision":2,"name":"Tech","description":""}}}"#
+        let member = try JSONDecoder().decode(RoleMember.self, from: Data(memberJSON.utf8))
+        XCTAssertEqual(member.authority.currentAssignmentVersion, 3)
+        let roleJSON = #"{"role":{"id":"00000000-0000-4000-8000-000000000777","currentRevision":5},"revision":{"name":"Dispatcher","description":"Books and assigns"}}"#
+        let role = try JSONDecoder().decode(OrganizationRole.self, from: Data(roleJSON.utf8))
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        try await client.changeMemberRole(member, to: role, idempotencyKey: "k")
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.url?.path, "/v1/organization/role-members/mem_42/role")
+        let body = try json(request.body)
+        XCTAssertNil(body["memberId"])
+        XCTAssertEqual(body["expectedVersion"] as? Int, 3)
+        XCTAssertEqual(body["expectedRoleRevision"] as? Int, 5)
+        XCTAssertEqual(body["desiredRoleId"] as? String, "00000000-0000-4000-8000-000000000777")
+    }
 }
