@@ -516,7 +516,7 @@ struct CustomerDetailView: View {
             if let contactMutationError {
                 Text(contactMutationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     .accessibilityIdentifier("contact-mutation-error")
             }
             ForEach(contacts) { contact in
@@ -557,7 +557,7 @@ struct CustomerDetailView: View {
             if let locationError {
                 Text(locationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     .accessibilityIdentifier("location-mutation-error")
             }
             ForEach(locations) { location in
@@ -810,7 +810,7 @@ private struct CustomerContactIcon: View {
         if let url {
             Link(destination: url) {
                 Image(systemName: isPhone ? "phone" : "envelope").font(Theme.font(size == 46 ? 17 : 13)).foregroundStyle(Theme.foreground)
-                    .frame(width: size, height: size).background(size == 46 ? Theme.card : Theme.fill, in: RoundedRectangle(cornerRadius: size == 46 ? 12 : 15))
+                    .frame(width: size, height: size).background(size == 46 ? Theme.card : Theme.fill, in: RoundedRectangle(cornerRadius: size == 46 ? 12 : 15, style: .continuous))
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel("\(isPhone ? "Call" : "Email") \(value)")
         }

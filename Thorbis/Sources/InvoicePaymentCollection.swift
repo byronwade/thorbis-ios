@@ -282,7 +282,7 @@ struct InvoicePaymentsSection: View {
                     }
                 }
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
 
             if let modelError = model.paymentError {
                 ErrorBanner(message: modelError)
@@ -439,7 +439,7 @@ private struct InvoicePaymentDetailSheet: View {
                         }
                     }
                     .padding(.horizontal, 15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
 
                     if refundModel.didComplete {
                         Label("Refund confirmed by Thorbis", systemImage: "checkmark.circle.fill")
@@ -447,7 +447,7 @@ private struct InvoicePaymentDetailSheet: View {
                             .foregroundStyle(Theme.success)
                             .padding(15)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                            .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
 
                     if let error = refundModel.errorMessage {
@@ -532,8 +532,8 @@ private struct InvoicePaymentDetailSheet: View {
             .foregroundStyle(Theme.foreground)
             .padding(15)
             .frame(minHeight: 58)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -584,7 +584,7 @@ private struct InvoicePaymentRefundForm: View {
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 } else if showsReasonForm {
                     reasonEntry
                 } else {
@@ -667,7 +667,7 @@ private struct InvoicePaymentRefundForm: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
 
             Text("Reason for refund")
                 .font(Theme.font(15, weight: .medium))
@@ -680,8 +680,8 @@ private struct InvoicePaymentRefundForm: View {
             .frame(minHeight: 136)
             .scrollContentBackground(.hidden)
             .padding(10)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
             .focused($reasonFocused)
             .accessibilityLabel("Reason for refund")
             .accessibilityHint("Enter between 3 and 2,000 characters")
@@ -740,7 +740,7 @@ private struct InvoicePaymentRefundStatusPanel: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         }
     }
 
@@ -962,8 +962,8 @@ struct InvoicePaymentCollectionSheet: View {
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity, minHeight: 168)
-            .background(option == .tapToPay ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(option == .tapToPay ? Theme.brand.opacity(0.5) : Theme.border, lineWidth: 1))
+            .background(option == .tapToPay ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(option == .tapToPay ? Theme.brand.opacity(0.5) : Theme.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Tap to Pay on iPhone")
@@ -1035,8 +1035,8 @@ struct InvoicePaymentCollectionSheet: View {
                 }
             }
             .padding(.horizontal, 12)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border, lineWidth: 1))
             .disabled(hasLockedIntent || model.waitingForProjection)
         }
     }
@@ -1054,7 +1054,7 @@ struct InvoicePaymentCollectionSheet: View {
             .pickerStyle(.menu)
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .padding(.horizontal, 12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .disabled(hasLockedIntent || model.waitingForProjection)
             Label("This records a payment collected elsewhere; it does not charge a card or bank account.", systemImage: "info.circle")
                 .font(Theme.font(12))

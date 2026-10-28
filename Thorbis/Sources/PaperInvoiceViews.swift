@@ -161,8 +161,8 @@ struct PaperJobInvoiceContent: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border, lineWidth: 1))
         }
     }
 

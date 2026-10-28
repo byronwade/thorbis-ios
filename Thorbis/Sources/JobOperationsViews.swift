@@ -157,8 +157,8 @@ struct JobCloseoutView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
     }
 
     private func load() async {
@@ -355,7 +355,7 @@ struct JobScheduleView: View {
                 .foregroundStyle(showsCalendar ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -400,7 +400,7 @@ struct JobScheduleView: View {
                 .foregroundStyle(selected ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -532,8 +532,8 @@ struct JobFollowUpsView: View {
                         }
                     }
                     .padding(14)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     .padding(.bottom, 8)
                 }
                 if session.can("job.edit", feature: "jobs") {
@@ -576,8 +576,8 @@ struct JobFollowUpsView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
     }
 
     private func load() async {
