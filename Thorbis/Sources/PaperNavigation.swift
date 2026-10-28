@@ -12,6 +12,7 @@ struct RootView: View {
     /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
     @State private var customPaths: [String: NavigationPath] = [:]
     @State private var drawerOpen = false
+    @State private var showSettings = false
     @State private var path = NavigationPath()
     @State private var schedulePath = NavigationPath()
     @State private var jobsPath = NavigationPath()
@@ -162,7 +163,19 @@ struct RootView: View {
         }
         // The avatar opens the side menu; settings are one more tap from there.
         .environment(\.paperShowMenu, { Task { @MainActor in withAnimation(.easeOut(duration: 0.2)) { drawerOpen = true } } })
+        .overlay(alignment: .leading) {
+            // Swipe in from the left edge to open the menu, only at a tab's first screen so the
+            // system back swipe keeps working everywhere else.
+            if !drawerOpen && atTabRoot {
+                Color.clear.frame(width: 18).contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 12).onEnded { value in
+                        if value.translation.width > 50 { withAnimation(.easeOut(duration: 0.2)) { drawerOpen = true } }
+                    })
+                    .accessibilityHidden(true)
+            }
+        }
         .overlay { sideMenu }
+        .sheet(isPresented: $showSettings) { SettingsView() }
         .background(Theme.background)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
@@ -223,6 +236,7 @@ struct RootView: View {
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
             case "new-job": createJob = true
+            case "settings": showSettings = true
             case "side-menu":
                 RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
                 RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
@@ -279,13 +293,24 @@ struct RootView: View {
                              openRecent: { item in closeDrawer(); openRecent(item) },
                              search: { closeDrawer(); selectedTab = PrimaryTab.search.rawValue },
                              newJob: { closeDrawer(); createJob = true },
-                             settings: { closeDrawer(); primaryTab = .more },
+                             settings: { closeDrawer(); showSettings = true },
                              close: closeDrawer)
                         .frame(width: min(geometry.size.width * 0.84, 340))
                         .transition(.move(edge: .leading))
                         .gesture(DragGesture().onEnded { if $0.translation.width < -60 { closeDrawer() } })
                 }
             }
+        }
+    }
+
+    private var atTabRoot: Bool {
+        switch selectedTab {
+        case PrimaryTab.schedule.rawValue: schedulePath.isEmpty
+        case PrimaryTab.jobs.rawValue: jobsPath.isEmpty
+        case PrimaryTab.customers.rawValue: customersPath.isEmpty
+        case PrimaryTab.more.rawValue: morePath.isEmpty
+        case PrimaryTab.search.rawValue: false
+        default: customPaths[selectedTab]?.isEmpty ?? true
         }
     }
 
