@@ -221,6 +221,8 @@ final class FieldOutboxTests: XCTestCase {
 
         XCTAssertTrue(box.entries.isEmpty)
         XCTAssertEqual(box.lastSyncSent, 3)
+        XCTAssertEqual(box.syncGeneration, 1, "Open invoice screens reload after a sync")
+        XCTAssertEqual(box.recordedPayments.map(\.idempotencyKey), ["cash-1"], "Held until the invoice screen sees it")
         XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, [
             "/v1/commands", "/v1/invoices/\(invoice)/payments", "/v1/commands",
         ], "The payment lands before the completion that may depend on it")

@@ -44,8 +44,20 @@ struct JobCloseoutView: View {
             return closeout.facts.photoCount + PendingPhotoStore.list(jobID: jobID).count >= closeout.policy.requiredPhotoCount
         case "check": return outbox.waitingChecks(jobID: jobID).contains(String(requirement.requirement.dropFirst("check:".count)))
         case "payment_or_unpaid_disposition":
-            return outbox.entries.contains { if case .payment(let payment) = $0.action { payment.jobId == jobID } else { false } }
+            return waitingPaymentsCoverBalance
         default: return false
+        }
+    }
+    /// Cash and check waiting on this phone cover every unpaid balance on the job's invoices as
+    /// last seen. A partial payment leaves the requirement (and the unpaid disposition) showing.
+    private var waitingPaymentsCoverBalance: Bool {
+        let owing = (JobDetailCache.invoices(jobID) ?? []).filter { $0.status == "issued" }.compactMap { invoice -> (String, Int)? in
+            let total = invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
+            let due = total - invoice.amountPaid
+            return due > 0 ? (invoice.id, due) : nil
+        }
+        return !owing.isEmpty && owing.allSatisfy { id, due in
+            outbox.waitingPayments(invoiceID: id).reduce(0) { $0 + $1.amountCents } >= due
         }
     }
     private var canComplete: Bool {

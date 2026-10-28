@@ -173,6 +173,12 @@ final class FieldOutbox: ObservableObject {
     @Published private(set) var lastSyncSent = 0
     /// Photos waiting in `PendingPhotoStore`, counted in the one sync line (OF-03).
     @Published private(set) var waitingPhotos = 0
+    /// Bumped after a sync sends anything, so open screens reload what the server now has.
+    @Published private(set) var syncGeneration = 0
+    /// Payments this session recorded from the queue. They keep holding their amount on an
+    /// invoice screen until that screen has reloaded and sees them, so the same money can't
+    /// look collectable again in between.
+    private(set) var recordedPayments: [OutboxEntry.PaymentPayload] = []
 
     var pending: [OutboxEntry] { entries.filter { $0.state == .pending } }
     /// Everything on this phone that hasn't reached the server yet.
@@ -380,11 +386,17 @@ final class FieldOutbox: ObservableObject {
     func drain(api: APIClient, useCommandEndpoint: Bool) async {
         guard !syncing, !pending.isEmpty else { return }
         syncing = true
-        defer { syncing = false }
+        defer { syncing = false; if lastSyncSent > 0 { syncGeneration += 1 } }
         var sent = 0
+        // A completion waits while its job still has photos on this phone: the closeout may count them.
+        let photoJobs = Set(PendingPhotoStore.list().map(\.jobID))
+        func waitsOnPhotos(_ entry: OutboxEntry) -> Bool {
+            if case .complete = entry.action { photoJobs.contains(entry.jobID) } else { false }
+        }
         while let first = pending.first {
+            if waitsOnPhotos(first) { break }
             if useCommandEndpoint && first.viaCommand {
-                let run = Array(pending.prefix { $0.viaCommand }.prefix(50))
+                let run = Array(pending.prefix { $0.viaCommand && !waitsOnPhotos($0) }.prefix(50))
                 guard let applied = await sendCommands(run, api: api) else { break }
                 sent += applied
             } else {
@@ -527,6 +539,9 @@ final class FieldOutbox: ObservableObject {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         if case .invoiceSignature(let payload) = entries[index].action {
             try? FileManager.default.removeItem(at: signatureDirectory.appendingPathComponent("\(payload.clientAssetId).png"))
+        }
+        if case .payment(let payment) = entries[index].action, entries[index].state == .pending {
+            recordedPayments.append(payment)
         }
         entries.remove(at: index)
     }

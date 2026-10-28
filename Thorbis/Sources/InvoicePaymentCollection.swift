@@ -91,7 +91,13 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     /// Cash and check taken on this phone and not yet recorded. They never lower the balance due
     /// (OF-02), but they do stop the same money being collected twice.
     var waitingCents: Int {
-        outbox?.waitingPayments(invoiceID: invoiceID).reduce(0) { $0 + $1.amountCents } ?? 0
+        guard let outbox else { return 0 }
+        let queued = outbox.waitingPayments(invoiceID: invoiceID).reduce(0) { $0 + $1.amountCents }
+        // Recorded from the queue but not yet in this screen's history: still held until reload.
+        let landed = outbox.recordedPayments
+            .filter { recorded in recorded.invoiceId == invoiceID && !payments.contains { $0.idempotencyKey == recorded.idempotencyKey } }
+            .reduce(0) { $0 + $1.amountCents }
+        return queued + landed
     }
 
     var collectableCents: Int? { outstandingCents.map { max(0, $0 - waitingCents) } }
@@ -151,6 +157,10 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             if error.isConnectivityFailure, let cached = invoice ?? JobDetailCache.invoice(invoiceID) {
                 // No signal: the last copy, so cash and check can still be taken (OF-04, OF-08).
                 invoice = cached
+                // A payment sent before the app lost signal keeps its key (OF-05).
+                if pendingRequest == nil {
+                    pendingRequest = intentStore.load(organizationID: cached.organizationId, invoiceID: invoiceID)
+                }
                 if let saved = JobDetailCache.payments(invoiceID) {
                     payments = saved
                     historyComplete = true
@@ -352,6 +362,10 @@ struct InvoicePaymentsSection: View {
                     .foregroundStyle(Theme.warning)
                     .padding(.horizontal, 2)
             }
+        }
+        .onChange(of: outbox.syncGeneration) { _, _ in
+            // A queued payment may have just recorded: show the server's invoice and history.
+            Task { await model.load() }
         }
         .onChange(of: model.invoice?.amountPaid) { _, _ in
             if let updated = model.invoice { onInvoiceUpdated(updated) }
