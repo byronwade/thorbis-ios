@@ -357,7 +357,7 @@ private struct ScheduleHero<Commit: View>: View {
                             Text(customer).font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
                         Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted).padding(.top, 4)
+                        PaperDisclosure().padding(.top, 4)
                     }
                     .contentShape(Rectangle())
                 }

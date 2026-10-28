@@ -422,7 +422,7 @@ struct JobDetailView: View {
                         PaperDetailRow(label: "Customer") {
                             HStack(spacing: 4) {
                                 Text(customer.name).foregroundStyle(Theme.foreground)
-                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle)
+                                PaperDisclosure()
                             }
                         }
                     }
@@ -519,7 +519,7 @@ struct JobDetailView: View {
                                 PaperStatusChip(status: estimate.status)
                                 Text("EST-\(estimate.id.suffix(4).uppercased())").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                                 Spacer()
-                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                                PaperDisclosure()
                             }
                         }
                         .padding(16)
@@ -638,7 +638,7 @@ struct JobDetailView: View {
                 ForEach(["All", "Notes", "Status"], id: \.self) { filter in
                     Button { activityFilter = filter } label: {
                         Text(filter)
-                            .font(Theme.font(12, weight: activityFilter == filter ? .semibold : .medium))
+                            .font(Theme.font(12, weight: .medium))
                             .foregroundStyle(activityFilter == filter ? Theme.background : Theme.muted)
                             .padding(.horizontal, 12).frame(height: 28)
                             .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
@@ -770,7 +770,7 @@ struct JobDetailView: View {
             Image(systemName: icon).foregroundStyle(Theme.brandText).frame(width: 20)
             Text(title).font(Theme.font(15, weight: .medium))
             Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+            PaperDisclosure()
         }
         .foregroundStyle(Theme.foreground)
         .padding(15)

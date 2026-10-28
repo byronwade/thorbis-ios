@@ -345,9 +345,7 @@ struct InvoicePaymentsSection: View {
                     Text("Refunded").font(Theme.font(12)).foregroundStyle(Theme.warning)
                 }
             }
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Theme.muted)
+            PaperDisclosure()
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -529,9 +527,7 @@ private struct InvoicePaymentDetailSheet: View {
                         .foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
+                PaperDisclosure()
             }
             .foregroundStyle(Theme.foreground)
             .padding(15)
@@ -1128,9 +1124,7 @@ struct InvoicePaymentCollectionSheet: View {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.brandText)
                 }
                 else {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.subtle)
+                    PaperDisclosure()
                 }
             }
             .frame(minHeight: 56)

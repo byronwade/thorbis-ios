@@ -432,7 +432,7 @@ struct CustomerDetailView: View {
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
                         Spacer(minLength: 8)
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle)
+                        PaperDisclosure()
                     }
                     .frame(minHeight: 52).contentShape(Rectangle())
                 }

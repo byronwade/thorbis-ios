@@ -13,7 +13,7 @@ struct ThorbisLogoLockup: View {
                 .frame(width: markSize, height: markSize)
                 .accessibilityHidden(true)
             Text("Thorbis")
-                .font(Theme.font(wordmarkSize, weight: .semibold))
+                .font(Theme.font(wordmarkSize, weight: .medium))
                 .foregroundStyle(Theme.foreground)
         }
         .accessibilityElement(children: .ignore)
@@ -290,7 +290,7 @@ extension PaperMenuRow where Trailing == AnyView {
         self.init(title: title, symbol: symbol, subtitle: subtitle, tile: tile) {
             AnyView(HStack(spacing: 6) {
                 if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted) }
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                PaperDisclosure()
             })
         }
     }
@@ -372,8 +372,8 @@ enum PaperChrome {
         }
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
-        appearance.titleTextAttributes = [.font: inter(17, .semibold)]
-        appearance.largeTitleTextAttributes = [.font: inter(34, .bold)]
+        appearance.titleTextAttributes = [.font: inter(17, .medium)]
+        appearance.largeTitleTextAttributes = [.font: inter(30, .medium)]
         let scrolled = UINavigationBarAppearance()
         scrolled.configureWithDefaultBackground()
         scrolled.titleTextAttributes = appearance.titleTextAttributes
@@ -699,5 +699,15 @@ struct FloatingCreateButton: View {
             .buttonStyle(PressStyle()).disabled(disabled)
         }
         .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+    }
+}
+
+/// Row disclosure chevron: one size, weight and colour for every tappable row.
+struct PaperDisclosure: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Theme.muted)
+            .accessibilityHidden(true)
     }
 }
