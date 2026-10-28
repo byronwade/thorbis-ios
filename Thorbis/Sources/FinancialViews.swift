@@ -754,6 +754,7 @@ struct NewEstimateView: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 28)
             }
             .scrollDismissesKeyboard(.interactively)
+            .keyboardDoneButton()
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)

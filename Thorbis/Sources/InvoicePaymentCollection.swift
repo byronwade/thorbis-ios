@@ -1204,7 +1204,11 @@ struct InvoicePaymentCollectionSheet: View {
     private func recordPayment() async {
         guard let amountCents else { return }
         let accepted = await model.record(amountCents: amountCents, method: method)
-        if accepted { dismiss() }
+        if accepted {
+            // The sheet closes on success, so a view-bound sensoryFeedback would never play.
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            dismiss()
+        }
     }
 
     private func createPayLink() async {
