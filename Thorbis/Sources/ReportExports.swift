@@ -24,9 +24,9 @@ struct ReportExport: Identifiable, Hashable {
               capability: "invoice.view", feature: "invoicing", alsoNeeds: ["payments"]),
     ]
 
-    static func available(_ session: SessionController) -> [ReportExport] {
+    @MainActor static func available(_ session: SessionController) -> [ReportExport] {
         all.filter { export in
-            session.can(export.capability, feature: export.feature) && export.alsoNeeds.allSatisfy(session.isFeatureOn)
+            session.can(export.capability, feature: export.feature) && export.alsoNeeds.allSatisfy { session.isFeatureOn($0) }
         }
     }
 
