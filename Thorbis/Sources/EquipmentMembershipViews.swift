@@ -281,7 +281,7 @@ struct CustomerMembershipSection: View {
                             Spacer()
                             if let price = plan.price {
                                 Text("\(money(price, currency: "USD"))\(plan.billingFrequency.map { " / \($0.replacingOccurrences(of: "_", with: " "))" } ?? "")")
-                                    .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .moneyStyle(.row).foregroundStyle(Theme.foreground)
                             }
                         }
                         Text([plan.discountPercent > 0 ? "\(plan.discountPercent)% off work" : nil,

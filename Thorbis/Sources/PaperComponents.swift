@@ -252,6 +252,10 @@ extension PaperDetailRow where Value == Text {
     init(_ label: String, value: String) {
         self.init(label: label) { Text(value) }
     }
+    /// MF-02: an amount in a detail row reads at the line size in tabular mono.
+    init(_ label: String, money: String) {
+        self.init(label: label) { Text(money).font(Theme.moneyFont(.line)).monospacedDigit() }
+    }
 }
 
 /// A row in a grouped list of destinations or settings (Paper 29 / 65).

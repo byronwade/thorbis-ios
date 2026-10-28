@@ -307,15 +307,22 @@ struct JobDetailView: View {
                         .background(Theme.fill, in: Capsule())
                     }
                     MemberChip(customerID: job.customerId)
-                    if let balance = invoiceBalanceCents {
-                        // The balance chip jumps to the Invoice tab, where it can be collected.
-                        Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
-                            Chip(text: "\(money(balance, currency: "USD")) due", icon: "dollarsign.circle", tint: Theme.foreground)
-                                .padding(.vertical, 8).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        .accessibilityHint("Opens the invoice")
+            }
+            if let balance = invoiceBalanceCents {
+                // MF-01/MF-03: what's owed on the job is a labelled figure, not a chip. It jumps to
+                // the Invoice tab, where it can be collected.
+                Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 12)
+                        Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
                     }
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .padding(.top, 8)
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Opens the invoice")
             }
             if !compact {
                 JobProgressTrack(status: outbox.pendingStatus(for: job.id) ?? job.status).padding(.top, 10)
@@ -541,7 +548,7 @@ struct JobDetailView: View {
                                 Spacer(minLength: 8)
                                 if let total = paperLinesTotal(estimate.lines) {
                                     Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
-                                        .font(Theme.monoFont(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .moneyStyle(.row).foregroundStyle(Theme.foreground)
                                 }
                             }
                             HStack(spacing: 8) {
@@ -566,7 +573,7 @@ struct JobDetailView: View {
     private func summary(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.monoFont(20, weight: .medium))
+            Text(value).moneyStyle(.total)
         }
     }
 

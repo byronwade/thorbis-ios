@@ -179,7 +179,10 @@ struct ReportsView: View {
                     HStack {
                         Text(credit.0).font(Theme.font(15, weight: .medium))
                         Spacer()
-                        Text("\(money(credit.1, currency: "USD")) · \(credit.2)").font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(money(credit.1, currency: "USD")).moneyStyle(.row)
+                            Text(credit.2).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        }
                     }
                     .frame(minHeight: 44)
                     .accessibilityElement(children: .combine)
@@ -192,9 +195,9 @@ struct ReportsView: View {
                         Text(monthName(month.month)).font(Theme.font(15, weight: .medium))
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(money(month.recorded, currency: "USD")).font(Theme.monoFont(13, weight: .medium))
+                            Text(money(month.recorded, currency: "USD")).moneyStyle(.row)
                             if month.refunded > 0 {
-                                Text("\(money(month.refunded, currency: "USD")) refunded").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                                Text("\(money(month.refunded, currency: "USD")) refunded").font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
                             }
                         }
                     }
@@ -211,7 +214,7 @@ struct ReportsView: View {
     private func moneyTile(_ label: String, _ amount: Int, count: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(money(amount, currency: "USD")).font(Theme.monoFont(20, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.7)
+            Text(money(amount, currency: "USD")).moneyStyle(.total)
             Text(count == 1 ? "1 entry" : "\(count) entries").font(Theme.font(12)).foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
