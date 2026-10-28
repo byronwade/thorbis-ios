@@ -159,8 +159,10 @@ struct EstimateDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
                 PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
-            } else if let record, record.status == "sent", session.can("estimate.approve", feature: "estimates") {
+            } else if let record, record.status == "sent", session.can("estimate.approve", feature: "estimates"),
+                      (jobID != nil && (record.options ?? []).isEmpty) || session.can("estimate.send", feature: "estimates") {
                 // On site, the next step is the customer's yes: hand them the options to choose and sign.
+                // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
                 PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
             }
         }

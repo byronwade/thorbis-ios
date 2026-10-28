@@ -334,7 +334,7 @@ struct CustomerEstimatePresentation: View {
             switch flow.step {
             case .choose:
                 CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
-                if !flow.canReview { hint("Choose an option above to continue.") }
+                if let error { hint(error, danger: true) } else if !flow.canReview { hint("Choose an option above to continue.") }
                 CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
             case .review:
                 CustomerPresentationCommit(title: flow.approveTitle, enabled: true, busy: busy, type: type) { Task { await startSigning() } }
