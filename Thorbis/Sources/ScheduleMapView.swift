@@ -171,5 +171,8 @@ struct ScheduleMapView: View {
         }
         places = found
         loaded = true
+        // A selection made before the stops were known (an iPad row tapped while loading,
+        // or Map entered with a job already picked) centers once the pins exist.
+        if let stop = stops.first(where: { $0.id == selectedID }) { center(on: stop) }
     }
 }
