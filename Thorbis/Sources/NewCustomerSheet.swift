@@ -40,9 +40,11 @@ struct NewCustomerSheet: View {
                     field("Email", text: $email, prompt: "name@example.com", focus: .email)
                         .textContentType(.emailAddress).keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .submitLabel(.next).onSubmit { focused = .address }
                     if !emailValid { Text("Check the email address.").font(Theme.font(12)).foregroundStyle(Theme.destructive) }
                     field("Service address", text: $address, prompt: "412 Birchwood Ln, Sacramento", focus: .address)
-                        .textContentType(.fullStreetAddress)
+                        .textContentType(.fullStreetAddress).submitLabel(.done)
+                        .onSubmit { if valid { Task { await save() } } }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                         Picker("Account", selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 })) {
@@ -76,7 +78,8 @@ struct NewCustomerSheet: View {
             }
             .onAppear { focused = .name }
             .task(id: CustomerPhoneLookup.digits(phone)) { await checkPhone() }
-            .interactiveDismissDisabled(busy)
+            // MA-16: typed details aren't lost to a stray swipe; Cancel still leaves.
+            .interactiveDismissDisabled(busy || !trimmedName.isEmpty || !phone.isEmpty || !email.isEmpty || !address.isEmpty)
         }
     }
 

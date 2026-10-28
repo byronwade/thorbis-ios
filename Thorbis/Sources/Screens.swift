@@ -141,6 +141,8 @@ struct NewJobSheet: View {
                     if let createdJobID { JobDetailView(jobId: createdJobID) }
                 }
         }
+        // A swipe never throws away a typed title (MA-16).
+        .interactiveDismissDisabled(busy || (savedJobID == nil && !draft.title.isEmpty))
     }
 
     private var customerPicker: some View {
@@ -385,25 +387,15 @@ struct CustomerContactSheet: View {
             ZStack {
                 Text(contact == nil ? "New contact" : "Edit contact")
                     .font(Theme.font(17, weight: .semibold))
+                // MA-16: Cancel leading; the one commit is the ink button at the bottom.
                 HStack {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .font(Theme.font(13, weight: .semibold))
-                            .foregroundStyle(Theme.foreground)
-                            .frame(width: 32, height: 32)
-                            .background(Theme.fill, in: Circle())
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel(contact == nil ? "Cancel new contact" : "Cancel contact changes")
-                    .disabled(busy)
+                    Button("Cancel") { dismiss() }
+                        .font(Theme.font(15))
+                        .foregroundStyle(Theme.foreground)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityLabel(contact == nil ? "Cancel new contact" : "Cancel contact changes")
+                        .disabled(busy)
                     Spacer()
-                    Button("Save") { Task { await save() } }
-                        .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(Theme.brandText)
-                        .frame(minHeight: 44)
-                        .disabled(!canSave)
-                        .opacity(canSave ? 1 : 0.45)
                 }
             }
             .frame(height: 40)
@@ -417,7 +409,7 @@ struct CustomerContactSheet: View {
                         Text("Role")
                             .font(Theme.font(13, weight: .medium))
                             .foregroundStyle(Theme.muted)
-                        HStack(spacing: 6) {
+                        FlowRow(spacing: 6, lineSpacing: 0) {
                             ForEach(Self.roles, id: \.self) { option in
                                 roleChip(option, selected: !usesCustomRole && role == option) {
                                     role = option
@@ -504,7 +496,7 @@ struct CustomerContactSheet: View {
         .toolbar(.hidden, for: .navigationBar)
         .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.hidden)
-        .presentationCornerRadius(20)
+        .presentationCornerRadius(Theme.cardRadius)
         .presentationBackground(Theme.card)
         .interactiveDismissDisabled(busy)
     }
@@ -515,19 +507,35 @@ struct CustomerContactSheet: View {
                 .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(Theme.muted)
             TextField(placeholder, text: text)
-                .font(field == .phone ? Theme.monoFont(14) : Theme.font(15))
+                // design.thorbis.com mobile: input type is at least 16.
+                .font(field == .phone ? Theme.monoFont(16) : Theme.font(16))
                 .keyboardType(field == .phone ? .phonePad : field == .email ? .emailAddress : .default)
                 .textInputAutocapitalization(field == .email || field == .phone ? .never : .words)
                 .autocorrectionDisabled()
+                .textContentType(field == .name ? .name : field == .phone ? .telephoneNumber : field == .email ? .emailAddress : nil)
                 .focused($focusedField, equals: field)
+                // MA-16: return moves to the next field; the last one saves.
+                .submitLabel(nextField(after: field) == nil ? .done : .next)
+                .onSubmit {
+                    if let next = nextField(after: field) { focusedField = next } else { Task { await save() } }
+                }
                 .padding(.horizontal, 14)
-                .frame(height: 46)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
+                .frame(height: 48)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(focusedField == field ? Theme.brand : Theme.border,
+                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                        .stroke(focusedField == field ? Theme.foreground : Theme.border,
                                 lineWidth: focusedField == field ? 1.5 : 1)
                 }
+        }
+    }
+
+    private func nextField(after field: ContactField) -> ContactField? {
+        switch field {
+        case .name: .phone
+        case .phone: showsEmail ? .email : nil
+        case .customRole: showsEmail ? .email : nil
+        case .email: nil
         }
     }
 

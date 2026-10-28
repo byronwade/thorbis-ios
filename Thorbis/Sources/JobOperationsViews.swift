@@ -308,7 +308,7 @@ struct JobScheduleView: View {
         .foregroundStyle(Theme.foreground)
         .presentationDetents([.height(430), .large])
         .presentationDragIndicator(.visible)
-        .presentationCornerRadius(20)
+        .presentationCornerRadius(Theme.cardRadius)
         .presentationBackground(Theme.card)
         .interactiveDismissDisabled(busy)
     }
