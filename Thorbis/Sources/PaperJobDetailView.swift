@@ -28,16 +28,20 @@ struct JobDetailView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var selectedTab = "Overview"
-    @State private var invoices: [InvoiceRecord] = []
-    @State private var invoicesLoaded = false
+    @State private var invoiceRead: JobDocumentRead<InvoiceRecord>?
+    private var invoices: [InvoiceRecord] { invoiceRead?.records ?? [] }
+    private var invoicesLoaded: Bool { invoiceRead != nil }
+    private var invoicesFailed: Bool { invoiceRead?.isComplete == false }
     @State private var selectedInvoiceID: String?
     @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
     @State private var loadedInvoiceModelID: String?
     @State private var showCollectPayment = false
     @State private var activityFilter = "All"
     @State private var showSchedule = false
-    @State private var jobEstimates: [EstimateRecord] = []
-    @State private var estimatesLoaded = false
+    @State private var estimateRead: JobDocumentRead<EstimateRecord>?
+    private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
+    private var estimatesLoaded: Bool { estimateRead != nil }
+    private var estimatesFailed: Bool { estimateRead?.isComplete == false }
     @State private var showNewEstimate = false
     @State private var committed = 0
     @State private var creatingInvoice = false
@@ -48,9 +52,6 @@ struct JobDetailView: View {
     /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
     @State private var createdEstimateID: String?
     @State private var showWrapUp = false
-    /// A failed read is not "none": the next step waits rather than offer duplicate paperwork (TF-10).
-    @State private var estimatesFailed = false
-    @State private var invoicesFailed = false
     /// The customer's service locations; the first (or only) one is where the job is.
     @State private var locations: [ServiceLocationRecord] = []
     /// The primary contact's phone (else the customer's), for one-tap Call and Text.
@@ -80,6 +81,9 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
             if let error { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
+            if let issue = documentReadIssue {
+                ErrorBanner(message: issue) { await retry() }.padding(.top, 4)
+            }
             if let job {
                 if selectedTab == "Photos" {
                     header(job, compact: true)
@@ -170,6 +174,9 @@ struct JobDetailView: View {
             }
         }
         .task(id: session.generation) {
+            invoiceRead = nil
+            estimateRead = nil
+            selectedInvoiceID = nil
             invoicePaymentModel = nil
             loadedInvoiceModelID = nil
             await load()
@@ -293,9 +300,9 @@ struct JobDetailView: View {
             transitions: availableTransitions(job).filter { nextStep != .transition($0) },
             canSchedule: session.can("job.assign", feature: "jobs"),
             canAssign: session.can("job.assign", feature: "jobs"),
-            canBillWithoutEstimate: invoicesLoaded && invoices.isEmpty && nextStep != .createInvoice
+            canBillWithoutEstimate: invoicesLoaded && !invoicesFailed && invoices.isEmpty && nextStep != .createInvoice
                 && job.status == "in_progress" && session.can("invoice.create", feature: "invoicing"),
-            canRequestDeposit: invoicesLoaded && invoices.isEmpty && job.estimateId != nil
+            canRequestDeposit: invoicesLoaded && !invoicesFailed && invoices.isEmpty && job.estimateId != nil
                 && session.can("invoice.create", feature: "progress_billing"),
             // The bar shows only on Overview; on the other tabs Wrap up stays in the menu.
             barIsWrapUp: selectedTab == "Overview" && nextStep == .wrapUp,
@@ -584,7 +591,7 @@ struct JobDetailView: View {
                 PaperGroupHeader(title: "Estimates", count: jobEstimates.count)
                 if !estimatesLoaded {
                     SkeletonRows(count: 2, leading: false, inset: 0)
-                } else if jobEstimates.isEmpty {
+                } else if jobEstimates.isEmpty && !estimatesFailed {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
                                     message: "Build one from the price book. It's added to this job automatically.")
                 }
@@ -613,6 +620,7 @@ struct JobDetailView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(PressStyle())
+                    .disabled(estimateRead?.freshIDs.contains(estimate.id) != true)
                 }
             }
         }
@@ -627,28 +635,29 @@ struct JobDetailView: View {
         }
     }
 
-    /// Linked estimates first; the job's origin estimate is included even without a link record.
+    private func scope(for job: JobRecord) -> JobDocumentScope? {
+        guard job.id == jobId, job.organizationId == session.activeOrganization?.id else { return nil }
+        return JobDocumentScope(jobID: job.id, organizationID: job.organizationId,
+                                customerID: job.customerId, originEstimateID: job.estimateId)
+    }
+
+    private var documentReadIssue: String? {
+        if estimatesFailed && invoicesFailed { return "Couldn't load all estimates and invoices for this job." }
+        return estimateRead?.issue ?? invoiceRead?.issue
+    }
+
     private func loadJobEstimates(_ job: JobRecord) async {
-        guard session.can("estimate.view", feature: "estimates") else { return }
-        let generation = session.generation
-        do {
-            var ids = try await api.fieldJobEstimateLinks(job.id).map(\.estimateId)
-            if let origin = job.estimateId, !ids.contains(origin) { ids.insert(origin, at: 0) }
-            var loaded: [EstimateRecord] = []
-            for id in ids {
-                loaded.append(try await api.fieldEstimate(id))
-            }
-            guard session.generation == generation else { return }
-            jobEstimates = loaded
-            estimatesLoaded = true
-            estimatesFailed = false
-        } catch is CancellationError {} catch {
-            guard session.generation == generation else { return }
-            estimatesFailed = true
-            if let origin = job.estimateId, let single = try? await api.fieldEstimate(origin) { jobEstimates = [single] }
-            estimatesLoaded = true
-            self.error = error.localizedDescription
+        guard session.can("estimate.view", feature: "estimates"), let scope = scope(for: job) else {
+            estimateRead = nil
+            return
         }
+        let generation = session.generation
+        let read = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: estimateRead) {
+            session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
+                self.job?.id == scope.jobID && self.job?.customerId == scope.customerID
+        }
+        guard session.generation == generation, let read else { return }
+        estimateRead = read
     }
 
     private func invoiceContent(_ job: JobRecord) -> some View {
@@ -657,7 +666,7 @@ struct JobDetailView: View {
                 emptyCard("Invoice access is unavailable.")
             } else if !invoicesLoaded {
                 SkeletonRows(count: 3, leading: false, inset: 0)
-            } else if invoices.isEmpty {
+            } else if invoices.isEmpty && !invoicesFailed {
                 PaperEmptyState(symbol: "doc.plaintext", title: "No invoice yet",
                                 message: "Start the invoice from this job. Lines come from its approved estimate; you can edit them before sending.",
                                 actionTitle: session.can("invoice.create", feature: "invoicing") ? (creatingInvoice ? "Creating…" : "Create invoice") : nil,
@@ -708,15 +717,11 @@ struct JobDetailView: View {
     }
 
     private var selectedInvoice: InvoiceRecord? {
-        if let selectedInvoiceID, let selected = invoices.first(where: { $0.id == selectedInvoiceID }) {
-            return selected
-        }
-        return invoices.first
+        invoiceRead?.preferredInvoice(id: selectedInvoiceID)
     }
 
     private func updateInvoice(_ updated: InvoiceRecord) {
-        guard let index = invoices.firstIndex(where: { $0.id == updated.id }) else { return }
-        invoices[index] = updated
+        invoiceRead = invoiceRead?.replacing(updated)
     }
 
     /// Paper 21B: filter pills, a quiet timeline of notes and status changes, composer last.
@@ -966,48 +971,47 @@ struct JobDetailView: View {
     }
 
     private func loadInvoices() async {
-        guard session.can("invoice.view", feature: "invoicing") else { return }
+        guard session.can("invoice.view", feature: "invoicing"), let job, let scope = scope(for: job) else {
+            invoiceRead = nil
+            return
+        }
         let generation = session.generation
-        do {
-            var mine: [InvoiceRecord]
-            var missed = false
-            do {
-                mine = try await api.fieldJobInvoices(jobId)
-            } catch let problem as Problem where problem.status == 404 || problem.status == 405 {
-                // A server without the job invoice read: the organization list, which is empty
-                // for technicians by design, then the ones this phone has seen for the job by id.
-                // Any other failure is a failed read, so the bar waits instead of guessing.
-                mine = try await api.fieldInvoices().filter { $0.jobId == jobId }
-            }
-            guard session.generation == generation else { return }
-            if mine.isEmpty {
-                for id in JobInvoiceMemory.ids(jobId) {
-                    if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) } else { missed = true }
-                }
-            }
-            invoices = mine.sorted { $0.createdAt > $1.createdAt }
-            mine.forEach { JobInvoiceMemory.remember($0.id, jobID: jobId) }
-            invoicesLoaded = true
-            invoicesFailed = missed
-            if let selectedInvoice {
-                selectedInvoiceID = selectedInvoice.id
-                await loadInvoicePayments(for: selectedInvoice)
-            }
-        } catch is CancellationError {} catch {
-            guard session.generation == generation else { return }
-            self.error = error.localizedDescription
-            invoicesLoaded = true
-            invoicesFailed = true
+        let read = await JobDocumentsLoader.invoices(scope: scope, api: api, knownIDs: JobInvoiceMemory.ids(jobId), retaining: invoiceRead) {
+            session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
+                self.job?.id == scope.jobID && self.job?.customerId == scope.customerID
+        }
+        guard session.generation == generation, let read else { return }
+        invoiceRead = read
+        if read.isComplete {
+            JobInvoiceMemory.replace(read.records.map(\.id), jobID: jobId)
+        } else {
+            read.records.filter { read.freshIDs.contains($0.id) }.forEach { JobInvoiceMemory.remember($0.id, jobID: jobId) }
+        }
+        if let selectedInvoice {
+            selectedInvoiceID = selectedInvoice.id
+            await loadInvoicePayments(for: selectedInvoice)
+        } else {
+            selectedInvoiceID = nil
+            invoicePaymentModel = nil
+            loadedInvoiceModelID = nil
         }
     }
 
     /// The job's canonical completion draft (POST /v1/jobs/{id}/completion-invoice); idempotent per job.
     @discardableResult private func createInvoice() async -> InvoiceRecord? {
-        guard !creatingInvoice, session.can("invoice.create", feature: "invoicing") else { return nil }
+        guard !creatingInvoice,
+              !session.can("invoice.view", feature: "invoicing") || (invoicesLoaded && !invoicesFailed),
+              let job, let scope = scope(for: job),
+              session.can("invoice.create", feature: "invoicing") else { return nil }
         creatingInvoice = true
         defer { creatingInvoice = false }
+        let generation = session.generation
         do {
             let invoice = try await api.ensureFieldCompletionInvoice(jobId)
+            guard session.generation == generation, session.activeOrganization?.id == scope.organizationID else { return nil }
+            guard scope.contains(invoice) else {
+                throw Problem(title: "Invoice could not be verified for this job", status: nil, detail: nil)
+            }
             JobInvoiceMemory.remember(invoice.id, jobID: jobId)
             selectedInvoiceID = invoice.id
             await loadInvoices()
@@ -1029,6 +1033,9 @@ struct JobDetailView: View {
         do {
             let loadedJob = try await api.fieldJob(jobId)
             guard session.generation == generation else { return }
+            guard loadedJob.id == jobId, loadedJob.organizationId == session.activeOrganization?.id else {
+                throw Problem(title: "Job could not be verified", status: nil, detail: nil)
+            }
             job = loadedJob
             // Record before the follow-up requests below, while the identity is known to match.
             RecentItems.shared.record(.job, id: loadedJob.id, title: loadedJob.title,
@@ -1260,6 +1267,12 @@ enum JobInvoiceMemory {
         guard !list.contains(invoiceID) else { return }
         list.append(invoiceID)
         all[jobID] = list
+        UserDefaults.standard.set(all, forKey: key)
+    }
+
+    static func replace(_ ids: [String], jobID: String) {
+        var all = UserDefaults.standard.dictionary(forKey: key) ?? [:]
+        all[jobID] = Array(Set(ids)).sorted()
         UserDefaults.standard.set(all, forKey: key)
     }
 

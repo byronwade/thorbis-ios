@@ -306,6 +306,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "months": months.map { ["month": $0.0, "revenue": $0.1, "collected": $0.2] },
                     "receivable": ["openInvoices": 9, "balance": 733_000, "overdueInvoices": 2, "overdueBalance": 620_000]] as [String: Any]
         }
+        if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+            if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
+            return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
+        }
         if path == "/v1/invoices" && PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
         if path == "/v1/invoices" { return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]] }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
