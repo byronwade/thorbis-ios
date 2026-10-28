@@ -40,7 +40,7 @@ struct JobCloseoutView: View {
                         .font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                 }
                 .padding(.bottom, 14)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error, retry: closeout == nil ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
                 if let closeout {
                     let checks = closeout.policy.requiredChecks.filter { $0.kind == nil || $0.kind == "acknowledgement" }
                     let done = closeout.requirements.filter { $0.outcome != "blocked" }.count
@@ -501,7 +501,7 @@ struct JobFollowUpsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Follow-ups").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error, retry: records.isEmpty ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
                 if loading && records.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 if !records.isEmpty { PaperGroupHeader(title: "On this job", count: records.count) }
                 ForEach(records) { record in
