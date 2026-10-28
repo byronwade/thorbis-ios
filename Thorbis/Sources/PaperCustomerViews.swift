@@ -130,11 +130,12 @@ struct CustomersView: View {
         let count = "\(jobCount) \(jobCount == 1 ? "job" : "jobs")"
         guard let open else { return count }
         if let date = JobFiltering.date(open.scheduledFor), ["scheduled", "dispatched"].contains(open.status) {
-            let when = Calendar.current.isDateInToday(date) ? "today \(date.formatted(date: .omitted, time: .shortened))"
+            // Same words as the Jobs list ("Today 4:00 PM", "In progress"), so a visit reads alike everywhere.
+            let when = Calendar.current.isDateInToday(date) ? "Today \(date.formatted(date: .omitted, time: .shortened))"
                 : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-            return "\(count) · next \(when)"
+            return "\(count) · \(when)"
         }
-        return "\(count) · \(open.status.statusLabel.lowercased())"
+        return "\(count) · \(open.status.statusLabel)"
     }
 
     private func create() async {

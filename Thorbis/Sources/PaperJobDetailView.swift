@@ -289,12 +289,7 @@ struct JobDetailView: View {
                     if let balance = invoiceBalanceCents {
                         // The balance chip jumps to the Invoice tab, where it can be collected.
                         Button { withAnimation(.snappy) { selectedTab = "Invoice" } } label: {
-                            Text("\(money(balance, currency: "USD")) due")
-                                .font(Theme.monoFont(12, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                                .padding(.horizontal, 10)
-                                .frame(height: Theme.chipHeight)
-                                .background(Theme.fill, in: Capsule())
+                            Chip(text: "\(money(balance, currency: "USD")) due", icon: "dollarsign.circle", tint: Theme.foreground)
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
