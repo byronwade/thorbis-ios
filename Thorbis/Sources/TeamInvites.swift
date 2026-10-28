@@ -105,6 +105,8 @@ struct InviteMemberSheet: View {
     }
 
     private func send() async {
+        // Return and the bar button both land here; one invite per press.
+        guard !busy, valid else { return }
         busy = true
         defer { busy = false }
         do {
