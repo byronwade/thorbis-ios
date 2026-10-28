@@ -38,4 +38,53 @@ final class RouteBodyTests: XCTestCase {
         XCTAssertEqual(body["description"] as? String, "Replace compressor")
         XCTAssertEqual((body["sellPrice"] as? [String: Any])?["amount"] as? Int, 85_000)
     }
+
+    func testRoleChangeNamesTheVersionsAndKeepsTheMemberInTheRoute() async throws {
+        let memberJSON = #"{"member":{"memberId":"mem_42","userId":"u","displayName":"Alex","email":"a@example.invalid","isLegalOwner":false,"legalMembershipRoles":[]},"authority":{"kind":"tenant_role","assignmentId":"as1","currentAssignmentVersion":3,"assignedRoleRevision":1,"role":{"roleId":"r1","currentRevision":2,"name":"Tech","description":""}}}"#
+        let member = try JSONDecoder().decode(RoleMember.self, from: Data(memberJSON.utf8))
+        XCTAssertEqual(member.authority.currentAssignmentVersion, 3)
+        let roleJSON = #"{"role":{"id":"00000000-0000-4000-8000-000000000777","currentRevision":5},"revision":{"name":"Dispatcher","description":"Books and assigns"}}"#
+        let role = try JSONDecoder().decode(OrganizationRole.self, from: Data(roleJSON.utf8))
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        try await client.changeMemberRole(member, to: role, idempotencyKey: "k")
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.url?.path, "/v1/organization/role-members/mem_42/role")
+        let body = try json(request.body)
+        XCTAssertNil(body["memberId"])
+        XCTAssertEqual(body["expectedVersion"] as? Int, 3)
+        XCTAssertEqual(body["expectedRoleRevision"] as? Int, 5)
+        XCTAssertEqual(body["desiredRoleId"] as? String, "00000000-0000-4000-8000-000000000777")
+    }
+
+    func testRoleReviseSendsGrantsWithoutTheRoleId() async throws {
+        let roleID = "00000000-0000-4000-8000-000000000777"
+        let reply = #"{"role":{"id":"\#(roleID)","currentRevision":6},"revision":{"name":"Tech","description":"","grants":[]}}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        let grants = [RoleGrant(capability: "estimate.discount", scope: "assigned", conditions: ["maxDiscountPercent": 10]),
+                      RoleGrant(capability: "invoice.refund", scope: "organization", effect: "deny")]
+        let saved = try await client.reviseOrganizationRole(roleID, expectedRevision: 5, name: "Tech", description: "", grants: grants)
+        XCTAssertEqual(saved.role.currentRevision, 6)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.url?.path, "/v1/organization/roles/\(roleID)/revise")
+        let body = try json(request.body)
+        XCTAssertNil(body["roleId"])
+        XCTAssertEqual(body["expectedRevision"] as? Int, 5)
+        let sent = try XCTUnwrap(body["grants"] as? [[String: Any]])
+        XCTAssertEqual(sent.count, 2)
+        XCTAssertEqual((sent[0]["conditions"] as? [String: Int])?["maxDiscountPercent"], 10)
+        XCTAssertEqual(sent[1]["effect"] as? String, "deny")
+    }
+
+    func testPersonOverrideRevokesWithNullPolicyAndTargetsTheMember() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), .init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        try await client.saveMemberOverride("mem_42", grants: [RoleGrant(capability: "job.assign", scope: "team")], denies: ["invoice.refund"],
+                                            expectedVersion: 2, idempotencyKey: "a")
+        try await client.saveMemberOverride("mem_42", grants: [], denies: [], expectedVersion: 3, idempotencyKey: "b")
+        let first = try json(URLProtocolFixture.recorded[0].body)
+        XCTAssertEqual((first["target"] as? [String: String])?["memberId"], "mem_42")
+        XCTAssertEqual(((first["policy"] as? [String: Any])?["userDenies"] as? [String]), ["invoice.refund"])
+        let second = try json(URLProtocolFixture.recorded[1].body)
+        XCTAssertTrue(second["policy"] is NSNull)
+        XCTAssertEqual(second["expectedVersion"] as? Int, 3)
+    }
 }
