@@ -135,7 +135,7 @@ struct Avatar: View {
     let name: String
     var size: CGFloat = 24
     var body: some View {
-        Text(initials(name)).font(Theme.font( size * 0.38, weight: .semibold))
+        Text(initials(name)).font(Theme.font(size * 0.38, weight: .medium))
             .foregroundStyle(Theme.muted)
             .frame(width: size, height: size)
             .background(Theme.fill, in: Circle())
