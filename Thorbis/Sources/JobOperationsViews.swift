@@ -321,7 +321,7 @@ struct JobScheduleView: View {
                 .accessibilityHidden(true)
             Spacer(minLength: 0)
             Text("Schedule")
-                .font(Theme.font(17, weight: .semibold))
+                .font(Theme.font(17, weight: .medium))
                 .tracking(-0.17)
             Spacer(minLength: 0)
             Button { dismiss() } label: {
@@ -523,11 +523,11 @@ struct JobFollowUpsView: View {
                             HStack(spacing: 18) {
                                 if record.kind == "office_scheduling", record.scheduling?.appointment == nil {
                                     Button("Book the return visit") { booking = record }
-                                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
                                         .frame(minHeight: 44).disabled(busy)
                                 }
                                 Button("Resolve") { Task { await resolve(record.id) } }
-                                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
                                     .frame(minHeight: 44).disabled(busy)
                             }
                         }

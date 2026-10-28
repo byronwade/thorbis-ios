@@ -243,10 +243,13 @@ struct JobDetailView: View {
 
     private func header(_ job: JobRecord, compact: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("JOB-\(job.id.suffix(4).uppercased()) · \(store.customerName(job.customerId))")
-                .font(Theme.monoFont(12, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .lineLimit(1)
+            // The reference is mono so its digits line up; the customer's name reads as a name.
+            HStack(spacing: 6) {
+                Text("JOB-\(job.id.suffix(4).uppercased())").font(Theme.monoFont(12, weight: .medium)).fixedSize()
+                Text("·").font(Theme.font(13))
+                Text(store.customerName(job.customerId)).font(Theme.font(13)).lineLimit(1)
+            }
+            .foregroundStyle(Theme.muted)
             Text(job.title)
                 .font(Theme.font(24, weight: .medium))
                 .tracking(-0.36)
@@ -520,12 +523,12 @@ struct JobDetailView: View {
                     NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(estimate.title).font(Theme.font(16, weight: .semibold))
+                                Text(estimate.title).font(Theme.font(16, weight: .medium))
                                     .foregroundStyle(Theme.foreground).multilineTextAlignment(.leading)
                                 Spacer(minLength: 8)
                                 if let total = paperLinesTotal(estimate.lines) {
                                     Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
-                                        .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                        .font(Theme.monoFont(14, weight: .medium)).foregroundStyle(Theme.foreground)
                                 }
                             }
                             HStack(spacing: 8) {
@@ -550,7 +553,7 @@ struct JobDetailView: View {
     private func summary(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.monoFont(19, weight: .semibold))
+            Text(value).font(Theme.monoFont(19, weight: .medium))
         }
     }
 
@@ -673,7 +676,7 @@ struct JobDetailView: View {
                         }
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(entry.title).font(Theme.font(14, weight: .semibold))
+                                Text(entry.title).font(Theme.font(14, weight: .medium))
                                 Spacer(minLength: 8)
                                 Text(entry.date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
                             }

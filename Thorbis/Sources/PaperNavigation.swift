@@ -93,7 +93,7 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $search) { PaperGlobalSearch() }
-        .sheet(isPresented: $settings) { NavigationStack { MoreView().paperDestinations().safeAreaInset(edge: .top) { HStack { Spacer(); Button("Done") { settings = false }.font(Theme.font(15, weight: .semibold)).frame(minWidth: 44, minHeight: 44) }.padding(.horizontal, Theme.gutter) } } }
+        .sheet(isPresented: $settings) { NavigationStack { MoreView().paperDestinations().safeAreaInset(edge: .top) { HStack { Spacer(); Button("Done") { settings = false }.font(Theme.font(15, weight: .medium)).frame(minWidth: 44, minHeight: 44) }.padding(.horizontal, Theme.gutter) } } }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
         #if DEBUG
@@ -536,7 +536,7 @@ struct RootView: View {
                         .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
                         .accessibilityHidden(true)
-                    Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(14, weight: .semibold)).lineLimit(1)
+                    Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(14, weight: .medium)).lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.down").font(.system(size: 10))
                 }.padding(.horizontal, 8).frame(minHeight: 44)

@@ -427,7 +427,7 @@ struct OutboxReviewSheet: View {
                             if case .rejected = entry.state {
                                 VStack(spacing: 0) {
                                     Button("Retry") { outbox.retry(entry) }
-                                        .font(Theme.font(13, weight: .semibold)).frame(minHeight: 44)
+                                        .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
                                     Button("Dismiss", role: .destructive) { outbox.dismiss(entry) }
                                         .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
                                 }

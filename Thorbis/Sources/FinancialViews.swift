@@ -84,10 +84,10 @@ struct EstimateDetailView: View {
                         if !record.lines.isEmpty, let total = paperLinesTotal(record.lines) {
                             Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15)
                             HStack {
-                                Text("Total").font(Theme.font(15, weight: .semibold))
+                                Text("Total").font(Theme.font(15, weight: .medium))
                                 Spacer()
                                 Text(money(total, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                    .font(Theme.monoFont(14, weight: .semibold))
+                                    .font(Theme.monoFont(14, weight: .medium))
                             }
                             .padding(15)
                             if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
@@ -97,7 +97,7 @@ struct EstimateDetailView: View {
                                         .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
                                     Spacer()
                                     Text(money(memberTotal, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                        .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                        .font(Theme.monoFont(14, weight: .medium)).foregroundStyle(Theme.brandText)
                                 }
                                 .padding(.horizontal, 15).padding(.bottom, 15)
                                 .accessibilityElement(children: .combine)
@@ -116,7 +116,7 @@ struct EstimateDetailView: View {
                                 Spacer()
                                 Text(money(option.totalAmount, currency: option.currency))
                             }
-                            .font(Theme.font(14, weight: .semibold))
+                            .font(Theme.font(14, weight: .medium))
                             .padding(15)
                         }
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -475,7 +475,7 @@ struct CommercialLineView: View {
             let total = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
             if !total.overflow {
                 Text(money(total.partialValue, currency: line.unitPrice.currency))
-                    .font(Theme.font(14, weight: .semibold))
+                    .font(Theme.font(14, weight: .medium))
             }
         }
         .foregroundStyle(Theme.foreground)
@@ -580,7 +580,7 @@ struct PaperDocumentRow: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
-                if let amount { Text(amount).font(Theme.monoFont(13, weight: .semibold)).foregroundStyle(Theme.foreground) }
+                if let amount { Text(amount).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground) }
                 PaperStatusChip(status: status)
             }
         }
@@ -715,9 +715,9 @@ struct NewEstimateView: View {
                         if !lines.isEmpty {
                             Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 14)
                             HStack {
-                                Text("Total").font(Theme.font(15, weight: .semibold))
+                                Text("Total").font(Theme.font(15, weight: .medium))
                                 Spacer()
-                                Text(total.map { money($0, currency: "USD") } ?? "—").font(Theme.monoFont(14, weight: .semibold))
+                                Text(total.map { money($0, currency: "USD") } ?? "—").font(Theme.monoFont(14, weight: .medium))
                             }
                             .padding(14)
                         }
@@ -767,7 +767,7 @@ struct NewEstimateView: View {
                 }
                 Spacer(minLength: 8)
                 if let cents = line.wrappedValue.cents {
-                    Text(money(cents * line.wrappedValue.quantity, currency: "USD")).font(Theme.monoFont(13, weight: .semibold))
+                    Text(money(cents * line.wrappedValue.quantity, currency: "USD")).font(Theme.monoFont(13, weight: .medium))
                 }
             }
             HStack(spacing: 10) {

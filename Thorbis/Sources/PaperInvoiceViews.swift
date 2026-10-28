@@ -89,7 +89,7 @@ struct PaperJobInvoiceContent: View {
 
             HStack(spacing: 12) {
                 Text(balance.balanceCents.map { money($0, currency: invoice.currency) } ?? "—")
-                    .font(Theme.monoFont(28, weight: .semibold))
+                    .font(Theme.monoFont(28, weight: .medium))
                     .tracking(-0.5)
                     .foregroundStyle(Theme.foreground)
                     .accessibilityLabel(balance.balanceCents.map { "Balance due \(money($0, currency: displayedInvoice.currency))" } ?? "Balance unavailable")
@@ -152,11 +152,11 @@ struct PaperJobInvoiceContent: View {
                 Divider().overlay(Theme.border)
                 HStack {
                     Text("Total")
-                        .font(Theme.font(14, weight: .semibold))
+                        .font(Theme.font(14, weight: .medium))
                         .foregroundStyle(Theme.foreground)
                     Spacer()
                     Text(paymentModel.totalCents.map { money($0, currency: displayedInvoice.currency) } ?? "Unavailable")
-                        .font(Theme.monoFont(13, weight: .semibold))
+                        .font(Theme.monoFont(13, weight: .medium))
                         .foregroundStyle(Theme.foreground)
                 }
                 .frame(minHeight: 44)
