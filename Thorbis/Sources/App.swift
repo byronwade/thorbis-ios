@@ -68,26 +68,38 @@ struct ThorbisApp: App {
         #endif
     }
 
+    @ViewBuilder private var appContent: some View {
+        if let publicEstimateToken {
+            PublicEstimateActionView(token: publicEstimateToken) {
+                self.publicEstimateToken = nil
+            }
+            .id(publicEstimateToken)
+        } else {
+            switch session.phase {
+            case .restoring:
+                ProgressView("Opening your workspace…")
+            case .signedOut, .failed:
+                LoginView()
+            case .choosingWorkspace, .noWorkspace:
+                WorkspaceSelectionView()
+            case .ready:
+                RootView().id(session.generation)
+            }
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
-                if let publicEstimateToken {
-                    PublicEstimateActionView(token: publicEstimateToken) {
-                        self.publicEstimateToken = nil
-                    }
-                    .id(publicEstimateToken)
+                #if DEBUG
+                if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
+                    CustomerPresentationPreview(screen: PaperPreview.screen)
                 } else {
-                    switch session.phase {
-                    case .restoring:
-                        ProgressView("Opening your workspace…")
-                    case .signedOut, .failed:
-                        LoginView()
-                    case .choosingWorkspace, .noWorkspace:
-                        WorkspaceSelectionView()
-                    case .ready:
-                        RootView().id(session.generation)
-                    }
+                    appContent
                 }
+                #else
+                appContent
+                #endif
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.background)
