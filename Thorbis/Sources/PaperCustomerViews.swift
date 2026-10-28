@@ -3,6 +3,7 @@ import UIKit
 
 /// Native translation of Paper's Customers and Customer detail artboards.
 struct CustomersView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
@@ -97,10 +98,10 @@ struct CustomersView: View {
             HStack(spacing: 12) {
                 Avatar(name: customer.name, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(1)
+                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                     // The open job's state as a word next to the count (a mark alone was a guess).
                     Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: open))
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                 }
                 Spacer(minLength: 4)
                 if let open { StatusRing(status: open.status).accessibilityHidden(true) }
@@ -201,6 +202,7 @@ private enum CustomerContactSheetItem: Identifiable {
 }
 
 struct CustomerDetailView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
@@ -426,7 +428,7 @@ struct CustomerDetailView: View {
                     HStack(spacing: 12) {
                         StatusRing(status: job.status).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                             Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
                                   job.status.statusLabel].joined(separator: " · "))
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -563,7 +565,7 @@ struct CustomerDetailView: View {
             ForEach(locations) { location in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(location.label).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                        Text(location.label).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                         Spacer(minLength: 4)
                         Text(location.kind.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         if canEdit {
@@ -652,7 +654,7 @@ struct CustomerDetailView: View {
                     HStack(spacing: 12) {
                         Image(systemName: statusIcon(job.status).0).foregroundStyle(statusIcon(job.status).1).frame(width: 16)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                             Text(job.status.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         }
                         Spacer()

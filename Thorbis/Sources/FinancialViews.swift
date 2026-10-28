@@ -587,13 +587,14 @@ struct PaperDocumentRow: View {
     let status: String
     let amount: String?
     var showsStatus = true
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
+                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                 HStack(spacing: 6) {
-                    Text(subtitle).font(Theme.font(13)).lineLimit(1)
+                    Text(subtitle).font(Theme.font(13)).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                     Text("·").font(Theme.font(13))
                     Text(reference).font(Theme.monoFont(12, weight: .medium)).fixedSize()
                 }
