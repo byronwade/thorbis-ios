@@ -652,7 +652,7 @@ extension LocalWorkspaceSection {
         switch self {
         case .fleet: "car"
         case .equipment: "wrench.and.screwdriver"
-        case .agreements: "signature"
+        case .agreements: "list.bullet.clipboard"
         case .team: "person.badge.plus"
         }
     }
