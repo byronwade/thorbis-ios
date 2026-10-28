@@ -535,7 +535,7 @@ struct CustomerEstimatePresentation: View {
 /// "Show to customer" for an invoice: what was done, what it cost, what is due, then sign or
 /// hand back to pay. Payment itself stays with the technician's collect screen.
 struct CustomerInvoicePresentation: View {
-    let invoice: InvoiceRecord
+    private let openedInvoice: InvoiceRecord
     let customerName: String
     /// True when the customer should sign for the work on this device.
     let canSign: Bool
@@ -556,6 +556,9 @@ struct CustomerInvoicePresentation: View {
     @State private var applicationKey = UUID().uuidString
     @State private var sent: FinancingApplication?
     @State private var showTerms = false
+    /// The invoice as re-read after the lender funded it while this screen was open.
+    @State private var reloadedInvoice: InvoiceRecord?
+    private var invoice: InvoiceRecord { reloadedInvoice ?? openedInvoice }
     @State private var name: String
     @State private var strokes: [[CGPoint]] = []
     @State private var busy = false
@@ -568,7 +571,7 @@ struct CustomerInvoicePresentation: View {
     init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?, financing: Bool = false,
          opensPayChoice: Bool = false, onSigned: @escaping (InvoiceRecord) -> Void, onDone: @escaping () -> Void) {
         self.opensPayChoice = opensPayChoice
-        self.invoice = invoice
+        openedInvoice = invoice
         self.customerName = customerName
         self.canSign = canSign
         self.onPay = onPay
@@ -858,7 +861,14 @@ struct CustomerInvoicePresentation: View {
             if offer.available, opensPayChoice { pay() }
         }
         // A paid invoice still says "Paid by Wisetack", so the history loads whatever is due.
-        applications = (try? await api.refreshFinancingApplications(invoiceID: invoice.id)) ?? []
+        let latest = (try? await api.refreshFinancingApplications(invoiceID: invoice.id)) ?? []
+        applications = latest
+        // A loan funded since the invoice was opened is a payment: show the balance it leaves.
+        if latest.contains(where: { $0.status == "funded" }), invoice.amountPaid < (paperLinesTotal(invoice.lines) ?? 0),
+           let updated = try? await api.fieldInvoice(invoice.id) {
+            reloadedInvoice = updated
+            onSigned(updated)
+        }
     }
 
     private func apply(phone: String?) async {
