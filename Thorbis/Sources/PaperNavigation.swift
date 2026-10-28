@@ -372,7 +372,26 @@ struct RootView: View {
     private func openRecent(_ item: RecentItems.Item) {
         switch item.kind {
         case .job:
-            store.requestedJobID = item.id
+            guard session.can("job.view", feature: "jobs") else { return }
+            if store.jobs.contains(where: { $0.id == item.id }) {
+                store.requestedJobID = item.id
+                return
+            }
+            // A job opened from company search may not be in the loaded list yet; open it by ID.
+            let tabs = layout.visibleTabs(session)
+            if tabs.contains(.schedule) {
+                primaryTab = .schedule
+                schedulePath = NavigationPath()
+                schedulePath.append(PaperRoute.job(item.id))
+            } else if tabs.contains(.jobs) {
+                primaryTab = .jobs
+                jobsPath = NavigationPath()
+                jobsPath.append(PaperRoute.job(item.id))
+            } else {
+                primaryTab = .more
+                morePath = NavigationPath()
+                morePath.append(PaperRoute.job(item.id))
+            }
         case .customer:
             guard session.can("customer.view", feature: "core_crm") else { return }
             // The list cache leaves out archived customers, so fall back to the saved entry and let
@@ -559,6 +578,7 @@ enum PaperRoute: Hashable {
     case customizeMenu
     case attention
     case payments
+    case job(String)
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -605,6 +625,7 @@ struct PaperRouteView: View {
         case .customizeMenu: CustomizeMenuView()
         case .attention: NeedsAttentionView()
         case .payments: PaymentsSetupView()
+        case .job(let id): JobDetailView(jobId: id)
         case .local(let section):
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
