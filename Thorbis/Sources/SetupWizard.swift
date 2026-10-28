@@ -118,6 +118,17 @@ enum SetupProgress {
         guard let organizationID else { return }
         defaults.set(step.rawValue, forKey: key(organizationID))
     }
+
+    /// Steps the owner skipped, so the last screen still offers Finish after setup is reopened.
+    static func skipped(_ organizationID: String?, defaults: UserDefaults = .standard) -> Set<SetupStep> {
+        guard let organizationID else { return [] }
+        return Set((defaults.stringArray(forKey: key(organizationID) + ".skipped") ?? []).compactMap(SetupStep.init(rawValue:)))
+    }
+
+    static func saveSkipped(_ steps: Set<SetupStep>, organizationID: String?, defaults: UserDefaults = .standard) {
+        guard let organizationID else { return }
+        defaults.set(steps.map(\.rawValue).sorted(), forKey: key(organizationID) + ".skipped")
+    }
 }
 
 struct SetupWizardView: View {
@@ -143,6 +154,7 @@ struct SetupWizardView: View {
     @FocusState private var focused: String?
 
     private var steps: [SetupStep] { SetupStep.steps(session) }
+    private var busy: Bool { facts.saving || facts.loading || importer.phase == .checking || importer.phase == .importing }
     private var index: Int { steps.firstIndex(of: step) ?? 0 }
 
     var body: some View {
@@ -184,8 +196,10 @@ struct SetupWizardView: View {
         .task {
             let resume = start ?? SetupProgress.load(session.activeOrganization?.id)
             if let resume, steps.contains(resume) { step = resume } else { step = steps.first ?? .done }
+            skipped = SetupProgress.skipped(session.activeOrganization?.id)
             await facts.load(api: api)
-            prefill()
+            if facts.profile != nil { prefill() } else if !step.facts.isEmpty { stepError = facts.loadError }
+            await loadPayments()
         }
         .onChange(of: step) { _, next in
             stepError = nil
@@ -208,6 +222,7 @@ struct SetupWizardView: View {
                             .frame(width: 44, height: 44).contentShape(Rectangle())
                     }
                     .accessibilityLabel("Back")
+                    .disabled(busy)
                 }
                 Spacer()
                 Text(step == .done ? "" : "Step \(index + 1) of \(steps.count - 1)")
@@ -234,12 +249,13 @@ struct SetupWizardView: View {
                 .inkCommit()
             }
             .buttonStyle(PressStyle())
-            .disabled(facts.saving || importer.phase == .checking || importer.phase == .importing)
+            .disabled(busy)
             .accessibilityIdentifier("setup-continue")
             if step != .done && step.required.isEmpty {
                 Button("Skip for now") { skip() }
                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, minHeight: 44)
+                    .disabled(busy)
             }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 6)
@@ -472,6 +488,16 @@ struct SetupWizardView: View {
         focused = nil
         stepError = nil
         if step == .done { dismiss(); return }
+        let origin = step
+        if !step.facts.isEmpty, facts.profile == nil {
+            // The first load failed (offline, say): try again here instead of a dead end.
+            await facts.load(api: api)
+            guard facts.profile != nil else {
+                stepError = facts.loadError ?? "Your company details did not load. Check your connection and tap Continue again."
+                return
+            }
+            prefill()
+        }
         if !step.facts.isEmpty {
             if step == .messages, (facts.drafts["email_sender_address"] ?? "").isEmpty, let email = facts.drafts["primary_email"], !email.isEmpty {
                 facts.drafts["email_sender_address"] = email
@@ -489,18 +515,21 @@ struct SetupWizardView: View {
                 return
             }
         }
+        guard step == origin else { return }
         if step == .customers, importer.phase == .preview || importer.phase == .map {
             stepError = "Import the file first, or tap Skip for now."
             return
         }
         finished.insert(step)
         skipped.remove(step)
+        SetupProgress.saveSkipped(skipped, organizationID: session.activeOrganization?.id)
         advanced += 1
         moveOn()
     }
 
     private func skip() {
         skipped.insert(step)
+        SetupProgress.saveSkipped(skipped, organizationID: session.activeOrganization?.id)
         moveOn()
     }
 

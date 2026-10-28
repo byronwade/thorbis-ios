@@ -180,7 +180,12 @@ final class CustomerImportModel: ObservableObject {
     @Published var fileName = ""
     @Published var headers: [String] = []
     @Published var records: [[String]] = []
-    @Published var mapping = CustomerImportMapping()
+    @Published var mapping = CustomerImportMapping() {
+        didSet { if mapping != oldValue { committedChunks = 0 } }
+    }
+    /// Chunks already imported, so Try again after an error carries on instead of starting over.
+    private(set) var committedChunks = 0
+    static let maxRows = 5000
     @Published var preview: CustomerImportResult.Summary?
     @Published var problems: [String] = []
     @Published var imported = 0
@@ -203,9 +208,14 @@ final class CustomerImportModel: ObservableObject {
             error = "That file has no customer rows. Export customers from your old software as CSV and try again."
             return
         }
+        guard table.count - 1 <= Self.maxRows else {
+            error = "That file has \(table.count - 1) rows. Split it into files of \(Self.maxRows) customers or fewer and import each one."
+            return
+        }
+        reset()
         fileName = url.lastPathComponent
         headers = header
-        records = Array(table.dropFirst().prefix(5000))
+        records = Array(table.dropFirst())
         mapping = .guess(header)
         phase = .map
     }
@@ -247,12 +257,14 @@ final class CustomerImportModel: ObservableObject {
         let all = rows
         phase = .importing
         error = nil
-        imported = 0
-        progress = 0
+        if committedChunks == 0 { imported = 0 }
+        let parts = chunks(all)
+        progress = Double(min(committedChunks * Self.chunkSize, all.count)) / Double(max(all.count, 1))
         do {
-            for (index, chunk) in chunks(all).enumerated() {
-                let result = try await api.importCustomers(chunk, dryRun: false)
+            for index in parts.indices where index >= committedChunks {
+                let result = try await api.importCustomers(parts[index], dryRun: false)
                 imported += result.summary.new
+                committedChunks = index + 1
                 progress = Double(min((index + 1) * Self.chunkSize, all.count)) / Double(all.count)
             }
             phase = .done
@@ -261,7 +273,7 @@ final class CustomerImportModel: ObservableObject {
             phase = .preview
             return false
         } catch {
-            self.error = "Imported \(imported) before an error: \(error.localizedDescription) Try again to finish; customers already in are skipped."
+            self.error = "Imported \(imported) before an error: \(error.localizedDescription) Try again to import the rest."
             phase = .preview
             return false
         }
@@ -269,7 +281,7 @@ final class CustomerImportModel: ObservableObject {
 
     func reset() {
         phase = .choose; fileName = ""; headers = []; records = []; mapping = .init()
-        preview = nil; problems = []; imported = 0; progress = 0; error = nil
+        preview = nil; problems = []; imported = 0; progress = 0; error = nil; committedChunks = 0
     }
 
     private func chunks(_ all: [CustomerImportRow]) -> [[CustomerImportRow]] {

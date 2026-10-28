@@ -59,6 +59,9 @@ final class SetupWizardTests: XCTestCase {
         XCTAssertEqual(SetupProgress.load("org_a", defaults: defaults), .services)
         XCTAssertNil(SetupProgress.load("org_b", defaults: defaults))
         XCTAssertNil(SetupProgress.load(nil, defaults: defaults))
+        SetupProgress.saveSkipped([.team, .payments], organizationID: "org_a", defaults: defaults)
+        XCTAssertEqual(SetupProgress.skipped("org_a", defaults: defaults), [.team, .payments])
+        XCTAssertEqual(SetupProgress.skipped("org_b", defaults: defaults), [])
     }
 
     func testOnlyTheCompanyStepHasRequiredFacts() {
