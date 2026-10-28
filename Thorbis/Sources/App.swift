@@ -52,6 +52,7 @@ struct ThorbisApp: App {
             store?.bindCache(actorID: actorID, organizationID: organizationID)
             PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
+            Task { @MainActor in RecentItems.shared.bind(actorID: actorID, organizationID: organizationID) }
         }
         PushNotifications.shared.start(api: api, store: store)
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }

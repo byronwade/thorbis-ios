@@ -12,25 +12,47 @@ final class RecentItems: ObservableObject {
     }
 
     static let shared = RecentItems()
+    /// Only the verified person and workspace's history; empty until one is bound.
     @Published private(set) var items: [Item] = []
-    private let key = "thorbis.recentItems.v1"
+    private var owner: String?
+    private var byOwner: [String: [Item]]
+    private let key = "thorbis.recentItems.v2"
 
     private init() {
-        items = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([Item].self, from: $0) } ?? []
+        UserDefaults.standard.removeObject(forKey: "thorbis.recentItems.v1")
+        byOwner = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([String: [Item]].self, from: $0) } ?? [:]
+    }
+
+    /// Follows the session's verified identity, like the workspace cache, so a workspace switch
+    /// or a different sign-in never shows the previous identity's records.
+    func bind(actorID: String?, organizationID: String?) {
+        if let actorID, let organizationID {
+            owner = "\(actorID.lowercased())|\(organizationID.lowercased())"
+        } else {
+            owner = nil
+        }
+        items = owner.flatMap { byOwner[$0] } ?? []
     }
 
     func record(_ kind: Item.Kind, id: String, title: String, subtitle: String) {
+        guard let owner else { return }
         let item = Item(kind: kind, id: id, title: title, subtitle: subtitle)
         guard items.first != item else { return }
         items.removeAll { $0.kind == kind && $0.id == id }
         items.insert(item, at: 0)
         items = Array(items.prefix(8))
-        if let data = try? JSONEncoder().encode(items) { UserDefaults.standard.set(data, forKey: key) }
+        byOwner[owner] = items
+        save()
     }
 
     func clear() {
         items = []
+        byOwner = [:]
         UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(byOwner) { UserDefaults.standard.set(data, forKey: key) }
     }
 }
 
@@ -50,7 +72,8 @@ struct SideMenu: View {
 
     private var pinned: [MenuItem] { layout.visibleTabs(session) }
     private var everything: [MenuItem] {
-        MenuItem.allCases.filter { !pinned.contains($0) && !layout.hidden.contains($0) && $0.permitted(session) }
+        // Like More, only places that can open on their own; Schedule, Jobs and Customers are tabs.
+        MenuItem.allCases.filter { !pinned.contains($0) && !layout.hidden.contains($0) && $0.permitted(session) && $0.route != nil }
     }
 
     var body: some View {
