@@ -218,7 +218,7 @@ struct RootView: View {
                     .zIndex(1)
                     // Always full-bleed, so the card's corners meet the screen's and opening the
                     // menu never changes the layout under the finger.
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(.container)
             }
             .background(Theme.surface.ignoresSafeArea())
             // Rotation or a new window size closes the menu instead of leaving it half-open.

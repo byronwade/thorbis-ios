@@ -59,7 +59,7 @@ struct JobDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
-            if let error { ErrorBanner(message: error) { await load() }.padding(.top, 4) }
+            if let error { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
             if let job {
                 if selectedTab == "Photos" {
                     header(job, compact: true)
@@ -818,6 +818,14 @@ struct JobDetailView: View {
     private func runTransition(_ target: String) {
         if target == "paused" { showPause = true }
         else { Task { await advance(target) } }
+    }
+
+    /// Try again re-runs every load this page has attempted, so a failed invoice or estimate
+    /// fetch is retried too, not just the job.
+    private func retry() async {
+        await load()
+        if invoicesLoaded { await loadInvoices() }
+        if estimatesLoaded, let job { await loadJobEstimates(job) }
     }
 
     private func loadInvoices() async {
