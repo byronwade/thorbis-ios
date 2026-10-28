@@ -147,6 +147,15 @@ enum PaperPreview {
             .background(Color.black)
             .accessibilityLabel("Design preview. Sample data. Read only. No network connection.")
     }
+
+    @MainActor static var reviewConnectionControl: some View {
+        Button("Restore sample connection") { PaperPreviewProtocol.restoreReviewConnection() }
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(Color.orange)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Color.black)
+            .buttonStyle(.plain)
+    }
 }
 
 @MainActor
@@ -193,13 +202,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private final class Scenario: @unchecked Sendable {
         let lock = NSLock()
         var invoiceReads = 0
+        var reviewConnectionRestored = false
         var ownerAuthenticated = false
     }
     private static let scenario = Scenario()
     static func resetScenario() {
-        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.ownerAuthenticated = false }
+        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false }
     }
     static func markOwnerAuthenticated() { scenario.lock.withLock { scenario.ownerAuthenticated = true } }
+    static func restoreReviewConnection() {
+        scenario.lock.withLock { scenario.reviewConnectionRestored = true }
+    }
     private static func legacyInvoiceRead(_ path: String) -> Bool {
         guard PaperPreview.isJobDocumentsPreview,
               ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-legacy"),
@@ -221,6 +234,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
+        } else if PaperPreview.screen.hasPrefix("present-estimate"),
+                  url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-review-pending") {
+            // A deliberately unresolved read for the native opening-state journey.
+            return
+        } else if PaperPreview.screen.hasPrefix("present-estimate"),
+                  url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-review-failure"),
+                  Self.scenario.lock.withLock({ !Self.scenario.reviewConnectionRestored }) {
+            status = 503
+            payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
         } else if Self.legacyInvoiceRead(url.path) {
             status = 404
             payload = ["status": 404, "title": "Preview legacy job invoice route"]
@@ -251,6 +275,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let org = PaperPreview.organizationID
         let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400))
         let now = ISO8601DateFormatter().string(from: Date())
+        if PaperPreview.screen.hasPrefix("present-estimate") {
+            let record = PaperPreview.optionsEstimate
+            if path == "/v1/estimates/\(record.id)" { return jsonObject(record) }
+            if path == "/v1/estimates/\(record.id)/revisions/2" {
+                var object = reviewRevision(record)
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-canonical-estimate"),
+                   var options = object["options"] as? [[String: Any]], options.count > 1 {
+                    options[1]["title"] = "Reviewed protection"
+                    options[1]["description"] = "The current issued repair and protection."
+                    options[1]["totalAmount"] = 54_321
+                    options[1]["lines"] = [["id": "00000000-0000-4000-8000-000000008500", "description": "Verified surge protection",
+                                            "quantity": 1, "unitPrice": ["amount": 54_321, "currency": "USD"]]]
+                    object["options"] = options
+                }
+                return object
+            }
+        }
         if PaperPreview.isJobDocumentsPreview {
             let estimates = PaperPreview.jobDocumentEstimates
             let invoices = PaperPreview.jobDocumentInvoices
@@ -269,6 +310,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": legacy ? [] : invoices.map { jsonObject($0)! }]
             }
             if let record = estimates.first(where: { path == "/v1/estimates/\($0.id)" }) { return jsonObject(record) }
+            if let record = estimates.first(where: { path == "/v1/estimates/\($0.id)/revisions/\($0.currentRevisionNumber ?? 0)" }) {
+                return reviewRevision(record)
+            }
             if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) {
                 var object = jsonObject(record) as! [String: Any]
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-foreign") ||
@@ -322,6 +366,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         if path == "/v1/estimates/\(PaperPreview.estimate.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate))
+        }
+        if path == "/v1/estimates/\(PaperPreview.estimate.id)/revisions/2" {
+            return reviewRevision(PaperPreview.estimate)
         }
         if path == "/v1/jobs/\(PaperPreview.jobID)/followups" {
             return ["items": [["id": "00000000-0000-4000-8000-000000009401", "organizationId": org, "jobId": PaperPreview.jobID, "kind": "office_scheduling",
@@ -606,6 +653,19 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         return nil
     }
+    private static func reviewRevision(_ record: EstimateRecord) -> [String: Any] {
+        var object = jsonObject(record) as! [String: Any]
+        object["id"] = "10000000" + record.id.dropFirst(8)
+        object["estimateId"] = record.id
+        object["revisionNumber"] = record.currentRevisionNumber ?? 0
+        object["status"] = record.status == "sent" ? "issued" : record.status
+        object["totalAmount"] = paperLinesTotal(record.lines) ?? 0
+        object["currency"] = record.lines.first?.unitPrice.currency ?? record.options?.first?.currency ?? "USD"
+        object["issuedAt"] = record.sentAt ?? record.updatedAt
+        object["provenance"] = "command"
+        return object
+    }
+
     private static func jsonObject<T: Encodable>(_ value: T) -> Any? {
         (try? JSONEncoder().encode(value)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
     }

@@ -68,6 +68,7 @@ Commit the verified contract, tests, spec and plan as `fix: bind customer review
 **Files:**
 - Modify: Thorbis/Sources/CustomerPresentation.swift
 - Modify: Thorbis/Sources/PaperPreview.swift
+- Modify: Thorbis/Sources/App.swift, DEBUG-only preview fault-control hit testing
 - Modify: Thorbis/Sources/ReleaseNotes.swift
 - Test: ThorbisTests/CustomerPresentationTests.swift
 - Create: ThorbisUITests/CustomerEstimateReviewUITests.swift
@@ -76,23 +77,23 @@ Commit the verified contract, tests, spec and plan as `fix: bind customer review
 - Consumes: Task1 DTO and guarded API methods.
 - Produces: CustomerEstimateFlow canonical revision adoption and existing screen flow, using canonical title/lines/options/currency/server total after loading. Existing EstimateRecord remains the captured aggregate context only.
 
-- [ ] **Step 1: Write failing model and native journeys**
+- [x] **Step 1: Write failing model and native journeys**
 
 Model assertions: canonical changed title, quantity, descriptions and server total drive review; preserved option ID uses canonical details; removed ID returns to choose with none selected. Native assertions: opening has no approval control until canonical read completes; contradictory local price/details are replaced by canonical values; a failed opening has Try again and a successful retry restores the correct review. DEBUG fixtures intercept all requests and still refuse non-GET writes.
 
-- [ ] **Step 2: Run Task2 RED**
+- [x] **Step 2: Run Task2 RED**
 
 Run focused CustomerPresentationTests plus CustomerEstimateReviewUITests. Expected: intended new adoption/readiness journeys fail on old presentation. Record exact execution count and assertions.
 
-- [ ] **Step 3: Wire canonical opening and signing**
+- [x] **Step 3: Wire canonical opening and signing**
 
 Before new decisions, show `Opening your estimate…`, then existing option/review screens from the loaded revision. Failure shows a named recovery and Try again. Retain Not today/hand-back while opening or failed. Clear ink/consent/link state for a replaced review, retain only still-valid option IDs, and prevent stale API-generation actions. The drawn staff approval uses the reviewed revision; the public path uses Task1's exact link. Keep all current screens/actions and Paper sizing. Add today's visible-change release note.
 
-- [ ] **Step 4: Run Task2 GREEN**
+- [x] **Step 4: Run Task2 GREEN**
 
 Run CustomerPresentationTests, CustomerEstimateReviewTests, PublicEstimateActionTests, JobCommercialDocumentsTests, the new native journeys and WhatsNewTests. Expected: all selected tests pass, zero failures/skips. Export the canonical review and recovery screenshots without altering pixels.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit as `fix: show canonical customer terms before signing`.
 

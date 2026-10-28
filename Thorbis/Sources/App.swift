@@ -127,6 +127,11 @@ struct ThorbisApp: App {
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .tint(Theme.brandText)
             #if DEBUG
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-review-failure") {
+                    PaperPreview.reviewConnectionControl
+                }
+            }
             .overlay(alignment: .bottom) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
             #endif
             .task {
