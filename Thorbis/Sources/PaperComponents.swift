@@ -290,7 +290,7 @@ extension PaperMenuRow where Trailing == AnyView {
         self.init(title: title, symbol: symbol, subtitle: subtitle, tile: tile) {
             AnyView(HStack(spacing: 6) {
                 if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted) }
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                PaperDisclosure()
             })
         }
     }
@@ -699,5 +699,15 @@ struct FloatingCreateButton: View {
             .buttonStyle(PressStyle()).disabled(disabled)
         }
         .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+    }
+}
+
+/// Row disclosure chevron: one size, weight and colour for every tappable row.
+struct PaperDisclosure: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Theme.muted)
+            .accessibilityHidden(true)
     }
 }

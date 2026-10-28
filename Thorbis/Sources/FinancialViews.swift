@@ -523,7 +523,7 @@ private func commercialAction(_ title: String, icon: String) -> some View {
         Image(systemName: icon).foregroundStyle(Theme.brandText)
         Text(title).font(Theme.font(15, weight: .medium))
         Spacer()
-        Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+        PaperDisclosure()
     }
     .foregroundStyle(Theme.foreground)
     .padding(15)
