@@ -288,7 +288,7 @@ struct JobDetailView: View {
                     MemberChip(customerID: job.customerId)
                     if let balance = invoiceBalanceCents {
                         // The balance chip jumps to the Invoice tab, where it can be collected.
-                        Button { withAnimation(.snappy) { selectedTab = "Invoice" } } label: {
+                        Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
                             Chip(text: "\(money(balance, currency: "USD")) due", icon: "dollarsign.circle", tint: Theme.foreground)
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }

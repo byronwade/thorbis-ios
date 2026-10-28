@@ -47,7 +47,7 @@ struct CustomersView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withAnimation { showSearch.toggle() } })
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withMotion { showSearch.toggle() } })
                 if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
                 PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
                 if let error = error ?? store.error {

@@ -270,3 +270,9 @@ extension Date {
         return formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
     }
 }
+
+/// MA-03: with Reduce Motion on, every animation becomes a short 150ms ease-out
+/// with no spring or travel; otherwise the given animation runs as written.
+@MainActor func withMotion<Result>(_ animation: Animation = .default, _ body: () throws -> Result) rethrows -> Result {
+    try withAnimation(UIAccessibility.isReduceMotionEnabled ? .easeOut(duration: 0.15) : animation, body)
+}
