@@ -797,8 +797,16 @@ struct JobDetailView: View {
         do {
             let all = try await api.fieldInvoices()
             guard session.generation == generation else { return }
-            invoices = all.filter { $0.jobId == jobId }
-                .sorted { $0.createdAt > $1.createdAt }
+            var mine = all.filter { $0.jobId == jobId }
+            // Technicians' invoice list is empty by design; re-read the ones this phone has seen
+            // for the job by id, which the server allows through the assigned job.
+            if mine.isEmpty {
+                for id in JobInvoiceMemory.ids(jobId) {
+                    if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) }
+                }
+            }
+            invoices = mine.sorted { $0.createdAt > $1.createdAt }
+            mine.forEach { JobInvoiceMemory.remember($0.id, jobID: jobId) }
             invoicesLoaded = true
             if let selectedInvoice {
                 selectedInvoiceID = selectedInvoice.id
@@ -818,6 +826,7 @@ struct JobDetailView: View {
         defer { creatingInvoice = false }
         do {
             let invoice = try await api.ensureFieldCompletionInvoice(jobId)
+            JobInvoiceMemory.remember(invoice.id, jobID: jobId)
             selectedInvoiceID = invoice.id
             await loadInvoices()
             committed += 1
@@ -1008,4 +1017,25 @@ struct JobProgressTrack: View {
 
     /// One accent for progress; status is the word, not a rainbow (design.thorbis.com Color).
     private var tint: Color { status == "completed" ? Theme.success : Theme.brandText }
+}
+
+/// Invoice ids this phone has seen per job, so a technician (whose invoice list is empty by
+/// design) can reopen a job's invoice by id. Ids only; cleared on sign-out with the defaults.
+enum JobInvoiceMemory {
+    private static let key = "thorbis.jobInvoiceIDs.v1"
+
+    static func ids(_ jobID: String) -> [String] {
+        (UserDefaults.standard.dictionary(forKey: key)?[jobID] as? [String]) ?? []
+    }
+
+    static func remember(_ invoiceID: String, jobID: String) {
+        var all = UserDefaults.standard.dictionary(forKey: key) ?? [:]
+        var list = (all[jobID] as? [String]) ?? []
+        guard !list.contains(invoiceID) else { return }
+        list.append(invoiceID)
+        all[jobID] = list
+        UserDefaults.standard.set(all, forKey: key)
+    }
+
+    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
 }

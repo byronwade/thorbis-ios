@@ -40,6 +40,7 @@ struct ThorbisApp: App {
             JobDetailCache.clearAll()
             Task { await JobLiveActivity.endAll() }
             TodaySnapshot.clear()
+            JobInvoiceMemory.clear()
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
             if let actorID, let organizationID {
@@ -208,8 +209,19 @@ final class Store: ObservableObject {
         guard session.phase == .ready else { throw CancellationError() }
         let jobs = session.can("job.view", feature: "jobs") ? try await api.jobs() : []
         guard session.generation == identity, session.phase == .ready else { throw CancellationError() }
-        let customers = session.can("customer.view", feature: "core_crm") ? try await api.customers() : []
+        var customers = session.can("customer.view", feature: "core_crm") ? try await api.customers() : []
         guard session.generation == identity, session.phase == .ready else { throw CancellationError() }
+        // Technicians get an empty customer list by design and read each customer through their
+        // assigned job, so fill in the names their jobs need one by one.
+        if session.can("customer.view", feature: "core_crm") {
+            let known = Set(customers.map(\.id))
+            let missing = Array(Set(jobs.compactMap(\.customerId)).subtracting(known)).sorted().prefix(40)
+            for id in missing {
+                guard let record = try? await api.fieldCustomer(id) else { continue }
+                customers.append(Customer(id: record.id, name: record.name, archived: nil, createdAt: nil))
+            }
+            guard session.generation == identity, session.phase == .ready else { throw CancellationError() }
+        }
         return (jobs, customers)
     }
 
