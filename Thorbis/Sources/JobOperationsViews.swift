@@ -10,6 +10,7 @@ struct JobCloseoutView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirmComplete = false
+    @State private var completed = 0
     @State private var confirmCancel = false
     @State private var invoiceID: String?
     @State private var openInvoiceID: String?
@@ -130,6 +131,7 @@ struct JobCloseoutView: View {
         .refreshable { await load() }
         .navigationDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0) }
         .navigationDestination(isPresented: $openBilling) { BillingSchedulesView() }
+        .sensoryFeedback(.success, trigger: completed)
         .confirmationDialog("Complete this job?", isPresented: $confirmComplete, titleVisibility: .visible) {
             Button("Complete job") { Task { await complete() } }
         }
@@ -180,6 +182,7 @@ struct JobCloseoutView: View {
         do {
             let disposition: FieldUnpaidDisposition? = validDisposition ? .init(reasonCode: unpaidReasonCode, reason: unpaidReason.trimmingCharacters(in: .whitespacesAndNewlines), followUpNextAction: unpaidNextAction.trimmingCharacters(in: .whitespacesAndNewlines)) : nil
             job = try await api.completeFieldJob(jobID, request: .init(unpaidDisposition: disposition))
+            completed += 1
             await load()
             await store.refresh(api)
         }
