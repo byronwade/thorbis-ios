@@ -240,16 +240,9 @@ struct InvoicePaymentsSection: View {
                         .foregroundStyle(Theme.muted)
                 }
                 Spacer()
-                Button(action: onCollectPayment) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .disabled(!session.can("invoice.payment.create", feature: "payments") || !model.canRecordPayment)
-                .accessibilityLabel("Collect payment")
+                // Collect payment lives in the bottom bar; one entry point, not two.
             }
+            .frame(minHeight: 44)
 
             VStack(spacing: 0) {
                 if let loadError = model.loadError {
@@ -934,8 +927,8 @@ struct InvoicePaymentCollectionSheet: View {
                     .focused($amountFocused)
                     .font(Theme.monoFont(32, weight: .semibold))
                     .tracking(-0.7)
-                    .multilineTextAlignment(.center)
-                    .frame(minWidth: 120)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize()
                     .accessibilityLabel("Amount to collect in dollars")
                     .disabled(hasLockedIntent || model.waitingForProjection || option == .paymentLink || option == .tapToPay)
                 if !hasLockedIntent && !model.waitingForProjection && option != .paymentLink && option != .tapToPay {

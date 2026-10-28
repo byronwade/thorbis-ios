@@ -293,8 +293,11 @@ struct WorkspacePriceBookView: View {
     @State private var search = ""
     @State private var category = "All"
     @State private var creating = false
-    /// Same capability the server checks for Price Book changes.
-    private var canEdit: Bool { session.can("organization.settings.edit", feature: "price_book") }
+    /// pricebook.edit is the server's capability for Price Book changes; organization.settings.edit
+    /// covers servers that predate it.
+    private var canEdit: Bool {
+        session.can("pricebook.edit", feature: "price_book") || session.can("organization.settings.edit", feature: "price_book")
+    }
 
     private var categories: [String] {
         ["All"] + Array(Set(items.map { $0.kind.capitalized })).sorted()
