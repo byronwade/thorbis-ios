@@ -49,6 +49,7 @@ struct PaperJobInvoiceContent: View {
     let onInvoiceUpdated: (InvoiceRecord) -> Void
 
     @EnvironmentObject private var session: SessionController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var balance: PaperInvoiceBalance {
         PaperInvoiceBalance(invoice: displayedInvoice, balanceCents: paymentModel.outstandingCents)
@@ -87,11 +88,13 @@ struct PaperJobInvoiceContent: View {
 
             HStack(spacing: 12) {
                 Text(balance.balanceCents.map { money($0, currency: invoice.currency) } ?? "—")
-                    .font(Theme.monoFont(30, weight: .medium))
+                    .moneyStyle(.hero)
                     .tracking(-0.5)
                     .foregroundStyle(Theme.foreground)
                     .accessibilityLabel(balance.balanceCents.map { "Balance due \(money($0, currency: displayedInvoice.currency))" } ?? "Balance unavailable")
                     .accessibilityAddTraits(.updatesFrequently)
+                    // MF-06: the balance rolls down when a payment lands.
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: balance.balanceCents)
                 Spacer(minLength: 4)
                 statusChip
             }
@@ -137,7 +140,7 @@ struct PaperJobInvoiceContent: View {
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             Text(lineAmount(line).map { money($0, currency: line.unitPrice.currency) } ?? "—")
-                            .font(Theme.monoFont(13, weight: .medium))
+                            .moneyStyle(.line)
                             .foregroundStyle(Theme.foreground)
                             .fixedSize()
                     }
@@ -154,7 +157,7 @@ struct PaperJobInvoiceContent: View {
                         .foregroundStyle(Theme.foreground)
                     Spacer()
                     Text(paymentModel.totalCents.map { money($0, currency: displayedInvoice.currency) } ?? "Unavailable")
-                        .font(Theme.monoFont(13, weight: .medium))
+                        .moneyStyle(.total)
                         .foregroundStyle(Theme.foreground)
                 }
                 .frame(minHeight: 44)

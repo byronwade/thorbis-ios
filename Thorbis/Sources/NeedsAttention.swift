@@ -67,7 +67,7 @@ struct NeedsAttentionView: View {
                     ForEach(waiting) { estimate in
                         NavigationLink(value: PaperRoute.estimate(estimate.id)) {
                             row(title: estimate.title, detail: "\(store.customerName(estimate.customerId)) · \(since("Sent", estimate.sentAt))",
-                                trailing: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? "", tint: Theme.muted)
+                                trailing: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? "", tint: Theme.foreground)
                         }.buttonStyle(.plain)
                     }
                 }
@@ -114,7 +114,7 @@ struct NeedsAttentionView: View {
                 Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
             }
             Spacer(minLength: 8)
-            if !trailing.isEmpty { Text(trailing).font(Theme.monoFont(13, weight: .semibold)).foregroundStyle(tint) }
+            if !trailing.isEmpty { Text(trailing).moneyStyle(.row).foregroundStyle(tint) }
             Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle)
         }
         .padding(.horizontal, Theme.gutter).padding(.vertical, 10)

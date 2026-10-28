@@ -94,6 +94,10 @@ struct EstimateDetailView: View {
                 if let record {
                     commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased())", context: store.customerName(record.customerId), title: record.title,
                                       status: record.status, date: record.createdAt)
+                    // MF-04: an estimate leads with its total.
+                    if let total = paperLinesTotal(record.lines), !record.lines.isEmpty {
+                        MoneyFigure(label: "Total", cents: total, currency: record.lines.first?.unitPrice.currency ?? "USD")
+                    }
                     PaperGroupHeader(title: "Line items", count: record.lines.count).padding(.top, 4)
                     VStack(spacing: 0) {
                         ForEach(record.lines) { line in CommercialLineView(line: line, divider: line.id != record.lines.first?.id) }
@@ -104,7 +108,7 @@ struct EstimateDetailView: View {
                                 Text("Total").font(Theme.font(15, weight: .medium))
                                 Spacer()
                                 Text(money(total, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                    .font(Theme.monoFont(15, weight: .medium))
+                                    .moneyStyle(.total)
                             }
                             .padding(15)
                             if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
@@ -113,8 +117,9 @@ struct EstimateDetailView: View {
                                     Label("Member price · \(memberPricing.discountPercent)% off", systemImage: "star")
                                         .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
                                     Spacer()
+                                    // MF-05: money stays ink; only the label carries the member mark.
                                     Text(money(memberTotal, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                        .font(Theme.monoFont(15, weight: .medium)).foregroundStyle(Theme.brandText)
+                                        .moneyStyle(.total).foregroundStyle(Theme.foreground)
                                 }
                                 .padding(.horizontal, 15).padding(.bottom, 15)
                                 .accessibilityElement(children: .combine)
@@ -137,7 +142,7 @@ struct EstimateDetailView: View {
                             HStack {
                                 Text("Option total").font(Theme.font(15, weight: .medium))
                                 Spacer()
-                                Text(money(option.totalAmount, currency: option.currency)).font(Theme.monoFont(15, weight: .medium))
+                                Text(money(option.totalAmount, currency: option.currency)).moneyStyle(.total)
                             }
                             .padding(15)
                         }
@@ -320,9 +325,10 @@ struct InvoicesView: View {
                             let total = paperLinesTotal(record.lines)
                             let due = total.map { max(0, $0 - record.amountPaid) }
                             PaperDocumentRow(reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
-                                             subtitle: record.status == "issued" ? (due.map { "\(money($0, currency: record.currency)) due" } ?? "Balance unavailable") : "Paid \(money(record.amountPaid, currency: record.currency))",
+                                             subtitle: record.status == "issued" ? (record.amountPaid > 0 ? "Balance due · part paid" : "Balance due") : record.status == "paid" ? "Paid" : record.status.statusLabel,
                                              status: record.status,
-                                             amount: total.map { money($0, currency: record.currency) },
+                                             // MF-04: an unpaid invoice's row shows what's owed now.
+                                             amount: (record.status == "issued" ? due : total).map { money($0, currency: record.currency) },
                                              showsStatus: false)
                         }.buttonStyle(RowPressStyle())
                     }
@@ -380,13 +386,19 @@ struct InvoiceDetailView: View {
                     commercialHeading(ref: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
                                       status: record.status, date: record.issuedAt ?? record.createdAt)
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-                    VStack(spacing: 0) {
-                        commercialDetail("Total", money(total, currency: record.currency))
-                        if record.amountPaid > 0 { commercialDetail("Paid", money(record.amountPaid, currency: record.currency)) }
-                        commercialDetail("Balance due", money(max(total - record.amountPaid, 0), currency: record.currency))
+                    let due = max(total - record.amountPaid, 0)
+                    // MF-04: what's owed now is the largest thing on the invoice; Total and Paid sit under it.
+                    MoneyFigure(label: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
+                                cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency)
+                    if record.amountPaid > 0 {
+                        VStack(spacing: 0) {
+                            commercialDetail("Total", money(total, currency: record.currency))
+                            Rectangle().fill(Theme.border).frame(height: 1)
+                            commercialDetail("Paid", money(record.amountPaid, currency: record.currency))
+                        }
+                        .padding(.horizontal, 15)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     }
-                    .padding(.horizontal, 15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
                     } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
@@ -580,13 +592,13 @@ struct CommercialLineView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(line.description).font(Theme.font(15, weight: .medium))
                 Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
-                    .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
             let total = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
             if !total.overflow {
                 Text(money(total.partialValue, currency: line.unitPrice.currency))
-                    .font(Theme.monoFont(13, weight: .medium))
+                    .moneyStyle(.line)
             }
         }
         .foregroundStyle(Theme.foreground)
@@ -615,14 +627,36 @@ private func commercialHeading(ref: String, context: String? = nil, title: Strin
     }
 }
 
+/// MF-02: a labelled amount in a card, at the total size.
+@MainActor
 private func commercialDetail(_ label: String, _ value: String) -> some View {
-    HStack(alignment: .top, spacing: 10) {
-        Text(label).foregroundStyle(Theme.muted)
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
+        Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
         Spacer(minLength: 12)
-        Text(value).foregroundStyle(Theme.foreground)
+        Text(value).moneyStyle(.total).foregroundStyle(Theme.foreground)
     }
-    .font(Theme.font(13))
-    .padding(.vertical, 13)
+    .padding(.vertical, 12)
+    .accessibilityElement(children: .combine)
+}
+
+/// MF-01/MF-03/MF-04: the amount a screen is about, labelled, at the hero size. Zero reads muted.
+struct MoneyFigure: View {
+    let label: String
+    let cents: Int
+    let currency: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            // MF-06: a recorded payment rolls the balance down instead of swapping it.
+            Text(money(cents, currency: currency)).moneyStyle(.hero).tracking(-0.5)
+                .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
+                .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: cents)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.updatesFrequently)
+    }
 }
 
 private func commercialAction(_ title: String, icon: String) -> some View {
@@ -703,7 +737,7 @@ struct PaperDocumentRow: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
-                if let amount { Text(amount).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground) }
+                if let amount { Text(amount).moneyStyle(.row).foregroundStyle(Theme.foreground) }
                 if showsStatus { PaperStatusChip(status: status) }
             }
         }
@@ -740,18 +774,23 @@ func money(_ cents: Int, currency: String) -> String {
 }
 
 /// The one line an office reads first on a document list: what's outstanding and how much.
-@ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
+@MainActor @ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
     let waiting = estimates.filter { $0.status == "sent" }
     let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
-    Text(waiting.isEmpty ? "Nothing waiting on customers" : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))")
-        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-        .padding(.bottom, 6)
+    // MF-03: the amount is a figure, the words label it.
+    if waiting.isEmpty {
+        Text("Nothing waiting on customers").font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 6)
+    } else {
+        MoneyFigure(label: "\(waiting.count) waiting on customers", cents: total, currency: "USD").padding(.bottom, 6)
+    }
 }
 
-@ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
+@MainActor @ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
     let unpaid = invoices.filter { $0.status == "issued" }
     let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
-    Text(unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD")) owed · \(unpaid.count) unpaid")
-        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-        .padding(.bottom, 6)
+    if unpaid.isEmpty {
+        Text("Everything is paid").font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 6)
+    } else {
+        MoneyFigure(label: "Owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")", cents: owed, currency: "USD").padding(.bottom, 6)
+    }
 }

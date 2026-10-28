@@ -13,6 +13,21 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-big-money",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "dollarsign.circle", title: "Money you can read at a glance",
+                      detail: "Balance due, estimate totals and payment amounts are now the biggest thing on the screen."),
+                .init(symbol: "banknote", title: "Record cash or a check in three taps",
+                      detail: "Collect, pick Cash or Check, Record. No extra confirm, and it remembers what you used last."),
+                .init(symbol: "link", title: "Payment links stay in one sheet",
+                      detail: "Creating a payment link now opens in the same sheet, so Done takes you back to the invoice."),
+                .init(symbol: "arrow.up.arrow.down", title: "Amounts roll when they change",
+                      detail: "Record a payment and the balance rolls down to its new amount right where you are."),
+            ],
+            fixes: 4
+        ),
+        ReleaseNote(
             id: "2026-10-28-estimate-builder",
             date: "2026-10-28",
             highlights: [
