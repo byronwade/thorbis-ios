@@ -40,15 +40,7 @@ struct PaperHeader: View {
                 if let search {
                     PaperCircleButton(symbol: "magnifyingglass", label: "Filter \(title.lowercased())", action: search)
                 }
-                Button(action: openAccount) {
-                    Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .frame(width: 36, height: 36).background(Theme.brandSurface, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                        .dynamicTypeSize(...DynamicTypeSize.large)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Account and menu")
+                // One way in: the menu button. The account lives at the bottom of the menu.
             }
             Text(title)
                 .font(Theme.font(34, weight: .bold)).tracking(-0.68)
@@ -478,3 +470,45 @@ struct PaperQuickActions: View {
         .accessibilityLabel(label)
     }
 }
+
+/// Lays chips out left to right and wraps to a new line when they run out of room.
+struct FlowRow: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > width { x = 0; y += lineHeight + lineSpacing; lineHeight = 0 }
+            x += size.width + spacing
+            widest = max(widest, x - spacing)
+            lineHeight = max(lineHeight, size.height)
+        }
+        return CGSize(width: min(widest, width), height: y + lineHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        // Break into lines first, then center each chip on its line so mixed hit areas align.
+        var lines: [[(Subviews.Element, CGSize)]] = [[]]
+        var x: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > bounds.width { lines.append([]); x = 0 }
+            lines[lines.count - 1].append((view, size))
+            x += size.width + spacing
+        }
+        var y = bounds.minY
+        for line in lines where !line.isEmpty {
+            let height = line.map(\.1.height).max() ?? 0
+            var x = bounds.minX
+            for (view, size) in line {
+                view.place(at: CGPoint(x: x, y: y + (height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += height + lineSpacing
+        }
+    }
+}
+
