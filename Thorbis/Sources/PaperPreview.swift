@@ -353,6 +353,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
+            if path == "/v1/jobs/\(id)/visit-history" {
+                return ["items": [
+                    ["id": "00000000-0000-4000-8000-000000009501", "title": "Spring AC tune-up", "status": "completed",
+                     "notes": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit.",
+                     "assignedToUserId": "00000000-0000-4000-8000-000000008801", "scheduledFor": "2026-04-14T16:00:00Z",
+                     "completedAt": "2026-04-14T17:20:00Z", "createdAt": "2026-04-02T10:00:00Z"],
+                    ["id": "00000000-0000-4000-8000-000000009502", "title": "Water heater flush", "status": "completed",
+                     "notes": "Sediment heavy. Anode rod due next year.", "assignedToUserId": actor,
+                     "scheduledFor": "2025-11-03T15:00:00Z", "completedAt": "2025-11-03T16:05:00Z", "createdAt": "2025-10-28T10:00:00Z"]
+                ]]
+            }
         }
         for customer in customers() {
             guard let id = customer["id"] as? String, let name = customer["name"] as? String, let address = customer["address"] as? String else { continue }
