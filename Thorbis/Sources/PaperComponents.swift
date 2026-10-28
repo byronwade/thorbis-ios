@@ -33,11 +33,9 @@ struct PaperHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // ChatGPT-style top row: the menu button sits top-left on every main screen.
             HStack(alignment: .center, spacing: 8) {
-                Text(title)
-                    .font(Theme.font(34, weight: .bold)).tracking(-0.68)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .accessibilityAddTraits(.isHeader)
+                PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
                 Spacer(minLength: 0)
                 if let search {
                     PaperCircleButton(symbol: "magnifyingglass", label: "Filter \(title.lowercased())", action: search)
@@ -50,14 +48,18 @@ struct PaperHeader: View {
                         .dynamicTypeSize(...DynamicTypeSize.large)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Account and settings")
+                .accessibilityLabel("Account and menu")
             }
+            Text(title)
+                .font(Theme.font(34, weight: .bold)).tracking(-0.68)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .accessibilityAddTraits(.isHeader)
             Text(subtitle)
                 .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 .frame(minHeight: 20, alignment: .leading)
         }
         .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 12)
+        .padding(.horizontal, Theme.gutter).padding(.top, 2).padding(.bottom, 12)
     }
 }
 
