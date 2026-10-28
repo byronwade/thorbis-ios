@@ -958,12 +958,17 @@ struct JobDetailView: View {
         guard session.can("invoice.view", feature: "invoicing") else { return }
         let generation = session.generation
         do {
-            let all = try await api.fieldInvoices()
-            guard session.generation == generation else { return }
-            var mine = all.filter { $0.jobId == jobId }
-            // Technicians' invoice list is empty by design; re-read the ones this phone has seen
-            // for the job by id, which the server allows through the assigned job.
+            var mine: [InvoiceRecord]
             var missed = false
+            do {
+                mine = try await api.fieldJobInvoices(jobId)
+            } catch let problem as Problem where problem.status == 404 || problem.status == 405 {
+                // A server without the job invoice read: the organization list, which is empty
+                // for technicians by design, then the ones this phone has seen for the job by id.
+                // Any other failure is a failed read, so the bar waits instead of guessing.
+                mine = try await api.fieldInvoices().filter { $0.jobId == jobId }
+            }
+            guard session.generation == generation else { return }
             if mine.isEmpty {
                 for id in JobInvoiceMemory.ids(jobId) {
                     if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) } else { missed = true }
