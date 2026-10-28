@@ -149,7 +149,8 @@ struct PaperEyebrow: View {
     }
 }
 
-/// Sentence-case group header: 13/500 muted title, mono count, optional trailing action.
+/// Sentence-case group header: 13/500 muted title, mono count (left out at zero, where the
+/// empty state below already says so), optional trailing action.
 struct PaperGroupHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
@@ -158,7 +159,7 @@ struct PaperGroupHeader<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(title).font(Theme.font(13, weight: .medium))
-            if let count { Text("\(count)").font(Theme.monoFont(12)) }
+            if let count, count > 0 { Text("\(count)").font(Theme.monoFont(12)) }
             Spacer(minLength: 0)
             trailing
         }
