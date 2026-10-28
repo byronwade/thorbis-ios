@@ -49,15 +49,18 @@ final class InvoicePaymentCollectionModel: ObservableObject {
 
     private let api: APIClient
     private let invoiceID: String
+    private let expectedJobScope: JobDocumentScope?
     private let intentStore: InvoicePaymentIntentStore
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
 
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
-         makeIdempotencyKey: @escaping () -> String = { UUID().uuidString.lowercased() }) {
+         makeIdempotencyKey: @escaping () -> String = { UUID().uuidString.lowercased() },
+         expectedJobScope: JobDocumentScope? = nil) {
         self.api = api
         self.invoiceID = invoiceID
+        self.expectedJobScope = expectedJobScope
         self.intentStore = intentStore
         self.makeIdempotencyKey = makeIdempotencyKey
     }
@@ -117,7 +120,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         do {
             try Task.checkCancellation()
             let loadedInvoice = try await api.fieldInvoice(invoiceID)
-            invoice = loadedInvoice
+            guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
@@ -136,9 +139,17 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         }
     }
 
-    func acceptInvoiceMutationResponse(_ updated: InvoiceRecord) {
-        guard updated.id == invoiceID else { return }
+    @discardableResult
+    func acceptInvoiceMutationResponse(_ updated: InvoiceRecord) -> Bool {
+        guard updated.id == invoiceID, expectedJobScope?.contains(updated) != false else {
+            invoice = nil
+            payments = []
+            historyComplete = false
+            loadError = "This invoice couldn't be verified. Refresh the job before continuing."
+            return false
+        }
         invoice = updated
+        return true
     }
 
     @discardableResult

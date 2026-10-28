@@ -361,6 +361,7 @@ struct InvoiceDetailView: View {
     let id: String
     /// Opened from the job's next step: once it's paid, go back to the job for wrap up (TF-09).
     var returnsWhenPaid = false
+    var expectedJobScope: JobDocumentScope? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
@@ -417,7 +418,7 @@ struct InvoiceDetailView: View {
                             model: paymentModel,
                             invoice: record,
                             onCollectPayment: { showCollectPayment = true },
-                            onInvoiceUpdated: { self.record = $0 }
+                            onInvoiceUpdated: { _ = accept($0) }
                         )
                     }
                     if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
@@ -452,8 +453,8 @@ struct InvoiceDetailView: View {
                                       summary: "By signing, \(store.customerName(record.customerId)) authorizes the work and charges on this invoice.",
                                       jobID: jobID, suggestedName: store.customerName(record.customerId)) { signature in
                     do {
-                        self.record = try await api.authorizeFieldInvoice(id, expectedLinesRevision: record.linesRevision, signature: signature)
-                        return nil
+                        let updated = try await api.authorizeFieldInvoice(id, expectedLinesRevision: record.linesRevision, signature: signature)
+                        return accept(updated) ? nil : paymentModel?.loadError
                     } catch { return error.localizedDescription }
                 }
             }
@@ -483,8 +484,7 @@ struct InvoiceDetailView: View {
             if let record {
                 NavigationStack {
                     InvoiceLineEditorView(invoice: record) { updated in
-                        self.record = updated
-                        paymentModel?.acceptInvoiceMutationResponse(updated)
+                        guard accept(updated) else { return }
                         error = nil
                         Task { await paymentModel?.load() }
                     }
@@ -513,8 +513,7 @@ struct InvoiceDetailView: View {
                             }
                         } : nil,
                         onSigned: { updated in
-                            self.record = updated
-                            paymentModel?.acceptInvoiceMutationResponse(updated)
+                            _ = accept(updated)
                         },
                         onDone: handBack)
                 }
@@ -528,7 +527,9 @@ struct InvoiceDetailView: View {
                 .presentationDragIndicator(.visible)
             }
         }
-        .task {
+        .task(id: session.generation) {
+            paymentModel = nil
+            record = nil
             await load()
             #if DEBUG
             if PaperPreview.enabled, PaperPreview.screen == "invoice-payment" {
@@ -557,24 +558,40 @@ struct InvoiceDetailView: View {
         defer { busy = false }
         do {
             let issued = try await api.issueFieldInvoice(id, expectedLinesRevision: current.linesRevision)
-            record = issued
-            paymentModel?.acceptInvoiceMutationResponse(issued)
+            guard accept(issued) else { return false }
             error = nil
             self.issued += 1
             await paymentModel?.load()
-            if let invoice = paymentModel?.invoice { record = invoice }
+            record = paymentModel?.invoice
             return true
         }
         catch is CancellationError { return false } catch { self.error = error.localizedDescription; return false }
     }
+    @discardableResult private func accept(_ invoice: InvoiceRecord) -> Bool {
+        guard let paymentModel, paymentModel.acceptInvoiceMutationResponse(invoice) else {
+            record = nil
+            error = paymentModel?.loadError
+            return false
+        }
+        record = invoice
+        return true
+    }
+
     private func load() async {
+        let generation = session.generation
+        guard expectedJobScope.map({ $0.organizationID == session.activeOrganization?.id }) != false else {
+            record = nil
+            paymentModel = nil
+            return
+        }
         if paymentModel == nil {
-            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id)
+            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: expectedJobScope)
         }
         guard let paymentModel else { return }
         await paymentModel.load()
-        if let invoice = paymentModel.invoice {
-            record = invoice
+        guard session.generation == generation else { return }
+        record = paymentModel.invoice
+        if paymentModel.invoice != nil {
             error = nil
         } else if let loadError = paymentModel.loadError {
             error = loadError

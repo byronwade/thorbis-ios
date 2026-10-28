@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "build": "73",
+  "buildID": "5fb0132f-70ba-4806-ac29-53dd4a1a063a",
+  "url": "https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/5fb0132f-70ba-4806-ac29-53dd4a1a063a",
+  "processed": true,
+  "group": "Internal Testers",
+  "groupID": "32e003bb-3a52-47c2-b84c-2e7cd7459b01",
+  "testerCount": 2,
+  "testingNotes": "Saved",
+  "sourceCommit": "5f48e17af1dd7886f62633270e7440f8ded09edf",
+  "verifiedAt": "2026-10-28T21:17:56.564189+00:00"
+}

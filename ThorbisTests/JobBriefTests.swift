@@ -40,6 +40,15 @@ final class JobBriefTests: XCTestCase {
         XCTAssertFalse(groups.flatMap { $0 }.contains(.wrapUp))
     }
 
+    func testCustomerDetailsAndCommercialHandoffHaveIndependentPermissionEntries() {
+        let both = JobMenu.groups(.init(canShowToCustomer: true, canEditCustomer: true)).flatMap { $0 }
+        XCTAssertTrue(both.contains(.showToCustomer))
+        XCTAssertTrue(both.contains(.customerDetails))
+        let contactsOnly = JobMenu.groups(.init(canEditCustomer: true)).flatMap { $0 }
+        XCTAssertTrue(contactsOnly.contains(.customerDetails))
+        XCTAssertFalse(contactsOnly.contains(.showToCustomer))
+    }
+
     // MARK: JS-06 contacts
 
     func testEveryContactIsListedPrimaryFirstThenByName() {

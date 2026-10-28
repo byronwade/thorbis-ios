@@ -1,0 +1,12 @@
+{
+  "sourceCommit": "5f48e17af1dd7886f62633270e7440f8ded09edf",
+  "version": "1.0",
+  "build": "73",
+  "bundleIdentifier": "com.thorbis.field",
+  "extensions": [
+    "com.thorbis.field.widgets"
+  ],
+  "tapToPayEnabled": false,
+  "releasePreviewBoundary": "passed",
+  "strictCodeSignature": "passed"
+}
