@@ -14,6 +14,7 @@ struct NewCustomerSheet: View {
     @State private var address = ""
     @State private var busy = false
     @State private var error: String?
+    @State private var lookup: CustomerPhoneLookup = .notApplicable
     @FocusState private var focused: Field?
 
     private enum Field { case name, phone, email, address }
@@ -35,6 +36,7 @@ struct NewCustomerSheet: View {
                         .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
                     field("Phone", text: $phone, prompt: "(555) 014-2276", focus: .phone)
                         .textContentType(.telephoneNumber).keyboardType(.phonePad)
+                    if case .found(let existing) = lookup { existingCustomerCard(existing) }
                     field("Email", text: $email, prompt: "name@example.com", focus: .email)
                         .textContentType(.emailAddress).keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -73,6 +75,7 @@ struct NewCustomerSheet: View {
                                disabled: !valid || !session.can("customer.create", feature: "core_crm")) { Task { await save() } }
             }
             .onAppear { focused = .name }
+            .task(id: CustomerPhoneLookup.digits(phone)) { await checkPhone() }
             .interactiveDismissDisabled(busy)
         }
     }
@@ -87,6 +90,44 @@ struct NewCustomerSheet: View {
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
         }
+    }
+
+    /// Paper's quiet notice: this number already belongs to someone, so offer them instead.
+    private func existingCustomerCard(_ existing: Customer) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("\(existing.name) already has this number", systemImage: "person.crop.circle.badge.checkmark")
+                .font(Theme.font(14, weight: .medium))
+            Text("Use their record so the job and history stay in one place.")
+                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Button {
+                onCreated(existing)
+                dismiss()
+            } label: {
+                Text("Use \(existing.name)").font(Theme.font(14, weight: .semibold))
+                    .frame(maxWidth: .infinity).frame(minHeight: 44)
+                    .foregroundStyle(Theme.brand)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func checkPhone() async {
+        let number = phone
+        guard CustomerPhoneLookup.digits(number).count >= 7, session.can("customer.view", feature: "core_crm") else {
+            lookup = .notApplicable
+            return
+        }
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        guard !Task.isCancelled else { return }
+        // A refused or failed check never blocks intake; it just shows nothing.
+        let result = (try? await api.lookupCustomer(phone: number)) ?? .unknown
+        guard !Task.isCancelled, number == phone else { return }
+        lookup = result
     }
 
     private func save() async {

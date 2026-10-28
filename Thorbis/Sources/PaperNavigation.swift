@@ -141,6 +141,7 @@ struct RootView: View {
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: false) }
         .onChange(of: store.jobs) { openRequestedJob(phone: false) }
         .onChange(of: store.requestedSchedule) { path = NavigationPath(); tab = .schedule }
+        .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord(phone: false) }
         .onAppear {
             if session.can("job.view", feature: "jobs") { path = NavigationPath(); tab = .schedule }
             else if session.can("customer.view", feature: "core_crm") { path = NavigationPath(); tab = .customers }
@@ -164,6 +165,7 @@ struct RootView: View {
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
         .onChange(of: store.requestedSchedule) { schedulePath = NavigationPath(); primaryTab = .schedule }
+        .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord(phone: true) }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
         #if DEBUG
@@ -224,6 +226,7 @@ struct RootView: View {
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
             case "notices": primaryTab = .more; morePath.append(PaperRoute.notices)
+            case "payments": primaryTab = .more; morePath.append(PaperRoute.payments)
             case "billing-detail":
                 primaryTab = .more
                 morePath.append(PaperRoute.billing)
@@ -301,6 +304,33 @@ struct RootView: View {
             tab = .schedule
             path = NavigationPath()
             path.append(job)
+        }
+    }
+
+    /// Opens the customer, estimate or invoice a link or notification asked for (RecordLink).
+    private func openRequestedRecord(phone: Bool) {
+        guard let record = store.requestedRecord else { return }
+        store.requestedRecord = nil
+        let access = record.access
+        guard session.can(access.capability, feature: access.feature) else { return }
+        var target = NavigationPath()
+        switch record {
+        case .customer(let id):
+            target.append(store.customers.first { $0.id == id } ?? Customer(id: id, name: "Customer", archived: nil, createdAt: nil))
+        case .estimate(let id): target.append(PaperRoute.estimate(id))
+        case .invoice(let id): target.append(PaperRoute.invoice(id))
+        }
+        if phone {
+            if case .customer = record, layout.visibleTabs(session).contains(.customers) {
+                primaryTab = .customers
+                customersPath = target
+            } else {
+                primaryTab = .more
+                morePath = target
+            }
+        } else {
+            if case .customer = record { tab = .customers } else { tab = .schedule }
+            path = target
         }
     }
 
@@ -397,6 +427,7 @@ enum PaperRoute: Hashable {
     case followUps(jobID: String)
     case customizeMenu
     case attention
+    case payments
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -442,6 +473,7 @@ struct PaperRouteView: View {
         case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
         case .customizeMenu: CustomizeMenuView()
         case .attention: NeedsAttentionView()
+        case .payments: PaymentsSetupView()
         case .local(let section):
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
