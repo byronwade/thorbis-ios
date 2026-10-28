@@ -16,6 +16,23 @@ enum Theme {
         return Font.custom("GeistMono-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
     }
     static let minimumSize: CGFloat = 12
+    /// design.thorbis.com MF-02: four money sizes, nothing smaller. Hero is what the screen is
+    /// about (balance due, the amount being collected, an estimate's total); total sits in cards
+    /// and Total / Paid rows; row is a list row's amount; line is a line item. Hero is 34 on a
+    /// phone and 40 on iPad (above the staff ramp, like customer mode); all scale with Dynamic Type.
+    enum MoneySize {
+        case hero, total, row, line
+    }
+    static func moneyFont(_ size: MoneySize, regular: Bool = false, wide: Bool = false) -> Font {
+        let weight: Font.Weight = regular || size == .line ? .regular : .medium
+        switch size {
+        case .hero:
+            return Font.custom("GeistMono-Regular", size: wide ? 40 : 34, relativeTo: .largeTitle).weight(weight)
+        case .total: return monoFont(24, weight: weight)
+        case .row: return monoFont(17, weight: weight)
+        case .line: return monoFont(15, weight: weight)
+        }
+    }
     /// MA-09: every size lands on the ramp 12/13/15/17/20/24/30 (16 stays for inputs, so
     /// iOS never zooms a field). Stray sizes like 14 or 26 snap to the nearest step.
     static func onRamp(_ size: CGFloat) -> CGFloat {
@@ -136,7 +153,7 @@ struct Avatar: View {
     let name: String
     var size: CGFloat = 24
     var body: some View {
-        Text(initials(name)).font(Theme.font( size * 0.38, weight: .semibold))
+        Text(initials(name)).font(Theme.font(size * 0.38, weight: .medium))
             .foregroundStyle(Theme.muted)
             .frame(width: size, height: size)
             .background(Theme.fill, in: Circle())
@@ -208,6 +225,28 @@ extension View {
     func inkCommit(enabled: Bool? = nil, height: CGFloat = Theme.commitHeight) -> some View {
         modifier(InkCommit(enabled: enabled, height: height))
     }
+
+    /// MF-02..MF-06: an amount in one of the four money sizes. Ink unless the call site tints it
+    /// (red only when overdue), tabular, never truncated (scales to 70% on one line), and the
+    /// digits roll when the amount changes.
+    func moneyStyle(_ size: Theme.MoneySize, regular: Bool = false) -> some View {
+        modifier(MoneyStyle(size: size, regular: regular))
+    }
+}
+
+private struct MoneyStyle: ViewModifier {
+    let size: Theme.MoneySize
+    let regular: Bool
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    func body(content: Content) -> some View {
+        content
+            .font(Theme.moneyFont(size, regular: regular, wide: sizeClass == .regular))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .contentTransition(.numericText())
+    }
 }
 
 /// MA-07: every button answers the finger at once. It dips to 0.97 and 85% opacity while
@@ -260,4 +299,23 @@ struct SkeletonRows: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading")
     }
+}
+
+extension Date {
+    /// One way to say when a visit is, used on every list and header: "Today 4:00 PM",
+    /// "Tomorrow 9:00 AM", otherwise "Thu, Oct 30, 9:00 AM".
+    func visitLabel(now: Date = .now, calendar: Calendar = .current) -> String {
+        let time = formatted(date: .omitted, time: .shortened)
+        if calendar.isDate(self, inSameDayAs: now) { return "Today \(time)" }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(self, inSameDayAs: tomorrow) {
+            return "Tomorrow \(time)"
+        }
+        return formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+    }
+}
+
+/// MA-03: with Reduce Motion on, every animation becomes a short 150ms ease-out
+/// with no spring or travel; otherwise the given animation runs as written.
+@MainActor func withMotion<Result>(_ animation: Animation = .default, _ body: () throws -> Result) rethrows -> Result {
+    try withAnimation(UIAccessibility.isReduceMotionEnabled ? .easeOut(duration: 0.15) : animation, body)
 }

@@ -98,7 +98,7 @@ struct ScheduleView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Schedule", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
+                PaperHeader(title: "Schedule", subtitle: subtitle) { withMotion { searchVisible.toggle() } }
                 OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
@@ -207,8 +207,8 @@ struct ScheduleView: View {
         .padding(.top, 40)
     }
 
-    /// Use queued work or the fresh record before the list's summary.
-    private func primaryAction(for job: Job) -> JobPrimaryAction? {
+    /// The next field step for the Next up job, in lifecycle order.
+    private func nextStep(for job: Job) -> String? {
         guard session.can("job.edit", feature: "jobs") else { return nil }
         let allowed: [String]
         let status: String
@@ -225,12 +225,17 @@ struct ScheduleView: View {
         } else {
             return nil
         }
-        return JobPrimaryAction.resolve(status: status, allowedTransitions: allowed, canEdit: true)
+        // Only ever forward: a job already in progress never offers "Mark arrived" again.
+        let order = ["scheduled": 0, "dispatched": 0, "en_route": 1, "arrived": 2, "in_progress": 3, "paused": 3]
+        let current = order[status] ?? 0
+        return ["en_route", "arrived", "in_progress"].first {
+            allowed.contains($0) && (order[$0] ?? 0) > current && !(status == "paused" && $0 == "in_progress")
+        }
     }
 
     @ViewBuilder private func commit(for job: Job) -> some View {
-        switch primaryAction(for: job) {
-        case .progress("en_route"):
+        switch nextStep(for: job) {
+        case "en_route":
             Menu {
                 Button("On my way") { Task { await progress(job, .enRoute(etaMinutes: nil)) } }
                 ForEach([15, 30, 45, 60], id: \.self) { minutes in
@@ -239,24 +244,25 @@ struct ScheduleView: View {
             } label: { commitLabel("On my way", symbol: "location.fill", busy: busyJobID == job.id) }
             .disabled(busyJobID != nil)
             .accessibilityHint("Tells the office and customer you are driving to this job")
-        case .progress("arrived"):
+        case "arrived":
             Button { Task { await progress(job, .arrived()) } } label: {
                 commitLabel("Mark arrived", symbol: "mappin.and.ellipse", busy: busyJobID == job.id)
             }
             .buttonStyle(PressStyle()).disabled(busyJobID != nil)
-        case .progress("in_progress"):
+        case "in_progress":
             Button { Task { await progress(job, .start) } } label: {
                 commitLabel("Start work", symbol: "wrench.and.screwdriver", busy: busyJobID == job.id)
             }
             .buttonStyle(PressStyle()).disabled(busyJobID != nil)
-        case .wrapUp:
-            NavigationLink { JobCloseoutView(jobID: job.id) } label: {
-                commitLabel("Wrap up", symbol: "checkmark.seal", busy: false)
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityHint("Opens the closeout checklist for this job")
         default:
-            EmptyView()
+            // On the job already: the next thing is wrapping it up, so that is the commit.
+            if (outbox.pendingStatus(for: job.id) ?? job.status) == "in_progress", session.can("job.edit", feature: "jobs") {
+                NavigationLink { JobCloseoutView(jobID: job.id) } label: {
+                    commitLabel("Wrap up", symbol: "checkmark.seal", busy: false)
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityHint("Opens the closeout checklist for this job")
+            }
         }
     }
 
@@ -346,12 +352,12 @@ private struct ScheduleHero<Commit: View>: View {
                 NavigationLink(value: job) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(job.title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            Text(job.title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .multilineTextAlignment(.leading)
                             Text(customer).font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
                         Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted).padding(.top, 4)
+                        PaperDisclosure().padding(.top, 4)
                     }
                     .contentShape(Rectangle())
                 }
@@ -470,7 +476,7 @@ struct JobsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Jobs", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
+                PaperHeader(title: "Jobs", subtitle: subtitle) { withMotion { searchVisible.toggle() } }
                 OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Title or job number") }
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
@@ -515,9 +521,7 @@ struct JobsView: View {
     private func detail(_ job: Job, customer: String) -> String {
         var parts = [customer]
         if let date = JobFiltering.date(job.scheduledFor), !["completed", "canceled"].contains(job.status) {
-            parts.append(Calendar.current.isDateInToday(date)
-                ? "Today \(date.formatted(date: .omitted, time: .shortened))"
-                : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+            parts.append(date.visitLabel())
         } else {
             parts.append(job.status.statusLabel)
         }

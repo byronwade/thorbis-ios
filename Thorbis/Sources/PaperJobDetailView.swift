@@ -36,7 +36,6 @@ struct JobDetailView: View {
     @State private var showCollectPayment = false
     @State private var activityFilter = "All"
     @State private var showSchedule = false
-    @State private var showWrapUp = false
     @State private var jobEstimates: [EstimateRecord] = []
     @State private var estimatesLoaded = false
     @State private var showNewEstimate = false
@@ -44,10 +43,30 @@ struct JobDetailView: View {
     @State private var creatingInvoice = false
     @State private var reviewInvoiceID: String?
     @State private var showDeposit = false
+    /// TF-01: the estimate opened from the next step; it goes straight to the customer when asked.
+    @State private var openEstimate: OpenedEstimate?
+    /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
+    @State private var createdEstimateID: String?
+    @State private var showWrapUp = false
+    /// A failed read is not "none": the next step waits rather than offer duplicate paperwork (TF-10).
+    @State private var estimatesFailed = false
+    @State private var invoicesFailed = false
     /// The customer's service locations; the first (or only) one is where the job is.
     @State private var locations: [ServiceLocationRecord] = []
     /// The primary contact's phone (else the customer's), for one-tap Call and Text.
     @State private var customerPhone: String?
+    /// JS-06: every contact on the account, and the account for its preferred channel.
+    @State private var contacts: [CustomerContactRecord] = []
+    @State private var customerRecord: CustomerRecord?
+    @State private var contactsLoaded = false
+    @State private var contactsFailed = false
+    /// JS-09/JS-10: this visit in counts, and the customer's other visits. Nil until read.
+    @State private var followUps: [FieldFollowUpRecord]?
+    @State private var mediaCount: Int?
+    @State private var visits: [JobVisitRecord] = []
+    @State private var bookingCall: BookingCallRecord?
+    @State private var showAssign = false
+    @State private var showFollowUps = false
     @Environment(\.openURL) private var openURL
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Photos", "Activity"]
@@ -112,7 +131,10 @@ struct JobDetailView: View {
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .sensoryFeedback(.success, trigger: committed)
-        .fullScreenCover(isPresented: $showCustomerMode) {
+        // The customer may have changed a phone, an email or a contact in their own hands.
+        .fullScreenCover(isPresented: $showCustomerMode, onDismiss: {
+            if let job { Task { await loadContacts(job) } }
+        }) {
             if let customerID = job?.customerId {
                 CustomerSelfEditView(customerID: customerID) { showCustomerMode = false }
             }
@@ -124,19 +146,42 @@ struct JobDetailView: View {
             }
         }
         .navigationDestination(item: $reviewInvoiceID) { id in
-            InvoiceDetailView(id: id)
+            InvoiceDetailView(id: id, returnsWhenPaid: true)
                 .onDisappear { Task { await loadInvoices() } }
         }
+        .navigationDestination(item: $openEstimate) { opened in
+            EstimateDetailView(id: opened.id, jobID: jobId, presentsOnOpen: opened.present)
+                .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices() } } }
+        }
         .navigationDestination(isPresented: $showWrapUp) { JobCloseoutView(jobID: jobId) }
+        .navigationDestination(isPresented: $showAssign) { JobAssignmentView(jobID: jobId) }
+        .navigationDestination(isPresented: $showFollowUps) {
+            JobFollowUpsView(jobID: jobId).onDisappear { Task { await loadFollowUps() } }
+        }
+        .sheet(isPresented: $showNewEstimate, onDismiss: {
+            // A saved estimate opens next, so the tech reviews it and hands it over (TF-06).
+            if let id = createdEstimateID { createdEstimateID = nil; openEstimate = OpenedEstimate(id: id, present: false) }
+        }) {
+            if let job {
+                NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { estimate in
+                    createdEstimateID = estimate.id
+                    Task { await loadJobEstimates(job) }
+                }
+            }
+        }
         .task(id: session.generation) {
             invoicePaymentModel = nil
             loadedInvoiceModelID = nil
             await load()
-            if selectedTab == "Invoice" { await loadInvoices() }
+            // The next step needs the job's paper, so it loads with the job, not only on its tab.
+            await loadInvoices()
+            if let job { await loadJobEstimates(job) }
         }
         .refreshable {
-            if selectedTab == "Invoice" { await loadInvoices() }
-            else { await load() }
+            await load()
+            if let job { await loadContacts(job) }
+            await loadInvoices()
+            if let job { await loadJobEstimates(job) }
         }
         // The Lock Screen card follows the status shown here, queued steps included.
         .task(id: liveActivityKey) {
@@ -147,31 +192,24 @@ struct JobDetailView: View {
         }
         // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
         .onAppear { if job != nil { Task { await load() } } }
-        .onChange(of: selectedTab) { _, tab in
+        .onChange(of: selectedTab) { previous, tab in
             if tab == "Invoice" { Task { await loadInvoices() } }
+            // Photos added on the Photos tab show in the Overview count straight away (JS-09).
+            if previous == "Photos" { Task { await loadMediaCount() } }
         }
         .onChange(of: selectedInvoiceID) { _, selectedID in
             guard let selectedID, let invoice = invoices.first(where: { $0.id == selectedID }) else { return }
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
-            if selectedTab == "Overview", let job, let action = primaryAction(job) {
-                switch action {
-                case .wrapUp:
-                    PaperActionBar(title: "Wrap up", symbol: "checkmark.seal", disabled: busy) { showWrapUp = true }
-                        .accessibilityHint("Opens the closeout checklist for this job")
-                case .progress(let target):
-                    PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
-                        runTransition(target)
-                    }
+            if selectedTab == "Overview", let step = nextStep {
+                // TF-01: the bar always carries the one next step of the call, money steps included.
+                PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
+                               busy: busy || creatingInvoice) {
+                    run(step)
                 }
-            } else if selectedTab == "Estimates", let job, session.can("estimate.create", feature: "estimates") {
+            } else if selectedTab == "Estimates", session.can("estimate.create", feature: "estimates") {
                 PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus") { showNewEstimate = true }
-                    .sheet(isPresented: $showNewEstimate) {
-                        NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { _ in
-                            Task { await loadJobEstimates(job) }
-                        }
-                    }
             } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
                       session.can("invoice.view", feature: "invoicing") {
                 // A draft is reviewed (lines) and issued on its own screen, then collected here.
@@ -216,7 +254,8 @@ struct JobDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showCollectPayment) {
+        // A payment changes the balance the next step reads, wherever it was collected from.
+        .sheet(isPresented: $showCollectPayment, onDismiss: { Task { await loadInvoices() } }) {
             if let invoice = selectedInvoice, let model = invoicePaymentModel {
                 InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
                     .presentationDetents([.large])
@@ -225,7 +264,7 @@ struct JobDetailView: View {
         }
     }
 
-    /// Native bar: system back on the left, share and more on the right (HIG-005).
+    /// Native bar: system back on the left, share and the job's one menu on the right (HIG-005, JS-02).
     @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
         if let job {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -233,38 +272,71 @@ struct JobDetailView: View {
                     Image(systemName: "square.and.arrow.up")
                 }
                 .accessibilityLabel("Share job")
-                Menu {
-                    Section {
-                        if session.can("job.assign", feature: "jobs") {
-                            Button("Schedule…", systemImage: "calendar") { showSchedule = true }
-                            NavigationLink { JobAssignmentView(jobID: jobId) } label: {
-                                Label("Assign technician…", systemImage: "person.crop.circle.badge.plus")
-                            }
+                let groups = menuGroups(job)
+                if !groups.isEmpty {
+                    Menu {
+                        ForEach(groups.indices, id: \.self) { index in
+                            Section { ForEach(groups[index], id: \.self) { menuItem($0, job: job) } }
                         }
-                        NavigationLink { JobCloseoutView(jobID: jobId) } label: { Label("Wrap up", systemImage: "checkmark.seal") }
-                        NavigationLink { JobFollowUpsView(jobID: jobId) } label: { Label("Follow-ups", systemImage: "list.bullet") }
+                    } label: {
+                        Image(systemName: "ellipsis")
                     }
-                    Section {
-                        if session.can("customer.edit", feature: "core_crm") {
-                            Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
-                        }
-                        Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
+                    .accessibilityLabel("Job actions")
                 }
-                .disabled(busy)
-                .accessibilityLabel("More job actions")
             }
+        }
+    }
+
+    /// JS-03: only what this person can do now, without the step the bar is carrying.
+    private func menuGroups(_ job: JobRecord) -> [[JobMenuAction]] {
+        JobMenu.groups(JobMenu.Inputs(
+            transitions: availableTransitions(job).filter { nextStep != .transition($0) },
+            canSchedule: session.can("job.assign", feature: "jobs"),
+            canAssign: session.can("job.assign", feature: "jobs"),
+            canBillWithoutEstimate: invoicesLoaded && invoices.isEmpty && nextStep != .createInvoice
+                && job.status == "in_progress" && session.can("invoice.create", feature: "invoicing"),
+            canRequestDeposit: invoicesLoaded && invoices.isEmpty && job.estimateId != nil
+                && session.can("invoice.create", feature: "progress_billing"),
+            // The bar shows only on Overview; on the other tabs Wrap up stays in the menu.
+            barIsWrapUp: selectedTab == "Overview" && nextStep == .wrapUp,
+            canShowToCustomer: session.can("customer.edit", feature: "core_crm")))
+    }
+
+    @ViewBuilder
+    private func menuItem(_ action: JobMenuAction, job: JobRecord) -> some View {
+        switch action {
+        case .transition(let target):
+            Button(transitionTitle(target), systemImage: transitionSymbol(target)) { runTransition(target) }.disabled(busy)
+        case .schedule:
+            Button(job.scheduledFor == nil ? "Schedule" : "Reschedule", systemImage: "calendar") { showSchedule = true }
+        case .assign:
+            Button(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", systemImage: "person.crop.circle.badge.plus") { showAssign = true }
+        case .billWithoutEstimate:
+            Button { run(.createInvoice) } label: {
+                Label { Text("Create invoice"); Text("Bill without an estimate") } icon: { Image(systemName: "doc.plaintext") }
+            }
+            .disabled(creatingInvoice)
+        case .deposit:
+            Button { showDeposit = true } label: {
+                Label { Text("Request a deposit"); Text("Bill part up front") } icon: { Image(systemName: "banknote") }
+            }
+        case .wrapUp:
+            Button { showWrapUp = true } label: {
+                Label { Text("Wrap up"); Text("Closeout checklist") } icon: { Image(systemName: "checkmark.seal") }
+            }
+        case .followUps:
+            Button("Follow-ups", systemImage: "list.bullet") { showFollowUps = true }
+        case .showToCustomer:
+            Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
+        case .copyID:
+            Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
         }
     }
 
     private func header(_ job: JobRecord, compact: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("JOB-\(job.id.suffix(4).uppercased()) · \(store.customerName(job.customerId))")
-                .font(Theme.monoFont(12, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .lineLimit(1)
+            // The reference is mono so its digits line up; the customer's name reads as a name.
+            PaperEyebrow(reference: "JOB-\(job.id.suffix(4).uppercased())", text: store.customerName(job.customerId))
             Text(job.title)
                 .font(Theme.font(24, weight: .medium))
                 .tracking(-0.36)
@@ -276,7 +348,7 @@ struct JobDetailView: View {
                     statusControl(job)
                     if let date = JobFiltering.date(job.scheduledFor) {
                         Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
-                            Label(scheduleLabel(date), systemImage: "clock")
+                            Label(date.visitLabel(), systemImage: "clock")
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
                                 .padding(.horizontal, 10)
@@ -302,24 +374,26 @@ struct JobDetailView: View {
                                 .foregroundStyle(Theme.muted)
                         }
                         .padding(.leading, 3).padding(.trailing, 10)
-                        .padding(.vertical, 3).frame(minHeight: Theme.chipHeight)
+                        .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
                         .background(Theme.fill, in: Capsule())
                     }
                     MemberChip(customerID: job.customerId)
-                    if let balance = invoiceBalanceCents {
-                        // The balance chip jumps to the Invoice tab, where it can be collected.
-                        Button { withAnimation(.snappy) { selectedTab = "Invoice" } } label: {
-                            Text("\(money(balance, currency: "USD")) due")
-                                .font(Theme.monoFont(12, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
-                                .background(Theme.fill, in: Capsule())
-                                .padding(.vertical, 8).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        .accessibilityHint("Opens the invoice")
+            }
+            if let balance = invoiceBalanceCents {
+                // MF-01/MF-03: what's owed on the job is a labelled figure, not a chip. It jumps to
+                // the Invoice tab, where it can be collected.
+                Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 12)
+                        Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
                     }
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .padding(.top, 8)
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Opens the invoice")
             }
             if !compact {
                 JobProgressTrack(status: outbox.pendingStatus(for: job.id) ?? job.status).padding(.top, 10)
@@ -358,7 +432,6 @@ struct JobDetailView: View {
                 statusChip(job, tint: tint, showsMenu: true)
             }
             .buttonStyle(.plain)
-            .disabled(busy)
         }
     }
 
@@ -378,12 +451,6 @@ struct JobDetailView: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .accessibilityLabel("Job status, \(job.status.statusLabel)")
-    }
-
-    private func scheduleLabel(_ date: Date) -> String {
-        let time = date.formatted(.dateTime.hour().minute())
-        if Calendar.current.isDateInToday(date) { return "Today · \(time)" }
-        return "\(date.formatted(.dateTime.weekday())) · \(time)"
     }
 
     private func assignedDisplayName(for job: JobRecord) -> String? {
@@ -430,60 +497,71 @@ struct JobDetailView: View {
         PaperTabs(options: tabs, selection: $selectedTab).padding(.bottom, 4)
     }
 
-    /// Paper 21: description as plain text, quiet value rows, then the job's other actions.
+    /// JS-01: the body is for reading, in the order a tech needs it at the door. Every action that
+    /// isn't the bar's next step is in the ••• menu at the top right.
     private func overviewContent(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            if let detail = job.notes, !detail.isEmpty {
-                Text(detail)
-                    .font(Theme.font(15)).lineSpacing(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 22) {
+            JobOfficeNote(notes: job.notes, pauseReason: job.pauseReason, pauseNextAction: job.pauseNextAction)
+            // JS-05: only when the platform recorded the call that booked this job.
+            if let bookingCall { JobBookingCallSection(call: bookingCall) }
+            if session.can("customer.view", feature: "core_crm") {
+                JobContactsSection(people: JobContacts.people(contacts: contacts, customer: customerRecord),
+                                   preference: JobContacts.preference(customerRecord),
+                                   loaded: contactsLoaded, failed: contactsFailed) { await loadContacts(job) }
             }
-            VStack(alignment: .leading, spacing: 0) {
-                PaperGroupHeader(title: "Details")
-                if let customer = store.customers.first(where: { $0.id == job.customerId }),
-                   session.can("customer.view", feature: "core_crm") {
-                    // The customer opens from the job: history, contacts and equipment in one tap.
-                    NavigationLink(value: customer) {
-                        PaperDetailRow(label: "Customer") {
-                            HStack(spacing: 4) {
-                                Text(customer.name).foregroundStyle(Theme.foreground)
-                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle)
-                            }
-                        }
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityHint("Opens the customer")
-                } else {
-                    PaperDetailRow("Customer", value: store.customerName(job.customerId))
-                }
-                if let place = locations.first {
-                    Button {
-                        if let url = Directions.url(address: place.address, coordinates: place.coordinates) { openURL(url) }
-                    } label: {
-                        PaperDetailRow(label: "Address") {
-                            HStack(spacing: 4) {
-                                Text(place.address).foregroundStyle(Theme.brandText)
-                                Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.brandText)
-                            }
-                        }
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityHint("Opens driving directions in Maps")
-                    let access = [place.gateCode.map { "Gate \($0)" }, place.alarmCode.map { "Alarm \($0)" },
-                                  place.dogOnSite.map { "Dog: \($0)" }, place.parking.map { "Parking: \($0)" }].compactMap { $0 }
-                    if !access.isEmpty { PaperDetailRow("Access", value: access.joined(separator: " · ")) }
-                }
-                if let date = JobFiltering.date(job.scheduledFor) {
-                    PaperDetailRow("Scheduled", value: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
-                } else {
-                    PaperDetailRow("Scheduled", value: "Not scheduled")
-                }
-                if let reason = job.pauseReason { PaperDetailRow("Pause reason", value: reason) }
-                if let next = job.pauseNextAction { PaperDetailRow("Next action", value: next) }
+            if let place = locations.first {
+                JobSiteSection(place: place, showsLabel: locations.count > 1)
             }
-            // What's installed at this address, so the tech arrives knowing model and serial.
+            // What's installed here and what they pay (JS-08); the tech records a unit they find in place.
             CustomerEquipmentSection(customerID: job.customerId, locations: locations, onlyLocationID: locations.first?.id)
+            CustomerMembershipSection(customerID: job.customerId, editable: false)
+            JobVisitCounts(latestNote: notes.last?.body, noteCount: notes.count + outbox.pendingNotes(for: job.id).count,
+                           photoCount: mediaCount, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
+                           openNotes: { activityFilter = "Notes"; withMotion(.snappy) { selectedTab = "Activity" } },
+                           openPhotos: { withMotion(.snappy) { selectedTab = "Photos" } },
+                           openFollowUpsScreen: { showFollowUps = true })
+            JobPastVisitsSection(visits: visits, currentUserID: session.user?.id)
+            detailsGroup(job)
+        }
+    }
+
+    private func detailsGroup(_ job: JobRecord) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaperGroupHeader(title: "Details")
+            if let customer = store.customers.first(where: { $0.id == job.customerId }),
+               session.can("customer.view", feature: "core_crm") {
+                // The customer opens from the job: history, contacts and equipment in one tap.
+                NavigationLink(value: customer) {
+                    PaperDetailRow(label: "Customer") {
+                        HStack(spacing: 4) {
+                            Text(customer.name).foregroundStyle(Theme.foreground)
+                            PaperDisclosure()
+                        }
+                    }
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityHint("Opens the customer")
+            } else {
+                PaperDetailRow("Customer", value: store.customerName(job.customerId))
+            }
+            if let date = JobFiltering.date(job.scheduledFor) {
+                PaperDetailRow("Scheduled", value: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+            } else {
+                PaperDetailRow("Scheduled", value: "Not scheduled")
+            }
+            if let created = JobFiltering.date(job.createdAt) {
+                PaperDetailRow("Booked", value: created.formatted(.dateTime.month(.abbreviated).day().year()))
+            }
+            // JH-02: drive and on-site time from the visit steps, live each minute while open (JH-04).
+            TimelineView(.everyMinute) { context in
+                if let hours = JobHours.make(job, now: context.date) {
+                    PaperDetailRow(label: "Time") {
+                        Text(hours.line).font(hours.hasDuration ? Theme.monoFont(15, weight: .medium) : Theme.font(15, weight: .medium))
+                    }
+                }
+            }
+            PaperDetailRow(label: "Job ID") { Text("JOB-\(job.id.suffix(4).uppercased())").font(Theme.monoFont(15, weight: .medium)) }
+                .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
         }
     }
 
@@ -497,9 +575,9 @@ struct JobDetailView: View {
                 let waiting = jobEstimates.filter { $0.status == "sent" }.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
                 if !jobEstimates.isEmpty {
                     HStack(spacing: 0) {
-                        summary("Awaiting approval", money(waiting, currency: "USD"))
+                        summary("Awaiting approval", money(waiting, currency: "USD"), quiet: waiting == 0)
                         Rectangle().fill(Theme.border).frame(width: 1, height: 40).padding(.horizontal, 16)
-                        summary("Approved", money(approved, currency: "USD"))
+                        summary("Approved", money(approved, currency: "USD"), quiet: approved == 0)
                     }
                     .padding(.bottom, 6)
                 }
@@ -514,24 +592,24 @@ struct JobDetailView: View {
                     NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(estimate.title).font(Theme.font(16, weight: .semibold))
+                                Text(estimate.title).font(Theme.font(15, weight: .medium))
                                     .foregroundStyle(Theme.foreground).multilineTextAlignment(.leading)
                                 Spacer(minLength: 8)
                                 if let total = paperLinesTotal(estimate.lines) {
                                     Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
-                                        .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                        .moneyStyle(.row).foregroundStyle(Theme.foreground)
                                 }
                             }
                             HStack(spacing: 8) {
                                 PaperStatusChip(status: estimate.status)
-                                Text("EST-\(estimate.id.suffix(4).uppercased())").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                                Text("EST-\(estimate.id.suffix(4).uppercased())").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                                 Spacer()
-                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                                PaperDisclosure()
                             }
                         }
                         .padding(16)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(PressStyle())
@@ -541,10 +619,11 @@ struct JobDetailView: View {
         .task(id: job.id) { await loadJobEstimates(job) }
     }
 
-    private func summary(_ label: String, _ value: String) -> some View {
+    /// A zero total is muted, so the figure that matters ("$970.00 awaiting") reads first.
+    private func summary(_ label: String, _ value: String, quiet: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.monoFont(19, weight: .semibold))
+            Text(value).moneyStyle(.total).foregroundStyle(quiet ? Theme.subtle : Theme.foreground)
         }
     }
 
@@ -562,8 +641,10 @@ struct JobDetailView: View {
             guard session.generation == generation else { return }
             jobEstimates = loaded
             estimatesLoaded = true
+            estimatesFailed = false
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
+            estimatesFailed = true
             if let origin = job.estimateId, let single = try? await api.fieldEstimate(origin) { jobEstimates = [single] }
             estimatesLoaded = true
             self.error = error.localizedDescription
@@ -645,7 +726,7 @@ struct JobDetailView: View {
                 ForEach(["All", "Notes", "Status"], id: \.self) { filter in
                     Button { activityFilter = filter } label: {
                         Text(filter)
-                            .font(Theme.font(12, weight: activityFilter == filter ? .semibold : .medium))
+                            .font(Theme.font(12, weight: .medium))
                             .foregroundStyle(activityFilter == filter ? Theme.background : Theme.muted)
                             .padding(.horizontal, 12).frame(height: 28)
                             .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
@@ -667,15 +748,15 @@ struct JobDetailView: View {
                         }
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(entry.title).font(Theme.font(14, weight: .semibold))
+                                Text(entry.title).font(Theme.font(15, weight: .medium))
                                 Spacer(minLength: 8)
-                                Text(entry.date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                                Text(entry.date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                             }
                             if let body = entry.body {
-                                Text(body).font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                                Text(body).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
                                     .textSelection(.enabled)
                             }
                             Text(entry.date.formatted(.dateTime.month(.abbreviated).day())).font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -694,10 +775,10 @@ struct JobDetailView: View {
                         .font(Theme.font(16))
                         .lineLimit(1...6)
                         .padding(.horizontal, 14).padding(.vertical, 11)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22))
-                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.border))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.border))
                     Button { Task { await saveNote() } } label: {
-                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .medium)) } }
+                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .medium)) } }
                             .foregroundStyle(Theme.onInk).frame(width: 44, height: 44)
                             .background(Theme.ink.opacity(canSaveNote ? 1 : 0.35), in: Circle())
                     }
@@ -775,9 +856,9 @@ struct JobDetailView: View {
     private func actionLabel(_ title: String, icon: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon).foregroundStyle(Theme.brandText).frame(width: 20)
-            Text(title).font(Theme.font(14, weight: .medium))
+            Text(title).font(Theme.font(15, weight: .medium))
             Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+            PaperDisclosure()
         }
         .foregroundStyle(Theme.foreground)
         .padding(15)
@@ -794,7 +875,45 @@ struct JobDetailView: View {
         Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    /// TF-01: the one next step for this job, from its status, its estimates and its invoices.
+    private var nextStep: TechJobStep? {
+        guard let job else { return nil }
+        let can = TechJobAbilities(
+            createEstimate: session.can("estimate.create", feature: "estimates"),
+            sendEstimate: session.can("estimate.send", feature: "estimates"),
+            approveEstimate: session.can("estimate.approve", feature: "estimates"),
+            createInvoice: session.can("invoice.create", feature: "invoicing"),
+            viewInvoice: session.can("invoice.view", feature: "invoicing"),
+            collectPayment: session.can("invoice.payment.create", feature: "payments"),
+            completeJob: session.can("job.complete", feature: "jobs"))
+        return TechJobFlow.nextStep(status: outbox.pendingStatus(for: job.id) ?? job.status, transitions: availableTransitions(job),
+                                    estimates: (estimatesLoaded && !estimatesFailed) || !session.can("estimate.view", feature: "estimates") ? jobEstimates : nil,
+                                    invoices: invoicesLoaded && !invoicesFailed ? invoices : nil, can: can)
+    }
+
+    private func run(_ step: TechJobStep) {
+        switch step {
+        case .transition(let target): runTransition(target)
+        case .buildEstimate: showNewEstimate = true
+        case .showEstimate(let id): openEstimate = OpenedEstimate(id: id, present: true)
+        case .createInvoice:
+            Task {
+                // TF-08: one tap makes the invoice from the approved work and opens it for review.
+                if let invoice = await createInvoice() { reviewInvoiceID = invoice.id }
+            }
+        case .reviewInvoice(let id): reviewInvoiceID = id
+        case .collect(let invoiceID, _, _):
+            Task {
+                selectedInvoiceID = invoiceID
+                if let invoice = invoices.first(where: { $0.id == invoiceID }) { await loadInvoicePayments(for: invoice) }
+                if invoicePaymentModel?.canRecordPayment == true { showCollectPayment = true }
+                else { withMotion(.snappy) { selectedTab = "Invoice" } }
+            }
+        case .wrapUp: showWrapUp = true
+        }
     }
 
     private func availableTransitions(_ job: JobRecord) -> [String] {
@@ -808,16 +927,6 @@ struct JobDetailView: View {
             ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused"].contains($0)
                 && session.can(["scheduled", "dispatched"].contains($0) ? "job.assign" : "job.edit", feature: "jobs")
         }
-    }
-
-    private func primaryAction(_ job: JobRecord) -> JobPrimaryAction? {
-        JobPrimaryAction.resolve(
-            status: outbox.pendingStatus(for: job.id) ?? job.status,
-            allowedTransitions: availableTransitions(job),
-            canEdit: session.can("job.edit", feature: "jobs"),
-            canAssign: session.can("job.assign", feature: "jobs"),
-            canResume: true
-        )
     }
 
     private func transitionTitle(_ target: String) -> String {
@@ -860,19 +969,26 @@ struct JobDetailView: View {
         guard session.can("invoice.view", feature: "invoicing") else { return }
         let generation = session.generation
         do {
-            let all = try await api.fieldInvoices()
+            var mine: [InvoiceRecord]
+            var missed = false
+            do {
+                mine = try await api.fieldJobInvoices(jobId)
+            } catch let problem as Problem where problem.status == 404 || problem.status == 405 {
+                // A server without the job invoice read: the organization list, which is empty
+                // for technicians by design, then the ones this phone has seen for the job by id.
+                // Any other failure is a failed read, so the bar waits instead of guessing.
+                mine = try await api.fieldInvoices().filter { $0.jobId == jobId }
+            }
             guard session.generation == generation else { return }
-            var mine = all.filter { $0.jobId == jobId }
-            // Technicians' invoice list is empty by design; re-read the ones this phone has seen
-            // for the job by id, which the server allows through the assigned job.
             if mine.isEmpty {
                 for id in JobInvoiceMemory.ids(jobId) {
-                    if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) }
+                    if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) } else { missed = true }
                 }
             }
             invoices = mine.sorted { $0.createdAt > $1.createdAt }
             mine.forEach { JobInvoiceMemory.remember($0.id, jobID: jobId) }
             invoicesLoaded = true
+            invoicesFailed = missed
             if let selectedInvoice {
                 selectedInvoiceID = selectedInvoice.id
                 await loadInvoicePayments(for: selectedInvoice)
@@ -881,12 +997,13 @@ struct JobDetailView: View {
             guard session.generation == generation else { return }
             self.error = error.localizedDescription
             invoicesLoaded = true
+            invoicesFailed = true
         }
     }
 
     /// The job's canonical completion draft (POST /v1/jobs/{id}/completion-invoice); idempotent per job.
-    private func createInvoice() async {
-        guard !creatingInvoice, session.can("invoice.create", feature: "invoicing") else { return }
+    @discardableResult private func createInvoice() async -> InvoiceRecord? {
+        guard !creatingInvoice, session.can("invoice.create", feature: "invoicing") else { return nil }
         creatingInvoice = true
         defer { creatingInvoice = false }
         do {
@@ -895,7 +1012,8 @@ struct JobDetailView: View {
             selectedInvoiceID = invoice.id
             await loadInvoices()
             committed += 1
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+            return invoice
+        } catch is CancellationError { return nil } catch { self.error = error.localizedDescription; return nil }
     }
 
     private func loadInvoicePayments(for invoice: InvoiceRecord) async {
@@ -919,12 +1037,7 @@ struct JobDetailView: View {
                let places = try? await api.fieldLocations(loadedJob.customerId), session.generation == generation {
                 locations = places
             }
-            if customerPhone == nil, session.can("customer.view", feature: "core_crm") {
-                let contacts = (try? await api.fieldContacts(loadedJob.customerId)) ?? []
-                let primary = contacts.first(where: \.primary)?.phone ?? contacts.first?.phone
-                if let primary { customerPhone = primary }
-                else { customerPhone = (try? await api.fieldCustomer(loadedJob.customerId))?.phone }
-            }
+            if !contactsLoaded { await loadContacts(loadedJob) }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
             let loadedNotes = try await api.fieldNotes(jobId)
@@ -932,6 +1045,7 @@ struct JobDetailView: View {
             notes = loadedNotes
             JobDetailCache.save(notes: loadedNotes, jobID: jobId)
             error = nil
+            await loadBrief()
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
             if error.isConnectivityFailure {
@@ -942,6 +1056,50 @@ struct JobDetailView: View {
             }
             self.error = error.localizedDescription
         }
+    }
+
+    /// JS-06: every contact and the account; the header's Call and Text reach the primary one.
+    private func loadContacts(_ job: JobRecord) async {
+        guard session.can("customer.view", feature: "core_crm") else { return }
+        let generation = session.generation
+        do {
+            let people = try await api.fieldContacts(job.customerId)
+            let account = try? await api.fieldCustomer(job.customerId)
+            guard session.generation == generation else { return }
+            contacts = people
+            customerRecord = account
+            contactsFailed = false
+            customerPhone = people.first(where: \.primary)?.phone ?? people.first(where: { $0.phone != nil })?.phone ?? account?.phone
+        } catch is CancellationError { return } catch {
+            guard session.generation == generation else { return }
+            contactsFailed = true
+            if customerPhone == nil { customerPhone = (try? await api.fieldCustomer(job.customerId))?.phone }
+        }
+        contactsLoaded = true
+    }
+
+    /// JS-09/JS-10: follow-ups, photo count and past visits. Each is optional: a section whose
+    /// read fails or that an older server doesn't offer simply stays out.
+    private func loadBrief() async {
+        let generation = session.generation
+        await loadFollowUps()
+        let loadedMedia = try? await api.fieldMedia(jobId)
+        let loadedVisits = try? await api.fieldVisitHistory(jobId)
+        let loadedCall = try? await api.fieldBookingCall(jobId)
+        guard session.generation == generation else { return }
+        if let loadedMedia { mediaCount = loadedMedia.count }
+        if let loadedVisits { visits = loadedVisits }
+        if let loadedCall { bookingCall = loadedCall }
+    }
+
+    private func loadMediaCount() async {
+        let generation = session.generation
+        guard let loaded = try? await api.fieldMedia(jobId), session.generation == generation else { return }
+        mediaCount = loaded.count
+    }
+
+    private func loadFollowUps() async {
+        if let loaded = try? await api.fieldFollowUps(jobId) { followUps = loaded }
     }
 
     /// A minimal record from the cached job list, so an unopened job still shows offline.
@@ -1044,6 +1202,12 @@ struct JobDetailView: View {
 }
 
 /// Where the visit is, in five steps: booked, on the way, on site, working, done.
+/// An estimate opened from the job; `present` hands it to the customer as soon as it loads.
+struct OpenedEstimate: Identifiable, Hashable {
+    let id: String
+    let present: Bool
+}
+
 struct JobProgressTrack: View {
     let status: String
     private static let steps = ["Booked", "On the way", "On site", "Working", "Done"]

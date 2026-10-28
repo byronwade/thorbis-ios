@@ -48,7 +48,7 @@ struct NewJobSheet: View {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 2) {
                             TextField("Job title", text: $draft.title, axis: .vertical)
-                                .font(Theme.font(26, weight: .semibold))
+                                .font(Theme.font(24, weight: .medium))
                                 .tracking(-0.39)
                                 .textFieldStyle(.plain)
                                 .accessibilityLabel("Job title")
@@ -455,7 +455,7 @@ struct CustomerContactSheet: View {
 
             ZStack {
                 Text(contact == nil ? "New contact" : "Edit contact")
-                    .font(Theme.font(17, weight: .semibold))
+                    .font(Theme.font(17, weight: .medium))
                 // MA-16: Cancel leading; the one commit is the ink button at the bottom.
                 HStack {
                     Button("Cancel") { dismiss() }
@@ -508,7 +508,7 @@ struct CustomerContactSheet: View {
                                 showsEmail = false
                             } label: {
                                 Image(systemName: "xmark")
-                                    .font(Theme.font(12, weight: .semibold))
+                                    .font(Theme.font(12, weight: .medium))
                                     .foregroundStyle(Theme.muted)
                                     .frame(width: 44, height: 46)
                             }
@@ -521,7 +521,7 @@ struct CustomerContactSheet: View {
                             focusedField = .email
                         } label: {
                             Text("+ Add email")
-                                .font(Theme.font(14, weight: .medium))
+                                .font(Theme.font(15, weight: .medium))
                                 .foregroundStyle(Theme.brandText)
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
@@ -589,7 +589,7 @@ struct CustomerContactSheet: View {
                     if let next = nextField(after: field) { focusedField = next } else { Task { await save() } }
                 }
                 .padding(.horizontal, 14)
-                .frame(height: 48)
+                .frame(minHeight: 48)
                 .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
@@ -611,7 +611,7 @@ struct CustomerContactSheet: View {
     private func roleChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if selected { Image(systemName: "checkmark").font(.system(size: 11, weight: .medium)) }
+                if selected { Image(systemName: "checkmark").font(.system(size: 12, weight: .medium)) }
                 Text(title).font(Theme.font(13, weight: .medium))
             }
             .foregroundStyle(selected ? Theme.onInk : Theme.muted)
@@ -652,7 +652,7 @@ extension LocalWorkspaceSection {
         switch self {
         case .fleet: "car"
         case .equipment: "wrench.and.screwdriver"
-        case .agreements: "signature"
+        case .agreements: "list.bullet.clipboard"
         case .team: "person.badge.plus"
         }
     }
@@ -703,6 +703,14 @@ struct MoreView: View {
                 }
                 group("Account") {
                     if session.can("organization.settings.edit") {
+                        NavigationLink(value: PaperRoute.businessSetup) {
+                            PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Company details, payments, services and team", tile: Theme.markAccent)
+                        }
+                        NavigationLink(value: PaperRoute.companyDetails) {
+                            PaperMenuRow("Company details", symbol: "building.2", subtitle: "Name, address and phone customers see", tile: Theme.markOlive)
+                        }
+                    }
+                    if session.can("organization.settings.edit") {
                         NavigationLink(value: PaperRoute.payments) {
                             PaperMenuRow("Payments", symbol: "creditcard", subtitle: "Stripe setup, card payments and payouts", tile: Theme.markForest)
                         }
@@ -710,12 +718,16 @@ struct MoreView: View {
                     NavigationLink(value: PaperRoute.customizeMenu) {
                         PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
                     }
+                    // MA-19: the notes stay one tap away on iPad too, where the gear opens More.
+                    NavigationLink(value: PaperRoute.whatsNew) {
+                        PaperMenuRow("What's new", symbol: "sparkles", subtitle: "What changed in recent updates", tile: Theme.markAccent)
+                    }
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(.white)
                             .frame(width: 40, height: 40).background(Theme.brandText, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(session.user?.name ?? "Account").font(Theme.font(16, weight: .medium))
+                            Text(session.user?.name ?? "Account").font(Theme.font(15, weight: .medium))
                             if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
                         }
                         Spacer()

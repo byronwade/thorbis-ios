@@ -9,12 +9,20 @@ struct EstimatesView: View {
     @State private var error: String?
     @State private var search = ""
     @State private var showCreate = false
-    private var visible: [EstimateRecord] { records.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) } }
+    /// Title, customer or reference, so "EST-4F2A" or a customer's name finds it too.
+    private var visible: [EstimateRecord] {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return records }
+        return records.filter { record in
+            [record.title, store.customerName(record.customerId), "EST-\(record.id.suffix(4).uppercased())"]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(estimates: records) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
@@ -23,9 +31,13 @@ struct EstimatesView: View {
                         NavigationLink { EstimateDetailView(id: record.id) } label: {
                             PaperDocumentRow(reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
                                              subtitle: store.customerName(record.customerId), status: record.status,
-                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
+                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") },
+                                             showsStatus: false)
                         }.buttonStyle(RowPressStyle())
                     }
+                }
+                if !records.isEmpty && visible.isEmpty {
+                    PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
                 }
                 if !loading && records.isEmpty && error == nil {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates yet", message: "Estimates you build for customers appear here.",
@@ -37,11 +49,12 @@ struct EstimatesView: View {
         .background(Theme.background)
         .navigationTitle("Estimates")
         .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $search)
+        .searchable(text: $search, prompt: "Title, customer or EST number")
         .task { await load() }
         .refreshable { await load() }
         .toolbar {
-            if session.can("estimate.create", feature: "estimates") { Button("New estimate", systemImage: "plus") { showCreate = true } }
+            // Neutral like the back button beside it; blue stays for links and selection.
+            if session.can("estimate.create", feature: "estimates") { Button("New estimate", systemImage: "plus") { showCreate = true }.tint(Theme.foreground) }
         }
         .sheet(isPresented: $showCreate, onDismiss: { Task { await load() } }) { NewEstimateView() }
     }
@@ -57,71 +70,86 @@ struct EstimateDetailView: View {
     let id: String
     /// The job it was opened from; in-person approval stores the signature with that job.
     var jobID: String? = nil
+    /// Opened from the job's next step: hand it to the customer as soon as it loads (TF-05), and
+    /// go back to the job once they approve, where the invoice is the next step (TF-06).
+    var presentsOnOpen = false
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
+    @State private var autoPresented = false
     @State private var record: EstimateRecord?
     @State private var error: String?
     @State private var busy = false
     @State private var confirm = false
+    @State private var succeeded = 0
     @State private var showRevisionEditor = false
     @State private var action = ""
     @State private var showToCustomer = false
     @State private var memberPricing: MemberPricing?
-    var body: some View {
+    private var scrollContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
-                    commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased()) · \(store.customerName(record.customerId))", title: record.title,
-                                      status: record.status.statusLabel, date: record.createdAt)
-                    Text("Line items")
-                        .font(Theme.font(17, weight: .medium))
-                        .padding(.top, 8)
+                    commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased())", context: store.customerName(record.customerId), title: record.title,
+                                      status: record.status, date: record.createdAt)
+                    // MF-04: an estimate leads with its total.
+                    if let total = paperLinesTotal(record.lines), !record.lines.isEmpty {
+                        MoneyFigure(label: "Total", cents: total, currency: record.lines.first?.unitPrice.currency ?? "USD")
+                    }
+                    PaperGroupHeader(title: "Line items", count: record.lines.count).padding(.top, 4)
                     VStack(spacing: 0) {
-                        ForEach(record.lines) { line in CommercialLineView(line: line) }
+                        ForEach(record.lines) { line in CommercialLineView(line: line, divider: line.id != record.lines.first?.id) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                         if !record.lines.isEmpty, let total = paperLinesTotal(record.lines) {
                             Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15)
                             HStack {
-                                Text("Total").font(Theme.font(15, weight: .semibold))
+                                Text("Total").font(Theme.font(15, weight: .medium))
                                 Spacer()
                                 Text(money(total, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                    .font(Theme.monoFont(14, weight: .semibold))
+                                    .moneyStyle(.total)
                             }
                             .padding(15)
                             if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
                                 let memberTotal = record.lines.reduce(0) { $0 + $1.quantity * memberPricing.memberPrice($1.unitPrice.amount) }
                                 HStack {
                                     Label("Member price · \(memberPricing.discountPercent)% off", systemImage: "star")
-                                        .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
                                     Spacer()
+                                    // MF-05: money stays ink; only the label carries the member mark.
                                     Text(money(memberTotal, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                        .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                        .moneyStyle(.total).foregroundStyle(Theme.foreground)
                                 }
                                 .padding(.horizontal, 15).padding(.bottom, 15)
                                 .accessibilityElement(children: .combine)
                             }
                         }
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     ForEach(record.options ?? []) { option in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(option.title).font(Theme.font(17, weight: .medium))
-                            Text(option.description).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            ForEach(option.lines) { line in CommercialLineView(line: line) }
-                            HStack {
-                                Text("Option total").foregroundStyle(Theme.muted)
-                                Spacer()
-                                Text(money(option.totalAmount, currency: option.currency))
+                        VStack(alignment: .leading, spacing: 0) {
+                            // The title and note sit inside the card's 15pt inset, like the lines under them.
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(option.title).font(Theme.font(17, weight: .medium))
+                                if !option.description.isEmpty {
+                                    Text(option.description).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                }
                             }
-                            .font(Theme.font(14, weight: .semibold))
+                            .padding([.horizontal, .top], 15).padding(.bottom, 5)
+                            ForEach(option.lines) { line in CommercialLineView(line: line, divider: line.id != option.lines.first?.id) }
+                            HStack {
+                                Text("Option total").font(Theme.font(15, weight: .medium))
+                                Spacer()
+                                Text(money(option.totalAmount, currency: option.currency)).moneyStyle(.total)
+                            }
                             .padding(15)
                         }
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     }
-                    Text("Actions").font(Theme.font(17, weight: .medium)).padding(.top, 8)
+                    PaperGroupHeader(title: "Actions").padding(.top, 4)
                     NavigationLink { CommercialDocumentView(path: "/v1/estimates/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
                         commercialAction("View PDF", icon: "doc.text")
                     }
@@ -143,7 +171,7 @@ struct EstimateDetailView: View {
                         .disabled(busy)
                     }
                     if let revision = record.currentRevisionNumber {
-                        Text("Revision \(revision)").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                        Text("Revision \(revision)").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                     }
                 } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
@@ -151,21 +179,17 @@ struct EstimateDetailView: View {
             .padding(.top, 24)
             .padding(.bottom, 28)
         }
+    }
+
+    var body: some View {
+        scrollContent
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Estimate")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .safeAreaInset(edge: .bottom) {
-            if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
-                PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
-            } else if let record, record.status == "sent", session.can("estimate.approve", feature: "estimates"),
-                      (jobID != nil && (record.options ?? []).isEmpty) || session.can("estimate.send", feature: "estimates") {
-                // On site, the next step is the customer's yes: hand them the options to choose and sign.
-                // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
-                PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
-            }
-        }
+        .safeAreaInset(edge: .bottom) { estimateBar }
+        .sensoryFeedback(.success, trigger: succeeded)
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
             Button(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }
         }
@@ -177,21 +201,72 @@ struct EstimateDetailView: View {
                 }
             }
         }
-        .task { await load() }
+        .task { await loadAndMaybePresent() }
         .refreshable { await load() }
         .fullScreenCover(isPresented: $showToCustomer) {
-            if let record {
-                CustomerModeContainer(onUnlocked: {
-                    showToCustomer = false
-                    Task { await load() }
-                }) { handBack in
-                    CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
-                                                 onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
-                }
-                .environmentObject(api)
-            }
+            if let record { customerMode(record) }
         }
     }
+
+    private func customerMode(_ record: EstimateRecord) -> some View {
+        CustomerModeContainer(onUnlocked: { customerModeClosed() }) { handBack in
+            CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
+                                         onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
+        }
+        .environmentObject(api)
+    }
+
+    private func customerModeClosed() {
+        showToCustomer = false
+        Task {
+            await load()
+            // TF-06: approved from the job's next step, the job (and its invoice step) comes back.
+            if presentsOnOpen, record?.status == "approved" { dismiss() }
+        }
+    }
+    @ViewBuilder private var estimateBar: some View {
+        if let record, record.status == "draft", jobID != nil, TechJobFlow.canShow(record, can: estimateAbilities) {
+            // TF-05: on site, showing is sending. The draft is issued as it's handed over, no second step.
+            PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { Task { await handToCustomer() } }
+        } else if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
+            PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
+        } else if let record, record.status == "sent", canShowSent(record) {
+            // On site, the next step is the customer's yes: hand them the options to choose and sign.
+            // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
+            PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
+        }
+    }
+
+    private func canShowSent(_ record: EstimateRecord) -> Bool {
+        guard session.can("estimate.approve", feature: "estimates") else { return false }
+        let singleScopeOnJob = jobID != nil && (record.options ?? []).isEmpty
+        return singleScopeOnJob || session.can("estimate.send", feature: "estimates")
+    }
+
+    private func loadAndMaybePresent() async {
+        await load()
+        guard presentsOnOpen, !autoPresented, let record, TechJobFlow.canShow(record, can: estimateAbilities) else { return }
+        autoPresented = true
+        await handToCustomer()
+    }
+
+    private var estimateAbilities: TechJobAbilities {
+        TechJobAbilities(sendEstimate: session.can("estimate.send", feature: "estimates"),
+                         approveEstimate: session.can("estimate.approve", feature: "estimates"))
+    }
+
+    /// Issues a draft (the revision the customer signs is frozen first), then opens customer mode.
+    private func handToCustomer() async {
+        guard let current = record else { return }
+        if current.status == "draft" {
+            busy = true
+            defer { busy = false }
+            do { record = try await api.sendFieldEstimate(id, expectedRevisionNumber: current.currentRevisionNumber ?? 0) }
+            catch is CancellationError { return } catch { self.error = error.localizedDescription; return }
+        }
+        showToCustomer = true
+    }
+
     private func performAction() async {
         guard let current = record else { return }
         busy = true
@@ -208,6 +283,7 @@ struct EstimateDetailView: View {
             default: return
             }
             error = nil
+            if action != "Decline" { succeeded += 1 }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     private func load() async {
@@ -226,24 +302,39 @@ struct InvoicesView: View {
     @State private var records: [InvoiceRecord] = []
     @State private var error: String?
     @State private var loading = true
+    @State private var search = ""
+    /// Customer or reference, the two things a tech has in hand when a customer calls about a bill.
+    private var visible: [InvoiceRecord] {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return records }
+        return records.filter { record in
+            [store.customerName(record.customerId), "INV-\(record.id.suffix(4).uppercased())"]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(invoices: records) }
-                ForEach(paperDocumentGroups(records, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
+                ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
                         NavigationLink { InvoiceDetailView(id: record.id) } label: {
                             let total = paperLinesTotal(record.lines)
                             let due = total.map { max(0, $0 - record.amountPaid) }
                             PaperDocumentRow(reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
-                                             subtitle: record.status == "issued" ? (due.map { "\(money($0, currency: record.currency)) due" } ?? "Balance unavailable") : "Paid \(money(record.amountPaid, currency: record.currency))",
+                                             subtitle: record.status == "issued" ? (record.amountPaid > 0 ? "Balance due · part paid" : "Balance due") : record.status == "paid" ? "Paid" : record.status.statusLabel,
                                              status: record.status,
-                                             amount: total.map { money($0, currency: record.currency) })
+                                             // MF-04: an unpaid invoice's row shows what's owed now.
+                                             amount: (record.status == "issued" ? due : total).map { money($0, currency: record.currency) },
+                                             showsStatus: false)
                         }.buttonStyle(RowPressStyle())
                     }
+                }
+                if !records.isEmpty && visible.isEmpty {
+                    PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
                 }
                 if !loading && records.isEmpty && error == nil {
                     PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices created from jobs appear here.")
@@ -254,6 +345,7 @@ struct InvoicesView: View {
         .background(Theme.background)
         .navigationTitle("Invoices")
         .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $search, prompt: "Customer or INV number")
         .task { await load() }
         .refreshable { await load() }
     }
@@ -267,13 +359,17 @@ struct InvoicesView: View {
 
 struct InvoiceDetailView: View {
     let id: String
+    /// Opened from the job's next step: once it's paid, go back to the job for wrap up (TF-09).
+    var returnsWhenPaid = false
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
     @State private var record: InvoiceRecord?
     @State private var error: String?
     @State private var busy = false
     @State private var confirmIssue = false
+    @State private var issued = 0
     @State private var showEditDraft = false
     @State private var showCollectPayment = false
     @State private var paymentModel: InvoicePaymentCollectionModel?
@@ -284,31 +380,38 @@ struct InvoiceDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
                     // Who it's for and what's owed come first; the line revision is bookkeeping, not for people.
                     commercialHeading(ref: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
-                                      status: record.status.statusLabel, date: record.issuedAt ?? record.createdAt)
+                                      status: record.status, date: record.issuedAt ?? record.createdAt)
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-                    VStack(spacing: 0) {
-                        commercialDetail("Total", money(total, currency: record.currency))
-                        if record.amountPaid > 0 { commercialDetail("Paid", money(record.amountPaid, currency: record.currency)) }
-                        commercialDetail("Balance due", money(max(total - record.amountPaid, 0), currency: record.currency))
+                    let due = max(total - record.amountPaid, 0)
+                    // MF-04: what's owed now is the largest thing on the invoice; Total and Paid sit under it.
+                    MoneyFigure(label: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
+                                cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency)
+                    if record.amountPaid > 0 {
+                        VStack(spacing: 0) {
+                            commercialDetail("Total", money(total, currency: record.currency))
+                            Rectangle().fill(Theme.border).frame(height: 1)
+                            commercialDetail("Paid", money(record.amountPaid, currency: record.currency))
+                        }
+                        .padding(.horizontal, 15)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     }
-                    .padding(.horizontal, 15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
                     } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
                         Button { showSignature = true } label: { commercialAction("Get customer signature", icon: "signature") }
                             .buttonStyle(.plain)
                     }
-                    Text("Line items").font(Theme.font(17, weight: .medium)).padding(.top, 8)
+                    PaperGroupHeader(title: "Line items", count: record.lines.count).padding(.top, 4)
                     VStack(spacing: 0) {
-                        ForEach(record.lines) { line in CommercialLineView(line: line) }
+                        ForEach(record.lines) { line in CommercialLineView(line: line, divider: line.id != record.lines.first?.id) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     if let paymentModel {
                         InvoicePaymentsSection(
                             model: paymentModel,
@@ -323,7 +426,7 @@ struct InvoiceDetailView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Text("Actions").font(Theme.font(17, weight: .medium)).padding(.top, 8)
+                    PaperGroupHeader(title: "Actions").padding(.top, 4)
                     if record.status != "draft", record.status != "void" {
                         Button { showToCustomer = true } label: { commercialAction("Show to customer", icon: "person.crop.rectangle") }
                             .buttonStyle(.plain)
@@ -361,6 +464,7 @@ struct InvoiceDetailView: View {
                     model: paymentModel,
                     canCollect: session.can("invoice.payment.create", feature: "payments"),
                     canIssue: session.can("invoice.issue", feature: "invoicing"),
+                    issueTitle: issueCollects ? "Issue and collect payment" : "Issue invoice",
                     busy: busy,
                     onCollect: { showCollectPayment = true },
                     onIssue: { confirmIssue = true }
@@ -371,8 +475,9 @@ struct InvoiceDetailView: View {
                     .background(Theme.chrome)
             }
         }
+        .sensoryFeedback(.success, trigger: issued)
         .confirmationDialog("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue, titleVisibility: .visible) {
-            Button("Issue invoice") { Task { await issue() } }
+            Button(issueCollects ? "Issue and collect" : "Issue invoice") { Task { await issueThenCollect() } }
         }
         .sheet(isPresented: $showEditDraft) {
             if let record {
@@ -416,7 +521,7 @@ struct InvoiceDetailView: View {
                 .environmentObject(api)
             }
         }
-        .sheet(isPresented: $showCollectPayment) {
+        .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
                     .presentationDetents([.large])
@@ -433,8 +538,21 @@ struct InvoiceDetailView: View {
         }
         .refreshable { await load() }
     }
-    private func issue() async {
-        guard let current = record else { return }
+    /// TF-08: issuing and collecting are one step for the tech; payment opens right after.
+    private func issueThenCollect() async {
+        guard await issue(), issueCollects, paymentModel?.canRecordPayment == true else { return }
+        showCollectPayment = true
+    }
+
+    private func returnIfPaid() {
+        if returnsWhenPaid, paymentModel?.invoice?.status == "paid" { dismiss() }
+    }
+
+    private var issueCollects: Bool {
+        session.can("invoice.issue", feature: "invoicing") && session.can("invoice.payment.create", feature: "payments")
+    }
+    @discardableResult private func issue() async -> Bool {
+        guard let current = record else { return false }
         busy = true
         defer { busy = false }
         do {
@@ -442,10 +560,12 @@ struct InvoiceDetailView: View {
             record = issued
             paymentModel?.acceptInvoiceMutationResponse(issued)
             error = nil
+            self.issued += 1
             await paymentModel?.load()
             if let invoice = paymentModel?.invoice { record = invoice }
+            return true
         }
-        catch is CancellationError {} catch { self.error = error.localizedDescription }
+        catch is CancellationError { return false } catch { self.error = error.localizedDescription; return false }
     }
     private func load() async {
         if paymentModel == nil {
@@ -462,36 +582,43 @@ struct InvoiceDetailView: View {
     }
 }
 
+/// One priced line, same type as the job's Invoice tab: 15/500 description over a 13pt
+/// "2 × $60.00", the line total in mono, and a hairline between lines.
 struct CommercialLineView: View {
     let line: FieldLine
+    var divider = false
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(line.description).font(Theme.font(14, weight: .medium))
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(line.description).font(Theme.font(15, weight: .medium))
                 Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
             let total = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
             if !total.overflow {
                 Text(money(total.partialValue, currency: line.unitPrice.currency))
-                    .font(Theme.font(14, weight: .semibold))
+                    .moneyStyle(.line)
             }
         }
         .foregroundStyle(Theme.foreground)
         .padding(15)
+        .frame(minHeight: 56)
+        .overlay(alignment: .top) {
+            if divider { Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15) }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
-private func commercialHeading(ref: String, title: String, status: String, date: String?) -> some View {
+/// Same header shape as job and customer pages: eyebrow, 24/500 title, then the status as the
+/// shared dot-and-word chip (approved isn't amber, draft isn't amber) and the date.
+private func commercialHeading(ref: String, context: String? = nil, title: String, status: String, date: String?) -> some View {
     VStack(alignment: .leading, spacing: 9) {
-        Text(ref).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+        PaperEyebrow(reference: ref, text: context)
         Text(title).font(Theme.font(24, weight: .medium)).tracking(-0.36)
         HStack(spacing: 8) {
-            Text(status).font(Theme.font(12, weight: .medium))
-                .foregroundStyle(Theme.warning)
-                .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            PaperStatusChip(status: status)
             if let date = JobFiltering.date(date) {
                 Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -500,14 +627,36 @@ private func commercialHeading(ref: String, title: String, status: String, date:
     }
 }
 
+/// MF-02: a labelled amount in a card, at the total size.
+@MainActor
 private func commercialDetail(_ label: String, _ value: String) -> some View {
-    HStack(alignment: .top, spacing: 10) {
-        Text(label).foregroundStyle(Theme.muted)
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
+        Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
         Spacer(minLength: 12)
-        Text(value).foregroundStyle(Theme.foreground)
+        Text(value).moneyStyle(.total).foregroundStyle(Theme.foreground)
     }
-    .font(Theme.font(13))
-    .padding(.vertical, 13)
+    .padding(.vertical, 12)
+    .accessibilityElement(children: .combine)
+}
+
+/// MF-01/MF-03/MF-04: the amount a screen is about, labelled, at the hero size. Zero reads muted.
+struct MoneyFigure: View {
+    let label: String
+    let cents: Int
+    let currency: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            // MF-06: a recorded payment rolls the balance down instead of swapping it.
+            Text(money(cents, currency: currency)).moneyStyle(.hero).tracking(-0.5)
+                .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
+                .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: cents)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.updatesFrequently)
+    }
 }
 
 private func commercialAction(_ title: String, icon: String) -> some View {
@@ -515,31 +664,31 @@ private func commercialAction(_ title: String, icon: String) -> some View {
         Image(systemName: icon).foregroundStyle(Theme.brandText)
         Text(title).font(Theme.font(15, weight: .medium))
         Spacer()
-        Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+        PaperDisclosure()
     }
     .foregroundStyle(Theme.foreground)
     .padding(15)
-    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
 }
 
 private struct CommercialSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Theme.font(14, weight: .medium))
+            .font(Theme.font(15, weight: .medium))
             .foregroundStyle(Theme.foreground)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(15)
-            .background(Theme.card.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(Theme.card.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 }
 
 private extension View {
     func commercialField() -> some View {
-        font(Theme.font(14))
+        font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 13)
             .frame(minHeight: 46)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 }
 
@@ -563,28 +712,37 @@ func paperDocumentGroups<T>(_ records: [T], status: KeyPath<T, String>, order: [
     return keys.map { ($0, grouped[$0] ?? []) }
 }
 
-/// Paper's document row: mono reference, title over a muted line, status chip, mono amount.
+/// Paper's document row, shaped like job and customer rows: the title over one muted line
+/// ("customer · EST-1A2B", reference in mono), the amount on the right. Lists grouped by
+/// status pass `showsStatus: false`, since the group header already says it.
 struct PaperDocumentRow: View {
     let reference: String
     let title: String
     let subtitle: String
     let status: String
     let amount: String?
+    var showsStatus = true
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(reference).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
-                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
-                Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                HStack(spacing: 6) {
+                    Text(subtitle).font(Theme.font(13)).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    Text("·").font(Theme.font(13))
+                    Text(reference).font(Theme.monoFont(12, weight: .medium)).fixedSize()
+                }
+                .foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
-                if let amount { Text(amount).font(Theme.monoFont(13, weight: .semibold)).foregroundStyle(Theme.foreground) }
-                PaperStatusChip(status: status)
+                if let amount { Text(amount).moneyStyle(.row).foregroundStyle(Theme.foreground) }
+                if showsStatus { PaperStatusChip(status: status) }
             }
         }
-        .padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -615,231 +773,24 @@ func money(_ cents: Int, currency: String) -> String {
     (Decimal(cents) / 100).formatted(.currency(code: currency))
 }
 
-/// Paper 35: build an estimate from the price book (typed lines still allowed),
-/// optionally for a job, which it is linked to after creation.
-struct NewEstimateView: View {
-    struct DraftLine: Identifiable {
-        let id = UUID()
-        var description = ""
-        var quantity = 1
-        var price = "0.00"
-        var source: FieldEstimateLineSourceInput = .manual
-        var cents: Int? { MoneyInput.cents(price) }
-        var fromPriceBook: Bool { if case .priceBookSelection = source { true } else { false } }
-    }
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @EnvironmentObject var session: SessionController
-    @Environment(\.dismiss) var dismiss
-    @State private var title: String
-    @State private var customerID: String
-    @State private var lines: [DraftLine] = []
-    @State private var busy = false
-    @State private var error: String?
-    @State private var showPriceBook = false
-    /// Set once the server created the estimate, so a retry only links it and never creates a duplicate.
-    @State private var created: EstimateRecord?
-    private let jobID: String?
-    private let onCreated: (EstimateRecord) -> Void
-
-    init(customerID: String = "", jobID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
-        _customerID = State(initialValue: customerID)
-        _title = State(initialValue: title)
-        self.jobID = jobID
-        self.onCreated = onCreated
-    }
-
-    var valid: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty &&
-        !lines.isEmpty && lines.allSatisfy { !$0.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.quantity > 0 && $0.quantity <= 100_000 && $0.cents != nil }
-    }
-    private var total: Int? {
-        var sum = 0
-        for line in lines {
-            guard let cents = line.cents else { return nil }
-            let (amount, o1) = cents.multipliedReportingOverflow(by: line.quantity)
-            let (next, o2) = sum.addingReportingOverflow(amount)
-            guard !o1, !o2 else { return nil }
-            sum = next
-        }
-        return sum
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("NEW ESTIMATE\(jobID.map { " · JOB-\($0.suffix(4).uppercased())" } ?? "")")
-                            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                        TextField("Estimate title", text: $title, axis: .vertical)
-                            .font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                            .accessibilityLabel("Estimate title")
-                        HStack(spacing: 6) {
-                            Chip(text: "Draft", icon: "circle.dashed")
-                            Menu {
-                                ForEach(store.customers.filter { $0.archived != true }) { customer in
-                                    Button(customer.name) { customerID = customer.id }
-                                }
-                            } label: {
-                                Chip(text: customerID.isEmpty ? "Choose customer" : store.customerName(customerID), icon: "person",
-                                     tint: customerID.isEmpty ? Theme.brandText : Theme.muted)
-                                    .padding(.vertical, 10).contentShape(Rectangle())
-                            }
-                            .disabled(jobID != nil && !customerID.isEmpty)
-                        }
-                    }
-                    .padding(.bottom, 14)
-
-                    PaperGroupHeader(title: "Line items", count: lines.count)
-                    VStack(spacing: 0) {
-                        ForEach($lines) { $line in
-                            lineRow($line)
-                            Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 14)
-                        }
-                        if session.can("pricebook.view", feature: "price_book") {
-                            Button { showPriceBook = true } label: {
-                                Label("Add from price book", systemImage: "book.closed")
-                                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading).padding(.horizontal, 14)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Button { lines.append(DraftLine()) } label: {
-                            Label("Add a custom line", systemImage: "plus")
-                                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.muted)
-                                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading).padding(.horizontal, 14)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(lines.count >= 500)
-                        if !lines.isEmpty {
-                            Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 14)
-                            HStack {
-                                Text("Total").font(Theme.font(15, weight: .semibold))
-                                Spacer()
-                                Text(total.map { money($0, currency: "USD") } ?? "—").font(Theme.monoFont(14, weight: .semibold))
-                            }
-                            .padding(14)
-                        }
-                    }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                    if lines.isEmpty {
-                        Text("Start with the price book so prices match what the office set.")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 10)
-                    }
-                    if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter).padding(.top, 8) }
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 28)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
-            .foregroundStyle(Theme.foreground)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
-            .safeAreaInset(edge: .bottom) {
-                PaperActionBar(title: created != nil ? "Retry adding to job" : jobID == nil ? "Create draft" : "Create and add to job",
-                               symbol: "doc.badge.plus", busy: busy,
-                               disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
-            }
-            .sheet(isPresented: $showPriceBook) {
-                NavigationStack {
-                    PaperPriceBookPicker(api: api, currency: "USD", customerID: customerID.isEmpty ? nil : customerID) { item in
-                        guard lines.count < 500, item.sellPrice.currency == "USD", item.revision > 0 else { return }
-                        lines.append(DraftLine(description: item.description, quantity: 1,
-                                               price: String(format: "%.2f", Double(item.sellPrice.amount) / 100),
-                                               source: .priceBookSelection(itemID: item.id, revision: item.revision)))
-                    }
-                }
-                .presentationDetents([.large])
-            }
-            .interactiveDismissDisabled(busy)
-        }
-    }
-
-    @ViewBuilder private func lineRow(_ line: Binding<DraftLine>) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if line.wrappedValue.fromPriceBook {
-                    Text(line.wrappedValue.description).font(Theme.font(15, weight: .medium))
-                } else {
-                    TextField("Description", text: line.description, axis: .vertical).font(Theme.font(16))
-                }
-                Spacer(minLength: 8)
-                if let cents = line.wrappedValue.cents {
-                    Text(money(cents * line.wrappedValue.quantity, currency: "USD")).font(Theme.monoFont(13, weight: .semibold))
-                }
-            }
-            HStack(spacing: 10) {
-                Stepper(value: line.quantity, in: 1...100_000) {
-                    Text("× \(line.wrappedValue.quantity)").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                }
-                .fixedSize()
-                if line.wrappedValue.fromPriceBook {
-                    Text("Price book · \(money(line.wrappedValue.cents ?? 0, currency: "USD")) each")
-                        .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                } else {
-                    TextField("0.00", text: line.price).keyboardType(.decimalPad)
-                        .font(Theme.monoFont(16)).multilineTextAlignment(.trailing)
-                        .padding(.horizontal, 10).frame(width: 110, height: 44)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                        .accessibilityLabel("Unit price")
-                }
-                Spacer()
-                Button(role: .destructive) { lines.removeAll { $0.id == line.wrappedValue.id } } label: {
-                    Image(systemName: "trash").frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain).foregroundStyle(Theme.muted)
-                .accessibilityLabel("Remove line")
-            }
-        }
-        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
-    }
-
-    private func save() async {
-        guard valid else { return }
-        busy = true
-        defer { busy = false }
-        do {
-            let estimate: EstimateRecord
-            if let created {
-                estimate = created
-            } else {
-                estimate = try await api.createFieldEstimate(.init(
-                    customerId: customerID,
-                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                    lines: lines.map { .init(description: $0.description.trimmingCharacters(in: .whitespacesAndNewlines), quantity: $0.quantity,
-                                             unitPrice: .init(amount: $0.cents ?? 0, currency: "USD"), source: $0.source) }))
-                created = estimate
-                onCreated(estimate)
-            }
-            if let jobID {
-                do { _ = try await api.linkFieldEstimate(jobID: jobID, estimateID: estimate.id) }
-                catch is CancellationError { return }
-                catch {
-                    self.error = "The estimate was saved but could not be added to the job. \(error.localizedDescription)"
-                    return
-                }
-                onCreated(estimate)
-            }
-            dismiss()
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
-    }
-}
-
 /// The one line an office reads first on a document list: what's outstanding and how much.
-@ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
+@MainActor @ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
     let waiting = estimates.filter { $0.status == "sent" }
     let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
-    Text(waiting.isEmpty ? "Nothing waiting on customers" : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))")
-        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-        .padding(.bottom, 6)
+    // MF-03: the amount is a figure, the words label it.
+    if waiting.isEmpty {
+        Text("Nothing waiting on customers").font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 6)
+    } else {
+        MoneyFigure(label: "\(waiting.count) waiting on customers", cents: total, currency: "USD").padding(.bottom, 6)
+    }
 }
 
-@ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
+@MainActor @ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
     let unpaid = invoices.filter { $0.status == "issued" }
     let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
-    Text(unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD")) owed · \(unpaid.count) unpaid")
-        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-        .padding(.bottom, 6)
+    if unpaid.isEmpty {
+        Text("Everything is paid").font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 6)
+    } else {
+        MoneyFigure(label: "Owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")", cents: owed, currency: "USD").padding(.bottom, 6)
+    }
 }

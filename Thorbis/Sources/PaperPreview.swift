@@ -13,7 +13,14 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "side-menu", "settings", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "side-menu", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
+        return args[index + 1]
+    }
+    /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
+    static var onboardingScreen: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
+              ["onboard-signup", "onboard-company", "onboard-details", "onboard-setup"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -295,6 +302,19 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
         }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/payments" { return ["items": []] }
+        if path == "/v1/organization/profile" {
+            let catalog: [(String, String, Int, Bool)] = [
+                ("legal_name", "Legal business name", 1, true), ("dba_names", "DBA / trade names", 1, false),
+                ("entity_type", "Entity type", 2, false), ("business_address", "Business address", 1, true),
+                ("website", "Website", 1, false), ("primary_phone", "Primary phone", 1, true),
+                ("primary_email", "Primary email", 1, false), ("industry", "Industry / trades", 1, false),
+                ("email_sender_name", "Email sender name", 1, false), ("email_sender_address", "Email reply-to address", 1, false),
+            ]
+            return ["organizationId": org, "coreReady": false, "missingCore": ["business_address", "primary_phone"],
+                    "facts": [["factKey": "legal_name", "label": "Legal business name", "tier": 1, "value": "Wade’s Plumbing LLC",
+                               "source": "user_confirmed", "confirmedAt": now, "version": 1]],
+                    "catalog": catalog.map { ["factKey": $0.0, "label": $0.1, "tier": $0.2, "required": $0.3, "confirmed": $0.0 == "legal_name"] }] as [String: Any]
+        }
         switch path {
         case "/api/auth/get-session":
             return ["user": ["id": actor, "name": "Ramon Marlowe", "email": "preview@example.invalid"], "session": ["userId": actor, "activeOrganizationId": org, "expiresAt": expiry]]
@@ -306,6 +326,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
             if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
+            if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
                     "capabilities": capabilities,
                     "resources": [], "views": []] as [String: Any]
@@ -331,19 +352,34 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": [waiting]]
         case "/v1/query":
-            let priceBookID = "00000000-0000-4000-8000-000000009201"
+            // The first item keeps the id the preview estimate's price book line points at.
+            let catalog: [(String, String, String, Int)] = [
+                ("Replace capacitor", "each", "material", 12500),
+                ("Capacitor, 45/5 MFD dual run", "each", "material", 14500),
+                ("Capacitor, 35/5 MFD dual run", "each", "material", 13500),
+                ("Hard start kit with capacitor", "each", "material", 21000),
+                ("Diagnostic visit", "visit", "service", 8900),
+                ("Condenser coil cleaning", "each", "service", 12000),
+                ("Refrigerant R-410A", "lb", "material", 9500),
+                ("Licensed technician labor", "hour", "labor", 14000),
+                ("Contactor, 30 amp single pole", "each", "material", 6800),
+                ("Surge protector, installed", "each", "assembly", 39500),
+            ]
+            let items: [[String: Any]] = catalog.enumerated().map { offset, entry in
+                let id = String(format: "00000000-0000-4000-8000-%012d", 9201 + offset)
+                return ["id": id, "resourceId": "price_book_items", "label": entry.0,
+                        "subtitle": "\(entry.2.capitalized) · \(entry.1)",
+                        "fields": ["price_book_items.id": id,
+                                   "price_book_items.current_revision": 4,
+                                   "price_book_items.description": entry.0,
+                                   "price_book_items.unit": entry.1,
+                                   "price_book_items.sell_price_amount": entry.3,
+                                   "price_book_items.currency": "USD",
+                                   "price_book_items.tax_classification": "taxable",
+                                   "price_book_items.kind": entry.2]]
+            }
             return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
-                    "items": [["id": priceBookID, "resourceId": "price_book_items", "label": "Replace capacitor",
-                               "subtitle": "Material · each",
-                               "fields": ["price_book_items.id": priceBookID,
-                                          "price_book_items.current_revision": 4,
-                                          "price_book_items.description": "Replace capacitor",
-                                          "price_book_items.unit": "each",
-                                          "price_book_items.sell_price_amount": 12500,
-                                          "price_book_items.currency": "USD",
-                                          "price_book_items.tax_classification": "taxable",
-                                          "price_book_items.kind": "material"]]],
-                    "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
+                    "items": items, "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
         default: break
         }
         for job in jobs() {
@@ -353,6 +389,37 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
+            if path == "/v1/jobs/\(id)/booking-call" {
+                return ["call": [
+                    "id": "00000000-0000-4000-8000-000000009601", "status": "completed", "direction": "inbound",
+                    "callerNumber": "(555) 010-0100", "callerName": "Dana Ruiz", "jobId": id,
+                    "linkedAt": "2026-10-27T15:20:00Z", "startedAt": "2026-10-27T15:12:00Z", "endedAt": "2026-10-27T15:15:12Z",
+                    "durationSeconds": 192,
+                    "recording": ["status": "available", "durationSeconds": 192,
+                                  "contentPath": "/v1/calls/00000000-0000-4000-8000-000000009601/recording"],
+                    "summary": ["text": "Water heater leaking at the base since this morning. Works from home; call 30 minutes ahead. Side gate code 4471.",
+                                "source": "model"],
+                    "transcriptStatus": "available",
+                    "transcript": [
+                        ["sequence": 1, "speaker": "business", "text": "Thanks for calling, how can we help?"],
+                        ["sequence": 2, "speaker": "caller", "text": "My water heater is leaking at the bottom. There's a puddle in the garage."],
+                        ["sequence": 3, "speaker": "business", "text": "We can have someone out tomorrow morning. Any gate code or pets?"],
+                        ["sequence": 4, "speaker": "caller", "text": "Side gate is 4471. The dog is friendly. Please call half an hour before."],
+                    ],
+                    "disclosure": "This call may be recorded for quality and training.",
+                ]]
+            }
+            if path == "/v1/jobs/\(id)/visit-history" {
+                return ["items": [
+                    ["id": "00000000-0000-4000-8000-000000009501", "title": "Spring AC tune-up", "status": "completed",
+                     "notes": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit.",
+                     "assignedToUserId": "00000000-0000-4000-8000-000000008801", "scheduledFor": "2026-04-14T16:00:00Z",
+                     "completedAt": "2026-04-14T17:20:00Z", "createdAt": "2026-04-02T10:00:00Z"],
+                    ["id": "00000000-0000-4000-8000-000000009502", "title": "Water heater flush", "status": "completed",
+                     "notes": "Sediment heavy. Anode rod due next year.", "assignedToUserId": actor,
+                     "scheduledFor": "2025-11-03T15:00:00Z", "completedAt": "2025-11-03T16:05:00Z", "createdAt": "2025-10-28T10:00:00Z"]
+                ]]
+            }
         }
         for customer in customers() {
             guard let id = customer["id"] as? String, let name = customer["name"] as? String, let address = customer["address"] as? String else { continue }

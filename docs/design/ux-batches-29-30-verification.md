@@ -1,5 +1,11 @@
 # Job Overview simplification and accessible controls
 
+> Historical verification of the initial checkout. Before upload, comparison
+> with build 69 exposed a newer main branch. The original action policy was
+> discarded in favor of main's full technician flow; only adaptive sizing was
+> carried forward. These 323 results and screenshots are not certification of
+> the integrated release. See `docs/release/build-70.md` for current evidence.
+
 28 October 2026 · Thorbis Field Management · SwiftUI · iOS/iPadOS 18+
 
 Implementation starts at `7adf174`; debug marketing version 1.0, project build 17.

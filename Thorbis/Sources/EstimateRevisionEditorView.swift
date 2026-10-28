@@ -1,11 +1,6 @@
 import SwiftUI
 
 struct EstimateRevisionEditorView: View {
-    private struct PriceBookTarget: Identifiable {
-        let optionID: String?
-        var id: String { optionID ?? "main" }
-    }
-
     let estimate: EstimateRecord
     let onSaved: (EstimateRecord) -> Void
 
@@ -19,7 +14,13 @@ struct EstimateRevisionEditorView: View {
     @State private var staleRevision = false
     @State private var confirmReload = false
     @State private var confirmDiscard = false
-    @State private var priceBookTarget: PriceBookTarget?
+    @ObservedObject private var catalog = PriceBookCatalog.shared
+    @State private var query = ""
+    @State private var kind = PriceBookKindFilter.all
+    @State private var target = EstimateBuilderTarget()
+    @State private var added = 0
+    @State private var removed: RemovedLine?
+    @FocusState private var focus: EstimateBuilderFocus?
 
     init(estimate: EstimateRecord, onSaved: @escaping (EstimateRecord) -> Void) {
         self.estimate = estimate
@@ -47,6 +48,24 @@ struct EstimateRevisionEditorView: View {
         session.can("pricebook.view", feature: "price_book")
     }
 
+    private var searching: Bool { focus == .search || !query.isEmpty }
+
+    private var targetLines: [EstimateRevisionLineDraft] {
+        guard let optionID = target.optionID else { return editor.lines }
+        return editor.options.first { $0.id == optionID }?.lines ?? []
+    }
+
+    private var searchPrompt: String {
+        let place = target.optionID.flatMap { id in editor.options.first { $0.id == id } }
+            .map { $0.title.isEmpty ? "option" : $0.title }
+        switch (place, target.group) {
+        case let (place?, group?): return "Add to \(place) · \(group.title)"
+        case let (place?, nil): return "Add to \(place)"
+        case let (nil, group?): return "Add to \(group.title)"
+        case (nil, nil): return "Search price book or type a line"
+        }
+    }
+
     private var canSave: Bool {
         !busy && canEdit && (editor.estimate.currentRevisionNumber ?? 0) > 0 &&
         editor.hasChanges && !editor.hasUnsupportedLineSources && (!editor.hasCreditLines || canDiscount)
@@ -55,6 +74,14 @@ struct EstimateRevisionEditorView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
+                if searching {
+                    PriceBookResultsList(
+                        catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
+                        quantityOnEstimate: { targetLines.quantity(ofPriceBookItem: $0) },
+                        addItem: add, addCustom: addCustom,
+                        retry: { Task { await refreshCatalog(force: true) } }
+                    )
+                } else {
                 VStack(alignment: .leading, spacing: 18) {
                     if let error { ErrorBanner(message: error) }
                     if staleRevision {
@@ -92,10 +119,11 @@ struct EstimateRevisionEditorView: View {
                         .padding(.horizontal, 2)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 18)
+                .padding(.top, 8)
                 .padding(.bottom, 24)
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)
@@ -109,28 +137,30 @@ struct EstimateRevisionEditorView: View {
             }
             .keyboardDoneButton()
             .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-            .safeAreaInset(edge: .bottom) {
-                PrimaryButton(title: "Save revised draft", busy: busy) { Task { await save() } }
-                    .disabled(!canSave)
-                    .opacity(canSave ? 1 : 0.5)
-                    .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
-                    .background(Theme.chrome)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if canEdit {
+                    EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
+                                      prompt: searchPrompt, finish: finishSearch)
+                        .disabled(busy)
+                }
             }
-            .sheet(item: $priceBookTarget) { target in
-                NavigationStack {
-                    PaperPriceBookPicker(api: api, currency: "USD", customerID: estimate.customerId) { item in
-                        do {
-                            try editor.addPriceBookItem(item, optionID: target.optionID)
-                            error = nil
-                        } catch {
-                            self.error = error.localizedDescription
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    if let removed {
+                        LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
+                    }
+                    if focus != .search {
+                        if editor.options.isEmpty { EstimateBuilderTotal(total: editor.lines.subtotal()) }
+                        PaperActionBar(title: saveTitle, symbol: "doc.badge.plus", busy: busy, disabled: !canSave) {
+                            Task { await save() }
                         }
                     }
-                    .environmentObject(session)
                 }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
             }
+            .sensoryFeedback(.success, trigger: added)
+            .animation(EstimateLineGroupsEditor.spring, value: searching)
+            .task { await refreshCatalog() }
+            .onChange(of: catalog.items.map(\.id)) { classifyLines() }
             .confirmationDialog("Reload the latest estimate?", isPresented: $confirmReload, titleVisibility: .visible) {
                 Button("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }
                 Button("Keep editing", role: .cancel) {}
@@ -175,44 +205,13 @@ struct EstimateRevisionEditorView: View {
 
     private var lineSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                sectionTitle("Line items", count: editor.lines.count)
-                Spacer()
-                if canUsePriceBook {
-                    Button { priceBookTarget = PriceBookTarget(optionID: nil) } label: {
-                        Label("Price Book", systemImage: "book.closed")
-                            .font(Theme.font(12, weight: .medium))
-                            .frame(minHeight: 44)
-                    }
-                    .disabled(busy || !canEdit || editor.lines.count >= 500)
-                    .accessibilityLabel("Add line from Price Book")
-                }
-            }
-            VStack(spacing: 0) {
-                ForEach($editor.lines) { $line in
-                    EstimateRevisionLineRow(
-                        line: $line,
-                        canMoveUp: editor.lines.first?.id != line.id,
-                        canMoveDown: editor.lines.last?.id != line.id,
-                        moveUp: { moveLine(line.id, offset: -1) },
-                        moveDown: { moveLine(line.id, offset: 1) },
-                        remove: { editor.removeLine(id: line.id) }
-                    )
-                    .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
-                    if line.id != editor.lines.last?.id {
-                        Rectangle().fill(Theme.border).frame(height: 1).padding(.leading, 14)
-                    }
-                }
-                Button { editor.addManualLine() } label: {
-                    Label("Add line item", systemImage: "plus")
-                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14).frame(minHeight: 46)
-                }
-                .disabled(busy || !canEdit || editor.lines.count >= 500 || editor.hasUnsupportedLineSources)
-            }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
+            EstimateLineGroupsEditor(
+                lines: $editor.lines,
+                disabled: busy || !canEdit || editor.hasUnsupportedLineSources,
+                focus: $focus,
+                addTo: { group in startAdding(optionID: nil, group: group) },
+                removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
+            )
         }
     }
 
@@ -241,12 +240,13 @@ struct EstimateRevisionEditorView: View {
             ForEach($editor.options) { $option in
                 EstimateRevisionOptionEditor(
                     option: $option,
-                    canUsePriceBook: canUsePriceBook,
                     disabled: busy || !canEdit || !optionsFeatureEnabled || editor.hasUnsupportedLineSources,
-                    addPriceBook: { priceBookTarget = PriceBookTarget(optionID: option.id) },
-                    addLine: { editor.addManualLine(optionID: option.id) },
+                    focus: $focus,
+                    addTo: { group in startAdding(optionID: option.id, group: group) },
                     removeOption: { editor.removeOption(id: option.id) },
-                    removeLine: { lineID in editor.removeOptionLine(optionID: option.id, lineID: lineID) }
+                    removed: { line, index in
+                        withAnimation { removed = RemovedLine(line: line, index: index, optionID: option.id) }
+                    }
                 )
             }
         }
@@ -259,9 +259,86 @@ struct EstimateRevisionEditorView: View {
         }
     }
 
-    private func moveLine(_ id: UUID, offset: Int) {
-        guard let index = editor.lines.firstIndex(where: { $0.id == id }) else { return }
-        editor.moveLine(id: id, to: index + offset)
+    private var saveTitle: String {
+        guard editor.options.isEmpty, let total = editor.lines.subtotal() else { return "Save revised draft" }
+        return "Save revised draft · \(money(total, currency: "USD"))"
+    }
+
+    private func refreshCatalog(force: Bool = false) async {
+        guard canUsePriceBook else { return }
+        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
+        classifyLines()
+    }
+
+    private func classifyLines() {
+        editor.classify(kinds: Dictionary(catalog.items.map { ($0.id, $0.kind) }, uniquingKeysWith: { first, _ in first }))
+    }
+
+    private func mutateTargetLines(_ change: (inout [EstimateRevisionLineDraft]) -> Void) {
+        if let optionID = target.optionID {
+            guard let index = editor.options.firstIndex(where: { $0.id == optionID }) else { return }
+            change(&editor.options[index].lines)
+        } else {
+            change(&editor.lines)
+        }
+    }
+
+    private func add(_ item: PriceBookListItem) {
+        guard !busy else { return }
+        var addedLine = false
+        withAnimation(EstimateLineGroupsEditor.spring) {
+            mutateTargetLines { addedLine = $0.addPriceBookItem(item, to: target.group) != nil }
+        }
+        guard addedLine else {
+            error = EstimateRevisionEditorError.tooManyLines.localizedDescription
+            return
+        }
+        error = nil
+        catalog.recordUse(item.id)
+        added += 1
+    }
+
+    private func addCustom(_ text: String) {
+        guard !busy else { return }
+        let group = target.group ?? (kind == .material ? .material : .work)
+        var lineID: UUID?
+        mutateTargetLines { lineID = $0.addCustomLine(text, to: group) }
+        guard let lineID else {
+            error = EstimateRevisionEditorError.tooManyLines.localizedDescription
+            return
+        }
+        added += 1
+        query = ""
+        kind = .all
+        target = EstimateBuilderTarget()
+        focus = .price(lineID)
+    }
+
+    private func startAdding(optionID: String?, group: EstimateLineGroup) {
+        target = EstimateBuilderTarget(optionID: optionID, group: group)
+        kind = group == .material ? .material : .all
+        focus = .search
+    }
+
+    private func finishSearch() {
+        query = ""
+        kind = .all
+        target = EstimateBuilderTarget()
+        focus = nil
+    }
+
+    private func undoRemove() {
+        guard let removed else { return }
+        withAnimation(EstimateLineGroupsEditor.spring) {
+            if let optionID = removed.optionID {
+                if let index = editor.options.firstIndex(where: { $0.id == optionID }) {
+                    editor.options[index].lines.restoreLine(removed.line, at: removed.index)
+                }
+            } else {
+                editor.lines.restoreLine(removed.line, at: removed.index)
+            }
+            self.removed = nil
+        }
     }
 
     private func save() async {
@@ -291,6 +368,7 @@ struct EstimateRevisionEditorView: View {
         do {
             let latest = try await api.fieldEstimate(estimate.id)
             editor = EstimateRevisionEditorState(estimate: latest)
+            classifyLines()
             staleRevision = false
             error = nil
         } catch is CancellationError {
@@ -302,93 +380,37 @@ struct EstimateRevisionEditorView: View {
 
 private struct EstimateRevisionOptionEditor: View {
     @Binding var option: EstimateRevisionOptionDraft
-    let canUsePriceBook: Bool
     let disabled: Bool
-    let addPriceBook: () -> Void
-    let addLine: () -> Void
+    let focus: FocusState<EstimateBuilderFocus?>.Binding
+    let addTo: (EstimateLineGroup) -> Void
     let removeOption: () -> Void
-    let removeLine: (UUID) -> Void
+    let removed: (EstimateRevisionLineDraft, Int) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 TextField("Option title", text: $option.title)
-                    .font(Theme.font(15, weight: .semibold))
+                    .font(Theme.font(17, weight: .medium))
                     .accessibilityLabel("Option package title")
-                    .disabled(disabled)
+                Text(option.lines.subtotal().map { money($0, currency: "USD") } ?? "—")
+                    .font(Theme.monoFont(24, weight: .medium))
+                    .contentTransition(.numericText())
+                    .lineLimit(1).minimumScaleFactor(0.7)
                 Button(action: removeOption) {
                     Image(systemName: "trash").foregroundStyle(Theme.destructive)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("Remove \(option.title.isEmpty ? "option package" : option.title)")
-                .disabled(disabled)
             }
             TextField("What this package includes", text: $option.description, axis: .vertical)
-                .font(Theme.font(13)).lineLimit(2...4)
+                .font(Theme.font(15)).lineLimit(2...4)
                 .accessibilityLabel("Option package description")
-                .disabled(disabled)
-            ForEach($option.lines) { $line in
-                EstimateRevisionLineRow(
-                    line: $line,
-                    canMoveUp: false,
-                    canMoveDown: false,
-                    moveUp: {}, moveDown: {},
-                    remove: { removeLine(line.id) }
-                )
-                .disabled(disabled)
-                if line.id != option.lines.last?.id { Rectangle().fill(Theme.border).frame(height: 1) }
-            }
-            HStack(spacing: 12) {
-                Button(action: addLine) {
-                    Label("Add line", systemImage: "plus").font(Theme.font(12, weight: .medium))
-                        .frame(minHeight: 44)
-                }
-                .disabled(disabled || option.lines.count >= 500)
-                if canUsePriceBook {
-                    Button(action: addPriceBook) {
-                        Label("Price Book", systemImage: "book.closed").font(Theme.font(12, weight: .medium))
-                            .frame(minHeight: 44)
-                    }
-                    .disabled(disabled || option.lines.count >= 500)
-                }
-            }
+            EstimateLineGroupsEditor(lines: $option.lines, disabled: disabled, focus: focus, addTo: addTo, removed: removed)
         }
+        .disabled(disabled)
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .background(Theme.fill.opacity(0.5), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
-    }
-}
-
-private struct EstimateRevisionLineRow: View {
-    @Binding var line: EstimateRevisionLineDraft
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-    let moveUp: () -> Void
-    let moveDown: () -> Void
-    let remove: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                TextField("Line item description", text: $line.description, axis: .vertical)
-                    .font(Theme.font(15, weight: .medium)).lineLimit(1...3)
-                    .accessibilityLabel("Line item description")
-                LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
-                                moveUp: moveUp, moveDown: moveDown, remove: remove)
-            }
-            HStack(spacing: 8) {
-                Text("Qty").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                LineNumberField(label: "Quantity", placeholder: "1", text: $line.quantity)
-                Spacer(minLength: 8)
-                LineNumberField(label: "Unit price in dollars", placeholder: "0.00", text: $line.unitPrice,
-                                prefix: "$", decimal: true, width: 128)
-            }
-            if case .some(.priceBookSelection(_, let revision)) = line.source {
-                Text("Price Book · Revision \(revision)")
-                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-            }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 }
 

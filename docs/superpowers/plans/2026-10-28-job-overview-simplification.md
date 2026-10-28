@@ -77,3 +77,15 @@ The Task 1 largest-text visual check exposed existing fixed-height clipping. Fix
 - [x] Replace fixed text-control heights with padded minimums, permit multiline chip labels, constrain oversized FlowRow measurements, and use the existing accessibility-size stacking convention for the whole quick-action group. Keep decorative avatar/glyph dimensions and all actions.
 - [x] Re-run layout, appearance, and native interaction checks. Expected: all pass; inspect the enlarged dark preview and the wide iPad record layout.
 - [x] Run the full app scheme once after both tasks, record the HIG matrix and remaining manual-device gaps, then commit and request the whole-branch review.
+
+### Task 3: Reconcile with the current release before TestFlight
+
+**New binding baseline:** origin/main `663c622`, which contains build 69 (`0c83429`) and newer job hours, booking-call and price search work. The initial checkout predates 104 main commits.
+
+**Files:** retain main's complete application; keep only the narrow adaptive-layout changes, layout/native tests, goal guidance and release notes.
+
+- [x] Stop the initial archive before upload; compare the latest uploaded source and main.
+- [x] Preserve main's TechJobFlow, JobMenu, onboarding, estimate builder, money hierarchy, record sections, fitted tabs and Reduce Motion. Remove the superseded JobPrimaryAction and its tests; restore main Schedule unchanged.
+- [x] Carry forward adaptive shared controls and local metadata heights. Adapt native tests to the current guided payment step and menu labels. Add the required What's new entry, including missing booking-call release coverage.
+- [ ] Generate and run the integrated full scheme. Inspect current screenshots. Expected: all tests pass, the payment step remains primary, all secondary actions remain reachable, text grows without clipping.
+- [ ] Archive and upload a new sequential TestFlight build using existing Xcode signing, verify processing and tester-group availability in App Store Connect, and record actual status.

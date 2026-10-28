@@ -10,6 +10,14 @@ final class JobFilteringTests: XCTestCase {
         XCTAssertEqual(ScheduleCompactRow.age(since: now.addingTimeInterval(-150 * 86400), now: now), "5mo")
     }
 
+    func testVisitLabelSaysTodayTomorrowOrTheDate() {
+        let now = Date()
+        XCTAssertTrue(now.visitLabel(now: now).hasPrefix("Today "))
+        XCTAssertTrue(now.addingTimeInterval(86400).visitLabel(now: now).hasPrefix("Tomorrow "))
+        let later = now.addingTimeInterval(5 * 86400).visitLabel(now: now)
+        XCTAssertFalse(later.hasPrefix("Today") || later.hasPrefix("Tomorrow"))
+    }
+
     func testTodayUsesScheduledTimeAndKeepsUnscheduledSeparate() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         var calendar = Calendar(identifier: .gregorian)

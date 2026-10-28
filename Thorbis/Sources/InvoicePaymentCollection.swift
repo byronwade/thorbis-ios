@@ -236,7 +236,7 @@ struct InvoicePaymentsSection: View {
                 // Same header grammar as "Line items" and "Activity" above and below it.
                 HStack(spacing: 6) {
                     Text("Payments").font(Theme.font(13, weight: .medium))
-                    Text("\(model.payments.count)").font(Theme.monoFont(12))
+                    if !model.payments.isEmpty { Text("\(model.payments.count)").font(Theme.monoFont(12)) }
                 }
                 .foregroundStyle(Theme.muted)
                 .padding(.horizontal, 2)
@@ -282,7 +282,7 @@ struct InvoicePaymentsSection: View {
                     }
                 }
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
 
             if let modelError = model.paymentError {
                 ErrorBanner(message: modelError)
@@ -329,7 +329,7 @@ struct InvoicePaymentsSection: View {
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 4) {
                 Text(payment.method.capitalized)
-                    .font(Theme.font(14, weight: .medium))
+                    .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                 Text(paymentDate(payment.recordedAt))
                     .font(Theme.font(12))
@@ -339,15 +339,13 @@ struct InvoicePaymentsSection: View {
             VStack(alignment: .trailing, spacing: 4) {
                 let amount = payment.netAmount ?? payment.amount
                 Text(money(amount.amount, currency: amount.currency))
-                    .font(Theme.font(14, weight: .semibold))
+                    .moneyStyle(.row)
                     .foregroundStyle(Theme.foreground)
                 if payment.status == .refunded {
-                    Text("Refunded").font(Theme.font(11)).foregroundStyle(Theme.warning)
+                    Text("Refunded").font(Theme.font(12)).foregroundStyle(Theme.warning)
                 }
             }
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Theme.muted)
+            PaperDisclosure()
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -366,6 +364,7 @@ struct InvoiceDetailFooter: View {
     @ObservedObject var model: InvoicePaymentCollectionModel
     let canCollect: Bool
     let canIssue: Bool
+    var issueTitle = "Issue invoice"
     let busy: Bool
     let onCollect: () -> Void
     let onIssue: () -> Void
@@ -376,7 +375,7 @@ struct InvoiceDetailFooter: View {
                 PrimaryButton(title: "Collect payment", busy: model.isRecording, action: onCollect)
                     .disabled(!model.canRecordPayment)
             } else if model.invoice?.status == "draft", canIssue {
-                PrimaryButton(title: "Issue invoice", busy: busy, action: onIssue)
+                PrimaryButton(title: issueTitle, busy: busy, action: onIssue)
             }
         }
         .padding(.horizontal, 20)
@@ -421,7 +420,7 @@ private struct InvoicePaymentDetailSheet: View {
                     VStack(alignment: .leading, spacing: 6) {
                         let received = refundModel.payment.netAmount ?? refundModel.payment.amount
                         Text(money(received.amount, currency: received.currency))
-                            .font(Theme.font(30, weight: .semibold))
+                            .moneyStyle(.hero)
                             .tracking(-0.45)
                         Text("Net received")
                             .font(Theme.font(13))
@@ -441,15 +440,15 @@ private struct InvoicePaymentDetailSheet: View {
                         }
                     }
                     .padding(.horizontal, 15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
 
                     if refundModel.didComplete {
                         Label("Refund confirmed by Thorbis", systemImage: "checkmark.circle.fill")
-                            .font(Theme.font(14, weight: .medium))
+                            .font(Theme.font(15, weight: .medium))
                             .foregroundStyle(Theme.success)
                             .padding(15)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                            .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
 
                     if let error = refundModel.errorMessage {
@@ -523,21 +522,19 @@ private struct InvoicePaymentDetailSheet: View {
                     .foregroundStyle(Theme.destructive)
                     .frame(width: 26)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(Theme.font(14, weight: .semibold))
+                    Text(title).font(Theme.font(15, weight: .medium))
                     Text("Full payment · \(money(refundModel.payment.amount.amount, currency: refundModel.payment.amount.currency))")
-                        .font(Theme.font(12))
+                        .font(Theme.font(15)).monospacedDigit()
                         .foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
+                PaperDisclosure()
             }
             .foregroundStyle(Theme.foreground)
             .padding(15)
             .frame(minHeight: 58)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -580,15 +577,15 @@ private struct InvoicePaymentRefundForm: View {
                 if model.didComplete {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("Refund confirmed", systemImage: "checkmark.circle.fill")
-                            .font(Theme.font(18, weight: .semibold))
+                            .font(Theme.font(17, weight: .medium))
                             .foregroundStyle(Theme.success)
                         Text("Thorbis confirmed the full refund of \(amountText).")
-                            .font(Theme.font(14))
+                            .font(Theme.font(15))
                             .foregroundStyle(Theme.muted)
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 } else if showsReasonForm {
                     reasonEntry
                 } else {
@@ -663,7 +660,7 @@ private struct InvoicePaymentRefundForm: View {
                     .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(Theme.warning)
                 Text(amountText)
-                    .font(Theme.font(30, weight: .semibold))
+                    .font(Theme.font(30, weight: .medium))
                     .tracking(-0.45)
                 Text("This refunds the entire recorded payment. Partial refunds are not available here.")
                     .font(Theme.font(13))
@@ -671,10 +668,10 @@ private struct InvoicePaymentRefundForm: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
 
             Text("Reason for refund")
-                .font(Theme.font(14, weight: .semibold))
+                .font(Theme.font(15, weight: .medium))
                 .accessibilityAddTraits(.isHeader)
             TextEditor(text: Binding(
                 get: { model.reasonDraft },
@@ -684,8 +681,8 @@ private struct InvoicePaymentRefundForm: View {
             .frame(minHeight: 136)
             .scrollContentBackground(.hidden)
             .padding(10)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
             .focused($reasonFocused)
             .accessibilityLabel("Reason for refund")
             .accessibilityHint("Enter between 3 and 2,000 characters")
@@ -722,7 +719,7 @@ private struct InvoicePaymentRefundStatusPanel: View {
         if let intent = model.intent {
             VStack(alignment: .leading, spacing: 12) {
                 Label(title(for: intent.state), systemImage: symbol(for: intent.state))
-                    .font(Theme.font(15, weight: .semibold))
+                    .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.warning)
                 Text(message(for: intent.state))
                     .font(Theme.font(13))
@@ -744,7 +741,7 @@ private struct InvoicePaymentRefundStatusPanel: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         }
     }
 
@@ -802,10 +799,11 @@ struct InvoicePaymentCollectionSheet: View {
         self.invoice = invoice
         let cents = model.pendingRequest?.amount.amount ?? min(model.outstandingCents ?? 0, 1_000_000_000_000)
         _amountText = State(initialValue: paymentAmountText(cents))
-        _method = State(initialValue: model.pendingRequest?.method ?? .cash)
-        // Tap to Pay needs Apple's entitlement and a card-present terminal first;
-        // open on the fastest path that actually takes money today.
-        _option = State(initialValue: model.pendingRequest == nil ? .paymentLink : .alreadyCollected)
+        // MF-09: open on the way this phone last collected (cash, check or link); otherwise on
+        // the fastest path that actually takes money today. Tap to Pay is chosen in `.task`.
+        let last = InvoiceCollectionOption.lastUsed
+        _method = State(initialValue: model.pendingRequest?.method ?? (last == .check ? .check : .cash))
+        _option = State(initialValue: model.pendingRequest == nil ? (last ?? .paymentLink) : .alreadyCollected)
         _tapToPayController = StateObject(wrappedValue: TapToPayController(invoiceID: invoice.id))
     }
 
@@ -852,14 +850,14 @@ struct InvoicePaymentCollectionSheet: View {
                     Button("Done") { amountFocused = false }.frame(minWidth: 44, minHeight: 44)
                 }
             }
-            .sheet(isPresented: $showPayLinkShare) {
-                NavigationStack {
+            .navigationDestination(isPresented: $showPayLinkShare) {
                     VStack(alignment: .leading, spacing: 18) {
                         if let payLink, let shareURL = payLink.shareURL {
                             Text("Secure payment link ready")
-                                .font(Theme.font(18, weight: .semibold))
-                            Text("Share the invoice balance with \(customerName).")
-                                .font(Theme.font(13))
+                                .font(Theme.font(17, weight: .medium))
+                            MoneyFigure(label: "Balance due", cents: model.outstandingCents ?? 0, currency: invoice.currency)
+                            Text("Share this link with \(customerName) to pay by card.")
+                                .font(Theme.font(15))
                                 .foregroundStyle(Theme.muted)
                             ShareLink(item: shareURL) {
                                 Label("Share payment link", systemImage: "square.and.arrow.up")
@@ -867,7 +865,7 @@ struct InvoicePaymentCollectionSheet: View {
                             }
                             .accessibilityIdentifier("share-invoice-payment-link")
                             Button("Copy link") { UIPasteboard.general.string = shareURL.absoluteString }
-                                .font(Theme.font(14, weight: .medium))
+                                .font(Theme.font(15, weight: .medium))
                                 .frame(maxWidth: .infinity, minHeight: 44)
                             if let expiration = JobFiltering.date(payLink.expiresAt) {
                                 Text("Expires \(expiration.formatted(date: .abbreviated, time: .shortened))")
@@ -883,13 +881,11 @@ struct InvoicePaymentCollectionSheet: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { showPayLinkShare = false }
+                            // MF-10: the link is made; Done goes back to the invoice.
+                            Button("Done") { dismiss() }
                                 .frame(minWidth: 44, minHeight: 44)
                         }
                     }
-                }
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
             }
             .confirmationDialog(recordConfirmationTitle, isPresented: $showRecordConfirmation, titleVisibility: .visible) {
                 Button(primaryTitle) { Task { await recordPayment() } }
@@ -899,7 +895,7 @@ struct InvoicePaymentCollectionSheet: View {
             }
             .task {
                 // Open on the iPhone reader when this workspace and phone can take cards in person.
-                if tapToPayAvailable && model.pendingRequest == nil { option = .tapToPay }
+                if tapToPayAvailable && model.pendingRequest == nil && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
                 await loadReceiptDestination()
             }
         }
@@ -907,18 +903,17 @@ struct InvoicePaymentCollectionSheet: View {
 
     private var amountHero: some View {
         VStack(spacing: 7) {
-            Text("INV-\(invoice.id.suffix(4).uppercased()) · \(customerName)")
-                .font(Theme.monoFont(11, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .lineLimit(1)
+            PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
             HStack(spacing: 3) {
+                // MF-01: the amount being collected is the screen.
                 Text("$")
-                    .font(Theme.monoFont(26, weight: .medium))
+                    .font(Theme.moneyFont(.hero))
                     .foregroundStyle(Theme.muted)
                 TextField("0.00", text: $amountText)
                     .keyboardType(.decimalPad)
                     .focused($amountFocused)
-                    .font(Theme.monoFont(32, weight: .semibold))
+                    .font(Theme.moneyFont(.hero))
+                    .monospacedDigit()
                     .tracking(-0.7)
                     .multilineTextAlignment(.leading)
                     .fixedSize()
@@ -933,13 +928,16 @@ struct InvoicePaymentCollectionSheet: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            Text("Balance due \(money(model.outstandingCents ?? 0, currency: invoice.currency))")
-                .font(Theme.font(12))
-                .foregroundStyle(Theme.muted)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                Text(money(model.outstandingCents ?? 0, currency: invoice.currency)).moneyStyle(.row).foregroundStyle(Theme.foreground)
+            }
+            .accessibilityElement(children: .combine)
             if amountCents == nil {
-                Text("Enter an amount within the invoice balance.")
-                    .font(Theme.font(12))
-                    .foregroundStyle(Theme.destructive)
+                // MA-15: words in body colour; the amount rule is the exit.
+                Label("Enter an amount up to the balance due.", systemImage: "exclamationmark.circle")
+                    .font(Theme.font(15))
+                    .foregroundStyle(Theme.foreground)
             }
         }
         .frame(maxWidth: .infinity)
@@ -961,7 +959,7 @@ struct InvoicePaymentCollectionSheet: View {
                     .frame(width: 60, height: 60)
                     .overlay(Circle().stroke(Theme.brand, lineWidth: 1.5))
                 Text(tapToPayHeadline)
-                    .font(Theme.font(17, weight: .semibold))
+                    .font(Theme.font(17, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                 Text("Accepts contactless cards, Apple Pay and other wallets")
                     .font(Theme.font(13))
@@ -969,8 +967,8 @@ struct InvoicePaymentCollectionSheet: View {
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity, minHeight: 168)
-            .background(option == .tapToPay ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(option == .tapToPay ? Theme.brand.opacity(0.5) : Theme.border, lineWidth: 1))
+            .background(option == .tapToPay ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(option == .tapToPay ? Theme.brand.opacity(0.5) : Theme.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Tap to Pay on iPhone")
@@ -1002,6 +1000,7 @@ struct InvoicePaymentCollectionSheet: View {
             return model.payments.count > before || model.outstandingCents == 0
         }
         if tapToPay.phase == .paid {
+            InvoiceCollectionOption.lastUsed = nil
             try? await Task.sleep(nanoseconds: 900_000_000)
             dismiss()
         }
@@ -1042,8 +1041,8 @@ struct InvoicePaymentCollectionSheet: View {
                 }
             }
             .padding(.horizontal, 12)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border, lineWidth: 1))
             .disabled(hasLockedIntent || model.waitingForProjection)
         }
     }
@@ -1061,7 +1060,7 @@ struct InvoicePaymentCollectionSheet: View {
             .pickerStyle(.menu)
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .padding(.horizontal, 12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .disabled(hasLockedIntent || model.waitingForProjection)
             Label("This records a payment collected elsewhere; it does not charge a card or bank account.", systemImage: "info.circle")
                 .font(Theme.font(12))
@@ -1073,7 +1072,7 @@ struct InvoicePaymentCollectionSheet: View {
     private var receiptRow: some View {
         HStack(spacing: 10) {
             Image(systemName: "envelope")
-                .font(.system(size: 14))
+                .font(.system(size: 15))
                 .foregroundStyle(Theme.muted)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
@@ -1121,8 +1120,8 @@ struct InvoicePaymentCollectionSheet: View {
                     .foregroundStyle(selected ? Theme.brand : Theme.muted)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.font(14, weight: selected ? .semibold : .medium))
-                    Text(subtitle).font(Theme.font(11)).foregroundStyle(Theme.muted)
+                    Text(title).font(Theme.font(15, weight: .medium))
+                    Text(subtitle).font(Theme.font(12)).foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 4)
                 if busy {
@@ -1131,9 +1130,7 @@ struct InvoicePaymentCollectionSheet: View {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.brandText)
                 }
                 else {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.subtle)
+                    PaperDisclosure()
                 }
             }
             .frame(minHeight: 56)
@@ -1203,7 +1200,9 @@ struct InvoicePaymentCollectionSheet: View {
             return
         }
         guard amountCents != nil else { return }
-        if hasLockedIntent {
+        // MF-08: the commit already says "Record $480.00 cash received", so cash and check record
+        // at once. A payment collected elsewhere still confirms that nothing is charged here.
+        if hasLockedIntent || option == .cash || option == .check {
             await recordPayment()
         } else {
             showRecordConfirmation = true
@@ -1213,7 +1212,12 @@ struct InvoicePaymentCollectionSheet: View {
     private func recordPayment() async {
         guard let amountCents else { return }
         let accepted = await model.record(amountCents: amountCents, method: method)
-        if accepted { dismiss() }
+        if accepted {
+            if option == .cash || option == .check { InvoiceCollectionOption.lastUsed = option }
+            // The sheet closes on success, so a view-bound sensoryFeedback would never play.
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            dismiss()
+        }
     }
 
     private func createPayLink() async {
@@ -1224,6 +1228,7 @@ struct InvoicePaymentCollectionSheet: View {
         do {
             payLink = try await api.openFieldPayLink(invoice.id)
             payLinkError = nil
+            InvoiceCollectionOption.lastUsed = .paymentLink
             showPayLinkShare = true
         } catch is CancellationError {
         } catch {
@@ -1253,22 +1258,39 @@ struct InvoicePaymentCollectionSheet: View {
     }
 }
 
-private enum InvoiceCollectionOption: Equatable {
+private enum InvoiceCollectionOption: String, Equatable {
     case tapToPay
     case paymentLink
     case cash
     case check
     case alreadyCollected
+
+    /// MF-09: the last way this phone collected, so the sheet opens on it. Nil means Tap to Pay
+    /// (when available) or the payment link. "Already collected" is never remembered.
+    static var lastUsed: InvoiceCollectionOption? {
+        get {
+            UserDefaults.standard.string(forKey: "thorbis.payment.lastOption")
+                .flatMap(InvoiceCollectionOption.init(rawValue:))
+                .flatMap { [InvoiceCollectionOption.cash, .check, .paymentLink].contains($0) ? $0 : nil }
+        }
+        set { UserDefaults.standard.set(newValue?.rawValue, forKey: "thorbis.payment.lastOption") }
+    }
 }
 
+@MainActor
 private func paymentDetail(_ label: String, _ value: String) -> some View {
-    HStack(spacing: 10) {
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
         Text(label).foregroundStyle(Theme.muted)
         Spacer()
-        Text(value).foregroundStyle(Theme.foreground).multilineTextAlignment(.trailing)
+        // MF-02: amounts in the detail read at the line size; dates stay body text.
+        if value.first == "$" || value.first == "-" {
+            Text(value).moneyStyle(.line).foregroundStyle(Theme.foreground)
+        } else {
+            Text(value).foregroundStyle(Theme.foreground).multilineTextAlignment(.trailing)
+        }
     }
-    .font(Theme.font(13))
-    .padding(.vertical, 13)
+    .font(Theme.font(15))
+    .padding(.vertical, 12)
 }
 
 private func paymentDate(_ value: String) -> String {

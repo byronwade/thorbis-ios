@@ -13,7 +13,7 @@ struct ThorbisLogoLockup: View {
                 .frame(width: markSize, height: markSize)
                 .accessibilityHidden(true)
             Text("Thorbis")
-                .font(Theme.font(wordmarkSize, weight: .semibold))
+                .font(Theme.font(wordmarkSize, weight: .medium))
                 .foregroundStyle(Theme.foreground)
         }
         .accessibilityElement(children: .ignore)
@@ -81,37 +81,79 @@ struct PaperCircleButton: View {
 struct PaperTabs: View {
     let options: [String]
     @Binding var selection: String
+    /// True while tabs remain past the trailing edge; the fade shows only then, so the
+    /// last tab is never left dimmed once you've scrolled to it.
+    @State private var moreTrailing = true
     var body: some View {
-        // When the tabs run past the edge, the chosen one scrolls fully into view, so a
-        // half-cut "Activity" never hides which tab is open.
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 2) {
-                    ForEach(options, id: \.self) { option in
-                        Button { selection = option } label: {
-                            Text(option).font(Theme.font(15, weight: .medium))
-                                .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                                .padding(.horizontal, 12).padding(.vertical, 6)
-                                .frame(minHeight: Theme.chipHeight + 4)
-                                .background(selection == option ? Theme.fill : .clear, in: Capsule())
-                                .frame(minHeight: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        .id(option)
-                        .accessibilityAddTraits(selection == option ? .isSelected : [])
-                    }
-                }.padding(.horizontal, Theme.gutter - 4)
-            }
-            .scrollIndicators(.hidden).padding(.bottom, 4)
-            .onChange(of: selection) { _, value in
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+        // Every tab shows in full when it can: first at the normal padding, then a little
+        // tighter, then tighter still (five job tabs on a 6.1" phone). Only past that does the row scroll, and
+        // then the chosen tab scrolls fully into view and the cut edge fades out.
+        ViewThatFits(in: .horizontal) {
+            row(padding: 12).padding(.horizontal, Theme.gutter - 4)
+            row(padding: 8).padding(.horizontal, Theme.gutter - 8)
+            // The job's five tabs need this on a 402pt phone; a cut-off "Acti" reads as a bug.
+            row(padding: 6).padding(.horizontal, Theme.gutter - 6)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    row(padding: 12).padding(.horizontal, Theme.gutter - 4)
+                }
+                .scrollIndicators(.hidden)
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.x + geometry.containerSize.width < geometry.contentSize.width - 1
+                } action: { _, value in
+                    moreTrailing = value
+                }
+                .mask(LinearGradient(stops: [.init(color: .black, location: 0.88),
+                                             .init(color: moreTrailing ? .clear : .black, location: 1)],
+                                     startPoint: .leading, endPoint: .trailing))
+                .onChange(of: selection) { _, value in
+                    withMotion(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+                }
             }
         }
+        .padding(.bottom, 4)
         .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    private func row(padding: CGFloat) -> some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { option in
+                Button { selection = option } label: {
+                    Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
+                        .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
+                        .padding(.horizontal, padding).padding(.vertical, 6)
+                        .frame(minHeight: Theme.chipHeight + 4)
+                        .background(selection == option ? Theme.fill : .clear, in: Capsule())
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .id(option)
+                .accessibilityAddTraits(selection == option ? .isSelected : [])
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// Sentence-case group header: 13/500 muted title, mono count, optional trailing action.
+/// The muted line above a page title. Only the reference ("JOB-2214") is mono so its digits
+/// line up; names and words read in the 13pt body face.
+struct PaperEyebrow: View {
+    var reference: String? = nil
+    var text: String? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let reference { Text(reference).font(Theme.monoFont(12, weight: .medium)).fixedSize() }
+            if reference != nil, text != nil { Text("·").font(Theme.font(13)) }
+            if let text { Text(text).font(Theme.font(13)).lineLimit(1) }
+        }
+        .foregroundStyle(Theme.muted)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Sentence-case group header: 13/500 muted title, mono count (left out at zero, where the
+/// empty state below already says so), optional trailing action.
 struct PaperGroupHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
@@ -120,7 +162,7 @@ struct PaperGroupHeader<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(title).font(Theme.font(13, weight: .medium))
-            if let count { Text("\(count)").font(Theme.monoFont(12)) }
+            if let count, count > 0 { Text("\(count)").font(Theme.monoFont(12)) }
             Spacer(minLength: 0)
             trailing
         }
@@ -161,7 +203,7 @@ struct PaperEmptyState: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 26, weight: .light)).foregroundStyle(Theme.muted)
+            Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(Theme.muted)
                 .padding(.bottom, 6)
             Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                 .multilineTextAlignment(.center)
@@ -213,6 +255,10 @@ extension PaperDetailRow where Value == Text {
     init(_ label: String, value: String) {
         self.init(label: label) { Text(value) }
     }
+    /// MF-02: an amount in a detail row reads at the line size in tabular mono.
+    init(_ label: String, money: String) {
+        self.init(label: label) { Text(money).font(Theme.moneyFont(.line)).monospacedDigit() }
+    }
 }
 
 /// A row in a grouped list of destinations or settings (Paper 29 / 65).
@@ -251,8 +297,8 @@ extension PaperMenuRow where Trailing == AnyView {
     init(_ title: String, symbol: String, subtitle: String? = nil, value: String? = nil, tile: Color? = nil) {
         self.init(title: title, symbol: symbol, subtitle: subtitle, tile: tile) {
             AnyView(HStack(spacing: 6) {
-                if let value { Text(value).font(Theme.font(14)).foregroundStyle(Theme.muted) }
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted) }
+                PaperDisclosure()
             })
         }
     }
@@ -316,8 +362,8 @@ struct PaperSearchField: View {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
             TextField(prompt, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled()
             if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search") }
-        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
     }
 }
 
@@ -334,8 +380,8 @@ enum PaperChrome {
         }
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
-        appearance.titleTextAttributes = [.font: inter(17, .semibold)]
-        appearance.largeTitleTextAttributes = [.font: inter(34, .bold)]
+        appearance.titleTextAttributes = [.font: inter(17, .medium)]
+        appearance.largeTitleTextAttributes = [.font: inter(30, .medium)]
         let scrolled = UINavigationBarAppearance()
         scrolled.configureWithDefaultBackground()
         scrolled.titleTextAttributes = appearance.titleTextAttributes
@@ -414,7 +460,7 @@ struct OutboxReviewSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("These changes were made without signal and the server didn't accept them. Open the job to redo what's still needed.")
-                        .font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.bottom, 12)
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 12)
                     ForEach(outbox.needsReview) { entry in
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.destructive).padding(.top, 2)
@@ -422,13 +468,13 @@ struct OutboxReviewSheet: View {
                                 Text("\(entry.summary) · \(store.jobs.first { $0.id == entry.jobID }?.title ?? "Job")")
                                     .font(Theme.font(15, weight: .medium))
                                 Text(reason(entry)).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                             }
                             Spacer(minLength: 8)
                             if case .rejected = entry.state {
                                 VStack(spacing: 0) {
                                     Button("Retry") { outbox.retry(entry) }
-                                        .font(Theme.font(13, weight: .semibold)).frame(minHeight: 44)
+                                        .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
                                     Button("Dismiss", role: .destructive) { outbox.dismiss(entry) }
                                         .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
                                 }
@@ -625,7 +671,7 @@ struct LineNumberField: View {
         }
         .padding(.horizontal, 10)
         .frame(width: width, height: 44)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 }
 
@@ -672,5 +718,23 @@ struct FloatingCreateButton: View {
             .buttonStyle(PressStyle()).disabled(disabled)
         }
         .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+    }
+}
+
+/// Row disclosure chevron: one size, weight and colour for every tappable row.
+struct PaperDisclosure: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Theme.muted)
+            .accessibilityHidden(true)
+    }
+}
+
+extension PaperEmptyState {
+    /// No-results state for a search, in Paper type instead of the system's SF Pro view.
+    static func search(_ text: String) -> PaperEmptyState {
+        PaperEmptyState(symbol: "magnifyingglass", title: "No results for \u{201C}\(text)\u{201D}",
+                        message: "Check the spelling or try a different word.")
     }
 }

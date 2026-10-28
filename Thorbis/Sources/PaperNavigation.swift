@@ -7,6 +7,7 @@ struct RootView: View {
     @EnvironmentObject private var outbox: FieldOutbox
     @State private var tab: TabletSection = .more
     @EnvironmentObject private var layout: MenuLayout
+    @EnvironmentObject private var whatsNew: WhatsNew
     /// The selected phone tab: a MenuItem id, "more" or "search".
     @State private var selectedTab = PrimaryTab.initial.rawValue
     /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
@@ -54,6 +55,21 @@ struct RootView: View {
             #endif
             await layout.refreshCompanyLayout(api: api)
         }
+        // MA-19: once after an update, risen over the home screen rather than during launch.
+        .task {
+            #if DEBUG
+            if PaperPreview.enabled, PaperPreview.screen != "whats-new" { return }
+            #endif
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            // A link, notification or Live Activity opened the app for a reason, before or during
+            // the pause; the notes wait for the next launch.
+            if store.openedForRecord { whatsNew.skipThisLaunch = true }
+            whatsNew.presentIfNeeded()
+        }
+        .sheet(item: $whatsNew.showing, onDismiss: { whatsNew.dismissed() }) { content in
+            WhatsNewSheet(content: content) { whatsNew.dismissed() }
+        }
     }
 
     private func writeTodaySnapshot() {
@@ -93,7 +109,7 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $search) { PaperGlobalSearch() }
-        .sheet(isPresented: $settings) { NavigationStack { MoreView().paperDestinations().safeAreaInset(edge: .top) { HStack { Spacer(); Button("Done") { settings = false }.font(Theme.font(15, weight: .semibold)).frame(minWidth: 44, minHeight: 44) }.padding(.horizontal, Theme.gutter) } } }
+        .sheet(isPresented: $settings) { NavigationStack { MoreView().paperDestinations().safeAreaInset(edge: .top) { HStack { Spacer(); Button("Done") { settings = false }.font(Theme.font(15, weight: .medium)).frame(minWidth: 44, minHeight: 44) }.padding(.horizontal, Theme.gutter) } } }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
         #if DEBUG
@@ -533,18 +549,18 @@ struct RootView: View {
             Button { workspace = true } label: {
                 HStack(spacing: 9) {
                     Image("ThorbisMark").resizable().scaledToFit().padding(4)
-                        .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
+                        .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Theme.border))
                         .accessibilityHidden(true)
-                    Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(14, weight: .semibold)).lineLimit(1)
+                    Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .medium)).lineLimit(1)
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.down").font(.system(size: 10))
+                    Image(systemName: "chevron.down").font(.system(size: 12))
                 }.padding(.horizontal, 8).frame(minHeight: 44)
             }.padding(.bottom, 10)
             Button { search = true } label: {
                 HStack(spacing: 8) { Image(systemName: "magnifyingglass"); Text("Search"); Spacer() }
                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.horizontal, 10)
-                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             }.padding(.bottom, 12)
             if session.can("job.view", feature: "jobs") {
                 sidebarRow("Schedule", icon: "calendar", target: .schedule, count: JobFiltering.schedule(store.jobs, range: .today).count)
@@ -558,7 +574,7 @@ struct RootView: View {
             Button { settings = true } label: {
                 HStack(spacing: 9) {
                     Avatar(name: session.user?.name ?? "", size: 26)
-                    Text(session.user?.name ?? "Account").font(Theme.font(14)).lineLimit(1)
+                    Text(session.user?.name ?? "Account").font(Theme.font(15)).lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "gearshape").font(.system(size: 15)).foregroundStyle(Theme.muted)
                 }.padding(.horizontal, 8).frame(minHeight: 44)
@@ -572,10 +588,10 @@ struct RootView: View {
         Button { path = NavigationPath(); tab = target } label: {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.system(size: 17)).frame(width: 18).foregroundStyle(Theme.muted)
-                Text(title).font(Theme.font(14, weight: tab == target ? .medium : .regular))
+                Text(title).font(Theme.font(15, weight: tab == target ? .medium : .regular))
                 Spacer()
-                if let count { Text("\(count)").font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted) }
-            }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                if let count { Text("\(count)").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted) }
+            }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         }.accessibilityAddTraits(tab == target ? .isSelected : [])
     }
 
@@ -583,7 +599,7 @@ struct RootView: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.system(size: 17)).frame(width: 18).foregroundStyle(Theme.muted)
-                Text(title).font(Theme.font(14))
+                Text(title).font(Theme.font(15))
                 Spacer(minLength: 0)
             }.padding(.horizontal, 8).frame(minHeight: 44).contentShape(Rectangle())
         }
@@ -605,8 +621,11 @@ enum PaperRoute: Hashable {
     case invoice(String)
     case followUps(jobID: String)
     case customizeMenu
+    case whatsNew
     case attention
     case payments
+    case businessSetup
+    case companyDetails
     case job(String)
 }
 
@@ -652,8 +671,11 @@ struct PaperRouteView: View {
         case .invoice(let id): InvoiceDetailView(id: id)
         case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
         case .customizeMenu: CustomizeMenuView()
+        case .whatsNew: WhatsNewHistoryView()
         case .attention: NeedsAttentionView()
         case .payments: PaymentsSetupView()
+        case .businessSetup: BusinessSetupView()
+        case .companyDetails: CompanyDetailsView()
         case .job(let id): JobDetailView(jobId: id)
         case .local(let section):
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
@@ -790,7 +812,7 @@ struct PaperGlobalSearch: View {
                             PaperGroupHeader(title: label(type), count: results.count).padding(.top, 8)
                             ForEach(results) { result in serverRow(result) }
                         }
-                        if server.isEmpty && !searching { ContentUnavailableView.search(text: trimmed) }
+                        if server.isEmpty && !searching { PaperEmptyState.search(trimmed) }
                         if searching { SkeletonRows(count: 2, inset: 0).padding(.top, 8) }
                     } else {
                         if session.isOffline || serverFailed {
@@ -825,7 +847,7 @@ struct PaperGlobalSearch: View {
                             }
                         }
                         if searching { SkeletonRows(count: 3, inset: 0).padding(.top, 8) }
-                        else if jobs.isEmpty && customers.isEmpty { ContentUnavailableView.search(text: trimmed) }
+                        else if jobs.isEmpty && customers.isEmpty { PaperEmptyState.search(trimmed) }
                     }
                 }
                 .padding(.horizontal, Theme.gutter)

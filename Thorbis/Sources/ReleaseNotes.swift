@@ -1,0 +1,144 @@
+import Foundation
+
+/// What changed in each update, shown once in the What's new sheet (design.thorbis.com MA-19..MA-22).
+///
+/// How to add notes: the pull request that changes what people see adds a new entry at the TOP
+/// of `all`, with an id that is never reused. Unshipped entries fold together in the sheet, so
+/// two PRs in one build just means two entries. Write for the person doing the work (MA-21):
+/// - `title`: what they can now do, at most 40 characters ("Mark arrived from the lock screen").
+/// - `detail`: one sentence, at most 110 characters, in domain words. No ticket ids or code names.
+/// - At most five highlights per entry; anything smaller goes in `fixes` as a count.
+/// - `symbol` is an SF Symbol outline name. A change nobody can see gets no note.
+/// `WhatsNewTests` checks every rule above.
+enum ReleaseNotes {
+    static let all: [ReleaseNote] = [
+        ReleaseNote(
+            id: "2026-10-28-readable-controls",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Read buttons at your text size",
+                      detail: "Buttons, tabs and job labels grow with your text, and contact shortcuts stack at larger sizes."),
+                .init(symbol: "phone", title: "Listen to the booking call",
+                      detail: "Play the booking call, read its summary, or open the transcript from the job."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-10-28-job-hours",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "clock", title: "See how long each job took",
+                      detail: "A job's Details show the drive and the time on site, from On my way, Mark arrived and Wrap up."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-28-exact-model-numbers",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "number", title: "Part and model numbers match exactly",
+                      detail: "Searching R-410A never shows R-420A, and R410A without the dash still finds it."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-28-job-screen",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "ellipsis.circle", title: "Every job action in one menu",
+                      detail: "Pause, reschedule, assign, deposit and wrap up now live in the ••• at the top right of a job."),
+                .init(symbol: "person.2", title: "Call or text any contact on the job",
+                      detail: "Every contact is listed with their own Call, Text and Email, and how they like to be reached."),
+                .init(symbol: "key", title: "Gate codes, dogs and parking up front",
+                      detail: "Getting in shows each code on its own line. Long press a code to copy it."),
+                .init(symbol: "clock.arrow.circlepath", title: "See what happened on past visits",
+                      detail: "A job lists the customer's earlier visits with the office's note from each one."),
+                .init(symbol: "wrench.and.screwdriver", title: "Equipment and membership on the job",
+                      detail: "Units at the site, their warranty and the customer's plan show without leaving the job."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-10-28-estimate-builder",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Find price book items as you type",
+                      detail: "Search forgives typos and words in any order, and puts the items you use most first."),
+                .init(symbol: "plus.circle", title: "Tap to add, tap again for one more",
+                      detail: "Results stay open while you add. Type anything that isn't in the book to add it as a line."),
+                .init(symbol: "line.3.horizontal", title: "Arrange Work and Materials your way",
+                      detail: "Edit any line in place, drag to reorder, and undo a removed line."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-10-28-big-money",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "dollarsign.circle", title: "Money you can read at a glance",
+                      detail: "Balance due, estimate totals and payment amounts are now the biggest thing on the screen."),
+                .init(symbol: "banknote", title: "Record cash or a check in three taps",
+                      detail: "Collect, pick Cash or Check, Record. No extra confirm, and it remembers what you used last."),
+                .init(symbol: "link", title: "Payment links stay in one sheet",
+                      detail: "Creating a payment link now opens in the same sheet, so Done takes you back to the invoice."),
+                .init(symbol: "arrow.up.arrow.down", title: "Amounts roll when they change",
+                      detail: "Record a payment and the balance rolls down to its new amount right where you are."),
+            ],
+            fixes: 4
+        ),
+        ReleaseNote(
+            id: "2026-10-28-next-step",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "arrow.forward.circle", title: "One button runs the whole job",
+                      detail: "The button at the bottom of a job is always the next step, from On my way to Collect."),
+                .init(symbol: "person.crop.rectangle", title: "Show an estimate in one tap",
+                      detail: "Show to customer sends a new estimate and hands it over, with no separate Send step."),
+                .init(symbol: "creditcard", title: "Issue and collect in one step",
+                      detail: "Issuing an invoice opens payment right away, and a paid job goes back to Wrap up."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-10-28-whats-new",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "sparkles", title: "See what changed after each update",
+                      detail: "This sheet shows once after an update. Find it again any time in Settings."),
+                .init(symbol: "magnifyingglass", title: "Find invoices by customer or number",
+                      detail: "Search on Invoices now matches the customer's name and the invoice number."),
+                .init(symbol: "arrow.clockwise", title: "Try again when a list fails to load",
+                      detail: "Estimates, invoices, closeout and follow-ups offer Try again instead of a dead end."),
+                .init(symbol: "hand.tap", title: "A tap you can feel when work is done",
+                      detail: "Completing, sending, approving and getting paid now confirm with a light tap."),
+                .init(symbol: "figure.walk.motion", title: "Calmer motion with Reduce Motion on",
+                      detail: "Every animation now follows the Reduce Motion setting on your phone."),
+            ],
+            fixes: 6
+        ),
+    ]
+}
+
+struct ReleaseNote: Identifiable, Equatable, Sendable {
+    /// Stable and never reused: the sheet remembers which ids a person has seen.
+    let id: String
+    /// The day the change merged, as yyyy-MM-dd.
+    let date: String
+    let highlights: [Highlight]
+    /// Smaller fixes, shown only as a count.
+    var fixes = 0
+
+    struct Highlight: Equatable, Sendable {
+        let symbol: String
+        let title: String
+        let detail: String
+    }
+
+    static let maxTitle = 40
+    static let maxDetail = 110
+    static let maxHighlights = 5
+
+    /// Noon UTC, so the label shows the same day in every US time zone.
+    var day: Date? { try? Date("\(date)T12:00:00Z", strategy: .iso8601) }
+
+    /// "Oct 28"
+    var dayLabel: String { day?.formatted(.dateTime.month(.abbreviated).day()) ?? date }
+}

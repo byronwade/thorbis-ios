@@ -241,7 +241,7 @@ struct PaymentsSetupView: View {
                         }
                         Text(payout.title).font(Theme.font(15, weight: .medium))
                         Spacer()
-                        Text(money(payout.amount, currency: payout.currency)).font(Theme.monoFont(14, weight: .medium))
+                        Text(money(payout.amount, currency: payout.currency)).moneyStyle(.row)
                     }
                     Text(payout.explanation).font(Theme.font(12)).foregroundStyle(Theme.muted)
                 }
@@ -255,7 +255,7 @@ struct PaymentsSetupView: View {
         HStack {
             Text(title).font(Theme.font(15, weight: .medium))
             Spacer()
-            Text(money(amount, currency: currency)).font(Theme.monoFont(15, weight: .medium))
+            Text(money(amount, currency: currency)).moneyStyle(.row)
                 .foregroundStyle(amount < 0 ? Theme.warning : Theme.foreground)
         }
         .frame(minHeight: 44)

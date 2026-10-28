@@ -376,10 +376,11 @@ struct PaperPriceBookPicker: View {
                                 Spacer(minLength: 8)
                                 VStack(alignment: .trailing, spacing: 2) {
                                     Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                                        .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .moneyStyle(.row).foregroundStyle(Theme.foreground)
                                     if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
+                                        // MF-05: no green on money; the word "Member" carries it.
                                         Text("Member \(money(memberPricing.memberPrice(item.sellPrice.amount), currency: item.sellPrice.currency))")
-                                            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.success)
+                                            .font(Theme.moneyFont(.line)).foregroundStyle(Theme.foreground)
                                     }
                                 }
                             }

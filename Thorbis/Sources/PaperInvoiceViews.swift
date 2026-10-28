@@ -49,6 +49,7 @@ struct PaperJobInvoiceContent: View {
     let onInvoiceUpdated: (InvoiceRecord) -> Void
 
     @EnvironmentObject private var session: SessionController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var balance: PaperInvoiceBalance {
         PaperInvoiceBalance(invoice: displayedInvoice, balanceCents: paymentModel.outstandingCents)
@@ -82,18 +83,18 @@ struct PaperJobInvoiceContent: View {
 
     private var balanceHeader: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("INV-\(displayedInvoice.id.suffix(4).uppercased()) · \(balance.statusLabel == "Unpaid" || balance.statusLabel == "Partially paid" ? "Balance due" : balance.statusLabel)")
-                .font(Theme.monoFont(12, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .lineLimit(1)
+            PaperEyebrow(reference: "INV-\(displayedInvoice.id.suffix(4).uppercased())",
+                         text: balance.statusLabel == "Unpaid" || balance.statusLabel == "Partially paid" ? "Balance due" : balance.statusLabel)
 
             HStack(spacing: 12) {
                 Text(balance.balanceCents.map { money($0, currency: invoice.currency) } ?? "—")
-                    .font(Theme.monoFont(28, weight: .semibold))
+                    .moneyStyle(.hero)
                     .tracking(-0.5)
                     .foregroundStyle(Theme.foreground)
                     .accessibilityLabel(balance.balanceCents.map { "Balance due \(money($0, currency: displayedInvoice.currency))" } ?? "Balance unavailable")
                     .accessibilityAddTraits(.updatesFrequently)
+                    // MF-06: the balance rolls down when a payment lands.
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: balance.balanceCents)
                 Spacer(minLength: 4)
                 statusChip
             }
@@ -134,12 +135,12 @@ struct PaperJobInvoiceContent: View {
                 ForEach(Array(displayedInvoice.lines.enumerated()), id: \.element.id) { index, line in
                     HStack(spacing: 12) {
                         Text(line.description)
-                            .font(Theme.font(14, weight: .medium))
+                            .font(Theme.font(15, weight: .medium))
                             .foregroundStyle(Theme.foreground)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             Text(lineAmount(line).map { money($0, currency: line.unitPrice.currency) } ?? "—")
-                            .font(Theme.monoFont(13, weight: .medium))
+                            .moneyStyle(.line)
                             .foregroundStyle(Theme.foreground)
                             .fixedSize()
                     }
@@ -152,19 +153,19 @@ struct PaperJobInvoiceContent: View {
                 Divider().overlay(Theme.border)
                 HStack {
                     Text("Total")
-                        .font(Theme.font(14, weight: .semibold))
+                        .font(Theme.font(15, weight: .medium))
                         .foregroundStyle(Theme.foreground)
                     Spacer()
                     Text(paymentModel.totalCents.map { money($0, currency: displayedInvoice.currency) } ?? "Unavailable")
-                        .font(Theme.monoFont(13, weight: .semibold))
+                        .moneyStyle(.total)
                         .foregroundStyle(Theme.foreground)
                 }
                 .frame(minHeight: 44)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border, lineWidth: 1))
         }
     }
 
@@ -188,7 +189,7 @@ struct PaperJobInvoiceContent: View {
                                 .foregroundStyle(Theme.muted)
                             if let date = event.date {
                                 Text(date.formatted(date: .omitted, time: .shortened))
-                                    .font(Theme.monoFont(11))
+                                    .font(Theme.monoFont(12))
                                     .foregroundStyle(Theme.subtle)
                             }
                         }

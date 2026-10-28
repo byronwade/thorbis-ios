@@ -206,7 +206,7 @@ struct WorkspaceRevenueView: View {
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(money(current?.collected ?? 0, currency: "USD"))
-                    .font(Theme.monoFont(34, weight: .semibold)).minimumScaleFactor(0.6).lineLimit(1)
+                    .moneyStyle(.hero)
                 if let current, let previous, previous.collected > 0 {
                     let change = Double(current.collected - previous.collected) / Double(previous.collected) * 100
                     Label("\(abs(Int(change.rounded())))% vs \(monthName(previous.month, long: false))", systemImage: change >= 0 ? "arrow.up" : "arrow.down")
@@ -239,8 +239,8 @@ struct WorkspaceRevenueView: View {
                 Text(monthName(month.month, long: true)).font(Theme.font(15, weight: .medium))
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(money(month.collected, currency: "USD")).font(Theme.monoFont(13, weight: .semibold))
-                    Text("Invoiced \(money(month.revenue, currency: "USD"))").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    Text(money(month.collected, currency: "USD")).moneyStyle(.row)
+                    Text("Invoiced \(money(month.revenue, currency: "USD"))").font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
             }
             .frame(minHeight: 48)
@@ -271,7 +271,7 @@ struct WorkspaceRevenueView: View {
     private func tile(_ title: String, _ value: String, detail: String, alert: Color?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.monoFont(19, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.7)
+            Text(value).moneyStyle(.total)
             Text(detail).font(Theme.font(12, weight: alert == nil ? .regular : .medium)).foregroundStyle(alert ?? Theme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -435,7 +435,7 @@ struct WorkspacePriceBookView: View {
             }
             Spacer(minLength: 6)
             Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                .moneyStyle(.row).foregroundStyle(Theme.foreground)
         }
         .frame(minHeight: 50)
         .contentShape(Rectangle())
@@ -490,7 +490,7 @@ private struct WorkspacePriceBookDetailView: View {
         List {
             if let error { Text(error).foregroundStyle(Theme.destructive) }
             if let detail {
-                LabeledContent("Price", value: money(detail.revision.sellPrice.amount, currency: detail.revision.sellPrice.currency))
+                LabeledContent("Price") { Text(money(detail.revision.sellPrice.amount, currency: detail.revision.sellPrice.currency)).moneyStyle(.total) }
                 LabeledContent("Unit", value: detail.revision.unit)
                 LabeledContent("Kind", value: detail.revision.kind.capitalized)
                 LabeledContent("Tax", value: detail.revision.taxClassification.replacingOccurrences(of: "_", with: " ").capitalized)

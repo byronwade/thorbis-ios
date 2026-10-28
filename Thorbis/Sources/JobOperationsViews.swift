@@ -10,6 +10,7 @@ struct JobCloseoutView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirmComplete = false
+    @State private var completed = 0
     @State private var confirmCancel = false
     @State private var invoiceID: String?
     @State private var openInvoiceID: String?
@@ -35,13 +36,12 @@ struct JobCloseoutView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("JOB-\(jobID.suffix(4).uppercased())\(job.map { " · \(store.customerName($0.customerId))" } ?? "")")
-                        .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                    PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())", text: job.map { store.customerName($0.customerId) })
                     Text(job?.status == "completed" ? "Job complete" : "Wrap up this job")
                         .font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                 }
                 .padding(.bottom, 14)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error, retry: closeout == nil ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
                 if let closeout {
                     let checks = closeout.policy.requiredChecks.filter { $0.kind == nil || $0.kind == "acknowledgement" }
                     let done = closeout.requirements.filter { $0.outcome != "blocked" }.count
@@ -80,7 +80,7 @@ struct JobCloseoutView: View {
                         }
                     }
                     if closeout.requirements.isEmpty && checks.isEmpty {
-                        Text("Nothing else is required before closing.").font(Theme.font(14)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                        Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                     }
                     if mayRecordUnpaidDisposition {
                         PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
@@ -110,7 +110,7 @@ struct JobCloseoutView: View {
                     }
                     if session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
                         Button("Cancel job", role: .destructive) { confirmCancel = true }
-                            .font(Theme.font(14, weight: .medium)).frame(minHeight: 44).padding(.top, 18)
+                            .font(Theme.font(15, weight: .medium)).frame(minHeight: 44).padding(.top, 18)
                             .disabled(busy)
                     }
                 } else if error == nil {
@@ -120,6 +120,7 @@ struct JobCloseoutView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
@@ -131,6 +132,7 @@ struct JobCloseoutView: View {
         .refreshable { await load() }
         .navigationDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0) }
         .navigationDestination(isPresented: $openBilling) { BillingSchedulesView() }
+        .sensoryFeedback(.success, trigger: completed)
         .confirmationDialog("Complete this job?", isPresented: $confirmComplete, titleVisibility: .visible) {
             Button("Complete job") { Task { await complete() } }
         }
@@ -141,7 +143,7 @@ struct JobCloseoutView: View {
     private func checklistRow(done: Bool, title: String, detail: String?) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 18)).foregroundStyle(done ? Theme.success : Theme.muted)
+                .font(.system(size: 17)).foregroundStyle(done ? Theme.success : Theme.muted)
                 .accessibilityLabel(done ? "Done" : "Not done")
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(15, weight: done ? .regular : .medium))
@@ -158,8 +160,8 @@ struct JobCloseoutView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
     }
 
     private func load() async {
@@ -181,6 +183,7 @@ struct JobCloseoutView: View {
         do {
             let disposition: FieldUnpaidDisposition? = validDisposition ? .init(reasonCode: unpaidReasonCode, reason: unpaidReason.trimmingCharacters(in: .whitespacesAndNewlines), followUpNextAction: unpaidNextAction.trimmingCharacters(in: .whitespacesAndNewlines)) : nil
             job = try await api.completeFieldJob(jobID, request: .init(unpaidDisposition: disposition))
+            completed += 1
             await load()
             await store.refresh(api)
         }
@@ -266,7 +269,7 @@ struct JobScheduleView: View {
                     if showsCustomTime {
                         HStack {
                             Label("Other time", systemImage: "clock")
-                                .font(Theme.font(14))
+                                .font(Theme.font(15))
                                 .foregroundStyle(Theme.muted)
                             Spacer()
                             DatePicker("Other time", selection: $date, displayedComponents: .hourAndMinute)
@@ -278,7 +281,7 @@ struct JobScheduleView: View {
                         .frame(minHeight: 44)
                     } else {
                         Button("Other time…") { showsCustomTime = true }
-                            .font(Theme.font(14, weight: .medium))
+                            .font(Theme.font(15, weight: .medium))
                             .foregroundStyle(Theme.brandText)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
@@ -321,12 +324,12 @@ struct JobScheduleView: View {
                 .accessibilityHidden(true)
             Spacer(minLength: 0)
             Text("Schedule")
-                .font(Theme.font(17, weight: .semibold))
+                .font(Theme.font(17, weight: .medium))
                 .tracking(-0.17)
             Spacer(minLength: 0)
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .medium))
                     .frame(width: 30, height: 30)
                     .background(Theme.fill, in: Circle())
                     .frame(width: 44, height: 44)
@@ -336,7 +339,7 @@ struct JobScheduleView: View {
             .accessibilityLabel("Close schedule picker")
             .disabled(busy)
         }
-        .frame(height: 44)
+        .frame(minHeight: 44)
         .padding(.horizontal, 20)
     }
 
@@ -352,11 +355,11 @@ struct JobScheduleView: View {
                     Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
                         .rotationEffect(.degrees(showsCalendar ? 180 : 0))
                 }
-                .font(Theme.font(13, weight: showsCalendar ? .semibold : .medium))
+                .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(showsCalendar ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -397,11 +400,11 @@ struct JobScheduleView: View {
             }
         } label: {
             Text(title)
-                .font(Theme.font(13, weight: selected ? .semibold : .medium))
+                .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(selected ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -427,7 +430,7 @@ struct JobScheduleView: View {
                     .foregroundStyle(selected ? Theme.brand : Theme.subtle)
                     .frame(width: 20, height: 20)
                 Text(label)
-                    .font(Theme.monoFont(14, weight: selected ? .semibold : .medium))
+                    .font(Theme.monoFont(15, weight: .medium))
                     .foregroundStyle(selected ? Theme.brand : Theme.foreground)
                 Spacer(minLength: 8)
                 Text("2 hr window")
@@ -502,7 +505,7 @@ struct JobFollowUpsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Follow-ups").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error, retry: records.isEmpty ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
                 if loading && records.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 if !records.isEmpty { PaperGroupHeader(title: "On this job", count: records.count) }
                 ForEach(records) { record in
@@ -523,18 +526,18 @@ struct JobFollowUpsView: View {
                             HStack(spacing: 18) {
                                 if record.kind == "office_scheduling", record.scheduling?.appointment == nil {
                                     Button("Book the return visit") { booking = record }
-                                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
                                         .frame(minHeight: 44).disabled(busy)
                                 }
                                 Button("Resolve") { Task { await resolve(record.id) } }
-                                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
                                     .frame(minHeight: 44).disabled(busy)
                             }
                         }
                     }
                     .padding(14)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     .padding(.bottom, 8)
                 }
                 if session.can("job.edit", feature: "jobs") {
@@ -557,6 +560,7 @@ struct JobFollowUpsView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $booking) { record in
@@ -577,8 +581,8 @@ struct JobFollowUpsView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
     }
 
     private func load() async {

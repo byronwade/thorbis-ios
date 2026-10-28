@@ -3,6 +3,7 @@ import UIKit
 
 /// Native translation of Paper's Customers and Customer detail artboards.
 struct CustomersView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
@@ -46,7 +47,7 @@ struct CustomersView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withAnimation { showSearch.toggle() } })
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withMotion { showSearch.toggle() } })
                 if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
                 PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
                 if let error = error ?? store.error {
@@ -66,7 +67,7 @@ struct CustomersView: View {
                     if scope == .archived {
                         PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: search.isEmpty ? "Archived customers will appear here." : "Try a different search.")
                     } else if !search.isEmpty {
-                        ContentUnavailableView.search(text: search)
+                        PaperEmptyState.search(search)
                     } else {
                         PaperEmptyState(symbol: "person.2", title: "No customers yet", message: "Customers you add appear here, A to Z.",
                                         actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
@@ -97,10 +98,10 @@ struct CustomersView: View {
             HStack(spacing: 12) {
                 Avatar(name: customer.name, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(1)
+                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                     // The open job's state as a word next to the count (a mark alone was a guess).
                     Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: open))
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                 }
                 Spacer(minLength: 4)
                 if let open { StatusRing(status: open.status).accessibilityHidden(true) }
@@ -130,11 +131,10 @@ struct CustomersView: View {
         let count = "\(jobCount) \(jobCount == 1 ? "job" : "jobs")"
         guard let open else { return count }
         if let date = JobFiltering.date(open.scheduledFor), ["scheduled", "dispatched"].contains(open.status) {
-            let when = Calendar.current.isDateInToday(date) ? "today \(date.formatted(date: .omitted, time: .shortened))"
-                : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-            return "\(count) · next \(when)"
+            // Same words as the Jobs list ("Today 4:00 PM", "In progress"), so a visit reads alike everywhere.
+            return "\(count) · \(date.visitLabel())"
         }
-        return "\(count) · \(open.status.statusLabel.lowercased())"
+        return "\(count) · \(open.status.statusLabel)"
     }
 
     private func create() async {
@@ -202,6 +202,7 @@ private enum CustomerContactSheetItem: Identifiable {
 }
 
 struct CustomerDetailView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
@@ -246,7 +247,7 @@ struct CustomerDetailView: View {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
-                        Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                        PaperEyebrow(text: "Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
                     }
                     Text(record?.name ?? customer.name).font(Theme.font(24, weight: .medium)).tracking(-0.36)
                         .accessibilityAddTraits(.isHeader)
@@ -404,10 +405,10 @@ struct CustomerDetailView: View {
             if let record {
                 if let phone = record.phone { detailRow("Phone", value: phone) }
                 if let email = record.email {
-                    HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(14)).frame(minHeight: 44)
+                    HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(15)).frame(minHeight: 44)
                 }
                 if let address = record.address {
-                    HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(14)).frame(minHeight: 44)
+                    HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(15)).frame(minHeight: 44)
                 }
                 if let industry = record.industry { detailRow("Industry", value: industry) }
                 if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel) }
@@ -427,13 +428,13 @@ struct CustomerDetailView: View {
                     HStack(spacing: 12) {
                         StatusRing(status: job.status).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                            Text([JobFiltering.date(job.scheduledFor).map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()) } ?? "No time yet",
+                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                            Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
                                   job.status.statusLabel].joined(separator: " · "))
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
                         Spacer(minLength: 8)
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle)
+                        PaperDisclosure()
                     }
                     .frame(minHeight: 52).contentShape(Rectangle())
                 }
@@ -457,7 +458,7 @@ struct CustomerDetailView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(smsConsentLabel)
-                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(Theme.foreground)
                     .frame(minHeight: 44)
@@ -466,7 +467,7 @@ struct CustomerDetailView: View {
                 Text(smsConsentLabel).foregroundStyle(Theme.foreground)
             }
         }
-        .font(Theme.font(14))
+        .font(Theme.font(15))
         .frame(minHeight: 44)
         .confirmationDialog(smsConsentChoice == true ? "Record that the customer agreed to job texts?" : "Record that the customer asked to stop job texts?",
                             isPresented: Binding(get: { smsConsentChoice != nil }, set: { if !$0 { smsConsentChoice = nil } }),
@@ -479,7 +480,7 @@ struct CustomerDetailView: View {
             Text("Only record what the customer told you themselves.")
         }
         .overlay(alignment: .bottomTrailing) {
-            if let smsConsentError { Text(smsConsentError).font(Theme.font(11)).foregroundStyle(Theme.destructive).offset(y: 14) }
+            if let smsConsentError { Text(smsConsentError).font(Theme.font(12)).foregroundStyle(Theme.destructive).offset(y: 14) }
         }
     }
 
@@ -513,18 +514,18 @@ struct CustomerDetailView: View {
 
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { contactSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
+            HStack { sectionTitle("Contacts", count: contacts.count); Spacer(); if canEdit { Button { contactSheet = .add } label: { Image(systemName: "plus").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle()) }.accessibilityLabel("Add contact").disabled(!contactsLoaded) } }
             if let contactMutationError {
                 Text(contactMutationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     .accessibilityIdentifier("contact-mutation-error")
             }
             ForEach(contacts) { contact in
                 HStack(spacing: 10) {
                     Avatar(name: contact.name, size: 28)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(contact.name).font(Theme.font(14, weight: .medium))
+                        Text(contact.name).font(Theme.font(15, weight: .medium))
                         Text([contact.role, contact.primary ? "Primary" : nil].compactMap { $0 }.joined(separator: " · ")).font(Theme.font(12)).foregroundStyle(Theme.muted)
                     }
                     Spacer(minLength: 2)
@@ -542,7 +543,7 @@ struct CustomerDetailView: View {
                                 showRemoveContactConfirmation = true
                             }.disabled(isMutatingContact)
                         } label: {
-                            Image(systemName: "ellipsis").frame(width: 30, height: 32).frame(width: 44, height: 44).contentShape(Rectangle())
+                            Image(systemName: "ellipsis").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
                         }
                         .accessibilityLabel("Contact actions for \(contact.name)")
                         .disabled(isMutatingContact)
@@ -554,17 +555,17 @@ struct CustomerDetailView: View {
     }
     private var locationsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { locationSheet = .add } label: { Image(systemName: "plus").frame(width: 30, height: 30).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Add location") } }
+            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { locationSheet = .add } label: { Image(systemName: "plus").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle()) }.accessibilityLabel("Add location") } }
             if let locationError {
                 Text(locationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     .accessibilityIdentifier("location-mutation-error")
             }
             ForEach(locations) { location in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(location.label).font(Theme.font(14, weight: .medium)).lineLimit(1)
+                        Text(location.label).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                         Spacer(minLength: 4)
                         Text(location.kind.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         if canEdit {
@@ -591,7 +592,7 @@ struct CustomerDetailView: View {
                         Image(systemName: location.coordinates == nil ? "mappin.slash" : "mappin.and.ellipse")
                         Text(location.coordinates.map { String(format: "%.4f, %.4f", $0.latitude, $0.longitude) } ?? "No map pin")
                     }
-                    .font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                 }.padding(.vertical, 5)
             }
             if locations.isEmpty { emptyText("No locations") }
@@ -653,7 +654,7 @@ struct CustomerDetailView: View {
                     HStack(spacing: 12) {
                         Image(systemName: statusIcon(job.status).0).foregroundStyle(statusIcon(job.status).1).frame(width: 16)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                             Text(job.status.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         }
                         Spacer()
@@ -692,7 +693,7 @@ struct CustomerDetailView: View {
                                 .background(Theme.fill, in: Circle())
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(event.summary).font(Theme.font(14, weight: .medium)).lineLimit(3)
+                                Text(event.summary).font(Theme.font(15, weight: .medium)).lineLimit(3)
                                 Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
                             }
                         }
@@ -769,7 +770,7 @@ struct CustomerDetailView: View {
         }
     }
     private func detailRow(_ title: String, value: String) -> some View {
-        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(14)).frame(minHeight: 44)
+        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(15)).frame(minHeight: 44)
     }
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
@@ -811,7 +812,7 @@ private struct CustomerContactIcon: View {
         if let url {
             Link(destination: url) {
                 Image(systemName: isPhone ? "phone" : "envelope").font(Theme.font(size == 46 ? 17 : 13)).foregroundStyle(Theme.foreground)
-                    .frame(width: size, height: size).background(size == 46 ? Theme.card : Theme.fill, in: RoundedRectangle(cornerRadius: size == 46 ? 12 : 15))
+                    .frame(width: size, height: size).background(size == 46 ? Theme.card : Theme.fill, in: RoundedRectangle(cornerRadius: size == 46 ? 12 : 15, style: .continuous))
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel("\(isPhone ? "Call" : "Email") \(value)")
         }
