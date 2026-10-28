@@ -3,6 +3,8 @@ import SwiftUI
 /// Customer intake as on the web: a name is all that's required, the rest helps the
 /// technician call, text and find the place.
 struct NewCustomerSheet: View {
+    /// Seeds the name, e.g. with what was typed into a customer search before tapping New.
+    var initialName: String = ""
     var onCreated: (Customer) -> Void = { _ in }
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
@@ -76,7 +78,10 @@ struct NewCustomerSheet: View {
                 PaperActionBar(title: "Save customer", symbol: "person.badge.plus", busy: busy,
                                disabled: !valid || !session.can("customer.create", feature: "core_crm")) { Task { await save() } }
             }
-            .onAppear { focused = .name }
+            .onAppear {
+                if request.name.isEmpty { request.name = initialName.trimmingCharacters(in: .whitespacesAndNewlines) }
+                focused = .name
+            }
             .task(id: CustomerPhoneLookup.digits(phone)) { await checkPhone() }
             // MA-16: typed details aren't lost to a stray swipe; Cancel still leaves.
             .interactiveDismissDisabled(busy || !trimmedName.isEmpty || !phone.isEmpty || !email.isEmpty || !address.isEmpty)
