@@ -81,10 +81,13 @@ struct PriceBookSearchIndex {
                 .prefix(Self.resultLimit)
                 .map { PriceBookSearchResult(item: $0.item, highlights: []) }
         }
-        let normalizedQuery = queryWords.joined(separator: " ")
+        // "R-410A" typed against a book that writes "R410A": try the query with each letter word
+        // joined to its neighbouring number too, the same join the index makes.
+        let spellings = Set([queryWords, Self.joinedModelWords(queryWords)]).map { ($0, $0.joined(separator: " ")) }
         var scored: [(entry: Entry, tier: Int, frecency: Double)] = []
         for entry in candidates {
-            guard let tier = Self.tier(of: entry, queryWords: queryWords, normalizedQuery: normalizedQuery) else { continue }
+            guard let tier = spellings.compactMap({ Self.tier(of: entry, queryWords: $0.0, normalizedQuery: $0.1) }).min()
+            else { continue }
             scored.append((entry, tier, usage[entry.item.id]?.frecency(now: now) ?? 0))
         }
         scored.sort { lhs, rhs in
@@ -114,6 +117,26 @@ struct PriceBookSearchIndex {
     }
 
     // MARK: Matching
+
+    /// Each letter word joined to the number next to it ("r", "410a" → "r410a"); two numbers never
+    /// join. The index adds the same joins for descriptions.
+    static func joinedModelWords(_ words: [String]) -> [String] {
+        var joined: [String] = []
+        var index = words.startIndex
+        while index < words.endIndex {
+            let word = words[index]
+            let next = words.index(after: index)
+            if next < words.endIndex,
+               word.contains(where: \.isNumber) != words[next].contains(where: \.isNumber) {
+                joined.append(word + words[next])
+                index = words.index(after: next)
+            } else {
+                joined.append(word)
+                index = next
+            }
+        }
+        return joined
+    }
 
     /// 0 whole description, 1 description starts with the query, 2 every word a word start,
     /// 3 some word only contained, 4 some word only within one typo. Nil when any word misses.

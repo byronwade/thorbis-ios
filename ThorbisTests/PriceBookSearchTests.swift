@@ -84,6 +84,10 @@ final class PriceBookSearchTests: XCTestCase {
         XCTAssertTrue(PriceBookSearchIndex(items: [item(20, "Pipe 110 mm")]).search("10mm pipe").isEmpty,
                       "a size never matches inside a larger one")
         XCTAssertEqual(PriceBookSearchIndex(items: [item(21, "Pipe 10 mm")]).search("10mm pipe").count, 1)
+        let joinedBook = PriceBookSearchIndex(items: [item(22, "Refrigerant R410A")])
+        XCTAssertEqual(joinedBook.search("R-410A").count, 1, "a dash typed into a model written without one")
+        XCTAssertEqual(joinedBook.search("r 410a").count, 1)
+        XCTAssertTrue(joinedBook.search("r 420a").isEmpty)
         XCTAssertEqual(search("R 410A"), ["Refrigerant R-410A"])
         XCTAssertEqual(search("CONDÉNSER").first, "Condenser coil cleaning")
     }
