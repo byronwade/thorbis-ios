@@ -208,6 +208,7 @@ struct EstimateSearchBar: View {
     let focus: FocusState<EstimateBuilderFocus?>.Binding
     let searching: Bool
     let prompt: String
+    var keepFiltersVisible = false
     let finish: () -> Void
 
     var body: some View {
@@ -222,7 +223,7 @@ struct EstimateSearchBar: View {
                         .submitLabel(.done)
                         .focused(focus, equals: .search)
                         .onSubmit(finish)
-                        .accessibilityLabel("Search price book or type a line")
+                        .accessibilityLabel(prompt)
                     if !query.isEmpty {
                         Button { query = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
@@ -242,7 +243,7 @@ struct EstimateSearchBar: View {
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            if searching {
+            if searching || keepFiltersVisible {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(PriceBookKindFilter.allCases) { filter in

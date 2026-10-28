@@ -1,8 +1,52 @@
+import Combine
 import XCTest
 @testable import Thorbis
 
 @MainActor
 final class PriceBookCatalogTests: XCTestCase {
+    func testAPIScopeChangeBeforeSharedLoadStartsCannotFillThePreviousWorkspaceCache() async throws {
+        let org = UUID().uuidString.lowercased()
+        defer { removeOwnCache(org) }
+        let api = client([.init(200, try page([(1,"Changed workspace")]))])
+        let catalog = PriceBookCatalog()
+        var invalidated = false
+        let observation = catalog.$loading.sink { loading in
+            if loading && !invalidated {
+                invalidated = true
+                api.invalidateRequests()
+            }
+        }
+        defer { observation.cancel() }
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: UUID(), force: true)
+        XCTAssertTrue(catalog.items.isEmpty)
+        XCTAssertFalse(catalog.loading)
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty, "A load handed to a changed API scope must not start a request")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL(org).path))
+    }
+
+    func testCancellingInitialCallerDoesNotStrandSameScopeRefresh() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([(1,"Shared catalog")]), gate: gate)])
+        let catalog = PriceBookCatalog()
+        let first = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true) }
+        try await waitForRequests(1)
+        let release = Task {
+            first.cancel()
+            gate.release()
+        }
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true)
+        await release.value
+        await first.value
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertFalse(catalog.loading)
+        XCTAssertNil(catalog.error)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertTrue(String(decoding: try Data(contentsOf: cacheURL(org)), as: UTF8.self).contains("Shared catalog"))
+    }
+
     func testRefreshLoadsAllPagesAndDeduplicatesIDs() async throws {
         let org = UUID().uuidString.lowercased()
         defer { removeOwnCache(org) }

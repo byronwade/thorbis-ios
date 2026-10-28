@@ -59,6 +59,29 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["No matching items"].waitForExistence(timeout: 10))
     }
 
+    func testSelectedCategoryStaysVisibleAfterClosingKeyboard() {
+        let app = openPriceBook()
+        let bar = app.otherElements["price-book-search"]
+        let search = bar.textFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        bar.buttons["Materials"].tap()
+        bar.buttons["Done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(bar.buttons["Materials"].exists, "An active category must stay visible")
+        XCTAssertTrue(bar.buttons["Materials"].isSelected)
+        bar.buttons["All"].tap()
+        XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009701"].waitForExistence(timeout: 5))
+    }
+
+    func testInvoiceSearchAnnouncesCatalogSearchOnly() {
+        let app = openPriceBook()
+        let search = app.otherElements["price-book-search"].textFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        XCTAssertEqual(search.label, "Search price book", "The spoken instruction must not promise custom lines in this picker")
+    }
+
     private func openPriceBook() -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()

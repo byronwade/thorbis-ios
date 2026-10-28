@@ -359,7 +359,7 @@ struct PaperPriceBookPicker: View {
                     description: Text(currency == "USD" ? "This account cannot select Price Book items." : "Catalog selection requires a USD invoice."))
             } else {
                 EstimateSearchBar(query: $search, kind: $kind, focus: $focus, searching: focus == .search,
-                    prompt: "Search price book", finish: { focus = nil })
+                    prompt: "Search price book", keepFiltersVisible: kind != .all, finish: { focus = nil })
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("price-book-search")
                 ScrollView {

@@ -21,7 +21,7 @@ enum ReleaseNotes {
                 .init(symbol: "plus.circle", title: "Add several items without going back",
                       detail: "Keep searching and adding, see the quantity in your draft, then tap Done when you're ready."),
             ],
-            fixes: 2
+            fixes: 5
         ),
         ReleaseNote(
             id: "2026-10-28-job-documents",

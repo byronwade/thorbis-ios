@@ -282,11 +282,12 @@ final class PriceBookCatalog: ObservableObject {
     private(set) var organizationID: String?
     private var lastRefresh: Date?
     private(set) var context: PriceBookCatalogContext?
-    private var loadingRequest: (context: PriceBookCatalogContext, id: UUID)?
+    private var loadingRequest: (context: PriceBookCatalogContext, apiGeneration: UUID, id: UUID, task: Task<Void, Never>)?
 
     /// Shows the cached catalog for `organizationID` right away, then reloads every page.
     func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID, force: Bool = false) async {
         guard !Task.isCancelled else { return }
+        let apiGeneration = api.requestGeneration
         let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration)
         if context != requested {
             context = requested
@@ -297,17 +298,33 @@ final class PriceBookCatalog: ObservableObject {
             error = nil
         }
         guard let organizationID else {
+            loadingRequest?.task.cancel()
             loadingRequest = nil
             loading = false
             return
         }
         if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < 60 { return }
-        guard loadingRequest?.context != requested else { return }
+        if let pending = loadingRequest, pending.context == requested, pending.apiGeneration == apiGeneration {
+            await pending.task.value
+            return
+        }
+        loadingRequest?.task.cancel()
         let request = UUID()
-        loadingRequest = (requested, request)
         loading = true
+        // The catalog owns this work so closing its initiating view cannot strand other callers.
+        let task = Task {
+            await self.load(api: api, organizationID: organizationID, context: requested,
+                            apiGeneration: apiGeneration, request: request)
+        }
+        loadingRequest = (requested, apiGeneration, request, task)
+        await task.value
+    }
+
+    private func load(api: APIClient, organizationID: String, context requested: PriceBookCatalogContext,
+                      apiGeneration: UUID, request: UUID) async {
         let current: @MainActor () -> Bool = {
-            self.context == requested && self.loadingRequest?.id == request && !Task.isCancelled
+            self.context == requested && self.loadingRequest?.id == request &&
+                api.requestGeneration == apiGeneration && !Task.isCancelled
         }
         defer {
             if loadingRequest?.id == request {
@@ -321,6 +338,7 @@ final class PriceBookCatalog: ObservableObject {
             var cursor: String?
             var pages = 0
             repeat {
+                guard current() else { return }
                 let page = try await api.priceBookItems(limit: 200, cursor: cursor)
                 guard current() else { return }
                 for item in page.items where seen.insert(item.id).inserted { all.append(item) }
@@ -401,6 +419,7 @@ final class PriceBookCatalog: ObservableObject {
         organizationID = nil
         lastRefresh = nil
         context = nil
+        loadingRequest?.task.cancel()
         loadingRequest = nil
         error = nil
         loading = false
