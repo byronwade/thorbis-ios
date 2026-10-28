@@ -57,7 +57,13 @@ struct PriceBookSearchIndex {
         entries = items.compactMap { item in
             guard item.archivedAt == nil, item.sellPrice.currency == currency else { return nil }
             let kindWords = item.kind.isEmpty ? [] : [item.kind, item.kind + "s"]
-            let words = Self.words(item.description) + Self.words(item.unit) + kindWords.map(Self.normalize)
+            let nameWords = Self.words(item.description)
+            // A letter word joined to its neighbouring number, so "R410A" finds "R-410A" exactly
+            // instead of by a typo. Two numbers never join: "45/5" is not "455".
+            let joined = zip(nameWords, nameWords.dropFirst())
+                .filter { $0.contains(where: \.isNumber) != $1.contains(where: \.isNumber) }
+                .map { $0 + $1 }
+            let words = nameWords + joined + Self.words(item.unit) + kindWords.map(Self.normalize)
             return Entry(item: item, normalizedDescription: Self.normalize(item.description), words: words)
         }
     }
@@ -75,10 +81,13 @@ struct PriceBookSearchIndex {
                 .prefix(Self.resultLimit)
                 .map { PriceBookSearchResult(item: $0.item, highlights: []) }
         }
-        let normalizedQuery = queryWords.joined(separator: " ")
+        // "R-410A" typed against a book that writes "R410A": try the query with each letter word
+        // joined to its neighbouring number too, the same join the index makes.
+        let spellings = Set([queryWords, Self.joinedModelWords(queryWords)]).map { ($0, $0.joined(separator: " ")) }
         var scored: [(entry: Entry, tier: Int, frecency: Double)] = []
         for entry in candidates {
-            guard let tier = Self.tier(of: entry, queryWords: queryWords, normalizedQuery: normalizedQuery) else { continue }
+            guard let tier = spellings.compactMap({ Self.tier(of: entry, queryWords: $0.0, normalizedQuery: $0.1) }).min()
+            else { continue }
             scored.append((entry, tier, usage[entry.item.id]?.frecency(now: now) ?? 0))
         }
         scored.sort { lhs, rhs in
@@ -109,6 +118,26 @@ struct PriceBookSearchIndex {
 
     // MARK: Matching
 
+    /// Each letter word joined to the number next to it ("r", "410a" → "r410a"); two numbers never
+    /// join. The index adds the same joins for descriptions.
+    static func joinedModelWords(_ words: [String]) -> [String] {
+        var joined: [String] = []
+        var index = words.startIndex
+        while index < words.endIndex {
+            let word = words[index]
+            let next = words.index(after: index)
+            if next < words.endIndex,
+               word.contains(where: \.isNumber) != words[next].contains(where: \.isNumber) {
+                joined.append(word + words[next])
+                index = words.index(after: next)
+            } else {
+                joined.append(word)
+                index = next
+            }
+        }
+        return joined
+    }
+
     /// 0 whole description, 1 description starts with the query, 2 every word a word start,
     /// 3 some word only contained, 4 some word only within one typo. Nil when any word misses.
     private static func tier(of entry: Entry, queryWords: [String], normalizedQuery: String) -> Int? {
@@ -127,12 +156,13 @@ struct PriceBookSearchIndex {
         }
     }
 
-    /// Numbers never take a typo or a contains match, and only the word still being typed may
-    /// match a longer number as a prefix ("12" must not find "120" once the next word is typed).
+    /// A word with any digit in it is a number, model or size ("12", "R410A", "10mm"): it never
+    /// takes a typo or a contains match, and only the word still being typed may match a longer
+    /// one as a prefix. So "R420A" never finds "R410A", "10mm" never finds "110mm", and "12"
+    /// stops finding "120" once the next word is typed.
     private static func match(_ query: String, against word: String, typing: Bool) -> WordMatch? {
         if word == query { return .exact }
-        let numeric = query.allSatisfy(\.isNumber)
-        if numeric { return typing && word.hasPrefix(query) ? .prefix : nil }
+        if query.contains(where: \.isNumber) { return typing && word.hasPrefix(query) ? .prefix : nil }
         if word.hasPrefix(query) { return .prefix }
         if query.count >= 3, word.contains(query) { return .contains }
         guard query.count >= 4 else { return nil }

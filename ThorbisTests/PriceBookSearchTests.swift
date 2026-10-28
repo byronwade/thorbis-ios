@@ -78,7 +78,16 @@ final class PriceBookSearchTests: XCTestCase {
     }
 
     func testPunctuationAndAccentsAreIgnored() {
-        XCTAssertEqual(search("r410a"), ["Refrigerant R-410A"], "one typo from the word 410a")
+        XCTAssertEqual(search("r410a"), ["Refrigerant R-410A"], "neighbouring words match joined")
+        XCTAssertTrue(search("r420a").isEmpty, "a model number never takes a typo")
+        XCTAssertTrue(search("455 capacitor").isEmpty, "two sizes never join into one number")
+        XCTAssertTrue(PriceBookSearchIndex(items: [item(20, "Pipe 110 mm")]).search("10mm pipe").isEmpty,
+                      "a size never matches inside a larger one")
+        XCTAssertEqual(PriceBookSearchIndex(items: [item(21, "Pipe 10 mm")]).search("10mm pipe").count, 1)
+        let joinedBook = PriceBookSearchIndex(items: [item(22, "Refrigerant R410A")])
+        XCTAssertEqual(joinedBook.search("R-410A").count, 1, "a dash typed into a model written without one")
+        XCTAssertEqual(joinedBook.search("r 410a").count, 1)
+        XCTAssertTrue(joinedBook.search("r 420a").isEmpty)
         XCTAssertEqual(search("R 410A"), ["Refrigerant R-410A"])
         XCTAssertEqual(search("CONDÉNSER").first, "Condenser coil cleaning")
     }
