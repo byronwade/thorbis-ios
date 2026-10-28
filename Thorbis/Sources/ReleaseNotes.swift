@@ -13,6 +13,19 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-estimate-builder",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Find price book items as you type",
+                      detail: "Search forgives typos and words in any order, and puts the items you use most first."),
+                .init(symbol: "plus.circle", title: "Tap to add, tap again for one more",
+                      detail: "Results stay open while you add. Type anything that isn't in the book to add it as a line."),
+                .init(symbol: "line.3.horizontal", title: "Arrange Work and Materials your way",
+                      detail: "Edit any line in place, drag to reorder, and undo a removed line."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
             id: "2026-10-28-next-step",
             date: "2026-10-28",
             highlights: [
