@@ -170,7 +170,7 @@ struct InvoiceLineEditorView: View {
         }
         .sheet(isPresented: $showPriceBook) {
             NavigationStack {
-                PaperPriceBookPicker(api: api, currency: invoice.currency) { item in
+                PaperPriceBookPicker(api: api, currency: invoice.currency, customerID: invoice.customerId) { item in
                     do {
                         try editor.addPriceBookItem(item)
                         error = nil
@@ -366,8 +366,11 @@ struct PaperPriceBookPicker: View {
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     let currency: String
+    /// When set and the customer is a member, each item also shows the member price.
+    var customerID: String? = nil
     let onSelect: (PriceBookListItem) -> Void
 
+    @State private var memberPricing: MemberPricing?
     @State private var items: [PriceBookListItem] = []
     @State private var cursor: String?
     @State private var search = ""
@@ -404,8 +407,14 @@ struct PaperPriceBookPicker: View {
                                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                                 }
                                 Spacer(minLength: 8)
-                                Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                                    .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
+                                        .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
+                                        Text("Member \(money(memberPricing.memberPrice(item.sellPrice.amount), currency: item.sellPrice.currency))")
+                                            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.success)
+                                    }
+                                }
                             }
                             .padding(.vertical, 5)
                             .contentShape(Rectangle())
@@ -435,6 +444,10 @@ struct PaperPriceBookPicker: View {
                 .background(Theme.background)
                 .refreshable { await refresh() }
                 .task { await refresh() }
+                .task(id: customerID) {
+                    guard let customerID else { return }
+                    memberPricing = try? await api.memberPricing(customerID)
+                }
             }
         }
         .background(Theme.background)

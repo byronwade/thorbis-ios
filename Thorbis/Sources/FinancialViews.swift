@@ -66,7 +66,7 @@ struct EstimateDetailView: View {
     @State private var confirm = false
     @State private var showRevisionEditor = false
     @State private var action = ""
-    @State private var showSignature = false
+    @State private var showToCustomer = false
     @State private var memberPricing: MemberPricing?
     var body: some View {
         ScrollView {
@@ -159,10 +159,11 @@ struct EstimateDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
                 PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
-            } else if let record, record.status == "sent", jobID != nil, (record.options ?? []).isEmpty,
-                      session.can("estimate.approve", feature: "estimates") {
-                // On site, the next step is the customer's yes: keep it one tap away.
-                PaperActionBar(title: "Customer approves and signs", symbol: "signature", busy: busy) { showSignature = true }
+            } else if let record, record.status == "sent", session.can("estimate.approve", feature: "estimates"),
+                      (jobID != nil && (record.options ?? []).isEmpty) || session.can("estimate.send", feature: "estimates") {
+                // On site, the next step is the customer's yes: hand them the options to choose and sign.
+                // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
+                PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
             }
         }
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
@@ -178,16 +179,16 @@ struct EstimateDetailView: View {
         }
         .task { await load() }
         .refreshable { await load() }
-        .sheet(isPresented: $showSignature) {
-            if let record, let jobID, let revision = record.currentRevisionNumber {
-                SignatureCaptureSheet(title: "Approve \(paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") } ?? "estimate")",
-                                      summary: "By signing, \(store.customerName(record.customerId)) approves \"\(record.title)\" as shown.",
-                                      jobID: jobID, suggestedName: store.customerName(record.customerId)) { signature in
-                    do {
-                        self.record = try await api.approveFieldEstimate(id, revisionNumber: revision, signature: signature)
-                        return nil
-                    } catch { return error.localizedDescription }
+        .fullScreenCover(isPresented: $showToCustomer) {
+            if let record {
+                CustomerModeContainer(onUnlocked: {
+                    showToCustomer = false
+                    Task { await load() }
+                }) { handBack in
+                    CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
+                                                 onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
                 }
+                .environmentObject(api)
             }
         }
     }
@@ -277,6 +278,9 @@ struct InvoiceDetailView: View {
     @State private var showCollectPayment = false
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var showSignature = false
+    @State private var showToCustomer = false
+    /// Set when the customer pressed Pay and the technician unlocked: collect once customer mode closes.
+    @State private var collectAfterCustomer = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -320,6 +324,10 @@ struct InvoiceDetailView: View {
                         .buttonStyle(.plain)
                     }
                     Text("Actions").font(Theme.font(16, weight: .semibold)).padding(.top, 8)
+                    if record.status != "draft", record.status != "void" {
+                        Button { showToCustomer = true } label: { commercialAction("Show to customer", icon: "person.crop.rectangle") }
+                            .buttonStyle(.plain)
+                    }
                     NavigationLink { CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
                         commercialAction("View PDF", icon: "doc.text")
                     }
@@ -380,6 +388,32 @@ struct InvoiceDetailView: View {
                 }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+            }
+        }
+        .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
+            if collectAfterCustomer { collectAfterCustomer = false; showCollectPayment = true }
+        }) {
+            if let record {
+                CustomerModeContainer(onUnlocked: { showToCustomer = false }) { handBack in
+                    CustomerInvoicePresentation(
+                        invoice: record, customerName: store.customerName(record.customerId),
+                        canSign: session.can("invoice.edit", feature: "invoicing"),
+                        onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments") ? {
+                            // Taking payment is a staff screen, so the technician unlocks first.
+                            Task {
+                                if await StaffUnlock.unlock(reason: "Unlock to take payment") {
+                                    collectAfterCustomer = true
+                                    showToCustomer = false
+                                }
+                            }
+                        } : nil,
+                        onSigned: { updated in
+                            self.record = updated
+                            paymentModel?.acceptInvoiceMutationResponse(updated)
+                        },
+                        onDone: handBack)
+                }
+                .environmentObject(api)
             }
         }
         .sheet(isPresented: $showCollectPayment) {
@@ -706,7 +740,7 @@ struct NewEstimateView: View {
             }
             .sheet(isPresented: $showPriceBook) {
                 NavigationStack {
-                    PaperPriceBookPicker(api: api, currency: "USD") { item in
+                    PaperPriceBookPicker(api: api, currency: "USD", customerID: customerID.isEmpty ? nil : customerID) { item in
                         guard lines.count < 500, item.sellPrice.currency == "USD", item.revision > 0 else { return }
                         lines.append(DraftLine(description: item.description, quantity: 1,
                                                price: String(format: "%.2f", Double(item.sellPrice.amount) / 100),

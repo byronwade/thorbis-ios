@@ -602,6 +602,11 @@ struct MoreView: View {
                     }
                 }
                 group("Account") {
+                    if session.can("organization.settings.edit") {
+                        NavigationLink(value: PaperRoute.payments) {
+                            PaperMenuRow("Payments", symbol: "creditcard", subtitle: "Stripe setup, card payments and payouts", tile: Theme.markForest)
+                        }
+                    }
                     NavigationLink(value: PaperRoute.customizeMenu) {
                         PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
                     }

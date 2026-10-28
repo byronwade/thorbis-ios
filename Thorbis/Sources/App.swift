@@ -52,6 +52,7 @@ struct ThorbisApp: App {
             store?.bindCache(actorID: actorID, organizationID: organizationID)
             PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
+            Task { @MainActor in RecentItems.shared.bind(actorID: actorID, organizationID: organizationID) }
         }
         PushNotifications.shared.start(api: api, store: store)
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
@@ -69,26 +70,38 @@ struct ThorbisApp: App {
         #endif
     }
 
+    @ViewBuilder private var appContent: some View {
+        if let publicEstimateToken {
+            PublicEstimateActionView(token: publicEstimateToken) {
+                self.publicEstimateToken = nil
+            }
+            .id(publicEstimateToken)
+        } else {
+            switch session.phase {
+            case .restoring:
+                ProgressView("Opening your workspace…")
+            case .signedOut, .failed:
+                LoginView()
+            case .choosingWorkspace, .noWorkspace:
+                WorkspaceSelectionView()
+            case .ready:
+                RootView().id(session.generation)
+            }
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
-                if let publicEstimateToken {
-                    PublicEstimateActionView(token: publicEstimateToken) {
-                        self.publicEstimateToken = nil
-                    }
-                    .id(publicEstimateToken)
+                #if DEBUG
+                if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
+                    CustomerPresentationPreview(screen: PaperPreview.screen)
                 } else {
-                    switch session.phase {
-                    case .restoring:
-                        ProgressView("Opening your workspace…")
-                    case .signedOut, .failed:
-                        LoginView()
-                    case .choosingWorkspace, .noWorkspace:
-                        WorkspaceSelectionView()
-                    case .ready:
-                        RootView().id(session.generation)
-                    }
+                    appContent
                 }
+                #else
+                appContent
+                #endif
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.background)
@@ -136,6 +149,8 @@ struct ThorbisApp: App {
                     publicEstimateToken = token
                 } else if let jobID = JobActivityLink.jobID(from: url) {
                     store.requestedJobID = jobID
+                } else if let record = RecordLink(url: url) {
+                    store.requestedRecord = record
                 } else if url.scheme == "thorbis", url.host() == "schedule" {
                     store.requestedSchedule += 1
                 }
@@ -182,6 +197,8 @@ final class Store: ObservableObject {
     @Published var requestedJobID: String?
     /// Bumped by the "Show my schedule" shortcut; RootView switches to Schedule.
     @Published var requestedSchedule = 0
+    /// A customer, estimate or invoice a link asked to open; RootView pushes it and clears this.
+    @Published var requestedRecord: RecordLink?
     @Published var customers: [Customer] = []
     @Published var error: String?
     @Published var loading = false

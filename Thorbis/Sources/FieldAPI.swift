@@ -1112,7 +1112,8 @@ extension APIClient {
 
     /// Records an explicit decision the customer gave staff. Online only; the key makes a retry safe.
     func recordCustomerSmsConsent(_ customerID: String, grant: Bool, expectedVersion: String?,
-                                  idempotencyKey: String) async throws -> CustomerSmsConsent {
+                                  idempotencyKey: String,
+                                  evidenceRef: String = "Told staff in person or by phone; recorded in the Thorbis iPhone app") async throws -> CustomerSmsConsent {
         // The customer and purpose come from the route; the server refuses them in the body.
         struct Body: Encodable {
             let decision: String
@@ -1131,7 +1132,7 @@ extension APIClient {
         struct Receipt: Decodable { let version: String; let decision: String; let recordedAt: String }
         let receipt: Receipt = try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"),
                                               body: Body(decision: grant ? "grant" : "revoke",
-                                                         expectedVersion: expectedVersion, evidenceRef: "Told staff in person or by phone; recorded in the Thorbis iPhone app",
+                                                         expectedVersion: expectedVersion, evidenceRef: evidenceRef,
                                                          idempotencyKey: idempotencyKey))
         return CustomerSmsConsent(decision: receipt.decision, version: receipt.version, recordedAt: receipt.recordedAt)
     }

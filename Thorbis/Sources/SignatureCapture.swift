@@ -14,14 +14,13 @@ struct SignatureCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var strokes: [[CGPoint]] = []
-    @State private var current: [CGPoint] = []
     @State private var busy = false
     @State private var error: String?
     /// Kept across retries so a second tap reuses the same uploaded image.
     @State private var uploaded: (key: String, mediaID: String)?
     @State private var clientAssetID = UUID().uuidString
 
-    private var hasInk: Bool { strokes.contains { $0.count > 1 } }
+    private var hasInk: Bool { SignatureInk.hasInk(strokes) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSubmit: Bool { hasInk && !trimmedName.isEmpty && trimmedName.count <= 120 && !busy }
 
@@ -73,37 +72,10 @@ struct SignatureCaptureSheet: View {
     }
 
     private var pad: some View {
-        Canvas { context, _ in
-            for stroke in strokes + [current] where stroke.count > 1 {
-                var path = Path()
-                path.addLines(stroke)
-                context.stroke(path, with: .color(.black), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
-            }
+        SignaturePad(strokes: $strokes) {
+            uploaded = nil
+            clientAssetID = UUID().uuidString
         }
-        .background(Color.white)
-        .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { current.append($0.location) }
-            .onEnded { _ in
-                strokes.append(current)
-                current = []
-                uploaded = nil
-                clientAssetID = UUID().uuidString
-            })
-    }
-
-    @MainActor private func png(size: CGSize) -> Data? {
-        let drawing = Canvas { context, _ in
-            for stroke in strokes where stroke.count > 1 {
-                var path = Path()
-                path.addLines(stroke)
-                context.stroke(path, with: .color(.black), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
-            }
-        }
-        .frame(width: size.width, height: size.height)
-        .background(Color.white)
-        let renderer = ImageRenderer(content: drawing)
-        renderer.scale = 2
-        return renderer.uiImage?.pngData()
     }
 
     private func sign() async {
@@ -116,9 +88,7 @@ struct SignatureCaptureSheet: View {
             if let uploaded, uploaded.key == key {
                 mediaID = uploaded.mediaID
             } else {
-                let maxX = strokes.flatMap { $0 }.map(\.x).max() ?? 320
-                let maxY = strokes.flatMap { $0 }.map(\.y).max() ?? 200
-                guard let data = png(size: CGSize(width: max(maxX + 16, 200), height: max(maxY + 16, 120))) else {
+                guard let data = SignatureInk.png(strokes) else {
                     error = "The signature could not be saved. Try again."
                     return
                 }
@@ -134,6 +104,59 @@ struct SignatureCaptureSheet: View {
         } catch {
             self.error = error.isConnectivityFailure ? "Signing needs a connection. Try again when you have signal." : error.localizedDescription
         }
+    }
+}
+
+/// The drawing surface for a finger signature: black ink on white in light and dark mode.
+/// `onStroke` runs after each finished stroke so a caller can drop an upload made for older ink.
+struct SignaturePad: View {
+    @Binding var strokes: [[CGPoint]]
+    var onStroke: () -> Void = {}
+    @State private var current: [CGPoint] = []
+
+    var body: some View {
+        Canvas { context, _ in
+            for stroke in strokes + [current] where stroke.count > 1 {
+                context.stroke(SignatureInk.path(stroke), with: .color(.black), style: SignatureInk.style)
+            }
+        }
+        .background(Color.white)
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { current.append($0.location) }
+            .onEnded { _ in
+                strokes.append(current)
+                current = []
+                onStroke()
+            })
+    }
+}
+
+enum SignatureInk {
+    static let style = StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round)
+
+    static func path(_ stroke: [CGPoint]) -> Path {
+        var path = Path()
+        path.addLines(stroke)
+        return path
+    }
+
+    static func hasInk(_ strokes: [[CGPoint]]) -> Bool { strokes.contains { $0.count > 1 } }
+
+    /// The drawing as a PNG, cropped to the ink's extent plus a margin.
+    @MainActor static func png(_ strokes: [[CGPoint]]) -> Data? {
+        let maxX = strokes.flatMap { $0 }.map(\.x).max() ?? 320
+        let maxY = strokes.flatMap { $0 }.map(\.y).max() ?? 200
+        let size = CGSize(width: max(maxX + 16, 200), height: max(maxY + 16, 120))
+        let drawing = Canvas { context, _ in
+            for stroke in strokes where stroke.count > 1 {
+                context.stroke(path(stroke), with: .color(.black), style: style)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .background(Color.white)
+        let renderer = ImageRenderer(content: drawing)
+        renderer.scale = 2
+        return renderer.uiImage?.pngData()
     }
 }
 

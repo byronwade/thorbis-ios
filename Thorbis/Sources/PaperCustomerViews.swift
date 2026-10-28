@@ -219,6 +219,7 @@ struct CustomerDetailView: View {
     @State private var smsConsentKey = UUID().uuidString
     @State private var smsConsentChoice: Bool?
     @State private var smsConsentError: String?
+    @State private var showCustomerMode = false
     private var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
     private var contacts: [CustomerContactRecord] { contactState.contacts }
@@ -273,6 +274,7 @@ struct CustomerDetailView: View {
             if canEdit {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
                         Button("Add contact", systemImage: "person.badge.plus") { contactSheet = .add }
                             .disabled(!contactsLoaded)
                         Button("Add location", systemImage: "mappin.and.ellipse") { locationSheet = .add }
@@ -283,6 +285,12 @@ struct CustomerDetailView: View {
         }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
+                if canEdit {
+                    Button { showCustomerMode = true } label: {
+                        Label("Show to customer", systemImage: "person.crop.rectangle").font(Theme.font(15, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 46).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .accessibilityHint("Hands the device to the customer to check and fix their details")
+                }
                 if session.can("job.create", feature: "jobs") {
                     Button { showNewJob = true } label: {
                         Label("New job", systemImage: "plus").font(Theme.font(15, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 46).foregroundStyle(.white).background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
@@ -301,6 +309,9 @@ struct CustomerDetailView: View {
             if tab == "Activity" { await loadActivity(reset: true) }
         }
         .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
+        .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task { await load(); await loadSmsConsent() } }) {
+            CustomerSelfEditView(customerID: customer.id) { showCustomerMode = false }
+        }
         .sheet(item: $contactSheet, onDismiss: { Task { await load() } }) { item in
             CustomerContactSheet(customerID: customer.id, contact: item.contact) { contact in
                 contactState.save(contact)
