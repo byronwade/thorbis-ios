@@ -94,7 +94,7 @@ struct JobAssignmentView: View {
                                 }
                                 .frame(minHeight: 52).contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RowPressStyle())
                             .accessibilityAddTraits(selectedUserID == person.userId ? .isSelected : [])
                         }
                     }

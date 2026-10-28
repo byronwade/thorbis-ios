@@ -99,11 +99,11 @@ struct JobCloseoutView: View {
                         if session.can("invoice.create", feature: "invoicing") {
                             Button { Task { await completionInvoice() } } label: {
                                 PaperMenuRow("Open completion invoice", symbol: "doc.plaintext")
-                            }.buttonStyle(.plain).disabled(busy)
+                            }.buttonStyle(RowPressStyle()).disabled(busy)
                         }
                         if let invoiceID, session.can("invoice.view", feature: "invoicing") {
                             NavigationLink { InvoiceDetailView(id: invoiceID) } label: { PaperMenuRow("View invoice", symbol: "doc.text") }
-                                .buttonStyle(.plain)
+                                .buttonStyle(RowPressStyle())
                         }
                     }
                     if session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
@@ -330,7 +330,7 @@ struct JobScheduleView: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .accessibilityLabel("Close schedule picker")
             .disabled(busy)
         }
@@ -347,7 +347,7 @@ struct JobScheduleView: View {
             } label: {
                 HStack(spacing: 6) {
                     Text("Pick date")
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
                         .rotationEffect(.degrees(showsCalendar ? 180 : 0))
                 }
                 .font(Theme.font(13, weight: showsCalendar ? .semibold : .medium))
@@ -358,7 +358,7 @@ struct JobScheduleView: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .accessibilityAddTraits(showsCalendar ? .isSelected : [])
             Spacer(minLength: 0)
         }
@@ -403,7 +403,7 @@ struct JobScheduleView: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -435,7 +435,7 @@ struct JobScheduleView: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowPressStyle())
         .accessibilityLabel("\(label), two hour arrival window")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -650,6 +650,8 @@ struct FollowUpBookingSheet: View {
             }
             .onAppear { if need.isEmpty { need = followUp.nextAction } }
         }
+        .interactiveDismissDisabled(busy)
+        .presentationCornerRadius(Theme.cardRadius)
     }
 
     private var window: (Date, Date)? {

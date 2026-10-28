@@ -261,7 +261,7 @@ struct JobDetailView: View {
                                 .background(Theme.fill, in: Capsule())
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                         .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
                     }
                     if let assignedName = assignedDisplayName(for: job) {
@@ -340,7 +340,7 @@ struct JobDetailView: View {
         let queued = outbox.pendingStatus(for: job.id)
         return HStack(spacing: 5) {
             Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .medium))
             Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
                 .font(Theme.font(12, weight: .medium))
             if showsMenu { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
@@ -429,11 +429,11 @@ struct JobDetailView: View {
                         PaperDetailRow(label: "Address") {
                             HStack(spacing: 4) {
                                 Text(place.address).foregroundStyle(Theme.brandText)
-                                Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.brandText)
                             }
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .accessibilityHint("Opens driving directions in Maps")
                     let access = [place.gateCode.map { "Gate \($0)" }, place.alarmCode.map { "Alarm \($0)" },
                                   place.dogOnSite.map { "Dog: \($0)" }, place.parking.map { "Parking: \($0)" }].compactMap { $0 }
@@ -455,18 +455,18 @@ struct JobDetailView: View {
                     Button { runTransition(target) } label: {
                         PaperMenuRow(transitionTitle(target), symbol: transitionSymbol(target))
                     }
-                    .buttonStyle(.plain).disabled(busy)
+                    .buttonStyle(RowPressStyle()).disabled(busy)
                 }
                 if session.can("job.assign", feature: "jobs") {
                     Button { showSchedule = true } label: { PaperMenuRow("Schedule", symbol: "calendar", subtitle: "Pick a day and arrival window") }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowPressStyle())
                     NavigationLink { JobAssignmentView(jobID: jobId) } label: { PaperMenuRow("Assign technician", symbol: "person.crop.circle.badge.plus") }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowPressStyle())
                 }
                 NavigationLink { JobCloseoutView(jobID: jobId) } label: { PaperMenuRow("Wrap up", symbol: "checkmark.seal", subtitle: "Closeout checklist") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowPressStyle())
                 NavigationLink { JobFollowUpsView(jobID: jobId) } label: { PaperMenuRow("Follow-ups", symbol: "list.bullet") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowPressStyle())
             }
         }
     }
@@ -518,7 +518,7 @@ struct JobDetailView: View {
                         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 }
             }
         }
@@ -569,7 +569,7 @@ struct JobDetailView: View {
                     Button { showDeposit = true } label: {
                         PaperMenuRow("Request a deposit", symbol: "banknote", subtitle: "Bill part up front from the approved estimate")
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowPressStyle())
                 }
             } else {
                 if invoices.count > 1 {
@@ -583,7 +583,7 @@ struct JobDetailView: View {
                         HStack(spacing: 7) {
                             Text("INV-\((selectedInvoice?.id ?? invoices[0].id).suffix(4).uppercased())")
                                 .font(Theme.monoFont(12, weight: .medium))
-                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                            Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
                         }
                         .foregroundStyle(Theme.muted)
                         .padding(.horizontal, 10)
@@ -633,7 +633,7 @@ struct JobDetailView: View {
                             .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
                             .frame(minHeight: 44).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .accessibilityAddTraits(activityFilter == filter ? .isSelected : [])
                 }
             }
@@ -641,7 +641,7 @@ struct JobDetailView: View {
                 ForEach(timeline(job)) { entry in
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
-                            Image(systemName: entry.symbol).font(.system(size: 11, weight: .semibold))
+                            Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(entry.isNote ? Theme.brandText : Theme.muted)
                                 .frame(width: 26, height: 26)
                                 .background(entry.isNote ? Theme.brandSurface : Theme.fill, in: Circle())
@@ -759,7 +759,7 @@ struct JobDetailView: View {
             Image(systemName: icon).foregroundStyle(Theme.brandText).frame(width: 20)
             Text(title).font(Theme.font(14, weight: .medium))
             Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
         }
         .foregroundStyle(Theme.foreground)
         .padding(15)
@@ -768,7 +768,7 @@ struct JobDetailView: View {
 
     private func actionButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { actionLabel(title, icon: icon) }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .disabled(busy)
     }
 
