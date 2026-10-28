@@ -48,7 +48,7 @@ iPhone 17 Pro Simulator, iOS 26.0 (23A343), arm64, 28 October 2026:
 - Focused action/layout/appearance/native checks: **20 passed, zero failures**.
   [Machine-readable summary](evidence/2026-10-28-job-overview/focused-tests.json).
 - Full app scheme: **323 passed, zero failures, zero skipped**, including all three native UI tests and the scroll-reachability check. [Machine-readable summary](evidence/2026-10-28-job-overview/full-tests.json).
-- `git diff --check`: passed. The final review is recorded below when complete.
+- `git diff --check`: passed. Fresh whole-branch review: no Critical or Important issues; ready to merge this scoped batch. One deferred minor: direct regression coverage for conflicting queued/fetched/list Schedule state precedence. Physical-device, live backend and whole-app certification remain unverified as recorded in the matrix.
 
 The native tests use read-only DEBUG preview fixtures. They prove local
 navigation and layout, not a successful live dispatch, payment, or closeout.
