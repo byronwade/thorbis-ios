@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "side-menu", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "side-menu", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
@@ -26,6 +26,26 @@ enum PaperPreview {
     static var estimate: EstimateRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002218","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","createdByUserId":"00000000-0000-4000-8000-000000000001","status":"sent","currentRevisionNumber":2,"title":"AC repair and compressor replacement","lines":[{"id":"00000000-0000-4000-8000-000000009211","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}},{"id":"00000000-0000-4000-8000-000000009212","description":"Replace compressor","quantity":1,"unitPrice":{"amount":85000,"currency":"USD"},"source":{"kind":"price_book","priceBookItemId":"00000000-0000-4000-8000-000000009201","priceBookRevision":4,"originalDescription":"Replace compressor","originalUnitPrice":{"amount":85000,"currency":"USD"},"addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z","overriddenFields":[]}}],"options":[{"id":"00000000-0000-4000-8000-000000009213","title":"Full system replacement","description":"Includes new compressor and efficiency inspection","lines":[{"id":"00000000-0000-4000-8000-000000009214","description":"System replacement","quantity":1,"unitPrice":{"amount":225000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}}],"totalAmount":225000,"currency":"USD"}],"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z","sentAt":"2026-07-20T12:00:00Z"}"#
         return try! JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
+    }
+    /// Good / better / best for the customer presentation screenshots.
+    static var optionsEstimate: EstimateRecord {
+        func line(_ id: Int, _ text: String, _ quantity: Int, _ cents: Int) -> FieldLine {
+            FieldLine(id: String(format: "00000000-0000-4000-8000-0000000093%02d", id), description: text, quantity: quantity,
+                      unitPrice: FieldMoney(amount: cents, currency: "USD"), source: nil)
+        }
+        func option(_ id: Int, _ title: String, _ text: String, _ lines: [FieldLine]) -> FieldEstimateOption {
+            FieldEstimateOption(id: String(format: "00000000-0000-4000-8000-0000000094%02d", id), title: title, description: text, lines: lines,
+                                totalAmount: paperLinesTotal(lines) ?? 0, currency: "USD")
+        }
+        let repair = [line(1, "Run capacitor, 45/5 µF", 1, 14_500), line(2, "Coil cleaning", 2, 12_000), line(3, "Labor, licensed technician", 1, 9_500)]
+        let better = repair + [line(4, "Surge protector, installed", 1, 39_500), line(5, "One-year parts warranty", 1, 151_000)]
+        let replace = [line(6, "3-ton high-efficiency condenser", 1, 690_000), line(7, "Installation and haul-away", 1, 220_000), line(8, "Ten-year warranty registration", 1, 75_000)]
+        return EstimateRecord(id: estimate.id, organizationId: estimate.organizationId, customerId: customerID, createdByUserId: estimate.createdByUserId,
+                              locationId: nil, status: "sent", currentRevisionNumber: 2, title: "AC not cooling", lines: [],
+                              options: [option(1, "Repair", "Replace the failed capacitor and clean the coil.", repair),
+                                        option(2, "Repair and protect", "The repair plus a surge protector and a one-year parts warranty.", better),
+                                        option(3, "Replace", "A new high-efficiency unit with a ten-year warranty.", replace)],
+                              createdAt: estimate.createdAt, updatedAt: estimate.updatedAt, sentAt: estimate.sentAt, approvedAt: nil, declinedAt: nil)
     }
     static var invoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"draft","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":null,"paidAt":null,"voidedAt":null,"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
@@ -229,11 +249,32 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                          ["id": "00000000-0000-4000-8000-000000009513", "position": 2, "description": "Start-up and balance", "scheduledAmount": ["amount": 150_000, "currency": "USD"]]],
                                "createdAt": "2026-10-01T12:00:00Z", "updatedAt": now]]]
         }
+        if path == "/v1/organization/money-availability" {
+            return ["version": 1, "asOf": now, "attention": NSNull(),
+                    "balances": [["currency": "USD", "available": 412_000, "pending": 186_500,
+                                  "explanation": "Pending is normal card settlement, not a hold. Stripe moves it to available on its own schedule, then pays it out."]],
+                    "payouts": [["state": "in_transit", "amount": 298_000, "currency": "USD", "arrivalDate": "2026-10-29", "title": "On its way",
+                                 "explanation": "This payout is on its way to your bank, expected on 2026-10-29.", "responsibleActor": "none", "providerCode": NSNull()],
+                                ["state": "paid", "amount": 512_250, "currency": "USD", "arrivalDate": "2026-10-24", "title": "Paid out",
+                                 "explanation": "Stripe sent this payout for arrival on 2026-10-24. Stripe marking it paid does not confirm your bank has posted it.", "responsibleActor": "none", "providerCode": NSNull()]]] as [String: Any]
+        }
+        if path == "/v1/organization/merchant-readiness" {
+            return ["state": "action_required", "chargesReady": false, "payoutsReady": false, "actionRequired": true,
+                    "requirements": ["eventuallyDueCount": 1, "currentlyDueCount": 2, "pastDueCount": 0]] as [String: Any]
+        }
         if path == "/v1/reports/operations" {
             return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-month", "reportVersion": 1, "truncated": false,
                     "estimates": ["drafts": 4, "presented": 31, "approved": 18, "declined": 6, "conversionBps": 5806],
                     "jobs": ["booked": 86, "completed": 71, "canceled": 3, "open": 12],
                     "months": [["month": "2026-08", "booked": 74, "completed": 70], ["month": "2026-09", "booked": 81, "completed": 77], ["month": "2026-10", "booked": 86, "completed": 71]]] as [String: Any]
+        }
+        if path == "/v1/reports/payment-activity" {
+            return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-month", "reportVersion": 1, "truncated": false,
+                    "months": [["month": "2026-09", "recorded": 4_480_000, "refunded": 32_000, "discounts": 15_000, "depositCredits": 120_000, "retainageWithheld": 0, "otherAdjustments": 0],
+                               ["month": "2026-10", "recorded": 4_105_000, "refunded": 0, "discounts": 22_500, "depositCredits": 80_000, "retainageWithheld": 45_000, "otherAdjustments": 0]],
+                    "totals": ["recordedCount": 61, "recorded": 8_585_000, "refundedCount": 1, "refunded": 32_000, "discountCount": 4, "discounts": 37_500,
+                               "depositCreditCount": 3, "depositCredits": 200_000, "retainageWithheldCount": 1, "retainageWithheld": 45_000,
+                               "otherAdjustmentCount": 0, "otherAdjustments": 0]] as [String: Any]
         }
         if path == "/v1/reports/schedule" {
             return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-day", "reportVersion": 1, "capacityModel": "booked-time-only", "truncated": false,

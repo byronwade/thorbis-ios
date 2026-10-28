@@ -12,6 +12,8 @@ struct JobCloseoutView: View {
     @State private var confirmComplete = false
     @State private var confirmCancel = false
     @State private var invoiceID: String?
+    @State private var openInvoiceID: String?
+    @State private var openBilling = false
     @State private var unpaidReasonCode = "customer_will_pay_later"
     @State private var unpaidReason = ""
     @State private var unpaidNextAction = ""
@@ -48,7 +50,18 @@ struct JobCloseoutView: View {
                         Text("\(done) of \(closeout.requirements.count + checks.count)").font(Theme.monoFont(12))
                     }
                     ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
-                        checklistRow(done: requirement.outcome != "blocked", title: requirement.detail, detail: requirement.nextAction)
+                        let step = CloseoutNextStep(requirement)
+                        HStack(spacing: 12) {
+                            checklistRow(done: requirement.outcome != "blocked", title: requirement.detail, detail: step?.detail)
+                            if let step, let title = step.buttonTitle, step.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) {
+                                Button(title) { Task { await recover(step) } }
+                                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .padding(.horizontal, 12).frame(minHeight: 32)
+                                    .background(Theme.brandSurface, in: Capsule())
+                                    .frame(minHeight: 44)
+                                    .disabled(busy)
+                            }
+                        }
                     }
                     ForEach(checks, id: \.key) { check in
                         let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key)
@@ -114,6 +127,8 @@ struct JobCloseoutView: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        .navigationDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0) }
+        .navigationDestination(isPresented: $openBilling) { BillingSchedulesView() }
         .confirmationDialog("Complete this job?", isPresented: $confirmComplete, titleVisibility: .visible) {
             Button("Complete job") { Task { await complete() } }
         }
@@ -175,6 +190,25 @@ struct JobCloseoutView: View {
         do { job = try await api.cancelFieldJob(jobID); await load(); await store.refresh(api) }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
+    /// Recovery from the checklist itself, so the tech never has to hunt for the invoice.
+    private func recover(_ step: CloseoutNextStep) async {
+        switch step {
+        case .openBilling: openBilling = true
+        case .createInvoice, .collectPayment, .recordUnpaid:
+            busy = true
+            defer { busy = false }
+            do {
+                // Idempotent: returns the job's existing completion invoice when there is one.
+                let invoice = try await api.ensureFieldCompletionInvoice(jobID)
+                invoiceID = invoice.id
+                error = nil
+                if step != .createInvoice { openInvoiceID = invoice.id }
+                await load()
+            } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        case .hint: break
+        }
+    }
+
     private func completionInvoice() async {
         busy = true
         defer { busy = false }

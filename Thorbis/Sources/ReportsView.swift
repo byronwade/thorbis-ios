@@ -24,7 +24,27 @@ struct ScheduleReport: Decodable {
     let truncated: Bool
 }
 
+/// `GET /v1/reports/payment-activity` (PaymentActivityReport). Integer minor units; reversals never netted.
+struct PaymentActivityReport: Decodable {
+    struct Month: Decodable, Identifiable {
+        let month: String
+        let recorded, refunded, discounts, depositCredits, retainageWithheld, otherAdjustments: Int
+        var id: String { month }
+    }
+    struct Totals: Decodable {
+        let recordedCount, recorded, refundedCount, refunded, discountCount, discounts: Int
+        let depositCreditCount, depositCredits, retainageWithheldCount, retainageWithheld: Int
+        let otherAdjustmentCount, otherAdjustments: Int
+    }
+    let generatedAt: String
+    let reportVersion: Int
+    let months: [Month]
+    let totals: Totals
+    let truncated: Bool
+}
+
 extension APIClient {
+    func paymentActivityReport() async throws -> PaymentActivityReport { try await send("GET", "/v1/reports/payment-activity") }
     func operationsReport() async throws -> OperationsReport { try await send("GET", "/v1/reports/operations") }
     func scheduleReport() async throws -> ScheduleReport { try await send("GET", "/v1/reports/schedule") }
 }
@@ -36,12 +56,14 @@ struct ReportsView: View {
     @State private var tab = "Operations"
     @State private var operations: OperationsReport?
     @State private var schedule: ScheduleReport?
+    @State private var payments: PaymentActivityReport?
     @State private var error: String?
 
     private var tabs: [String] {
         var result: [String] = []
         if session.can("estimate.view", feature: "estimates") { result.append("Operations") }
         if session.can("job.view", feature: "jobs") { result.append("Schedule") }
+        if session.can("invoice.view", feature: "invoicing") { result.append("Payments") }
         return result
     }
 
@@ -57,9 +79,11 @@ struct ReportsView: View {
                 if let error { ErrorBanner(message: error) }
                 Group {
                     if tabs.isEmpty {
-                        PaperEmptyState(symbol: "chart.bar", title: "Reports unavailable", message: "Your role can't view estimate or job reports.")
+                        PaperEmptyState(symbol: "chart.bar", title: "Reports unavailable", message: "Your role can't view estimate, job or payment reports.")
                     } else if (tabs.contains(tab) ? tab : tabs[0]) == "Operations" {
                         if let operations { operationsContent(operations) } else { loadingState }
+                    } else if (tabs.contains(tab) ? tab : tabs[0]) == "Payments" {
+                        if let payments { paymentsContent(payments) } else { loadingState }
                     } else {
                         if let schedule { scheduleContent(schedule) } else { loadingState }
                     }
@@ -136,6 +160,67 @@ struct ReportsView: View {
         }
     }
 
+    @ViewBuilder private func paymentsContent(_ report: PaymentActivityReport) -> some View {
+        if report.truncated { incomplete }
+        else {
+            PaperGroupHeader(title: "All time")
+            HStack(spacing: 10) {
+                moneyTile("Payments", report.totals.recorded, count: report.totals.recordedCount)
+                moneyTile("Refunds", report.totals.refunded, count: report.totals.refundedCount)
+            }
+            let credits = [("Discounts", report.totals.discounts, report.totals.discountCount),
+                           ("Deposits applied", report.totals.depositCredits, report.totals.depositCreditCount),
+                           ("Retainage withheld", report.totals.retainageWithheld, report.totals.retainageWithheldCount),
+                           ("Other adjustments", report.totals.otherAdjustments, report.totals.otherAdjustmentCount)]
+                .filter { $0.2 > 0 }
+            if !credits.isEmpty {
+                PaperGroupHeader(title: "Credits on invoices").padding(.top, 18)
+                ForEach(credits, id: \.0) { credit in
+                    HStack {
+                        Text(credit.0).font(Theme.font(15, weight: .medium))
+                        Spacer()
+                        Text("\(money(credit.1, currency: "USD")) · \(credit.2)").font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            if !report.months.isEmpty {
+                PaperGroupHeader(title: "By month", count: report.months.count).padding(.top, 18)
+                ForEach(report.months.suffix(6).reversed()) { month in
+                    HStack {
+                        Text(monthName(month.month)).font(Theme.font(15, weight: .medium))
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(money(month.recorded, currency: "USD")).font(Theme.monoFont(13, weight: .medium))
+                            if month.refunded > 0 {
+                                Text("\(money(month.refunded, currency: "USD")) refunded").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            Text("Refunds are shown on their own, never subtracted from payments.")
+                .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 12)
+            footer(report.reportVersion, report.generatedAt)
+        }
+    }
+
+    private func moneyTile(_ label: String, _ amount: Int, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text(money(amount, currency: "USD")).font(Theme.monoFont(20, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.7)
+            Text(count == 1 ? "1 entry" : "\(count) entries").font(Theme.font(12)).foregroundStyle(Theme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .accessibilityElement(children: .combine)
+    }
+
     private var incomplete: some View {
         PaperEmptyState(symbol: "exclamationmark.triangle", title: "Report incomplete",
                         message: "The server reached its scan limit, so these counts would understate the totals. Open the report on the web.")
@@ -184,6 +269,11 @@ struct ReportsView: View {
                 let loaded = try await api.scheduleReport()
                 guard session.generation == generation else { return }
                 schedule = loaded
+            }
+            if session.can("invoice.view", feature: "invoicing") {
+                let loaded = try await api.paymentActivityReport()
+                guard session.generation == generation else { return }
+                payments = loaded
             }
             error = nil
         } catch is CancellationError {} catch {

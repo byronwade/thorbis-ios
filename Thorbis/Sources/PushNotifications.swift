@@ -64,8 +64,12 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let jobID = Self.jobID(from: response.notification.request.content.userInfo)
-        await MainActor.run { if let jobID { store?.requestedJobID = jobID } }
+        let userInfo = response.notification.request.content.userInfo
+        let jobID = Self.jobID(from: userInfo)
+        let record = (userInfo["thorbis"] as? [String: Any]).flatMap(RecordLink.init(push:))
+        await MainActor.run {
+            if let jobID { store?.requestedJobID = jobID } else if let record { store?.requestedRecord = record }
+        }
     }
 
     nonisolated static func jobID(from userInfo: [AnyHashable: Any]) -> String? {
