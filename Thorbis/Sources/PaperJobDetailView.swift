@@ -8,10 +8,15 @@ struct JobDetailView: View {
     init(jobId: String, showsBack: Bool = true) {
         self.jobId = jobId
         self.showsBack = showsBack
+        #if DEBUG
+        let previewTabs = ["job-invoice": "Invoice", "job-estimates": "Estimates", "job-activity": "Activity", "job-media": "Photos", "job-invoice-empty": "Invoice"]
+        _selectedTab = State(initialValue: PaperPreview.enabled ? previewTabs[PaperPreview.screen] ?? "Overview" : "Overview")
+        #endif
     }
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
     @State private var notes: [JobNoteRecord] = []
@@ -24,17 +29,38 @@ struct JobDetailView: View {
     @State private var selectedTab = "Overview"
     @State private var invoices: [InvoiceRecord] = []
     @State private var invoicesLoaded = false
+    @State private var selectedInvoiceID: String?
+    @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
+    @State private var loadedInvoiceModelID: String?
+    @State private var showCollectPayment = false
     @State private var activityFilter = "All"
     @State private var showSchedule = false
+    @State private var jobEstimates: [EstimateRecord] = []
+    @State private var estimatesLoaded = false
+    @State private var showNewEstimate = false
+    @State private var committed = 0
+    @State private var creatingInvoice = false
+    @State private var reviewInvoiceID: String?
+    @State private var showDeposit = false
+    /// The customer's service locations; the first (or only) one is where the job is.
+    @State private var locations: [ServiceLocationRecord] = []
+    /// The primary contact's phone (else the customer's), for one-tap Call and Text.
+    @State private var customerPhone: String?
+    @Environment(\.openURL) private var openURL
 
-    private let tabs = ["Overview", "Estimates", "Invoice", "Media", "Activity"]
+    private let tabs = ["Overview", "Estimates", "Invoice", "Photos", "Activity"]
+
+    private var liveActivityKey: String {
+        guard let job else { return "" }
+        return [job.id, job.status, outbox.pendingStatus(for: job.id) ?? "", locations.first?.address ?? ""].joined(separator: "|")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            topBar
+            OfflineBanner().padding(.top, 4)
             if let error { ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12) }
             if let job {
-                if selectedTab == "Media" {
+                if selectedTab == "Photos" {
                     header(job, compact: true)
                     tabBar
                     JobMediaView(jobID: jobId)
@@ -52,7 +78,7 @@ struct JobDetailView: View {
                         }
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 22)
+                    .padding(.top, selectedTab == "Invoice" ? 4 : 22)
                     .padding(.bottom, 28)
                     }
                     }
@@ -65,22 +91,68 @@ struct JobDetailView: View {
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
+        .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
-        .task(id: session.generation) { await load() }
-        .refreshable { await load() }
+        .sensoryFeedback(.success, trigger: committed)
+        .sheet(isPresented: $showDeposit) {
+            JobDepositSheet(jobID: jobId) { invoice in
+                selectedInvoiceID = invoice.id
+                Task { await loadInvoices() }
+            }
+        }
+        .navigationDestination(item: $reviewInvoiceID) { id in
+            InvoiceDetailView(id: id)
+                .onDisappear { Task { await loadInvoices() } }
+        }
+        .task(id: session.generation) {
+            invoicePaymentModel = nil
+            loadedInvoiceModelID = nil
+            await load()
+            if selectedTab == "Invoice" { await loadInvoices() }
+        }
+        .refreshable {
+            if selectedTab == "Invoice" { await loadInvoices() }
+            else { await load() }
+        }
+        // The Lock Screen card follows the status shown here, queued steps included.
+        .task(id: liveActivityKey) {
+            guard let job else { return }
+            let pending = outbox.pendingStatus(for: job.id)
+            await JobLiveActivity.sync(job: job, status: pending ?? job.status, waitingToSync: pending != nil,
+                                       customer: store.customerName(job.customerId), address: locations.first?.address)
+        }
+        // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
+        .onAppear { if job != nil { Task { await load() } } }
         .onChange(of: selectedTab) { _, tab in
             if tab == "Invoice" { Task { await loadInvoices() } }
         }
+        .onChange(of: selectedInvoiceID) { _, selectedID in
+            guard let selectedID, let invoice = invoices.first(where: { $0.id == selectedID }) else { return }
+            Task { await loadInvoicePayments(for: invoice) }
+        }
         .safeAreaInset(edge: .bottom) {
             if selectedTab == "Overview", let job, let target = availableTransitions(job).first {
-                PrimaryButton(title: transitionTitle(target), icon: "arrow.right", busy: busy) {
+                // Directions now sits with Call and Text in the header; the bar carries one commit.
+                PaperActionBar(title: transitionTitle(target), symbol: transitionSymbol(target), busy: busy) {
                     runTransition(target)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .background(Theme.chrome)
+            } else if selectedTab == "Estimates", let job, session.can("estimate.create", feature: "estimates") {
+                PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus") { showNewEstimate = true }
+                    .sheet(isPresented: $showNewEstimate) {
+                        NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { _ in
+                            Task { await loadJobEstimates(job) }
+                        }
+                    }
+            } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
+                      session.can("invoice.view", feature: "invoicing") {
+                // A draft is reviewed (lines) and issued on its own screen, then collected here.
+                PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
+            } else if selectedTab == "Invoice",
+                      session.can("invoice.payment.create", feature: "payments"),
+                      let invoice = selectedInvoice,
+                      let model = invoicePaymentModel,
+                      loadedInvoiceModelID == invoice.id {
+                PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
             }
         }
         .sheet(isPresented: $showPause) {
@@ -103,51 +175,37 @@ struct JobDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: $showCollectPayment) {
+            if let invoice = selectedInvoice, let model = invoicePaymentModel {
+                InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
     }
 
-    private var topBar: some View {
-        HStack {
-            if showsBack {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 38, height: 38)
-                        .background(Theme.fill, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .accessibilityLabel("Back")
-            }
-            Spacer()
-            if let job {
+    /// Native bar: system back on the left, share and more on the right (HIG-005).
+    @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
+        if let job {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 ShareLink(item: "\(job.title) · \(job.id)") {
                     Image(systemName: "square.and.arrow.up")
-                        .frame(width: 38, height: 38)
-                        .background(Theme.fill, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("Share job")
                 Menu {
                     Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
-                    NavigationLink("Closeout") { JobCloseoutView(jobID: jobId).toolbar(.visible, for: .navigationBar) }
-                    NavigationLink("Follow-ups") { JobFollowUpsView(jobID: jobId).toolbar(.visible, for: .navigationBar) }
+                    NavigationLink { JobCloseoutView(jobID: jobId) } label: { Label("Closeout", systemImage: "checkmark.seal") }
+                    NavigationLink { JobFollowUpsView(jobID: jobId) } label: { Label("Follow-ups", systemImage: "list.bullet") }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .frame(width: 38, height: 38)
-                        .background(Theme.fill, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("More job actions")
             }
         }
-        .buttonStyle(.plain)
-        .font(.system(size: 16))
-        .padding(.horizontal, 20)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
     }
 
     private func header(_ job: JobRecord, compact: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("JOB-\(job.id.suffix(4).uppercased()) · \(store.customerName(job.customerId))")
                 .font(Theme.monoFont(12, weight: .medium))
                 .foregroundStyle(Theme.muted)
@@ -157,175 +215,482 @@ struct JobDetailView: View {
                 .tracking(-0.39)
                 .lineLimit(compact ? 2 : nil)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                Text(job.status.statusLabel)
-                    .foregroundStyle(job.status == "completed" ? Theme.success : Theme.warning)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(job.status == "completed" ? Theme.successSurface : Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
-                if let date = JobFiltering.date(job.scheduledFor) {
-                    Label(date.formatted(.dateTime.weekday().hour().minute()), systemImage: "calendar")
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    statusControl(job)
+                    if let date = JobFiltering.date(job.scheduledFor) {
+                        Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
+                            Label(scheduleLabel(date), systemImage: "clock")
+                                .font(Theme.font(12, weight: .medium))
+                                .foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 9)
+                                .frame(height: 24)
+                                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                                .padding(.vertical, 10).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
+                    }
                 }
-                if job.assignedToUserId != nil { Label("Assigned", systemImage: "person") }
+
+                HStack(spacing: 8) {
+                    if let assignedName = assignedDisplayName(for: job) {
+                        HStack(spacing: 6) {
+                            Text(nameInitials(assignedName))
+                                .font(Theme.font(8, weight: .semibold))
+                                .foregroundStyle(Theme.brandText)
+                                .frame(width: 16, height: 16)
+                                .background(Theme.brandSurface, in: Circle())
+                            Text(shortName(assignedName))
+                                .font(Theme.font(12, weight: .medium))
+                                .foregroundStyle(Theme.muted)
+                        }
+                        .padding(.horizontal, 7)
+                        .frame(height: 24)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    MemberChip(customerID: job.customerId)
+                    if let balance = invoiceBalanceCents {
+                        Text("\(money(balance, currency: "USD")) due")
+                            .font(Theme.monoFont(11, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 9)
+                            .frame(height: 24)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
             }
-            .font(Theme.font(11, weight: .medium))
-            .foregroundStyle(Theme.muted)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            if !compact {
+                JobProgressTrack(status: outbox.pendingStatus(for: job.id) ?? job.status).padding(.top, 10)
+                quickActions
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .padding(.bottom, 16)
+        .padding(.horizontal, Theme.gutter)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+    }
+
+    /// Everything a tech reaches for on arrival, without leaving the job: call, text, drive.
+    private var quickActions: some View {
+        PaperQuickActions(phone: customerPhone,
+                          directions: locations.first.flatMap { Directions.url(address: $0.address, coordinates: $0.coordinates) })
+            .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private func statusControl(_ job: JobRecord) -> some View {
+        let tint: Color = switch job.status {
+        case "completed": Theme.success
+        case "en_route", "dispatched": Theme.brandText
+        case "scheduled", "canceled": Theme.muted
+        default: Theme.warning
+        }
+        let surface: Color = switch job.status {
+        case "completed": Theme.successSurface
+        case "en_route", "dispatched": Theme.brandSurface
+        case "scheduled", "canceled": Theme.fill
+        default: Theme.warningSurface
+        }
+        let transitions = availableTransitions(job)
+        if transitions.isEmpty {
+            statusChip(job, tint: tint, surface: surface, showsMenu: false)
+        } else {
+            Menu {
+                ForEach(transitions, id: \.self) { target in
+                    Button(transitionTitle(target)) { runTransition(target) }
+                }
+            } label: {
+                statusChip(job, tint: tint, surface: surface, showsMenu: true)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func statusChip(_ job: JobRecord, tint: Color, surface: Color, showsMenu: Bool) -> some View {
+        let queued = outbox.pendingStatus(for: job.id)
+        return HStack(spacing: 5) {
+            Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
+                .font(.system(size: 11, weight: .semibold))
+            Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
+                .font(Theme.font(12, weight: .medium))
+            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .background(surface, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .accessibilityLabel("Job status, \(job.status.statusLabel)")
+    }
+
+    private func scheduleLabel(_ date: Date) -> String {
+        let time = date.formatted(.dateTime.hour().minute())
+        if Calendar.current.isDateInToday(date) { return "Today · \(time)" }
+        return "\(date.formatted(.dateTime.weekday())) · \(time)"
+    }
+
+    private func assignedDisplayName(for job: JobRecord) -> String? {
+        guard let assignedID = job.assignedToUserId else { return nil }
+        guard assignedID == session.user?.id, let name = session.user?.name, !name.isEmpty else { return "Assigned" }
+        return name
+    }
+
+    private func shortName(_ name: String) -> String {
+        let parts = name.split(whereSeparator: \.isWhitespace)
+        guard let first = parts.first else { return name }
+        guard let last = parts.dropFirst().last else { return String(first) }
+        return "\(first) \(last.prefix(1))."
+    }
+
+    private func nameInitials(_ name: String) -> String {
+        String(name.split(whereSeparator: \.isWhitespace).prefix(2).compactMap(\.first))
+    }
+
+    private var invoiceBalanceCents: Int? {
+        let issued = invoices.filter { $0.status == "issued" && $0.currency == "USD" }
+        guard !issued.isEmpty else { return nil }
+        var balanceTotal = 0
+        for invoice in issued {
+            var invoiceTotal = 0
+            for line in invoice.lines {
+                guard line.quantity >= 0, line.unitPrice.amount >= 0,
+                      line.unitPrice.currency == invoice.currency else { return nil }
+                let (lineTotal, lineOverflow) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
+                let (nextTotal, sumOverflow) = invoiceTotal.addingReportingOverflow(lineTotal)
+                guard !lineOverflow, !sumOverflow else { return nil }
+                invoiceTotal = nextTotal
+            }
+            let (due, dueOverflow) = invoiceTotal.subtractingReportingOverflow(invoice.amountPaid)
+            guard !dueOverflow, due >= 0 else { return nil }
+            let (nextBalance, balanceOverflow) = balanceTotal.addingReportingOverflow(due)
+            guard !balanceOverflow else { return nil }
+            balanceTotal = nextBalance
+        }
+        return balanceTotal
     }
 
     private var tabBar: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(tabs, id: \.self) { tab in
-                    Button { selectedTab = tab } label: {
-                        Text(tab)
-                            .font(Theme.font(13, weight: selectedTab == tab ? .semibold : .medium))
-                            .foregroundStyle(selectedTab == tab ? Theme.foreground : Theme.muted)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(selectedTab == tab ? Theme.fill : .clear, in: Capsule())
-                            .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 14)
-        }
-        .scrollIndicators(.hidden)
+        PaperTabs(options: tabs, selection: $selectedTab).padding(.bottom, 4)
     }
 
+    /// Paper 21: description as plain text, quiet value rows, then the job's other actions.
     private func overviewContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            sectionTitle("Details")
             if let detail = job.notes, !detail.isEmpty {
                 Text(detail)
-                    .font(Theme.font(14))
+                    .font(Theme.font(15)).lineSpacing(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .textSelection(.enabled)
             }
-            VStack(spacing: 0) {
-                detailRow("Customer", store.customerName(job.customerId))
-                if let date = JobFiltering.date(job.scheduledFor) { detailRow("Scheduled", date.formatted()) }
-                if let reason = job.pauseReason { detailRow("Pause reason", reason) }
-                if let next = job.pauseNextAction { detailRow("Next action", next) }
+            VStack(alignment: .leading, spacing: 0) {
+                PaperGroupHeader(title: "Details") {
+                    if session.can("job.assign", feature: "jobs") {
+                        Button("Edit time") { showSchedule = true }
+                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .frame(minHeight: 44)
+                    }
+                }
+                PaperDetailRow("Customer", value: store.customerName(job.customerId))
+                if let place = locations.first {
+                    Button {
+                        if let url = Directions.url(address: place.address, coordinates: place.coordinates) { openURL(url) }
+                    } label: {
+                        PaperDetailRow(label: "Address") {
+                            HStack(spacing: 4) {
+                                Text(place.address).foregroundStyle(Theme.brandText)
+                                Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.brandText)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens driving directions in Maps")
+                    let access = [place.gateCode.map { "Gate \($0)" }, place.alarmCode.map { "Alarm \($0)" },
+                                  place.dogOnSite.map { "Dog: \($0)" }, place.parking.map { "Parking: \($0)" }].compactMap { $0 }
+                    if !access.isEmpty { PaperDetailRow("Access", value: access.joined(separator: " · ")) }
+                }
+                if let date = JobFiltering.date(job.scheduledFor) {
+                    PaperDetailRow("Scheduled", value: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                } else {
+                    PaperDetailRow("Scheduled", value: "Not scheduled")
+                }
+                if let reason = job.pauseReason { PaperDetailRow("Pause reason", value: reason) }
+                if let next = job.pauseNextAction { PaperDetailRow("Next action", value: next) }
             }
-            .padding(.horizontal, 15)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-            sectionTitle("Related work")
-            VStack(spacing: 0) {
+            // What's installed at this address, so the tech arrives knowing model and serial.
+            CustomerEquipmentSection(customerID: job.customerId, locations: locations, onlyLocationID: locations.first?.id)
+            VStack(alignment: .leading, spacing: 0) {
+                PaperGroupHeader(title: "On this job")
                 ForEach(availableTransitions(job).dropFirst(), id: \.self) { target in
-                    actionButton(transitionTitle(target), icon: "arrow.right") { runTransition(target) }
+                    Button { runTransition(target) } label: {
+                        PaperMenuRow(transitionTitle(target), symbol: transitionSymbol(target))
+                    }
+                    .buttonStyle(.plain).disabled(busy)
                 }
-                NavigationLink { JobCloseoutView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Closeout", icon: "checkmark.circle") }
-                NavigationLink { JobFollowUpsView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Follow-ups", icon: "list.bullet") }
                 if session.can("job.assign", feature: "jobs") {
-                    Button { showSchedule = true } label: { actionLabel("Schedule job", icon: "calendar") }
-                    NavigationLink { JobAssignmentView(jobID: jobId).toolbar(.visible, for: .navigationBar) } label: { actionLabel("Assign job", icon: "person.crop.circle.badge.plus") }
+                    Button { showSchedule = true } label: { PaperMenuRow("Schedule", symbol: "calendar", subtitle: "Pick a day and arrival window") }
+                        .buttonStyle(.plain)
+                    NavigationLink { JobAssignmentView(jobID: jobId) } label: { PaperMenuRow("Assign technician", symbol: "person.crop.circle.badge.plus") }
+                        .buttonStyle(.plain)
                 }
+                NavigationLink { JobCloseoutView(jobID: jobId) } label: { PaperMenuRow("Wrap up", symbol: "checkmark.seal", subtitle: "Closeout checklist") }
+                    .buttonStyle(.plain)
+                NavigationLink { JobFollowUpsView(jobID: jobId) } label: { PaperMenuRow("Follow-ups", symbol: "list.bullet") }
+                    .buttonStyle(.plain)
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
+    /// Paper 23: every estimate on the job with totals, approved vs awaiting, and one commit to build another.
     private func estimatesContent(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
-            sectionTitle("Estimates")
-            if let estimateID = job.estimateId, session.can("estimate.view", feature: "estimates") {
-                NavigationLink { EstimateDetailView(id: estimateID).toolbar(.visible, for: .navigationBar) } label: {
-                    actionLabel("View linked estimate", icon: "doc.text")
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            if !session.can("estimate.view", feature: "estimates") {
+                PaperEmptyState(symbol: "doc.text", title: "Estimates unavailable", message: "Your role cannot view estimates.")
             } else {
-                emptyCard("No linked estimate is available for this job.")
+                let approved = jobEstimates.filter { $0.status == "approved" }.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
+                let waiting = jobEstimates.filter { $0.status == "sent" }.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
+                if !jobEstimates.isEmpty {
+                    HStack(spacing: 0) {
+                        summary("Awaiting approval", money(waiting, currency: "USD"))
+                        Rectangle().fill(Theme.border).frame(width: 1, height: 40).padding(.horizontal, 16)
+                        summary("Approved", money(approved, currency: "USD"))
+                    }
+                    .padding(.bottom, 6)
+                }
+                PaperGroupHeader(title: "Estimates", count: jobEstimates.count)
+                if !estimatesLoaded {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20)
+                } else if jobEstimates.isEmpty {
+                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
+                                    message: "Build one from the price book. It's added to this job automatically.")
+                }
+                ForEach(jobEstimates) { estimate in
+                    NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(estimate.title).font(Theme.font(16, weight: .semibold))
+                                    .foregroundStyle(Theme.foreground).multilineTextAlignment(.leading)
+                                Spacer(minLength: 8)
+                                if let total = paperLinesTotal(estimate.lines) {
+                                    Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
+                                        .font(Theme.monoFont(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                }
+                            }
+                            HStack(spacing: 8) {
+                                PaperStatusChip(status: estimate.status)
+                                Text("EST-\(estimate.id.suffix(4).uppercased())").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .padding(16)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+        }
+        .task(id: job.id) { await loadJobEstimates(job) }
+    }
+
+    private func summary(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text(value).font(Theme.monoFont(19, weight: .semibold))
+        }
+    }
+
+    /// Linked estimates first; the job's origin estimate is included even without a link record.
+    private func loadJobEstimates(_ job: JobRecord) async {
+        guard session.can("estimate.view", feature: "estimates") else { return }
+        let generation = session.generation
+        do {
+            var ids = try await api.fieldJobEstimateLinks(job.id).map(\.estimateId)
+            if let origin = job.estimateId, !ids.contains(origin) { ids.insert(origin, at: 0) }
+            var loaded: [EstimateRecord] = []
+            for id in ids {
+                loaded.append(try await api.fieldEstimate(id))
+            }
+            guard session.generation == generation else { return }
+            jobEstimates = loaded
+            estimatesLoaded = true
+        } catch is CancellationError {} catch {
+            guard session.generation == generation else { return }
+            if let origin = job.estimateId, let single = try? await api.fieldEstimate(origin) { jobEstimates = [single] }
+            estimatesLoaded = true
+            self.error = error.localizedDescription
         }
     }
 
     private func invoiceContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 15) {
-            sectionTitle("Invoice")
             if !session.can("invoice.view", feature: "invoicing") {
                 emptyCard("Invoice access is unavailable.")
             } else if !invoicesLoaded {
                 ProgressView("Loading invoices…").frame(maxWidth: .infinity).padding(30)
             } else if invoices.isEmpty {
-                emptyCard("No invoice is linked to this job.")
+                PaperEmptyState(symbol: "doc.plaintext", title: "No invoice yet",
+                                message: "Start the invoice from this job. Lines come from its approved estimate; you can edit them before sending.",
+                                actionTitle: session.can("invoice.create", feature: "invoicing") ? (creatingInvoice ? "Creating…" : "Create invoice") : nil,
+                                action: { Task { await createInvoice() } })
+                if job.estimateId != nil, session.can("invoice.create", feature: "progress_billing") {
+                    Button { showDeposit = true } label: {
+                        PaperMenuRow("Request a deposit", symbol: "banknote", subtitle: "Bill part up front from the approved estimate")
+                    }
+                    .buttonStyle(.plain)
+                }
             } else {
-                ForEach(invoices) { invoice in
-                    NavigationLink { InvoiceDetailView(id: invoice.id).toolbar(.visible, for: .navigationBar) } label: {
-                        actionLabel("Invoice · \(invoice.status.statusLabel)", icon: "doc.text")
-                            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                if invoices.count > 1 {
+                    Menu {
+                        ForEach(invoices) { invoice in
+                            Button("INV-\(invoice.id.suffix(4).uppercased()) · \(invoice.status.statusLabel)") {
+                                selectedInvoiceID = invoice.id
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 7) {
+                            Text("INV-\((selectedInvoice?.id ?? invoices[0].id).suffix(4).uppercased())")
+                                .font(Theme.monoFont(12, weight: .medium))
+                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 36)
+                        .background(Theme.fill, in: Capsule())
+                    }
+                }
+                if let invoice = selectedInvoice {
+                    if let model = invoicePaymentModel, loadedInvoiceModelID == invoice.id {
+                        PaperJobInvoiceContent(
+                            invoice: invoice,
+                            paymentModel: model,
+                            onCollectPayment: { showCollectPayment = true },
+                            onInvoiceUpdated: updateInvoice
+                        )
+                    } else {
+                        ProgressView("Loading invoice…")
+                            .frame(maxWidth: .infinity, minHeight: 100)
                     }
                 }
             }
         }
     }
 
+    private var selectedInvoice: InvoiceRecord? {
+        if let selectedInvoiceID, let selected = invoices.first(where: { $0.id == selectedInvoiceID }) {
+            return selected
+        }
+        return invoices.first
+    }
+
+    private func updateInvoice(_ updated: InvoiceRecord) {
+        guard let index = invoices.firstIndex(where: { $0.id == updated.id }) else { return }
+        invoices[index] = updated
+    }
+
+    /// Paper 21B: filter pills, a quiet timeline of notes and status changes, composer last.
     private func activityContent(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
-            sectionTitle("Activity")
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(["All", "Notes", "Status"], id: \.self) { filter in
-                        Button { activityFilter = filter } label: {
-                            Text(filter)
-                                .font(Theme.font(12, weight: activityFilter == filter ? .semibold : .medium))
-                                .foregroundStyle(activityFilter == filter ? Theme.foreground : Theme.muted)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 7)
-                                .background(activityFilter == filter ? Theme.fill : Theme.card, in: Capsule())
-                                .frame(minHeight: 44)
-                        }
-                        .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 6) {
+                ForEach(["All", "Notes", "Status"], id: \.self) { filter in
+                    Button { activityFilter = filter } label: {
+                        Text(filter)
+                            .font(Theme.font(12, weight: activityFilter == filter ? .semibold : .medium))
+                            .foregroundStyle(activityFilter == filter ? Theme.background : Theme.muted)
+                            .padding(.horizontal, 12).frame(height: 28)
+                            .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
+                            .frame(minHeight: 44).contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(activityFilter == filter ? .isSelected : [])
                 }
             }
-            .scrollIndicators(.hidden)
-            if activityFilter != "Status" {
-                ForEach(notes) { record in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(record.body).font(Theme.font(14))
-                        if let date = JobFiltering.date(record.createdAt) {
-                            Text(date.formatted()).font(Theme.font(11)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(timeline(job)) { entry in
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(spacing: 0) {
+                            Image(systemName: entry.symbol).font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(entry.isNote ? Theme.brandText : Theme.muted)
+                                .frame(width: 26, height: 26)
+                                .background(entry.isNote ? Theme.brandSurface : Theme.fill, in: Circle())
+                            Rectangle().fill(Theme.border).frame(width: 1).frame(maxHeight: .infinity)
                         }
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(entry.title).font(Theme.font(14, weight: .semibold))
+                                Spacer(minLength: 8)
+                                Text(entry.date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                            }
+                            if let body = entry.body {
+                                Text(body).font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+                                    .textSelection(.enabled)
+                            }
+                            Text(entry.date.formatted(.dateTime.month(.abbreviated).day())).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                        }
+                        .padding(.bottom, 16)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityElement(children: .combine)
                 }
             }
-            if activityFilter != "Notes" {
-                ForEach(statusEvents(job), id: \.0) { event in
-                    HStack(spacing: 12) {
-                        Image(systemName: "checkmark.circle").foregroundStyle(Theme.brand)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(event.0).font(Theme.font(14, weight: .medium))
-                            Text(event.1.formatted()).font(Theme.font(11)).foregroundStyle(Theme.muted)
-                        }
-                        Spacer()
-                    }
-                    .padding(15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                }
+            if timeline(job).isEmpty {
+                PaperEmptyState(symbol: "clock", title: "No activity yet", message: "Notes and status changes on this job show up here.")
             }
-            if notes.isEmpty && statusEvents(job).isEmpty { emptyCard("No activity yet.") }
             if session.can("job.note", feature: "jobs") {
-                TextField("Add a note", text: $note, axis: .vertical)
-                    .lineLimit(3...8)
-                    .padding(13)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-                PrimaryButton(title: "Save note", busy: busy) { Task { await saveNote() } }
-                    .disabled(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || note.utf16.count > 10_000)
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Add a note or update…", text: $note, axis: .vertical)
+                        .font(Theme.font(16))
+                        .lineLimit(1...6)
+                        .padding(.horizontal, 14).padding(.vertical, 11)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22))
+                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.border))
+                    Button { Task { await saveNote() } } label: {
+                        Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold)) } }
+                            .foregroundStyle(.white).frame(width: 44, height: 44)
+                            .background(Theme.brand.opacity(canSaveNote ? 1 : 0.4), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSaveNote || busy)
+                    .accessibilityLabel("Save note")
+                }
             }
         }
+    }
+
+    private var canSaveNote: Bool {
+        !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && note.utf16.count <= 10_000
+    }
+
+    private struct TimelineEntry: Identifiable {
+        let id: String
+        let title: String
+        let body: String?
+        let date: Date
+        let symbol: String
+        var isNote: Bool { body != nil }
+    }
+
+    private func timeline(_ job: JobRecord) -> [TimelineEntry] {
+        var entries: [TimelineEntry] = []
+        if activityFilter != "Status" {
+            entries += outbox.pendingNotes(for: job.id).compactMap { entry in
+                guard case .note(let payload) = entry.action else { return nil }
+                let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
+                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath")
+            }
+            entries += notes.compactMap { record in
+                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble") }
+            }
+        }
+        if activityFilter != "Notes" {
+            entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill") }
+        }
+        return entries.sorted { $0.date > $1.date }
     }
 
     private func statusEvents(_ job: JobRecord) -> [(String, Date)] {
@@ -362,7 +727,7 @@ struct JobDetailView: View {
 
     private func actionLabel(_ title: String, icon: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(Theme.brand).frame(width: 20)
+            Image(systemName: icon).foregroundStyle(Theme.brandText).frame(width: 20)
             Text(title).font(Theme.font(14, weight: .medium))
             Spacer()
             Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.muted)
@@ -386,14 +751,39 @@ struct JobDetailView: View {
     }
 
     private func availableTransitions(_ job: JobRecord) -> [String] {
-        (job.allowedTransitions ?? []).filter {
+        let allowed: [String]
+        if let queued = outbox.pendingStatus(for: job.id) {
+            allowed = outbox.offlineSteps(from: queued).filter { ["en_route", "arrived", "in_progress"].contains($0) }
+        } else {
+            allowed = job.allowedTransitions ?? []
+        }
+        return allowed.filter {
             ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused"].contains($0)
                 && session.can(["scheduled", "dispatched"].contains($0) ? "job.assign" : "job.edit", feature: "jobs")
         }
     }
 
     private func transitionTitle(_ target: String) -> String {
-        target == "paused" ? "Pause job…" : "Mark \(target.statusLabel.lowercased())"
+        switch target {
+        case "paused": "Pause job…"
+        case "en_route": "On my way"
+        case "arrived": "Mark arrived"
+        case "in_progress": job?.status == "paused" ? "Resume work" : "Start work"
+        case "dispatched": "Dispatch"
+        case "scheduled": "Move back to scheduled"
+        default: "Mark \(target.statusLabel.lowercased())"
+        }
+    }
+
+    private func transitionSymbol(_ target: String) -> String {
+        switch target {
+        case "paused": "pause.circle"
+        case "en_route": "location.fill"
+        case "arrived": "mappin.and.ellipse"
+        case "in_progress": "wrench.and.screwdriver"
+        case "dispatched": "paperplane"
+        default: "arrow.uturn.backward"
+        }
     }
 
     private func runTransition(_ target: String) {
@@ -407,13 +797,49 @@ struct JobDetailView: View {
         do {
             let all = try await api.fieldInvoices()
             guard session.generation == generation else { return }
-            invoices = all.filter { $0.jobId == jobId }
+            var mine = all.filter { $0.jobId == jobId }
+            // Technicians' invoice list is empty by design; re-read the ones this phone has seen
+            // for the job by id, which the server allows through the assigned job.
+            if mine.isEmpty {
+                for id in JobInvoiceMemory.ids(jobId) {
+                    if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) }
+                }
+            }
+            invoices = mine.sorted { $0.createdAt > $1.createdAt }
+            mine.forEach { JobInvoiceMemory.remember($0.id, jobID: jobId) }
             invoicesLoaded = true
+            if let selectedInvoice {
+                selectedInvoiceID = selectedInvoice.id
+                await loadInvoicePayments(for: selectedInvoice)
+            }
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
             self.error = error.localizedDescription
             invoicesLoaded = true
         }
+    }
+
+    /// The job's canonical completion draft (POST /v1/jobs/{id}/completion-invoice); idempotent per job.
+    private func createInvoice() async {
+        guard !creatingInvoice, session.can("invoice.create", feature: "invoicing") else { return }
+        creatingInvoice = true
+        defer { creatingInvoice = false }
+        do {
+            let invoice = try await api.ensureFieldCompletionInvoice(jobId)
+            JobInvoiceMemory.remember(invoice.id, jobID: jobId)
+            selectedInvoiceID = invoice.id
+            await loadInvoices()
+            committed += 1
+        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+
+    private func loadInvoicePayments(for invoice: InvoiceRecord) async {
+        guard session.can("invoice.view", feature: "invoicing") else { return }
+        if loadedInvoiceModelID != invoice.id {
+            loadedInvoiceModelID = invoice.id
+            invoicePaymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: invoice.id)
+        }
+        await invoicePaymentModel?.load()
     }
     private func load() async {
         let generation = session.generation
@@ -421,14 +847,46 @@ struct JobDetailView: View {
             let loadedJob = try await api.fieldJob(jobId)
             guard session.generation == generation else { return }
             job = loadedJob
+            if locations.isEmpty, session.can("customer.view", feature: "core_crm"),
+               let places = try? await api.fieldLocations(loadedJob.customerId), session.generation == generation {
+                locations = places
+            }
+            if customerPhone == nil, session.can("customer.view", feature: "core_crm") {
+                let contacts = (try? await api.fieldContacts(loadedJob.customerId)) ?? []
+                let primary = contacts.first(where: \.primary)?.phone ?? contacts.first?.phone
+                if let primary { customerPhone = primary }
+                else { customerPhone = (try? await api.fieldCustomer(loadedJob.customerId))?.phone }
+            }
+            outbox.learn(loadedJob)
+            JobDetailCache.save(loadedJob)
             let loadedNotes = try await api.fieldNotes(jobId)
             guard session.generation == generation else { return }
             notes = loadedNotes
+            JobDetailCache.save(notes: loadedNotes, jobID: jobId)
             error = nil
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
+            if error.isConnectivityFailure {
+                // No signal: the last copy of this job, or what the schedule already knows.
+                if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
+                if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
+                if job != nil { self.error = nil; return }
+            }
             self.error = error.localizedDescription
         }
+    }
+
+    /// A minimal record from the cached job list, so an unopened job still shows offline.
+    private func listRecord() -> JobRecord? {
+        guard let item = store.jobs.first(where: { $0.id == jobId }), let customerID = item.customerId,
+              let organizationID = session.activeOrganization?.id else { return nil }
+        return JobRecord(id: item.id, organizationId: organizationID, customerId: customerID, estimateId: nil, estimateRevisionNumber: nil,
+                         locationId: item.locationId, teamId: nil, title: item.title, notes: nil, status: item.status,
+                         assignedToUserId: item.assignedToUserId, scheduledFor: item.scheduledFor,
+                         createdAt: item.createdAt ?? "", updatedAt: item.updatedAt ?? "", dispatchedAt: nil, enRouteAt: nil,
+                         arrivedAt: nil, arrivalMethod: nil, startedAt: nil, pausedAt: nil, pauseReason: nil, pauseNextAction: nil,
+                         pauseOwnerUserId: nil, pauseCycleAuditId: nil, lastResumeAuditId: nil, scheduleCycleAuditId: nil,
+                         completedAt: nil, canceledAt: nil, allowedTransitions: nil)
     }
     private func advance(_ target: String) async {
         let request: FieldProgressRequest
@@ -453,16 +911,52 @@ struct JobDetailView: View {
         }
     }
     @discardableResult private func progress(_ request: FieldProgressRequest) async -> Bool {
+        if session.isOffline || outbox.pendingStatus(for: jobId) != nil {
+            return queue(request)
+        }
         busy = true
         defer { busy = false }
         do {
             job = try await api.progressFieldJob(jobId, request: request)
+            committed += 1
+            // The progress response carries no allowedTransitions; re-read the job so the
+            // next step (Mark arrived, Start work, ...) appears without a manual refresh.
+            await load()
             await store.refresh(api)
             error = nil
             return true
-        } catch is CancellationError { return false } catch { self.error = error.localizedDescription; return false }
+        } catch is CancellationError { return false } catch {
+            if error.isConnectivityFailure { return queue(request) }
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    /// No signal: the step is saved on the phone and sent in order later; the header says so.
+    private func queue(_ request: FieldProgressRequest) -> Bool {
+        guard let payload = OutboxEntry.ProgressPayload(jobID: jobId, request: request) else {
+            error = "Pausing a job needs a connection."
+            return false
+        }
+        outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
+        committed += 1
+        error = nil
+        if !session.isOffline { Task { await syncQueued() } }
+        return true
+    }
+
+    private func syncQueued() async {
+        await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
+        await load()
+        await store.refresh(api)
     }
     private func saveNote() async {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if session.isOffline {
+            outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
+            note = ""
+            return
+        }
         busy = true
         defer { busy = false }
         do {
@@ -470,6 +964,78 @@ struct JobDetailView: View {
             notes.append(saved)
             note = ""
             error = nil
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {} catch {
+            if error.isConnectivityFailure {
+                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
+                note = ""
+            } else {
+                self.error = error.localizedDescription
+            }
+        }
     }
+}
+
+/// Where the visit is, in five steps: booked, on the way, on site, working, done.
+struct JobProgressTrack: View {
+    let status: String
+    private static let steps = ["Booked", "On the way", "On site", "Working", "Done"]
+
+    private var current: Int? {
+        switch status {
+        case "scheduled", "dispatched": 0
+        case "en_route": 1
+        case "arrived": 2
+        case "in_progress", "paused": 3
+        case "completed": 4
+        default: nil
+        }
+    }
+
+    var body: some View {
+        if let current {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    ForEach(Self.steps.indices, id: \.self) { index in
+                        Capsule()
+                            .fill(index <= current ? tint : Theme.fill)
+                            .frame(height: 5)
+                    }
+                }
+                HStack {
+                    Text(Self.steps[current]).font(Theme.font(12, weight: .semibold)).foregroundStyle(tint)
+                    if status == "paused" { Text("· Paused").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.warning) }
+                    Spacer()
+                    if current < Self.steps.count - 1 {
+                        Text("Next: \(Self.steps[current + 1])").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Step \(current + 1) of 5, \(Self.steps[current])")
+        }
+    }
+
+    /// One accent for progress; status is the word, not a rainbow (design.thorbis.com Color).
+    private var tint: Color { status == "completed" ? Theme.success : Theme.brandText }
+}
+
+/// Invoice ids this phone has seen per job, so a technician (whose invoice list is empty by
+/// design) can reopen a job's invoice by id. Ids only; cleared on sign-out with the defaults.
+enum JobInvoiceMemory {
+    private static let key = "thorbis.jobInvoiceIDs.v1"
+
+    static func ids(_ jobID: String) -> [String] {
+        (UserDefaults.standard.dictionary(forKey: key)?[jobID] as? [String]) ?? []
+    }
+
+    static func remember(_ invoiceID: String, jobID: String) {
+        var all = UserDefaults.standard.dictionary(forKey: key) ?? [:]
+        var list = (all[jobID] as? [String]) ?? []
+        guard !list.contains(invoiceID) else { return }
+        list.append(invoiceID)
+        all[jobID] = list
+        UserDefaults.standard.set(all, forKey: key)
+    }
+
+    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
 }

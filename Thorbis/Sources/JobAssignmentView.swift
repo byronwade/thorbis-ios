@@ -62,50 +62,55 @@ struct JobAssignmentView: View {
             && job?.organizationId == session.activeOrganization?.id
     }
 
+    /// Paper's quiet list: one tap picks a technician, one commit saves it.
     var body: some View {
-        Form {
-            if !session.can("job.assign", feature: "jobs") {
-                Text("Assignment is unavailable for this workspace.")
-                    .foregroundStyle(.secondary)
-            } else {
-                if let error { ErrorBanner(message: error) }
-                if loading { ProgressView("Loading assignable people…") }
-                if isCurrent, let job {
-                    Section("Current assignment") {
-                        if let current = job.assignedToUserId {
-                            Text(assignees.first(where: { $0.userId == current })?.displayName
-                                 ?? "Assigned member unavailable in your roster")
-                        } else {
-                            Text("Unassigned")
-                        }
-                    }
-                    Section("Assign to") {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Assign technician").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                    .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
+                if !session.can("job.assign", feature: "jobs") {
+                    PaperEmptyState(symbol: "person.crop.circle.badge.xmark", title: "Assignment unavailable", message: "Your role can't assign jobs in this workspace.")
+                } else {
+                    if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                    if loading { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30) }
+                    if isCurrent, let job {
+                        PaperDetailRow("Assigned now", value: job.assignedToUserId.map { current in
+                            assignees.first(where: { $0.userId == current })?.displayName ?? "Someone outside your roster"
+                        } ?? "Unassigned")
+                        PaperGroupHeader(title: "Assign to", count: assignees.count).padding(.top, 12)
                         if assignees.isEmpty {
-                            Text("No assignable members are available.")
-                                .foregroundStyle(.secondary)
+                            Text("No one can be assigned right now.").font(Theme.font(14)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                         }
                         ForEach(assignees.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }) { person in
-                            Button {
-                                selectedUserID = person.userId
-                            } label: {
-                                HStack {
-                                    Text(person.displayName)
+                            Button { selectedUserID = person.userId } label: {
+                                HStack(spacing: 12) {
+                                    Avatar(name: person.displayName, size: 32)
+                                    Text(person.displayName).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                     Spacer()
-                                    if selectedUserID == person.userId {
-                                        Image(systemName: "checkmark").accessibilityHidden(true)
-                                    }
+                                    Image(systemName: selectedUserID == person.userId ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(selectedUserID == person.userId ? Theme.brandText : Theme.muted)
+                                        .accessibilityHidden(true)
                                 }
+                                .frame(minHeight: 52).contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
                             .accessibilityAddTraits(selectedUserID == person.userId ? .isSelected : [])
                         }
                     }
-                    Button("Save assignment") { Task { await save() } }
-                        .disabled(saving || selectedUserID == nil || selectedUserID == job.assignedToUserId)
                 }
-                if saving { ProgressView("Saving assignment…") }
+            }
+            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if isCurrent, let job {
+                PaperActionBar(title: "Save assignment", symbol: "person.crop.circle.badge.checkmark", busy: saving,
+                               disabled: selectedUserID == nil || selectedUserID == job.assignedToUserId) { Task { await save() } }
             }
         }
-        .navigationTitle("Assign job")
         .task(id: session.generation) { await load() }
         .refreshable { await load() }
     }

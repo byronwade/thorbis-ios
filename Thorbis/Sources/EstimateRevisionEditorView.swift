@@ -60,7 +60,7 @@ struct EstimateRevisionEditorView: View {
                         Button { confirmReload = true } label: {
                             Label("Review latest estimate", systemImage: "arrow.clockwise")
                                 .font(Theme.font(14, weight: .medium))
-                                .foregroundStyle(Theme.brand)
+                                .foregroundStyle(Theme.brandText)
                                 .frame(minHeight: 44)
                         }
                         .accessibilityHint("Loads the current server version and replaces these edits")

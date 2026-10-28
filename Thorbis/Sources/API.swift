@@ -7,6 +7,16 @@ struct Customer: Codable, Identifiable, Hashable {
     let createdAt: String?
 }
 
+/// `customers.create` input (createCustomerInputSchema); nil fields are omitted.
+struct NewCustomerRequest: Encodable, Equatable {
+    var name: String
+    var phone: String? = nil
+    var email: String? = nil
+    var address: String? = nil
+    var accountType: String? = nil
+    var preferredContact: String? = nil
+}
+
 struct Job: Codable, Identifiable, Hashable {
     let id: String
     let customerId: String?
@@ -150,8 +160,10 @@ final class APIClient: ObservableObject {
                                               body: Body(to: to, arrival: to == "arrived" ? Arrival(method: "manual") : nil))
     }
     func createCustomer(name: String) async throws -> Customer {
-        struct Body: Encodable { let name: String }
-        return try await send("POST", "/v1/customers", body: Body(name: name))
+        try await createCustomer(NewCustomerRequest(name: name))
+    }
+    func createCustomer(_ request: NewCustomerRequest) async throws -> Customer {
+        try await send("POST", "/v1/customers", body: request)
     }
     func createJob(customerId: String, title: String) async throws -> Job {
         struct Body: Encodable { let customerId: String; let title: String }
@@ -185,7 +197,28 @@ final class APIClient: ObservableObject {
 
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
         let response = try await sendData(method, path, body: body, queryItems: queryItems, cursor: cursor, authed: authed)
+        return try decodeResponse(response)
+    }
+
+    func sendWithStatus<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?) async throws -> (value: T, status: Int) {
+        let response = try await sendData(method, path, body: body)
+        return (try decodeResponse(response), response.status)
+    }
+
+    private func decodeResponse<T: Decodable>(_ response: DataResponse) throws -> T {
         if response.data.isEmpty, let empty = try? JSONDecoder().decode(T.self, from: Data("{}".utf8)) { return empty }
+        do { return try JSONDecoder().decode(T.self, from: response.data) }
+        catch { throw Problem(title: "Invalid API response", status: response.status, detail: error.localizedDescription) }
+    }
+
+    func sendPublic<T: Decodable>(_ method: String, _ path: String) async throws -> T {
+        let response = try await sendData(method, path, body: Optional<String>.none, authed: false, handleCookies: false)
+        do { return try JSONDecoder().decode(T.self, from: response.data) }
+        catch { throw Problem(title: "Invalid API response", status: response.status, detail: error.localizedDescription) }
+    }
+
+    func sendPublic<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B) async throws -> T {
+        let response = try await sendData(method, path, body: body, authed: false, handleCookies: false)
         do { return try JSONDecoder().decode(T.self, from: response.data) }
         catch { throw Problem(title: "Invalid API response", status: response.status, detail: error.localizedDescription) }
     }
@@ -205,7 +238,7 @@ final class APIClient: ObservableObject {
         let contentType: String?
     }
 
-    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json") async throws -> DataResponse {
+    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true) async throws -> DataResponse {
         let generation = requestGeneration
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
@@ -220,6 +253,7 @@ final class APIClient: ObservableObject {
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        req.httpShouldHandleCookies = handleCookies
         req.setValue(accept, forHTTPHeaderField: "accept")
         // URLSession does not supply the browser Origin required for cookie-backed mutations.
         if !["GET", "HEAD", "OPTIONS"].contains(method.uppercased()) {
@@ -240,7 +274,14 @@ final class APIClient: ObservableObject {
         do { (data, resp) = try await session.data(for: req) }
         catch is CancellationError { throw CancellationError() }
         catch let error as URLError where error.code == .cancelled { throw CancellationError() }
-        catch { throw Problem(title: "Network error", status: nil, detail: error.localizedDescription) }
+        catch {
+            let offline: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost,
+                                               .cannotConnectToHost, .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff]
+            let detail = (error as? URLError).map { offline.contains($0.code) } == true
+                ? "No connection. Check your signal and try again."
+                : error.localizedDescription
+            throw Problem(title: "Network error", status: nil, detail: detail)
+        }
         try Task.checkCancellation()
         guard generation == requestGeneration else { throw CancellationError() }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0

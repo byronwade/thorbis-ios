@@ -45,6 +45,7 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
         let method: String?
         let headers: [String: String]
         let body: Data?
+        let handlesCookies: Bool
 
         func header(_ name: String) -> String? {
             headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
@@ -96,7 +97,8 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
         let recorded = RecordedRequest(url: request.url,
                                        method: request.httpMethod,
                                        headers: request.allHTTPHeaderFields ?? [:],
-                                       body: body)
+                                       body: body,
+                                       handlesCookies: request.httpShouldHandleCookies)
         let reply = Self.storage.lock.withLock { () -> Reply in
             Self.storage.requests.append(recorded)
             return Self.storage.replies.isEmpty ? Reply(599) : Self.storage.replies.removeFirst()
@@ -108,8 +110,15 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
         }
     }
 
+    /// A reply that never reaches a server, like a phone with no signal.
+    static let offline = Reply(0)
+
     private func deliver(_ reply: Reply) {
         guard stateLock.withLock({ !stopped }) else { return }
+        if reply.status == 0 {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
         guard let url = request.url,
               let response = HTTPURLResponse(url: url, statusCode: reply.status,
                                              httpVersion: "HTTP/1.1", headerFields: ["Content-Type": reply.contentType])

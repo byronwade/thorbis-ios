@@ -52,6 +52,42 @@ struct FieldJobCreate: Encodable {
     }
 }
 
+struct FieldJobDraft: Equatable {
+    var customerID = ""
+    var title = ""
+    var notes = ""
+
+    init(customerID: String = "", title: String = "", notes: String = "") {
+        self.customerID = customerID
+        self.title = title
+        self.notes = notes
+    }
+
+    var canCreate: Bool {
+        !customerID.isEmpty && !trimmedTitle.isEmpty && !titleIsTooLong && !notesAreTooLong
+    }
+
+    var titleIsTooLong: Bool { trimmedTitle.utf16.count > 200 }
+    var notesAreTooLong: Bool { trimmedNotes.utf16.count > 10_000 }
+
+    var request: FieldJobCreate? {
+        guard canCreate else { return nil }
+        return FieldJobCreate(
+            customerId: customerID,
+            title: trimmedTitle,
+            notes: trimmedNotes.isEmpty ? nil : trimmedNotes
+        )
+    }
+
+    private var trimmedTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedNotes: String {
+        notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 struct CustomerRecord: Codable, Identifiable, Hashable {
     let id: String
     let organizationId: String
@@ -681,6 +717,18 @@ struct EstimateRecord: Codable, Identifiable, Hashable {
     let sentAt: String?
     let approvedAt: String?
     let declinedAt: String?
+    /// Present once the customer signed the approval on a technician's phone.
+    var approvalSignature: FieldSignatureRecord? = nil
+}
+
+/// A signature recorded with an estimate approval or an invoice authorization.
+struct FieldSignatureRecord: Codable, Hashable {
+    let id: String
+    let signerName: String
+    let signedAt: String
+    let imageMediaId: String
+    /// Invoice authorizations only: the line revision the customer signed.
+    var linesRevision: Int? = nil
 }
 
 struct FieldPhysicalServiceEvidence: Codable, Hashable {
@@ -712,6 +760,8 @@ struct InvoiceRecord: Codable, Identifiable, Hashable {
     let voidedAt: String?
     let createdAt: String
     let updatedAt: String
+    /// The customer's latest signed authorization; current when its linesRevision matches.
+    var customerAuthorization: FieldSignatureRecord? = nil
 }
 
 enum FieldEstimateLineSourceInput: Hashable, Encodable {
@@ -750,6 +800,13 @@ struct FieldEstimateLineInput: Encodable {
         self.unitPrice = unitPrice
         self.source = source
     }
+}
+
+struct JobEstimateLink: Codable, Identifiable, Hashable {
+    let id: String
+    let jobId: String
+    let estimateId: String
+    let linkedAt: String?
 }
 
 struct FieldEstimateCreate: Encodable {
@@ -1009,6 +1066,15 @@ extension APIClient {
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
     }
+    /// Estimates related to a job (`GET /v1/jobs/{id}/estimates`), as link records.
+    func fieldJobEstimateLinks(_ jobID: String) async throws -> [JobEstimateLink] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"))
+    }
+    /// Links an existing estimate to a job without changing the job's origin.
+    func linkFieldEstimate(jobID: String, estimateID: String) async throws -> JobEstimateLink {
+        guard UUID(uuidString: estimateID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: estimateID) }
+        return try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/estimates/\(estimateID)/link"), body: [String: String]())
+    }
 
     func fieldInvoices() async throws -> [InvoiceRecord] { try await allFieldPages("/v1/invoices") }
     func fieldInvoice(_ id: String) async throws -> InvoiceRecord { try await send("GET", fieldPath("/v1/invoices", id: id)) }
@@ -1030,3 +1096,43 @@ extension APIClient {
 }
 
 private struct EmptyObject: Encodable {}
+
+/// The customer's current decision on transactional job texts (GET /v1/customers/{id}/sms-consent).
+struct CustomerSmsConsent: Codable, Hashable {
+    let decision: String
+    let version: String
+    let recordedAt: String
+}
+
+extension APIClient {
+    /// Nil until a decision has been recorded.
+    func customerSmsConsent(_ customerID: String) async throws -> CustomerSmsConsent? {
+        try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"))
+    }
+
+    /// Records an explicit decision the customer gave staff. Online only; the key makes a retry safe.
+    func recordCustomerSmsConsent(_ customerID: String, grant: Bool, expectedVersion: String?,
+                                  idempotencyKey: String) async throws -> CustomerSmsConsent {
+        // The customer and purpose come from the route; the server refuses them in the body.
+        struct Body: Encodable {
+            let decision: String
+            let expectedVersion: String?
+            let evidenceRef: String
+            let idempotencyKey: String
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(decision, forKey: .decision)
+                try c.encode(expectedVersion, forKey: .expectedVersion)  // null is meaningful: no prior decision
+                try c.encode(evidenceRef, forKey: .evidenceRef)
+                try c.encode(idempotencyKey, forKey: .idempotencyKey)
+            }
+            enum CodingKeys: String, CodingKey { case decision, expectedVersion, evidenceRef, idempotencyKey }
+        }
+        struct Receipt: Decodable { let version: String; let decision: String; let recordedAt: String }
+        let receipt: Receipt = try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"),
+                                              body: Body(decision: grant ? "grant" : "revoke",
+                                                         expectedVersion: expectedVersion, evidenceRef: "Told staff in person or by phone; recorded in the Thorbis iPhone app",
+                                                         idempotencyKey: idempotencyKey))
+        return CustomerSmsConsent(decision: receipt.decision, version: receipt.version, recordedAt: receipt.recordedAt)
+    }
+}

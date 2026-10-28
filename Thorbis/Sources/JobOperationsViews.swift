@@ -22,65 +22,96 @@ struct JobCloseoutView: View {
     private var validDisposition: Bool {
         mayRecordUnpaidDisposition && !unpaidReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !unpaidNextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && unpaidReason.utf16.count <= 2000 && unpaidNextAction.utf16.count <= 2000
     }
+    private var canComplete: Bool {
+        guard let closeout else { return false }
+        return session.can("job.complete", feature: "jobs") && job?.allowedTransitions?.contains("completed") == true
+            && (closeout.completable || validDisposition)
+    }
+
+    /// Paper 83: a short checklist, then one commit.
     var body: some View {
-        List {
-            if let error { ErrorBanner(message: error) }
-            if let closeout {
-                Section("Requirements") {
-                    ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label(requirement.detail, systemImage: requirement.outcome == "blocked" ? "exclamationmark.circle" : "checkmark.circle")
-                            if let action = requirement.nextAction { Text(action).font(.caption).foregroundStyle(.secondary) }
-                        }
-                    }
-                    if closeout.requirements.isEmpty { Text("No additional closeout requirements") }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("JOB-\(jobID.suffix(4).uppercased())\(job.map { " · \(store.customerName($0.customerId))" } ?? "")")
+                        .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                    Text(job?.status == "completed" ? "Job complete" : "Wrap up this job")
+                        .font(Theme.font(26, weight: .semibold)).tracking(-0.39).accessibilityAddTraits(.isHeader)
                 }
-                if session.can("job.edit", feature: "jobs") {
-                    Section("Checks") {
-                        ForEach(closeout.policy.requiredChecks, id: \.key) { check in
-                            if check.kind == nil || check.kind == "acknowledgement" {
-                                if closeout.facts.acknowledgedCheckKeys.contains(check.key) {
-                                    Label(check.label, systemImage: "checkmark.circle.fill").foregroundStyle(Theme.success)
-                                } else {
-                                    Button("Confirm: \(check.label)") { Task { await acknowledge(check.key) } }.disabled(busy)
-                                }
+                .padding(.bottom, 14)
+                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let closeout {
+                    let checks = closeout.policy.requiredChecks.filter { $0.kind == nil || $0.kind == "acknowledgement" }
+                    let done = closeout.requirements.filter { $0.outcome != "blocked" }.count
+                        + checks.filter { closeout.facts.acknowledgedCheckKeys.contains($0.key) }.count
+                    PaperGroupHeader(title: "Before you close") {
+                        Text("\(done) of \(closeout.requirements.count + checks.count)").font(Theme.monoFont(12))
+                    }
+                    ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
+                        checklistRow(done: requirement.outcome != "blocked", title: requirement.detail, detail: requirement.nextAction)
+                    }
+                    ForEach(checks, id: \.key) { check in
+                        let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key)
+                        HStack(spacing: 12) {
+                            checklistRow(done: acknowledged, title: check.label, detail: nil)
+                            if !acknowledged && session.can("job.edit", feature: "jobs") {
+                                Button("Confirm") { Task { await acknowledge(check.key) } }
+                                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .padding(.horizontal, 12).frame(minHeight: 32)
+                                    .background(Theme.brandSurface, in: Capsule())
+                                    .frame(minHeight: 44)
+                                    .disabled(busy)
                             }
                         }
                     }
-                }
-                if mayRecordUnpaidDisposition {
-                    Section("Unpaid follow-up") {
+                    if closeout.requirements.isEmpty && checks.isEmpty {
+                        Text("Nothing else is required before closing.").font(Theme.font(14)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                    }
+                    if mayRecordUnpaidDisposition {
+                        PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
                         Picker("Reason", selection: $unpaidReasonCode) {
                             Text("Customer will pay later").tag("customer_will_pay_later")
                             Text("Office collection required").tag("office_collection_required")
                             Text("Payment attempt failed").tag("payment_attempt_failed")
                             Text("Other").tag("other")
                         }
-                        TextField("Explain the unpaid balance", text: $unpaidReason, axis: .vertical)
-                        TextField("Office follow-up action", text: $unpaidNextAction, axis: .vertical)
-                        Text("Completing with this disposition leaves payment outstanding and creates an office follow-up.").font(.caption).foregroundStyle(.secondary)
+                        .pickerStyle(.menu).frame(minHeight: 44)
+                        wellField("Explain the unpaid balance", text: $unpaidReason)
+                        wellField("Office follow-up action", text: $unpaidNextAction).padding(.top, 8)
+                        Text("Completing with this leaves payment outstanding and creates an office follow-up.")
+                            .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
                     }
-                }
-                Section("Completion") {
                     if job?.status == "completed" {
-                        Label("Job completed", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.success)
+                        PaperGroupHeader(title: "Billing").padding(.top, 18)
                         if session.can("invoice.create", feature: "invoicing") {
-                            Button("Open completion invoice") { Task { await completionInvoice() } }.disabled(busy)
+                            Button { Task { await completionInvoice() } } label: {
+                                PaperMenuRow("Open completion invoice", symbol: "doc.plaintext")
+                            }.buttonStyle(.plain).disabled(busy)
                         }
-                    } else if session.can("job.complete", feature: "jobs"), job?.allowedTransitions?.contains("completed") == true {
-                        Button("Complete job") { confirmComplete = true }.disabled(busy || (!closeout.completable && !validDisposition))
-                    }
-                    if let invoiceID, session.can("invoice.view", feature: "invoicing") {
-                        NavigationLink("View invoice") { InvoiceDetailView(id: invoiceID) }
+                        if let invoiceID, session.can("invoice.view", feature: "invoicing") {
+                            NavigationLink { InvoiceDetailView(id: invoiceID) } label: { PaperMenuRow("View invoice", symbol: "doc.text") }
+                                .buttonStyle(.plain)
+                        }
                     }
                     if session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
-                        Button("Cancel job", role: .destructive) { confirmCancel = true }.disabled(busy)
+                        Button("Cancel job", role: .destructive) { confirmCancel = true }
+                            .font(Theme.font(14, weight: .medium)).frame(minHeight: 44).padding(.top, 18)
+                            .disabled(busy)
                     }
-                    if busy { ProgressView() }
+                } else if error == nil {
+                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
                 }
-            } else if error == nil { ProgressView("Loading closeout…") }
+            }
+            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
-        .navigationTitle("Closeout")
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if job?.status != "completed", session.can("job.complete", feature: "jobs"), job?.allowedTransitions?.contains("completed") == true {
+                PaperActionBar(title: "Complete job", symbol: "checkmark", busy: busy, disabled: !canComplete) { confirmComplete = true }
+            }
+        }
         .task { await load() }
         .refreshable { await load() }
         .confirmationDialog("Complete this job?", isPresented: $confirmComplete, titleVisibility: .visible) {
@@ -90,6 +121,30 @@ struct JobCloseoutView: View {
             Button("Cancel job", role: .destructive) { Task { await cancel() } }
         }
     }
+    private func checklistRow(done: Bool, title: String, detail: String?) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 18)).foregroundStyle(done ? Theme.success : Theme.muted)
+                .accessibilityLabel(done ? "Done" : "Not done")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Theme.font(15, weight: done ? .regular : .medium))
+                    .foregroundStyle(done ? Theme.muted : Theme.foreground)
+                if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted) }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func wellField(_ prompt: String, text: Binding<String>) -> some View {
+        TextField(prompt, text: text, axis: .vertical)
+            .font(Theme.font(16)).lineLimit(2...5)
+            .padding(12)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+    }
+
     private func load() async {
         do {
             job = try await api.fieldJob(jobID)
@@ -188,7 +243,7 @@ struct JobScheduleView: View {
                     } else {
                         Button("Other time…") { showsCustomTime = true }
                             .font(Theme.font(14, weight: .medium))
-                            .foregroundStyle(Theme.brand)
+                            .foregroundStyle(Theme.brandText)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                     if let error { ErrorBanner(message: error).padding(.vertical, 8) }
@@ -404,41 +459,92 @@ struct JobFollowUpsView: View {
     @State private var reason = ""
     @State private var nextAction = ""
     @State private var kind: FieldFollowUpRequest.Kind = .notifyOffice
+    @State private var booking: FieldFollowUpRecord?
+    /// Open follow-ups first, then one short form to ask the office for the next step.
     var body: some View {
-        List {
-            if let error { ErrorBanner(message: error) }
-            if loading { ProgressView() }
-            ForEach(records) { record in
-                Section(record.kind.statusLabel) {
-                    Text(record.reason).font(.headline)
-                    Text(record.nextAction)
-                    LabeledContent("Status", value: record.status.statusLabel)
-                    if let scheduling = record.scheduling {
-                        Text(scheduling.appointment != nil ? "Visit booked" : "Office review required").foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Follow-ups").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                    .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
+                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30) }
+                if !records.isEmpty { PaperGroupHeader(title: "On this job", count: records.count) }
+                ForEach(records) { record in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(record.kind.statusLabel).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                            Spacer()
+                            PaperStatusChip(status: record.status)
+                        }
+                        Text(record.reason).font(Theme.font(15, weight: .medium))
+                        Text("Next: \(record.nextAction)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        if let scheduling = record.scheduling {
+                            Label(scheduling.appointment != nil ? "Visit booked" : "Waiting for office review",
+                                  systemImage: scheduling.appointment != nil ? "calendar.badge.checkmark" : "hourglass")
+                                .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                        }
+                        if record.status == "open", session.can("job.assign", feature: "jobs") {
+                            HStack(spacing: 18) {
+                                if record.kind == "office_scheduling", record.scheduling?.appointment == nil {
+                                    Button("Book the return visit") { booking = record }
+                                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                        .frame(minHeight: 44).disabled(busy)
+                                }
+                                Button("Resolve") { Task { await resolve(record.id) } }
+                                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .frame(minHeight: 44).disabled(busy)
+                            }
+                        }
                     }
-                    if record.status == "open", session.can("job.assign", feature: "jobs") {
-                        Button("Resolve follow-up") { Task { await resolve(record.id) } }.disabled(busy)
-                    }
+                    .padding(14)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .padding(.bottom, 8)
                 }
-            }
-            if session.can("job.edit", feature: "jobs") {
-                Section("New follow-up") {
+                if session.can("job.edit", feature: "jobs") {
+                    PaperGroupHeader(title: "New follow-up").padding(.top, 10)
                     Picker("Request", selection: $kind) {
                         Text("Notify office").tag(FieldFollowUpRequest.Kind.notifyOffice)
-                        Text("Ask office to schedule").tag(FieldFollowUpRequest.Kind.officeScheduling)
+                        Text("Schedule a return visit").tag(FieldFollowUpRequest.Kind.officeScheduling)
                     }
-                    TextField("Reason", text: $reason, axis: .vertical)
-                    TextField("Next action", text: $nextAction, axis: .vertical)
-                    Text("A scheduling request goes to the office for review. It does not reserve an appointment.").font(.caption).foregroundStyle(.secondary)
-                    Button("Create follow-up") { Task { await create() } }
-                        .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
+                    .pickerStyle(.segmented)
+                    .padding(.bottom, 10)
+                    followUpField("What happened?", text: $reason)
+                    followUpField("What needs to happen next?", text: $nextAction).padding(.top, 8)
+                    Text("A return-visit request goes to the office to book; it doesn't reserve a time.")
+                        .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
+                }
+                if !loading && records.isEmpty && !session.can("job.edit", feature: "jobs") {
+                    PaperEmptyState(symbol: "list.bullet", title: "No follow-ups", message: "Follow-ups recorded on this job appear here.")
                 }
             }
+            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
-        .navigationTitle("Follow-ups")
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $booking) { record in
+            FollowUpBookingSheet(jobID: jobID, followUp: record) { Task { await load() } }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if session.can("job.edit", feature: "jobs") {
+                PaperActionBar(title: "Send follow-up", symbol: "paperplane", busy: busy,
+                               disabled: reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                   || reason.utf16.count > 2000 || nextAction.utf16.count > 2000) { Task { await create() } }
+            }
+        }
         .task { await load() }
         .refreshable { await load() }
     }
+
+    private func followUpField(_ prompt: String, text: Binding<String>) -> some View {
+        TextField(prompt, text: text, axis: .vertical)
+            .font(Theme.font(16)).lineLimit(2...5)
+            .padding(12)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+    }
+
     private func load() async {
         loading = true
         defer { loading = false }
@@ -460,5 +566,86 @@ struct JobFollowUpsView: View {
         defer { busy = false }
         do { _ = try await api.resolveFieldFollowUp(jobID, followUpID: id); await load() }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Books an office-scheduling follow-up into a real arrival window. When capacity is short the
+/// server sends it to the office instead, and the sheet says so rather than claiming a booking.
+struct FollowUpBookingSheet: View {
+    let jobID: String
+    let followUp: FieldFollowUpRecord
+    let onDone: () -> Void
+    @EnvironmentObject private var api: APIClient
+    @Environment(\.dismiss) private var dismiss
+    @State private var day = Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now
+    @State private var start = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now
+    @State private var hours = 2
+    @State private var need = ""
+    @State private var busy = false
+    @State private var error: String?
+    @State private var result: String?
+    /// One intent per sheet, so a retry after a dropped connection can't book twice.
+    @State private var intentID = UUID().uuidString.lowercased()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Arrival window") {
+                    DatePicker("Day", selection: $day, in: Date()..., displayedComponents: .date)
+                    DatePicker("Arrive from", selection: $start, displayedComponents: .hourAndMinute)
+                    Stepper("Window: \(hours) hour\(hours == 1 ? "" : "s")", value: $hours, in: 1...8)
+                }
+                Section("What the visit is for") {
+                    TextField("Service needed", text: $need, axis: .vertical).lineLimit(2...4)
+                }
+                if let result { Section { Label(result, systemImage: "checkmark.circle").foregroundStyle(Theme.success) } }
+                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle("Book return visit")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button(result == nil ? "Cancel" : "Done") { if result != nil { onDone() }; dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if result == nil {
+                        Button("Book") { Task { await book() } }
+                            .disabled(busy || need.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .onAppear { if need.isEmpty { need = followUp.nextAction } }
+        }
+    }
+
+    private var window: (Date, Date)? {
+        let calendar = Calendar.current
+        let time = calendar.dateComponents([.hour, .minute], from: start)
+        guard let begins = calendar.date(bySettingHour: time.hour ?? 9, minute: time.minute ?? 0, second: 0, of: day),
+              let ends = calendar.date(byAdding: .hour, value: hours, to: begins) else { return nil }
+        return (begins, ends)
+    }
+
+    private func book() async {
+        guard let (begins, ends) = window else { return }
+        busy = true
+        defer { busy = false }
+        let format = ISO8601DateFormatter()
+        format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let request = FieldFollowUpBookingRequest(intentId: intentID,
+                                                  requestedWindow: FieldAppointmentWindow(startsAt: format.string(from: begins), endsAt: format.string(from: ends)),
+                                                  timeZone: TimeZone.current.identifier,
+                                                  serviceNeed: need.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                  requiredTraitIds: [])
+        do {
+            let booked = try await api.bookFieldFollowUp(jobID, followUpID: followUp.id, request: request)
+            result = booked.outcome == "booked"
+                ? "Booked for \(begins.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
+                : "No one is free then, so the office will confirm a time."
+            error = nil
+        } catch is CancellationError {
+        } catch {
+            self.error = error.isConnectivityFailure ? "Booking needs a connection. Try again when you have signal." : error.localizedDescription
+        }
     }
 }

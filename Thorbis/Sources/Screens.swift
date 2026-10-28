@@ -1,15 +1,20 @@
 import SwiftUI
 
 struct NewJobSheet: View {
-    @EnvironmentObject var api: APIClient
-    @EnvironmentObject var store: Store
-    @EnvironmentObject var session: SessionController
-    @Environment(\.dismiss) var dismiss
-    var preselected: Customer? = nil
-    @State private var title = ""
-    @State private var customerId = ""
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var store: Store
+    @EnvironmentObject private var session: SessionController
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: FieldJobDraft
     @State private var busy = false
     @State private var error: String?
+    @State private var createdJobID: String?
+    @State private var showNewCustomer = false
+
+    init(preselected: Customer? = nil) {
+        _draft = State(initialValue: FieldJobDraft(customerID: preselected?.id ?? ""))
+    }
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
@@ -26,39 +31,145 @@ struct NewJobSheet: View {
                         Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up") } }
                             .foregroundStyle(.white).frame(width: 38, height: 38).background(Theme.brand, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle())
                     }.accessibilityLabel("Create job")
-                        .disabled(busy || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || customerId.isEmpty || !session.can("job.create", feature: "jobs"))
+                        .disabled(busy || !draft.canCreate || !session.can("job.create", feature: "jobs"))
                 }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 10)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("Job title", text: $title, axis: .vertical).font(Theme.font(26, weight: .semibold)).tracking(-0.39).textFieldStyle(.plain)
-                            .accessibilityLabel("Job title")
-                        Menu {
-                            Picker("Customer", selection: $customerId) {
-                                Text("Choose a customer").tag("")
-                                ForEach(store.customers.filter { $0.archived != true }) { Text($0.name).tag($0.id) }
-                            }
-                        } label: {
-                            Label(store.customers.first(where: { $0.id == customerId })?.name ?? "Customer", systemImage: "person")
-                                .font(Theme.font(12, weight: .medium)).padding(.horizontal, 10).frame(minHeight: 28)
-                                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
-                                .frame(minHeight: 44)
-                        }.padding(.vertical, 10)
-                        if let error { Text(error).font(Theme.font(13)).foregroundStyle(Theme.destructive) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 2) {
+                            TextField("Job title", text: $draft.title, axis: .vertical)
+                                .font(Theme.font(26, weight: .semibold))
+                                .tracking(-0.39)
+                                .textFieldStyle(.plain)
+                                .accessibilityLabel("Job title")
+                                .disabled(busy)
+                        }
+                        .padding(.top, 8)
+                        if draft.titleIsTooLong {
+                            Text("Job titles can be up to 200 characters.")
+                                .font(Theme.font(12))
+                                .foregroundStyle(Theme.destructive)
+                                .padding(.top, 4)
+                        }
+
+                        TextField(
+                            text: $draft.notes,
+                            prompt: Text("Add description — what's the problem, where, anything the tech should know…")
+                                .foregroundStyle(Theme.muted),
+                            axis: .vertical
+                        ) {
+                            Text("Job description")
+                        }
+                            .font(Theme.font(15))
+                            .foregroundStyle(Theme.foreground)
+                            .lineLimit(2...6)
+                            .textFieldStyle(.plain)
+                            .accessibilityLabel("Job description")
+                            .padding(.top, 8)
+                            .disabled(busy)
+                        if draft.notesAreTooLong {
+                            Text("Descriptions can be up to 10,000 characters.")
+                                .font(Theme.font(12))
+                                .foregroundStyle(Theme.destructive)
+                                .padding(.top, 4)
+                        }
+
+                        customerPicker
+                            .padding(.top, 12)
+
+                        Text("Set the schedule and assign a technician from job details after creating the job.")
+                            .font(Theme.font(12))
+                            .foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 8)
+
+                        if let error {
+                            Label(error, systemImage: "exclamationmark.triangle")
+                                .font(Theme.font(13))
+                                .foregroundStyle(Theme.destructive)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 14)
+                                .accessibilityIdentifier("new-job-error")
+                        }
                     }.padding(.horizontal, 20).padding(.vertical, 8)
                 }
                 Spacer(minLength: 0)
             }.foregroundStyle(Theme.foreground).background(Theme.background).buttonStyle(.plain)
                 .toolbar(.hidden, for: .navigationBar)
-                .onAppear { customerId = preselected?.id ?? "" }
+                .sheet(isPresented: $showNewCustomer) {
+                    NewCustomerSheet { customer in draft.customerID = customer.id; error = nil }
+                }
+                .navigationDestination(isPresented: createdJobRoute) {
+                    if let createdJobID { JobDetailView(jobId: createdJobID) }
+                }
         }
     }
+
+    private var customerPicker: some View {
+        Menu {
+            if session.can("customer.create", feature: "core_crm") {
+                Button { showNewCustomer = true } label: { Label("New customer…", systemImage: "person.badge.plus") }
+                Divider()
+            }
+            Button { draft.customerID = "" } label: {
+                Label("Choose a customer", systemImage: "person.crop.circle.badge.xmark")
+            }
+            ForEach(store.customers.filter { $0.archived != true }) { customer in
+                Button { draft.customerID = customer.id; error = nil } label: {
+                    if customer.id == draft.customerID {
+                        Label(customer.name, systemImage: "checkmark")
+                    } else {
+                        Text(customer.name)
+                    }
+                }
+            }
+        } label: {
+            Label {
+                Text(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Customer")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } icon: {
+                Image(systemName: "person")
+            }
+            .font(Theme.font(12, weight: .medium))
+            .padding(.horizontal, 10)
+            .frame(minHeight: 44)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .accessibilityLabel("Customer: \(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Choose a customer")")
+        .disabled(busy)
+    }
+
+    private var createdJobRoute: Binding<Bool> {
+        Binding(
+            get: { createdJobID != nil },
+            set: { isPresented in
+                guard !isPresented, createdJobID != nil else { return }
+                createdJobID = nil
+                dismiss()
+            }
+        )
+    }
+
     private func create() async {
+        guard !busy, let request = draft.request,
+              session.can("job.create", feature: "jobs") else { return }
+        let sessionGeneration = session.generation
+        let organizationID = session.activeOrganization?.id
+        error = nil
         busy = true
         defer { busy = false }
         do {
-            _ = try await api.createJob(customerId: customerId, title: title.trimmingCharacters(in: .whitespacesAndNewlines))
-            await store.refresh(api)
-            dismiss()
+            let createdJob = try await api.createFieldJob(request)
+            guard session.generation == sessionGeneration,
+                  session.activeOrganization?.id == organizationID else { return }
+            _ = await store.refresh(api)
+            guard session.generation == sessionGeneration,
+                  session.activeOrganization?.id == organizationID else { return }
+            if session.can("job.view", feature: "jobs") {
+                createdJobID = createdJob.id
+            } else {
+                dismiss()
+            }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
 }
@@ -89,6 +200,16 @@ struct AddressLink: View {
         var components = URLComponents(string: "https://maps.apple.com/")
         let destination = coordinates.map { "\($0.latitude),\($0.longitude)" } ?? address
         components?.queryItems = [URLQueryItem(name: "q", value: destination)]
+        return components?.url
+    }
+}
+
+/// Turn-by-turn driving directions in Apple Maps to a service location.
+enum Directions {
+    static func url(address: String, coordinates: FieldCoordinates?) -> URL? {
+        var components = URLComponents(string: "https://maps.apple.com/")
+        let destination = coordinates.map { "\($0.latitude),\($0.longitude)" } ?? address
+        components?.queryItems = [URLQueryItem(name: "daddr", value: destination), URLQueryItem(name: "dirflg", value: "d")]
         return components?.url
     }
 }
@@ -177,7 +298,7 @@ struct CustomerContactSheet: View {
                     Spacer()
                     Button("Save") { Task { await save() } }
                         .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
+                        .foregroundStyle(Theme.brandText)
                         .frame(minHeight: 44)
                         .disabled(!canSave)
                         .opacity(canSave ? 1 : 0.45)
@@ -212,7 +333,7 @@ struct CustomerContactSheet: View {
                                 usesCustomRole = true
                             }
                             .font(Theme.font(12, weight: .medium))
-                            .foregroundStyle(Theme.brand)
+                            .foregroundStyle(Theme.brandText)
                         }
                     }
 
@@ -238,7 +359,7 @@ struct CustomerContactSheet: View {
                         } label: {
                             Text("+ Add email")
                                 .font(Theme.font(14, weight: .medium))
-                                .foregroundStyle(Theme.brand)
+                                .foregroundStyle(Theme.brandText)
                                 .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
                         }
                         .buttonStyle(.plain)
@@ -349,72 +470,113 @@ struct CustomerContactSheet: View {
     }
 }
 
+/// Paper 29 and 65 together: every destination that is not a tab, then account settings.
 struct MoreView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject var api: APIClient
     @State private var showWorkspaces = false
+    @State private var showNewJob = false
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                settingsGroup("Account") {
+            VStack(alignment: .leading, spacing: 0) {
+                workspaceHeader
+                // Items placed in the tab bar or hidden in Customize menu are left out here.
+                ForEach(MenuItem.Group.allCases, id: \.self) { section in
+                    let items = layout.moreItems(in: section, session: session)
+                    let local = section == .phone && session.user?.id != nil && session.activeOrganization?.id != nil
+                        ? LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) } : []
+                    if !items.isEmpty || !local.isEmpty {
+                        group(section.rawValue) {
+                            ForEach(items) { item in
+                                if let route = item.route {
+                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint) }
+                                }
+                            }
+                            ForEach(local, id: \.self) { section in
+                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder", tile: Theme.markBurnt) }
+                            }
+                        }
+                    }
+                }
+                group("Account") {
+                    NavigationLink(value: PaperRoute.customizeMenu) {
+                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
+                    }
                     HStack(spacing: 12) {
-                        Avatar(name: session.user?.name ?? "", size: 36)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(session.user?.name ?? "Account").font(Theme.font(15, weight: .medium))
+                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
+                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 40, height: 40).background(Theme.brand, in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.user?.name ?? "Account").font(Theme.font(16, weight: .medium))
                             if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
                         }
                         Spacer()
-                    }.frame(minHeight: 54)
-                    LabeledContent("Workspace", value: session.activeOrganization?.name ?? "")
-                    if session.organizations.count > 1 { Button("Switch workspace") { showWorkspaces = true }.frame(minHeight: 46) }
+                    }
+                    .frame(minHeight: 56)
+                    .accessibilityElement(children: .combine)
+                    PaperMenuRow(title: "Appearance", symbol: "circle.lefthalf.filled") {
+                        Picker("Appearance", selection: $appearance) {
+                            Text("System").tag("system")
+                            Text("Light").tag("light")
+                            Text("Dark").tag("dark")
+                        }
+                        .pickerStyle(.menu).labelsHidden().tint(Theme.muted)
+                    }
+                    Button { Task { await session.signOut() } } label: {
+                        PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
+                    }
                 }
-                settingsGroup("Work") {
-                    if session.can("estimate.view", feature: "estimates") { NavigationLink { EstimatesView() } label: { settingsRow("Estimates", icon: "doc.text") } }
-                    if session.can("invoice.view", feature: "invoicing") { NavigationLink { InvoicesView() } label: { settingsRow("Invoices", icon: "doc.plaintext") } }
-                    if session.can("job.view", feature: "job_booking_notices") { NavigationLink { WorkspaceNoticesView(api: api, available: true).id(session.generation) } label: { settingsRow("Notifications", icon: "bell") } }
-                    if session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments") { NavigationLink { WorkspaceRevenueView(api: api, available: true).id(session.generation) } label: { settingsRow("Revenue report", icon: "chart.bar") } }
-                    if session.can("pricebook.view", feature: "price_book") { NavigationLink { WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation) } label: { settingsRow("Price book", icon: "book.closed") } }
-                }
-                if let actorID = session.user?.id, let organizationID = session.activeOrganization?.id {
-                    settingsGroup("On this device") {
-                        NavigationLink { InboxLocalDraftView(actorID: actorID, organizationID: organizationID) } label: { settingsRow("Message drafts", icon: "bubble.left") }
-                        ForEach(LocalWorkspaceSection.allCases, id: \.self) { section in
-                            if session.can(section.requiredCapability, feature: section.requiredFeature) { NavigationLink { LocalWorkspaceView(section: section, actorID: actorID, organizationID: organizationID) } label: { settingsRow(section.title, icon: "folder") } }
+                Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
+                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity).padding(.top, 28).padding(.bottom, 32)
+            }
+            .foregroundStyle(Theme.foreground).buttonStyle(.plain)
+        }
+        .background(Theme.background)
+        .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
+        .sheet(isPresented: $showNewJob) { NewJobSheet() }
+    }
+
+    /// Paper's workspace switcher with the compose action beside it.
+    private var workspaceHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Button { showWorkspaces = true } label: {
+                    HStack(spacing: 8) {
+                        Image("ThorbisMark").resizable().scaledToFit().padding(3)
+                            .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
+                            .accessibilityHidden(true)
+                        Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .semibold)).lineLimit(1)
+                        if session.organizations.count > 1 {
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
                         }
                     }
+                    .padding(.horizontal, 10).frame(minHeight: 44)
+                    .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
                 }
-                settingsGroup("App") {
-                    Picker("Appearance", selection: $appearance) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
-                    }
-                    .pickerStyle(.menu)
-                    .frame(minHeight: 44)
+                .allowsHitTesting(session.organizations.count > 1)
+                .accessibilityLabel("Workspace, \(session.activeOrganization?.name ?? "")")
+                Spacer()
+                if session.can("job.create", feature: "jobs") {
+                    PaperCircleButton(symbol: "square.and.pencil", label: "New job") { showNewJob = true }
+                }
+            }
+            Text("More").font(Theme.font(34, weight: .bold)).tracking(-0.68).padding(.top, 10)
+                .accessibilityAddTraits(.isHeader)
+        }
+        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 4)
+    }
 
-                    Button { Task { await session.signOut() } } label: {
-                        HStack(spacing: 12) { Image(systemName: "rectangle.portrait.and.arrow.right").frame(width: 20); Text("Sign out"); Spacer() }.foregroundStyle(Theme.destructive).frame(minHeight: 46)
-                    }
-                }
-                Text("Thorbis \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
-                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 16).padding(.bottom, 28)
-            }.font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).buttonStyle(.plain)
-        }.background(Theme.background).navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
-    }
-    private func settingsGroup<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+    private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.vertical, 10)
+            PaperGroupHeader(title: title).padding(.top, 14)
             content()
-        }.padding(.horizontal, 20)
-    }
-    private func settingsRow(_ title: String, icon: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 18)).frame(width: 20).foregroundStyle(Theme.muted)
-            Text(title)
-            Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.muted)
-        }.frame(minHeight: 46).contentShape(Rectangle())
+        }
+        .padding(.horizontal, Theme.gutter)
     }
 }

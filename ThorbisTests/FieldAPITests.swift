@@ -511,16 +511,73 @@ final class FieldAPITests: XCTestCase {
     func testCreatingManualJobSendsOnlyJobOwnedFields() async throws {
         let job = #"{"id":"00000000-0000-4000-8000-000000000001","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","title":"Repair","status":"scheduled","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
         let client = APIClient(session: URLProtocolFixture.session([.init(201, job)]), baseURL: "https://app.thorbis.com")
+        // This optional jobs.locationId is the organization's branch scope, not a customer service address.
+        let branchLocationID = "00000000-0000-4000-8000-000000000004"
 
-        _ = try await client.createFieldJob(.init(customerId: customerID, title: "Repair", notes: "Leaking valve"))
+        _ = try await client.createFieldJob(.init(customerId: customerID, title: "Repair", locationId: branchLocationID, notes: "Leaking valve"))
 
         let sent = try XCTUnwrap(URLProtocolFixture.recorded.first)
         XCTAssertEqual(sent.url?.path, "/v1/jobs")
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent.body)) as? [String: Any])
         XCTAssertEqual(body["customerId"] as? String, customerID)
+        XCTAssertEqual(body["locationId"] as? String, branchLocationID)
         XCTAssertEqual(body["notes"] as? String, "Leaking valve")
+        XCTAssertNil(body["teamId"])
+        XCTAssertNil(body["assignedToUserId"])
+        XCTAssertNil(body["priority"])
         XCTAssertNil(body["estimateId"])
         XCTAssertNil(body["organizationId"])
+    }
+
+    func testFieldJobDraftBuildsTrimmedSupportedRequest() throws {
+        var draft = FieldJobDraft()
+        draft.customerID = customerID
+        draft.title = "  Water heater repair  "
+        draft.notes = "  Leaking valve in the basement  "
+
+        XCTAssertTrue(draft.canCreate)
+        let request = try XCTUnwrap(draft.request)
+        XCTAssertEqual(request.customerId, customerID)
+        XCTAssertEqual(request.title, "Water heater repair")
+        XCTAssertEqual(request.notes, "Leaking valve in the basement")
+        XCTAssertNil(request.teamId)
+        XCTAssertNil(request.locationId)
+    }
+
+    func testFieldJobDraftRequiresCustomerAndNonblankTitleAndDropsBlankNotes() throws {
+        var draft = FieldJobDraft()
+        draft.title = "   \n"
+        XCTAssertFalse(draft.canCreate)
+        XCTAssertNil(draft.request)
+
+        draft.customerID = customerID
+        XCTAssertFalse(draft.canCreate)
+        draft.title = "Repair"
+        draft.notes = "  \n  "
+
+        let request = try XCTUnwrap(draft.request)
+        XCTAssertTrue(draft.canCreate)
+        XCTAssertNil(request.notes)
+        XCTAssertNil(request.locationId)
+    }
+
+    func testFieldJobDraftUsesCanonicalTitleAndNotesLimits() throws {
+        var draft = FieldJobDraft(
+            customerID: customerID,
+            title: String(repeating: "T", count: 200),
+            notes: String(repeating: "N", count: 10_000)
+        )
+        XCTAssertTrue(draft.canCreate)
+        XCTAssertNotNil(draft.request)
+
+        draft.title.append("T")
+        XCTAssertFalse(draft.canCreate)
+        XCTAssertNil(draft.request)
+
+        draft.title = "Repair"
+        draft.notes.append("N")
+        XCTAssertFalse(draft.canCreate)
+        XCTAssertNil(draft.request)
     }
 
     func testLegacyPhotoListDecodesMetadataAndDoesNotConfuseItWithMediaAssets() async throws {
