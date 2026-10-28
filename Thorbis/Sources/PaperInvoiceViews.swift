@@ -92,6 +92,8 @@ struct PaperJobInvoiceContent: View {
                     .foregroundStyle(Theme.foreground)
                     .accessibilityLabel(balance.balanceCents.map { "Balance due \(money($0, currency: displayedInvoice.currency))" } ?? "Balance unavailable")
                     .accessibilityAddTraits(.updatesFrequently)
+                    // MF-06: the balance rolls down when a payment lands.
+                    .animation(.snappy(duration: 0.3), value: balance.balanceCents)
                 Spacer(minLength: 4)
                 statusChip
             }

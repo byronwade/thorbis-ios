@@ -623,11 +623,14 @@ struct MoneyFigure: View {
     let label: String
     let cents: Int
     let currency: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            // MF-06: a recorded payment rolls the balance down instead of swapping it.
             Text(money(cents, currency: currency)).moneyStyle(.hero).tracking(-0.5)
                 .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
+                .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: cents)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
