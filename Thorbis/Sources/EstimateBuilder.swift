@@ -559,7 +559,7 @@ struct EstimateBuilderLineRow: View {
                 if line.isEditedPriceBookLine, let original = line.priceBookOriginal {
                     HStack(spacing: 8) {
                         Text("Edited · price book \(EstimateRevisionEditorState.parsePrice(original.unitPrice).map { money($0, currency: "USD") } ?? original.unitPrice)")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
                         Button("Reset", action: reset)
                             .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
                             .frame(minHeight: 44)
@@ -653,7 +653,7 @@ struct EstimateBuilderTotal: View {
             Text("Total").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.muted)
             Spacer(minLength: 12)
             Text(total.map { money($0, currency: "USD") } ?? "—")
-                .font(Theme.monoFont(34, weight: .medium)).foregroundStyle(Theme.foreground)
+                .moneyStyle(.hero).foregroundStyle(Theme.foreground)
                 .contentTransition(.numericText())
                 .lineLimit(1).minimumScaleFactor(0.7)
         }

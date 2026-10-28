@@ -339,7 +339,7 @@ struct InvoicePaymentsSection: View {
             VStack(alignment: .trailing, spacing: 4) {
                 let amount = payment.netAmount ?? payment.amount
                 Text(money(amount.amount, currency: amount.currency))
-                    .font(Theme.font(15, weight: .medium))
+                    .moneyStyle(.row)
                     .foregroundStyle(Theme.foreground)
                 if payment.status == .refunded {
                     Text("Refunded").font(Theme.font(12)).foregroundStyle(Theme.warning)
@@ -420,7 +420,7 @@ private struct InvoicePaymentDetailSheet: View {
                     VStack(alignment: .leading, spacing: 6) {
                         let received = refundModel.payment.netAmount ?? refundModel.payment.amount
                         Text(money(received.amount, currency: received.currency))
-                            .font(Theme.font(30, weight: .medium))
+                            .moneyStyle(.hero)
                             .tracking(-0.45)
                         Text("Net received")
                             .font(Theme.font(13))
@@ -524,7 +524,7 @@ private struct InvoicePaymentDetailSheet: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(Theme.font(15, weight: .medium))
                     Text("Full payment · \(money(refundModel.payment.amount.amount, currency: refundModel.payment.amount.currency))")
-                        .font(Theme.font(12))
+                        .font(Theme.font(15)).monospacedDigit()
                         .foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 8)
@@ -799,10 +799,11 @@ struct InvoicePaymentCollectionSheet: View {
         self.invoice = invoice
         let cents = model.pendingRequest?.amount.amount ?? min(model.outstandingCents ?? 0, 1_000_000_000_000)
         _amountText = State(initialValue: paymentAmountText(cents))
-        _method = State(initialValue: model.pendingRequest?.method ?? .cash)
-        // Tap to Pay needs Apple's entitlement and a card-present terminal first;
-        // open on the fastest path that actually takes money today.
-        _option = State(initialValue: model.pendingRequest == nil ? .paymentLink : .alreadyCollected)
+        // MF-09: open on the way this phone last collected (cash, check or link); otherwise on
+        // the fastest path that actually takes money today. Tap to Pay is chosen in `.task`.
+        let last = InvoiceCollectionOption.lastUsed
+        _method = State(initialValue: model.pendingRequest?.method ?? (last == .check ? .check : .cash))
+        _option = State(initialValue: model.pendingRequest == nil ? (last ?? .paymentLink) : .alreadyCollected)
         _tapToPayController = StateObject(wrappedValue: TapToPayController(invoiceID: invoice.id))
     }
 
@@ -849,14 +850,14 @@ struct InvoicePaymentCollectionSheet: View {
                     Button("Done") { amountFocused = false }.frame(minWidth: 44, minHeight: 44)
                 }
             }
-            .sheet(isPresented: $showPayLinkShare) {
-                NavigationStack {
+            .navigationDestination(isPresented: $showPayLinkShare) {
                     VStack(alignment: .leading, spacing: 18) {
                         if let payLink, let shareURL = payLink.shareURL {
                             Text("Secure payment link ready")
                                 .font(Theme.font(17, weight: .medium))
-                            Text("Share the invoice balance with \(customerName).")
-                                .font(Theme.font(13))
+                            MoneyFigure(label: "Balance due", cents: model.outstandingCents ?? 0, currency: invoice.currency)
+                            Text("Share this link with \(customerName) to pay by card.")
+                                .font(Theme.font(15))
                                 .foregroundStyle(Theme.muted)
                             ShareLink(item: shareURL) {
                                 Label("Share payment link", systemImage: "square.and.arrow.up")
@@ -880,13 +881,11 @@ struct InvoicePaymentCollectionSheet: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { showPayLinkShare = false }
+                            // MF-10: the link is made; Done goes back to the invoice.
+                            Button("Done") { dismiss() }
                                 .frame(minWidth: 44, minHeight: 44)
                         }
                     }
-                }
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
             }
             .confirmationDialog(recordConfirmationTitle, isPresented: $showRecordConfirmation, titleVisibility: .visible) {
                 Button(primaryTitle) { Task { await recordPayment() } }
@@ -896,7 +895,7 @@ struct InvoicePaymentCollectionSheet: View {
             }
             .task {
                 // Open on the iPhone reader when this workspace and phone can take cards in person.
-                if tapToPayAvailable && model.pendingRequest == nil { option = .tapToPay }
+                if tapToPayAvailable && model.pendingRequest == nil && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
                 await loadReceiptDestination()
             }
         }
@@ -906,13 +905,15 @@ struct InvoicePaymentCollectionSheet: View {
         VStack(spacing: 7) {
             PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
             HStack(spacing: 3) {
+                // MF-01: the amount being collected is the screen.
                 Text("$")
-                    .font(Theme.monoFont(24, weight: .medium))
+                    .font(Theme.moneyFont(.hero))
                     .foregroundStyle(Theme.muted)
                 TextField("0.00", text: $amountText)
                     .keyboardType(.decimalPad)
                     .focused($amountFocused)
-                    .font(Theme.monoFont(30, weight: .medium))
+                    .font(Theme.moneyFont(.hero))
+                    .monospacedDigit()
                     .tracking(-0.7)
                     .multilineTextAlignment(.leading)
                     .fixedSize()
@@ -927,13 +928,16 @@ struct InvoicePaymentCollectionSheet: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            Text("Balance due \(money(model.outstandingCents ?? 0, currency: invoice.currency))")
-                .font(Theme.font(12))
-                .foregroundStyle(Theme.muted)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                Text(money(model.outstandingCents ?? 0, currency: invoice.currency)).moneyStyle(.row).foregroundStyle(Theme.foreground)
+            }
+            .accessibilityElement(children: .combine)
             if amountCents == nil {
-                Text("Enter an amount within the invoice balance.")
-                    .font(Theme.font(12))
-                    .foregroundStyle(Theme.destructive)
+                // MA-15: words in body colour; the amount rule is the exit.
+                Label("Enter an amount up to the balance due.", systemImage: "exclamationmark.circle")
+                    .font(Theme.font(15))
+                    .foregroundStyle(Theme.foreground)
             }
         }
         .frame(maxWidth: .infinity)
@@ -996,6 +1000,7 @@ struct InvoicePaymentCollectionSheet: View {
             return model.payments.count > before || model.outstandingCents == 0
         }
         if tapToPay.phase == .paid {
+            InvoiceCollectionOption.lastUsed = nil
             try? await Task.sleep(nanoseconds: 900_000_000)
             dismiss()
         }
@@ -1195,7 +1200,9 @@ struct InvoicePaymentCollectionSheet: View {
             return
         }
         guard amountCents != nil else { return }
-        if hasLockedIntent {
+        // MF-08: the commit already says "Record $480.00 cash received", so cash and check record
+        // at once. A payment collected elsewhere still confirms that nothing is charged here.
+        if hasLockedIntent || option == .cash || option == .check {
             await recordPayment()
         } else {
             showRecordConfirmation = true
@@ -1206,6 +1213,7 @@ struct InvoicePaymentCollectionSheet: View {
         guard let amountCents else { return }
         let accepted = await model.record(amountCents: amountCents, method: method)
         if accepted {
+            if option == .cash || option == .check { InvoiceCollectionOption.lastUsed = option }
             // The sheet closes on success, so a view-bound sensoryFeedback would never play.
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             dismiss()
@@ -1220,6 +1228,7 @@ struct InvoicePaymentCollectionSheet: View {
         do {
             payLink = try await api.openFieldPayLink(invoice.id)
             payLinkError = nil
+            InvoiceCollectionOption.lastUsed = .paymentLink
             showPayLinkShare = true
         } catch is CancellationError {
         } catch {
@@ -1249,22 +1258,39 @@ struct InvoicePaymentCollectionSheet: View {
     }
 }
 
-private enum InvoiceCollectionOption: Equatable {
+private enum InvoiceCollectionOption: String, Equatable {
     case tapToPay
     case paymentLink
     case cash
     case check
     case alreadyCollected
+
+    /// MF-09: the last way this phone collected, so the sheet opens on it. Nil means Tap to Pay
+    /// (when available) or the payment link. "Already collected" is never remembered.
+    static var lastUsed: InvoiceCollectionOption? {
+        get {
+            UserDefaults.standard.string(forKey: "thorbis.payment.lastOption")
+                .flatMap(InvoiceCollectionOption.init(rawValue:))
+                .flatMap { [InvoiceCollectionOption.cash, .check, .paymentLink].contains($0) ? $0 : nil }
+        }
+        set { UserDefaults.standard.set(newValue?.rawValue, forKey: "thorbis.payment.lastOption") }
+    }
 }
 
+@MainActor
 private func paymentDetail(_ label: String, _ value: String) -> some View {
-    HStack(spacing: 10) {
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
         Text(label).foregroundStyle(Theme.muted)
         Spacer()
-        Text(value).foregroundStyle(Theme.foreground).multilineTextAlignment(.trailing)
+        // MF-02: amounts in the detail read at the line size; dates stay body text.
+        if value.first == "$" || value.first == "-" {
+            Text(value).moneyStyle(.line).foregroundStyle(Theme.foreground)
+        } else {
+            Text(value).foregroundStyle(Theme.foreground).multilineTextAlignment(.trailing)
+        }
     }
-    .font(Theme.font(13))
-    .padding(.vertical, 13)
+    .font(Theme.font(15))
+    .padding(.vertical, 12)
 }
 
 private func paymentDate(_ value: String) -> String {

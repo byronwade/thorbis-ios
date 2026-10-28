@@ -214,7 +214,9 @@ struct NewEstimateView: View {
                               source: $0.source ?? .manual)
                     }))
                 created = estimate
-                onCreated(estimate)
+                // On a job, the estimate opens only once it's attached; an unattached one in job
+                // context would never count as the job's estimate.
+                if jobID == nil { onCreated(estimate) }
             }
             if let jobID {
                 do { _ = try await api.linkFieldEstimate(jobID: jobID, estimateID: estimate.id) }

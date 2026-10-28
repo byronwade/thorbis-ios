@@ -170,12 +170,12 @@ struct BillingScheduleDetailView: View {
                     if progress.depositsBilled > 0 || progress.retainedToDate > 0 {
                         PaperGroupHeader(title: "Deposits and retainage").padding(.top, 8)
                         if progress.depositsBilled > 0 {
-                            PaperDetailRow("Deposits billed", value: money(progress.depositsBilled, currency: "USD"))
-                            PaperDetailRow("Not yet applied", value: money(progress.depositOutstanding, currency: "USD"))
+                            PaperDetailRow("Deposits billed", money: money(progress.depositsBilled, currency: "USD"))
+                            PaperDetailRow("Not yet applied", money: money(progress.depositOutstanding, currency: "USD"))
                         }
                         if progress.retainedToDate > 0 {
-                            PaperDetailRow("Retained", value: money(progress.retainedToDate, currency: "USD"))
-                            PaperDetailRow("Releasable now", value: money(progress.retainageOutstanding, currency: "USD"))
+                            PaperDetailRow("Retained", money: money(progress.retainedToDate, currency: "USD"))
+                            PaperDetailRow("Releasable now", money: money(progress.retainageOutstanding, currency: "USD"))
                         }
                     }
                     PaperGroupHeader(title: "Schedule of values", count: progress.schedule.lines.count).padding(.top, 8)
@@ -185,13 +185,13 @@ struct BillingScheduleDetailView: View {
                             HStack(alignment: .firstTextBaseline) {
                                 Text(line.description).font(Theme.font(15, weight: .medium))
                                 Spacer(minLength: 8)
-                                Text(money(line.scheduledAmount.amount, currency: "USD")).font(Theme.monoFont(13, weight: .semibold))
+                                Text(money(line.scheduledAmount.amount, currency: "USD")).moneyStyle(.row)
                             }
                             if let lineProgress {
                                 ProgressView(value: Double(lineProgress.billedToDate), total: Double(max(line.scheduledAmount.amount, 1)))
                                     .tint(Theme.brand)
                                 Text("\(money(lineProgress.billedToDate, currency: "USD")) billed · \(money(lineProgress.remaining, currency: "USD")) left")
-                                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
                             }
                         }
                         .padding(.vertical, 8)
@@ -205,7 +205,7 @@ struct BillingScheduleDetailView: View {
                     }
                     if progress.retainageOutstanding > 0, canBill {
                         Button("Release retainage · \(money(progress.retainageOutstanding, currency: "USD"))") { confirm = "release-retainage" }
-                            .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                            .font(Theme.font(15, weight: .medium)).monospacedDigit().foregroundStyle(Theme.brandText)
                             .frame(minHeight: 44).padding(.top, 8).disabled(busy)
                     }
                 } else if error == nil {
@@ -240,7 +240,7 @@ struct BillingScheduleDetailView: View {
     private func figure(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.monoFont(19, weight: .semibold))
+            Text(value).moneyStyle(.total)
         }
     }
 
