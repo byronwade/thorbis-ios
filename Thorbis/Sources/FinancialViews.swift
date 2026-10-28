@@ -776,8 +776,8 @@ struct NewEstimateView: View {
                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                 } else {
                     TextField("0.00", text: line.price).keyboardType(.decimalPad)
-                        .font(Theme.monoFont(14)).multilineTextAlignment(.trailing)
-                        .padding(.horizontal, 10).frame(width: 110, height: 36)
+                        .font(Theme.monoFont(16)).multilineTextAlignment(.trailing)
+                        .padding(.horizontal, 10).frame(width: 110, height: 44)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                         .accessibilityLabel("Unit price")
                 }

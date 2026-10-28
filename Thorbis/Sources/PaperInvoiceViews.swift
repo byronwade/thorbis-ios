@@ -148,7 +148,7 @@ struct PaperJobInvoiceContent: View {
                             .foregroundStyle(Theme.foreground)
                             .fixedSize()
                     }
-                    .frame(minHeight: 42)
+                    .frame(minHeight: 44)
                     if index < displayedInvoice.lines.count - 1 {
                         Divider().overlay(Theme.border)
                     }
@@ -164,7 +164,7 @@ struct PaperJobInvoiceContent: View {
                         .font(Theme.monoFont(13, weight: .semibold))
                         .foregroundStyle(Theme.foreground)
                 }
-                .frame(minHeight: 42)
+                .frame(minHeight: 44)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 4)

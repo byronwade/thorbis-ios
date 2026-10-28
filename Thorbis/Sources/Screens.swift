@@ -514,7 +514,7 @@ struct CustomerContactSheet: View {
                             Text("+ Add email")
                                 .font(Theme.font(14, weight: .medium))
                                 .foregroundStyle(Theme.brandText)
-                                .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
                         .buttonStyle(.plain)
                     }
