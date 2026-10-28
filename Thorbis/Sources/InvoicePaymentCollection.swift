@@ -907,10 +907,7 @@ struct InvoicePaymentCollectionSheet: View {
 
     private var amountHero: some View {
         VStack(spacing: 7) {
-            Text("INV-\(invoice.id.suffix(4).uppercased()) · \(customerName)")
-                .font(Theme.monoFont(11, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .lineLimit(1)
+            PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
             HStack(spacing: 3) {
                 Text("$")
                     .font(Theme.monoFont(26, weight: .medium))

@@ -670,8 +670,7 @@ struct NewEstimateView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("NEW ESTIMATE\(jobID.map { " · JOB-\($0.suffix(4).uppercased())" } ?? "")")
-                            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                        PaperEyebrow(reference: jobID.map { "JOB-\($0.suffix(4).uppercased())" }, text: "New estimate")
                         TextField("Estimate title", text: $title, axis: .vertical)
                             .font(Theme.font(24, weight: .medium)).tracking(-0.36)
                             .accessibilityLabel("Estimate title")

@@ -246,7 +246,7 @@ struct CustomerDetailView: View {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
-                        Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+                        PaperEyebrow(text: "Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
                     }
                     Text(record?.name ?? customer.name).font(Theme.font(24, weight: .medium)).tracking(-0.36)
                         .accessibilityAddTraits(.isHeader)
