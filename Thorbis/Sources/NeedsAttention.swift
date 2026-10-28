@@ -50,7 +50,7 @@ struct NeedsAttentionView: View {
                     ForEach(unpaid, id: \.0.id) { invoice, balance in
                         NavigationLink(value: PaperRoute.invoice(invoice.id)) {
                             row(title: store.customerName(invoice.customerId), detail: since("Issued", invoice.issuedAt),
-                                trailing: money(balance, currency: invoice.currency), tint: Theme.warning)
+                                trailing: money(balance, currency: invoice.currency), tint: Theme.foreground)
                         }.buttonStyle(.plain)
                     }
                 }
