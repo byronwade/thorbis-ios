@@ -80,6 +80,7 @@ final class PriceBookSearchTests: XCTestCase {
     func testPunctuationAndAccentsAreIgnored() {
         XCTAssertEqual(search("r410a"), ["Refrigerant R-410A"], "neighbouring words match joined")
         XCTAssertTrue(search("r420a").isEmpty, "a model number never takes a typo")
+        XCTAssertTrue(search("455 capacitor").isEmpty, "two sizes never join into one number")
         XCTAssertEqual(search("R 410A"), ["Refrigerant R-410A"])
         XCTAssertEqual(search("CONDÉNSER").first, "Condenser coil cleaning")
     }

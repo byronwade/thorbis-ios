@@ -58,8 +58,11 @@ struct PriceBookSearchIndex {
             guard item.archivedAt == nil, item.sellPrice.currency == currency else { return nil }
             let kindWords = item.kind.isEmpty ? [] : [item.kind, item.kind + "s"]
             let nameWords = Self.words(item.description)
-            // Neighbouring words joined, so "R410A" finds "R-410A" exactly instead of by a typo.
-            let joined = zip(nameWords, nameWords.dropFirst()).map { $0 + $1 }
+            // A letter word joined to its neighbouring number, so "R410A" finds "R-410A" exactly
+            // instead of by a typo. Two numbers never join: "45/5" is not "455".
+            let joined = zip(nameWords, nameWords.dropFirst())
+                .filter { $0.contains(where: \.isNumber) != $1.contains(where: \.isNumber) }
+                .map { $0 + $1 }
             let words = nameWords + joined + Self.words(item.unit) + kindWords.map(Self.normalize)
             return Entry(item: item, normalizedDescription: Self.normalize(item.description), words: words)
         }
