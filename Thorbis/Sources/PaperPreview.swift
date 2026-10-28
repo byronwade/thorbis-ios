@@ -389,6 +389,26 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
+            if path == "/v1/jobs/\(id)/booking-call" {
+                return ["call": [
+                    "id": "00000000-0000-4000-8000-000000009601", "status": "completed", "direction": "inbound",
+                    "callerNumber": "(555) 010-0100", "callerName": "Dana Ruiz", "jobId": id,
+                    "linkedAt": "2026-10-27T15:20:00Z", "startedAt": "2026-10-27T15:12:00Z", "endedAt": "2026-10-27T15:15:12Z",
+                    "durationSeconds": 192,
+                    "recording": ["status": "available", "durationSeconds": 192,
+                                  "contentPath": "/v1/calls/00000000-0000-4000-8000-000000009601/recording"],
+                    "summary": ["text": "Water heater leaking at the base since this morning. Works from home; call 30 minutes ahead. Side gate code 4471.",
+                                "source": "model"],
+                    "transcriptStatus": "available",
+                    "transcript": [
+                        ["sequence": 1, "speaker": "business", "text": "Thanks for calling, how can we help?"],
+                        ["sequence": 2, "speaker": "caller", "text": "My water heater is leaking at the bottom. There's a puddle in the garage."],
+                        ["sequence": 3, "speaker": "business", "text": "We can have someone out tomorrow morning. Any gate code or pets?"],
+                        ["sequence": 4, "speaker": "caller", "text": "Side gate is 4471. The dog is friendly. Please call half an hour before."],
+                    ],
+                    "disclosure": "This call may be recorded for quality and training.",
+                ]]
+            }
             if path == "/v1/jobs/\(id)/visit-history" {
                 return ["items": [
                     ["id": "00000000-0000-4000-8000-000000009501", "title": "Spring AC tune-up", "status": "completed",
