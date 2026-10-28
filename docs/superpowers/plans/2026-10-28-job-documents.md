@@ -49,7 +49,7 @@ an explicit actionable invoice, then issued balance, draft, other records.
 ### Task 2: All-document navigation and customer handoff
 
 **Files:** PaperJobDetailView.swift, new JobDocumentRows.swift and
-JobCustomerDocumentsView.swift; TechnicianFlow.swift JobMenu actions; native tests.
+JobCustomerDocumentsView.swift; JobBrief.swift JobMenu actions; native tests.
 
 **Interfaces:** rows consume scoped snapshots; customer hub receives exact job
 scope and document references, refreshes before presenting, uses

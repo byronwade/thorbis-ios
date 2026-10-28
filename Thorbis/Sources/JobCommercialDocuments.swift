@@ -23,12 +23,16 @@ struct JobDocumentRead<Record> {
     let freshIDs: Set<String>
     let isComplete: Bool
     let issue: String?
+    /// Verified association, but no safe document contents were available to display.
+    let unavailableIDs: [String]
 
-    fileprivate init(scope: JobDocumentScope, records: [Record], freshIDs: Set<String>, isComplete: Bool, kind: String) {
+    fileprivate init(scope: JobDocumentScope, records: [Record], freshIDs: Set<String>, isComplete: Bool,
+                     unavailableIDs: [String] = [], kind: String) {
         self.scope = scope
         self.records = records
         self.freshIDs = freshIDs
         self.isComplete = isComplete
+        self.unavailableIDs = unavailableIDs
         issue = isComplete ? nil : "Couldn't load all \(kind) for this job. Some records may need a refresh."
     }
 }
@@ -113,7 +117,9 @@ enum JobDocumentsLoader {
             records += retained.filter { !present.contains($0.id) && scope.contains($0, requestedID: $0.id) }
         }
         guard isCurrent(), !Task.isCancelled else { return nil }
-        return .init(scope: scope, records: records, freshIDs: fresh, isComplete: complete, kind: "estimates")
+        let displayed = Set(records.map(\.id))
+        return .init(scope: scope, records: records, freshIDs: fresh, isComplete: complete,
+                     unavailableIDs: unique(ids).filter { !displayed.contains($0) }, kind: "estimates")
     }
 
     static func invoices(scope: JobDocumentScope, api: APIClient, knownIDs: [String],

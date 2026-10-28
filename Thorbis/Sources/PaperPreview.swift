@@ -23,6 +23,36 @@ enum PaperPreview {
               ["onboard-signup", "onboard-company", "onboard-details", "onboard-setup"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
+    static var isJobDocumentsPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents") }
+    /// Deterministic OS-boundary responses for the isolated, read-only design preview only.
+    static var ownerAuthentication: (@MainActor (String) async -> Bool)? {
+        let args = ProcessInfo.processInfo.arguments
+        guard enabled, let index = args.firstIndex(of: "--paper-preview-owner-auth"), args.indices.contains(index + 1),
+              ["approved", "denied"].contains(args[index + 1]) else { return nil }
+        let approved = args[index + 1] == "approved"
+        return { _ in approved }
+    }
+    static var jobDocumentEstimates: [EstimateRecord] {
+        [changed(estimate, ["title": "Main drain repair", "options": NSNull()]),
+         changed(estimate, ["id": "00000000-0000-4000-8000-000000002238", "title": "Water heater add-ons", "status": "draft", "options": NSNull()]),
+         changed(estimate, ["id": "00000000-0000-4000-8000-000000002239", "title": "Other job estimate", "options": NSNull()])]
+    }
+    static var jobDocumentInvoices: [InvoiceRecord] {
+        var primary = issuedInvoice
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-signed") {
+            primary.customerAuthorization = .init(id: "00000000-0000-4000-8000-000000009501", signerName: "Preview customer",
+                signedAt: "2026-10-27T12:00:00Z", imageMediaId: "00000000-0000-4000-8000-000000009502", linesRevision: primary.linesRevision)
+        }
+        return [primary,
+         changed(issuedInvoice, ["id": "00000000-0000-4000-8000-000000002240", "status": "paid", "origin": "estimate_deposit",
+                                "amountPaid": 34000, "createdAt": "2026-10-27T12:00:00Z", "paidAt": "2026-10-27T12:05:00Z"]),
+         changed(issuedInvoice, ["id": "00000000-0000-4000-8000-000000002241", "jobId": "00000000-0000-4000-8000-000000002215"])]
+    }
+    private static func changed<T: Codable>(_ value: T, _ fields: [String: Any]) -> T {
+        var object = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as! [String: Any]
+        fields.forEach { object[$0.key] = $0.value }
+        return try! JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: object))
+    }
     static var isWorkingJobPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-working-job") }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview }
     static var paymentLinkPreview: FieldInvoicePayLink? {
@@ -167,6 +197,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
+        } else if PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents-partial"),
+                  url.path == "/v1/estimates/00000000-0000-4000-8000-000000002238" {
+            status = 503
+            payload = ["status": 503, "title": "Preview estimate unavailable"]
         } else if url.scheme == "https", url.host == "app.thorbis.com", let fixture = Self.fixture(path: url.path) {
             status = 200
             payload = fixture
@@ -189,6 +224,30 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let org = PaperPreview.organizationID
         let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400))
         let now = ISO8601DateFormatter().string(from: Date())
+        if PaperPreview.isJobDocumentsPreview {
+            let estimates = PaperPreview.jobDocumentEstimates
+            let invoices = PaperPreview.jobDocumentInvoices
+            if path == "/v1/jobs/\(PaperPreview.jobID)/estimates" {
+                return ["items": estimates.prefix(2).enumerated().map { index, estimate in
+                    ["id": "00000000-0000-4000-8000-0000000093\(String(format: "%02d", index))",
+                     "jobId": PaperPreview.jobID, "estimateId": estimate.id, "linkedAt": now]
+                }]
+            }
+            if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+                return ["items": invoices.filter { $0.jobId == PaperPreview.jobID }.map { jsonObject($0)! }]
+            }
+            if path == "/v1/estimates" { return ["items": estimates.map { jsonObject($0)! }] }
+            if path == "/v1/invoices" { return ["items": invoices.map { jsonObject($0)! }] }
+            if let record = estimates.first(where: { path == "/v1/estimates/\($0.id)" }) { return jsonObject(record) }
+            if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) { return jsonObject(record) }
+            if path == "/v1/invoices/\(invoices[1].id)/payments" {
+                var payment = jsonObject(PaperPreview.refundPayment) as! [String: Any]
+                payment["invoiceId"] = invoices[1].id
+                payment["amount"] = ["amount": 34000, "currency": "USD"]
+                payment["netAmount"] = ["amount": 34000, "currency": "USD"]
+                return ["items": [payment]]
+            }
+        }
         if path == "/v1/public/document-actions/preview-estimate" {
             return [
                 "kind": "estimate",

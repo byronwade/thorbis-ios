@@ -1,0 +1,78 @@
+import SwiftUI
+
+/// The same recognizable paper in the technician list and the customer handoff.
+struct JobDocumentRow: View {
+    let reference: String
+    let title: String
+    let status: String
+    let amount: String?
+    var detail: String? = nil
+    var fresh = true
+    var customerFacing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(reference).font(Theme.monoFont(customerFacing ? 14 : 12))
+                    .foregroundStyle(Theme.muted)
+                Spacer(minLength: 4)
+                PaperStatusChip(status: status)
+            }
+            Text(title).font(Theme.font(customerFacing ? 20 : 17, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let amount { Text(amount).moneyStyle(.row) }
+                    if let detail {
+                        Text(detail).font(Theme.font(customerFacing ? 17 : 13)).foregroundStyle(Theme.muted)
+                    }
+                    if !fresh {
+                        Label("Needs refresh", systemImage: "arrow.clockwise")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                }
+                Spacer(minLength: 8)
+                if fresh { PaperDisclosure() }
+            }
+        }
+        .foregroundStyle(Theme.foreground)
+        .multilineTextAlignment(.leading)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+        .contentShape(Rectangle())
+    }
+}
+
+extension JobDocumentRow {
+    init(estimate: EstimateRecord, fresh: Bool, customerFacing: Bool = false) {
+        reference = "EST-\(estimate.id.suffix(4).uppercased())"
+        title = estimate.title
+        status = estimate.status
+        // Whole alternatives are never added together or presented as add-ons.
+        if let options = estimate.options, !options.isEmpty, estimate.status != "approved" {
+            amount = nil
+            detail = "\(options.count) options"
+        } else {
+            amount = paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") }
+            detail = nil
+        }
+        self.fresh = fresh
+        self.customerFacing = customerFacing
+    }
+
+    init(invoice: InvoiceRecord, fresh: Bool, customerFacing: Bool = false) {
+        reference = "INV-\(invoice.id.suffix(4).uppercased())"
+        title = invoice.origin == "estimate_deposit" ? "Deposit" : "Invoice"
+        status = invoice.status
+        amount = paperLinesTotal(invoice.lines).map { money($0, currency: invoice.currency) }
+        if invoice.status == "issued", let total = paperLinesTotal(invoice.lines), invoice.amountPaid >= 0, total >= invoice.amountPaid {
+            detail = "\(money(total - invoice.amountPaid, currency: invoice.currency)) due"
+        } else {
+            detail = nil
+        }
+        self.fresh = fresh
+        self.customerFacing = customerFacing
+    }
+}

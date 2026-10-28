@@ -36,6 +36,16 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertFalse(read.isComplete)
     }
 
+    func testInitiallyUnavailableLinkedEstimateKeepsItsOwnVisibleReference() async throws {
+        let client = api([.init(200, page([link(11), link(12, job: 101)])),
+                          .init(200, estimate(10)), .init(503, problem(503))])
+        let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: client, retaining: nil, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(read.records.map(\.id), [id(10)])
+        XCTAssertEqual(read.unavailableIDs, [id(11)])
+        XCTAssertFalse(read.isComplete)
+    }
+
     func testEstimateDetailMustMatchTheRequestedIdentityAndCustomer() async throws {
         for body in [estimate(99), estimate(10, customer: 3), estimate(10, organization: 4)] {
             let client = api([.init(200, page([])), .init(200, body)])

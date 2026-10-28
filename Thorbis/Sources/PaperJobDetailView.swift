@@ -20,6 +20,9 @@ struct JobDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
     @State private var showCustomerMode = false
+    @State private var showCommercialDocuments = false
+    @State private var customerPaymentInvoiceID: String?
+    @State private var documentInvoiceID: String?
     @State private var notes: [JobNoteRecord] = []
     @State private var note = ""
     @State private var reason = ""
@@ -143,11 +146,33 @@ struct JobDetailView: View {
                 CustomerSelfEditView(customerID: customerID) { showCustomerMode = false }
             }
         }
+        .fullScreenCover(isPresented: $showCommercialDocuments, onDismiss: {
+            Task { await finishCustomerDocuments() }
+        }) {
+            CustomerModeContainer(onUnlocked: { showCommercialDocuments = false }) { handBack in
+                if let job, let scope = scope(for: job) {
+                    JobCustomerDocumentsView(scope: scope, jobTitle: job.title,
+                        customerName: store.customerName(job.customerId), handBack: handBack,
+                        onUnlocked: { showCommercialDocuments = false },
+                        requestPayment: { id in
+                            customerPaymentInvoiceID = id
+                            showCommercialDocuments = false
+                        }, invoiceUpdated: updateInvoice, authenticateOwner: customerOwnerAuthentication)
+                } else {
+                    Text("Hand the device back to your technician to reload this job.")
+                        .font(Theme.font(20)).padding(Theme.gutter)
+                }
+            }
+        }
         .sheet(isPresented: $showDeposit) {
             JobDepositSheet(jobID: jobId) { invoice in
                 selectedInvoiceID = invoice.id
                 Task { await loadInvoices() }
             }
+        }
+        .navigationDestination(item: $documentInvoiceID) { id in
+            InvoiceDetailView(id: id)
+                .onDisappear { Task { await loadInvoices() } }
         }
         .navigationDestination(item: $reviewInvoiceID) { id in
             InvoiceDetailView(id: id, returnsWhenPaid: true)
@@ -306,7 +331,8 @@ struct JobDetailView: View {
                 && session.can("invoice.create", feature: "progress_billing"),
             // The bar shows only on Overview; on the other tabs Wrap up stays in the menu.
             barIsWrapUp: selectedTab == "Overview" && nextStep == .wrapUp,
-            canShowToCustomer: session.can("customer.edit", feature: "core_crm")))
+            canShowToCustomer: session.can("estimate.view", feature: "estimates") || session.can("invoice.view", feature: "invoicing"),
+            canEditCustomer: session.can("customer.edit", feature: "core_crm")))
     }
 
     @ViewBuilder
@@ -334,7 +360,9 @@ struct JobDetailView: View {
         case .followUps:
             Button("Follow-ups", systemImage: "list.bullet") { showFollowUps = true }
         case .showToCustomer:
-            Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
+            Button("Show to customer", systemImage: "person.crop.rectangle") { showCommercialDocuments = true }
+        case .customerDetails:
+            Button("Customer details", systemImage: "person.crop.circle") { showCustomerMode = true }
         case .copyID:
             Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
         }
@@ -572,23 +600,13 @@ struct JobDetailView: View {
         }
     }
 
-    /// Paper 23: every estimate on the job with totals, approved vs awaiting, and one commit to build another.
+    /// Every estimate has its own paper and price; the footer builds another on this job.
     private func estimatesContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if !session.can("estimate.view", feature: "estimates") {
                 PaperEmptyState(symbol: "doc.text", title: "Estimates unavailable", message: "Your role cannot view estimates.")
             } else {
-                let approved = jobEstimates.filter { $0.status == "approved" }.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
-                let waiting = jobEstimates.filter { $0.status == "sent" }.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
-                if !jobEstimates.isEmpty {
-                    HStack(spacing: 0) {
-                        summary("Awaiting approval", money(waiting, currency: "USD"), quiet: waiting == 0)
-                        Rectangle().fill(Theme.border).frame(width: 1, height: 40).padding(.horizontal, 16)
-                        summary("Approved", money(approved, currency: "USD"), quiet: approved == 0)
-                    }
-                    .padding(.bottom, 6)
-                }
-                PaperGroupHeader(title: "Estimates", count: jobEstimates.count)
+                PaperGroupHeader(title: "Estimates", count: jobEstimates.count + (estimateRead?.unavailableIDs.count ?? 0))
                 if !estimatesLoaded {
                     SkeletonRows(count: 2, leading: false, inset: 0)
                 } else if jobEstimates.isEmpty && !estimatesFailed {
@@ -597,42 +615,20 @@ struct JobDetailView: View {
                 }
                 ForEach(jobEstimates) { estimate in
                     NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(estimate.title).font(Theme.font(15, weight: .medium))
-                                    .foregroundStyle(Theme.foreground).multilineTextAlignment(.leading)
-                                Spacer(minLength: 8)
-                                if let total = paperLinesTotal(estimate.lines) {
-                                    Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
-                                        .moneyStyle(.row).foregroundStyle(Theme.foreground)
-                                }
-                            }
-                            HStack(spacing: 8) {
-                                PaperStatusChip(status: estimate.status)
-                                Text("EST-\(estimate.id.suffix(4).uppercased())").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                                Spacer()
-                                PaperDisclosure()
-                            }
-                        }
-                        .padding(16)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
-                        .contentShape(Rectangle())
+                        JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true)
                     }
                     .buttonStyle(PressStyle())
+                    .accessibilityIdentifier("job-estimate-\(estimate.id)")
                     .disabled(estimateRead?.freshIDs.contains(estimate.id) != true)
+                }
+                ForEach(estimateRead?.unavailableIDs ?? [], id: \.self) { id in
+                    JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
+                                   status: "unavailable", amount: nil, fresh: false)
+                        .accessibilityIdentifier("job-estimate-unavailable-\(id)")
                 }
             }
         }
         .task(id: job.id) { await loadJobEstimates(job) }
-    }
-
-    /// A zero total is muted, so the figure that matters ("$970.00 awaiting") reads first.
-    private func summary(_ label: String, _ value: String, quiet: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).moneyStyle(.total).foregroundStyle(quiet ? Theme.subtle : Theme.foreground)
-        }
     }
 
     private func scope(for job: JobRecord) -> JobDocumentScope? {
@@ -678,39 +674,14 @@ struct JobDetailView: View {
                     .buttonStyle(RowPressStyle())
                 }
             } else {
-                if invoices.count > 1 {
-                    Menu {
-                        ForEach(invoices) { invoice in
-                            Button("INV-\(invoice.id.suffix(4).uppercased()) · \(invoice.status.statusLabel)") {
-                                selectedInvoiceID = invoice.id
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 7) {
-                            Text("INV-\((selectedInvoice?.id ?? invoices[0].id).suffix(4).uppercased())")
-                                .font(Theme.monoFont(12, weight: .medium))
-                            Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
-                        .background(Theme.fill, in: Capsule())
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
+                PaperGroupHeader(title: "Invoices", count: invoices.count)
+                ForEach(invoices) { invoice in
+                    Button { documentInvoiceID = invoice.id } label: {
+                        JobDocumentRow(invoice: invoice, fresh: invoiceRead?.freshIDs.contains(invoice.id) == true)
                     }
-                    .accessibilityLabel("Choose invoice")
-                }
-                if let invoice = selectedInvoice {
-                    if let model = invoicePaymentModel, loadedInvoiceModelID == invoice.id {
-                        PaperJobInvoiceContent(
-                            invoice: invoice,
-                            paymentModel: model,
-                            onCollectPayment: { showCollectPayment = true },
-                            onInvoiceUpdated: updateInvoice
-                        )
-                    } else {
-                        SkeletonRows(count: 4, leading: false, inset: 0)
-                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityIdentifier("job-invoice-\(invoice.id)")
+                    .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true)
                 }
             }
         }
@@ -1018,6 +989,30 @@ struct JobDetailView: View {
             committed += 1
             return invoice
         } catch is CancellationError { return nil } catch { self.error = error.localizedDescription; return nil }
+    }
+
+    private func finishCustomerDocuments() async {
+        let requestedID = customerPaymentInvoiceID
+        customerPaymentInvoiceID = nil
+        let generation = session.generation
+        if let job { await loadJobEstimates(job) }
+        await loadInvoices()
+        guard session.generation == generation, let requestedID,
+              session.can("invoice.payment.create", feature: "payments"),
+              invoiceRead?.freshIDs.contains(requestedID) == true,
+              let invoice = invoices.first(where: { $0.id == requestedID }) else { return }
+        selectedInvoiceID = requestedID
+        await loadInvoicePayments(for: invoice)
+        guard session.generation == generation, loadedInvoiceModelID == requestedID,
+              invoicePaymentModel?.canRecordPayment == true else { return }
+        showCollectPayment = true
+    }
+
+    private var customerOwnerAuthentication: @MainActor (String) async -> Bool {
+        #if DEBUG
+        if let preview = PaperPreview.ownerAuthentication { return preview }
+        #endif
+        return { await StaffUnlock.unlock(reason: $0) }
     }
 
     private func loadInvoicePayments(for invoice: InvoiceRecord) async {
