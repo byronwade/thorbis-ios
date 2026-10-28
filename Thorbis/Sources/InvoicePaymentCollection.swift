@@ -329,7 +329,7 @@ struct InvoicePaymentsSection: View {
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 4) {
                 Text(payment.method.capitalized)
-                    .font(Theme.font(14, weight: .medium))
+                    .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                 Text(paymentDate(payment.recordedAt))
                     .font(Theme.font(12))
@@ -339,10 +339,10 @@ struct InvoicePaymentsSection: View {
             VStack(alignment: .trailing, spacing: 4) {
                 let amount = payment.netAmount ?? payment.amount
                 Text(money(amount.amount, currency: amount.currency))
-                    .font(Theme.font(14, weight: .medium))
+                    .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                 if payment.status == .refunded {
-                    Text("Refunded").font(Theme.font(11)).foregroundStyle(Theme.warning)
+                    Text("Refunded").font(Theme.font(12)).foregroundStyle(Theme.warning)
                 }
             }
             Image(systemName: "chevron.right")
@@ -445,7 +445,7 @@ private struct InvoicePaymentDetailSheet: View {
 
                     if refundModel.didComplete {
                         Label("Refund confirmed by Thorbis", systemImage: "checkmark.circle.fill")
-                            .font(Theme.font(14, weight: .medium))
+                            .font(Theme.font(15, weight: .medium))
                             .foregroundStyle(Theme.success)
                             .padding(15)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -523,7 +523,7 @@ private struct InvoicePaymentDetailSheet: View {
                     .foregroundStyle(Theme.destructive)
                     .frame(width: 26)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(Theme.font(14, weight: .medium))
+                    Text(title).font(Theme.font(15, weight: .medium))
                     Text("Full payment · \(money(refundModel.payment.amount.amount, currency: refundModel.payment.amount.currency))")
                         .font(Theme.font(12))
                         .foregroundStyle(Theme.muted)
@@ -580,10 +580,10 @@ private struct InvoicePaymentRefundForm: View {
                 if model.didComplete {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("Refund confirmed", systemImage: "checkmark.circle.fill")
-                            .font(Theme.font(18, weight: .medium))
+                            .font(Theme.font(17, weight: .medium))
                             .foregroundStyle(Theme.success)
                         Text("Thorbis confirmed the full refund of \(amountText).")
-                            .font(Theme.font(14))
+                            .font(Theme.font(15))
                             .foregroundStyle(Theme.muted)
                     }
                     .padding(16)
@@ -674,7 +674,7 @@ private struct InvoicePaymentRefundForm: View {
             .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
 
             Text("Reason for refund")
-                .font(Theme.font(14, weight: .medium))
+                .font(Theme.font(15, weight: .medium))
                 .accessibilityAddTraits(.isHeader)
             TextEditor(text: Binding(
                 get: { model.reasonDraft },
@@ -857,7 +857,7 @@ struct InvoicePaymentCollectionSheet: View {
                     VStack(alignment: .leading, spacing: 18) {
                         if let payLink, let shareURL = payLink.shareURL {
                             Text("Secure payment link ready")
-                                .font(Theme.font(18, weight: .medium))
+                                .font(Theme.font(17, weight: .medium))
                             Text("Share the invoice balance with \(customerName).")
                                 .font(Theme.font(13))
                                 .foregroundStyle(Theme.muted)
@@ -867,7 +867,7 @@ struct InvoicePaymentCollectionSheet: View {
                             }
                             .accessibilityIdentifier("share-invoice-payment-link")
                             Button("Copy link") { UIPasteboard.general.string = shareURL.absoluteString }
-                                .font(Theme.font(14, weight: .medium))
+                                .font(Theme.font(15, weight: .medium))
                                 .frame(maxWidth: .infinity, minHeight: 44)
                             if let expiration = JobFiltering.date(payLink.expiresAt) {
                                 Text("Expires \(expiration.formatted(date: .abbreviated, time: .shortened))")
@@ -910,12 +910,12 @@ struct InvoicePaymentCollectionSheet: View {
             PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
             HStack(spacing: 3) {
                 Text("$")
-                    .font(Theme.monoFont(26, weight: .medium))
+                    .font(Theme.monoFont(24, weight: .medium))
                     .foregroundStyle(Theme.muted)
                 TextField("0.00", text: $amountText)
                     .keyboardType(.decimalPad)
                     .focused($amountFocused)
-                    .font(Theme.monoFont(32, weight: .medium))
+                    .font(Theme.monoFont(30, weight: .medium))
                     .tracking(-0.7)
                     .multilineTextAlignment(.leading)
                     .fixedSize()
@@ -1118,8 +1118,8 @@ struct InvoicePaymentCollectionSheet: View {
                     .foregroundStyle(selected ? Theme.brand : Theme.muted)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.font(14, weight: selected ? .semibold : .medium))
-                    Text(subtitle).font(Theme.font(11)).foregroundStyle(Theme.muted)
+                    Text(title).font(Theme.font(15, weight: .medium))
+                    Text(subtitle).font(Theme.font(12)).foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 4)
                 if busy {
