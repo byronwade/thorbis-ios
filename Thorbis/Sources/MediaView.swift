@@ -117,8 +117,8 @@ struct JobMediaView: View {
                                             if let tag = ["Before", "After"].first(where: record.tags.contains) {
                                                 Text(tag).font(Theme.font(11, weight: .semibold))
                                                     .foregroundStyle(tag == "After" ? Theme.success : Theme.foreground)
-                                                    .padding(.horizontal, 7).frame(height: 20)
-                                                    .background(tag == "After" ? Theme.successSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 6))
+                                                    .padding(.horizontal, 8).frame(height: 24)
+                                                    .background(tag == "After" ? Theme.successSurface : Theme.fill, in: Capsule())
                                                     .padding(8)
                                             }
                                         }
@@ -179,14 +179,12 @@ struct JobMediaView: View {
                     HStack(spacing: 8) {
                         Button { showCamera = true } label: {
                             HStack(spacing: 7) {
-                                if busy { ProgressView().tint(.white) } else { Image(systemName: "camera") }
+                                if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "camera") }
                                 Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")
                             }
-                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).frame(height: 46)
-                            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                            .inkCommit()
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                         .disabled(busy || !UIImagePickerController.isSourceTypeAvailable(.camera))
                         PhotosPicker(selection: $selection, matching: .images) {
                             Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)

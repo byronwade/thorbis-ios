@@ -241,7 +241,8 @@ struct WorkspaceRevenueView: View {
                     Capsule()
                         .fill(index == months.count - 1 ? Theme.brand : Theme.muted.opacity(0.45))
                         .frame(width: 6, height: max(4, 44 * CGFloat(month.collected) / CGFloat(peak)))
-                    Text(monthName(month.month, long: false).uppercased()).font(Theme.monoFont(10, weight: .medium))
+                    Text(monthName(month.month, long: false).uppercased()).font(Theme.monoFont(12, weight: .medium))
+                        .lineLimit(1).minimumScaleFactor(0.85)
                         .foregroundStyle(index == months.count - 1 ? Theme.foreground : Theme.muted)
                 }
                 .frame(maxWidth: .infinity)

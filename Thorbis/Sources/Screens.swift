@@ -33,15 +33,17 @@ struct NewJobSheet: View {
                     Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Cancel new job").disabled(busy)
                     Spacer()
                     HStack(spacing: 5) {
-                        Text(String((session.activeOrganization?.name ?? "W").prefix(1))).font(Theme.font(9, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 16, height: 16).background(Theme.brand, in: RoundedRectangle(cornerRadius: 5))
+                        Image("ThorbisMark").resizable().scaledToFit().frame(width: 16, height: 16).accessibilityHidden(true)
                         Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(13, weight: .medium)).lineLimit(1)
                     }.padding(.horizontal, 12).frame(height: 30).background(Theme.fill, in: Capsule())
                     Spacer()
                     Button { Task { await create() } } label: {
-                        Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up") } }
-                            .foregroundStyle(.white).frame(width: 38, height: 38).background(Theme.brand, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle())
-                    }.accessibilityLabel("Create job")
+                        // MA-08: the create commit is ink; an icon-only control is a circle.
+                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .medium)) } }
+                            .foregroundStyle(Theme.onInk).frame(width: 38, height: 38)
+                            .background(Theme.ink.opacity(draft.canCreate ? 1 : 0.35), in: Circle())
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).accessibilityLabel("Create job")
                         .disabled(busy || !draft.canCreate || !session.can("job.create", feature: "jobs"))
                 }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 10)
                 ScrollView {
@@ -479,17 +481,13 @@ struct CustomerContactSheet: View {
                 }
                 Button { Task { await save() } } label: {
                     Group {
-                        if busy { ProgressView().tint(.white) }
-                        else { Text(contact == nil ? "Save contact" : "Save changes").font(Theme.font(15, weight: .semibold)) }
+                        if busy { ProgressView().tint(Theme.onInk) }
+                        else { Text(contact == nil ? "Save contact" : "Save changes") }
                     }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                    .inkCommit(enabled: canSave)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .disabled(!canSave)
-                .opacity(canSave ? 1 : 0.45)
 
                 if contact == nil {
                     Text("The first contact is set as primary automatically.")
@@ -536,13 +534,13 @@ struct CustomerContactSheet: View {
     private func roleChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if selected { Image(systemName: "checkmark").font(Theme.font(10, weight: .semibold)) }
-                Text(title).font(Theme.font(13, weight: selected ? .semibold : .medium))
+                if selected { Image(systemName: "checkmark").font(.system(size: 11, weight: .medium)) }
+                Text(title).font(Theme.font(13, weight: .medium))
             }
-            .foregroundStyle(selected ? Color.white : Theme.muted)
+            .foregroundStyle(selected ? Theme.onInk : Theme.muted)
             .padding(.horizontal, 12)
             .frame(height: 30)
-            .background(selected ? Theme.brand : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+            .background(selected ? Theme.ink : Theme.fill, in: Capsule())
             .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
@@ -576,8 +574,18 @@ struct MoreView: View {
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject var api: APIClient
+    @EnvironmentObject private var outbox: FieldOutbox
     @State private var showWorkspaces = false
     @State private var showNewJob = false
+    @State private var confirmSignOut = false
+
+    /// MA-17: signing out deletes this phone's saved work, so the dialog says what would be lost.
+    private var signOutMessage: String {
+        let waiting = outbox.pending.count + outbox.needsReview.count
+        return waiting == 0
+            ? "Jobs and customers saved on this phone are removed. You can sign back in at any time."
+            : "\(waiting) change\(waiting == 1 ? "" : "s") on this phone haven't synced yet. Signing out deletes \(waiting == 1 ? "it" : "them")."
+    }
 
     var body: some View {
         ScrollView {
@@ -613,7 +621,7 @@ struct MoreView: View {
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
                             .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-                            .frame(width: 40, height: 40).background(Theme.brand, in: Circle())
+                            .frame(width: 40, height: 40).background(Theme.brandText, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
                             Text(session.user?.name ?? "Account").font(Theme.font(16, weight: .medium))
                             if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
@@ -630,7 +638,7 @@ struct MoreView: View {
                         }
                         .pickerStyle(.menu).labelsHidden().tint(Theme.muted)
                     }
-                    Button { Task { await session.signOut() } } label: {
+                    Button { confirmSignOut = true } label: {
                         PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
                     }
                 }
@@ -644,6 +652,11 @@ struct MoreView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
         .sheet(isPresented: $showNewJob) { NewJobSheet() }
+        .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
+        } message: {
+            Text(signOutMessage)
+        }
     }
 
     /// Paper's workspace switcher with the compose action beside it.

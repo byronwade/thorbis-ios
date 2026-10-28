@@ -101,10 +101,9 @@ struct ScheduleMapView: View {
             }
             HStack(spacing: 8) {
                 NavigationLink(value: stop.job) {
-                    Text("Open job").font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    Text("Open job").inkCommit()
                 }
+                .buttonStyle(PressStyle())
                 if let url = Directions.url(address: stop.place.address, coordinates: stop.place.coordinates) {
                     PaperSquareButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps") { openURL(url) }
                 }

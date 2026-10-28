@@ -13,6 +13,28 @@ final class AppearanceTests: XCTestCase {
         }
     }
 
+    // design.thorbis.com MA-08: the ink commit's inverse type stays readable in every appearance.
+    func testInkCommitTypeIsReadable() {
+        for style: UIUserInterfaceStyle in [.light, .dark] {
+            for contrast: UIAccessibilityContrast in [.normal, .high] {
+                let ink = luminance(resolve(Theme.ink, style: style, contrast: contrast))
+                let type = luminance(resolve(Theme.onInk, style: style, contrast: contrast))
+                XCTAssertGreaterThanOrEqual((max(ink, type) + 0.05) / (min(ink, type) + 0.05), 7,
+                    "Ink commit unreadable in style \(style.rawValue), contrast \(contrast.rawValue)")
+            }
+        }
+    }
+
+    // design.thorbis.com MA-09: weights 400 and 500 only, nothing under 12.
+    func testTypeRampKeepsTwoWeightsAndAFloor() {
+        for heavy: Font.Weight in [.semibold, .bold, .heavy, .black] {
+            XCTAssertEqual(Theme.allowed(heavy), .medium)
+        }
+        XCTAssertEqual(Theme.allowed(.regular), .regular)
+        XCTAssertEqual(Theme.allowed(.medium), .medium)
+        XCTAssertEqual(Theme.minimumSize, 12)
+    }
+
     // Catches unreadable labels on cards/fields, including Increase Contrast.
     func testInformationalTextIsReadableOnEverySurface() {
         for style: UIUserInterfaceStyle in [.light, .dark] {

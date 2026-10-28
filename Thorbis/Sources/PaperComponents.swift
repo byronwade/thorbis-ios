@@ -76,7 +76,7 @@ struct PaperCircleButton: View {
                 .frame(width: size, height: size).background(Theme.fill, in: Circle())
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel(label)
     }
 }
@@ -99,6 +99,7 @@ struct PaperTabs: View {
                 }
             }.padding(.horizontal, Theme.gutter - 4)
         }.scrollIndicators(.hidden).padding(.bottom, 4)
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }
 
@@ -142,7 +143,7 @@ struct StatusRing: View {
     }
 }
 
-/// Paper's quiet empty state: line icon, one sentence, an optional text action.
+/// MA-14: what will be here, in one sentence, and one bordered button that starts it.
 struct PaperEmptyState: View {
     let symbol: String
     let title: String
@@ -154,12 +155,18 @@ struct PaperEmptyState: View {
         VStack(spacing: 8) {
             Image(systemName: symbol).font(.system(size: 26, weight: .light)).foregroundStyle(Theme.muted)
                 .padding(.bottom, 6)
-            Text(title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-            Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                .multilineTextAlignment(.center)
+            Text(message).font(Theme.font(15)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                    .frame(minHeight: 44)
+                Button(action: action) {
+                    Text(actionTitle).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 18).frame(minHeight: 44)
+                        .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                }
+                .buttonStyle(PressStyle())
+                .padding(.top, 8)
             }
         }
         .frame(maxWidth: .infinity)
@@ -233,7 +240,7 @@ extension PaperMenuRow where Trailing == AnyView {
     }
 }
 
-/// Paper's sticky bottom bar: one blue commit, at most one quiet square beside it.
+/// The sticky bottom bar: one ink commit (MA-08), at most one quiet square beside it.
 struct PaperActionBar<Secondary: View>: View {
     let title: String
     var symbol: String? = nil
@@ -246,14 +253,12 @@ struct PaperActionBar<Secondary: View>: View {
         HStack(spacing: 8) {
             Button(action: action) {
                 HStack(spacing: 7) {
-                    if busy { ProgressView().tint(.white) } else if let symbol { Image(systemName: symbol).font(.system(size: 15, weight: .semibold)) }
-                    Text(title).font(Theme.font(15, weight: .semibold))
+                    if busy { ProgressView().tint(Theme.onInk) } else if let symbol { Image(systemName: symbol).font(.system(size: 15, weight: .medium)) }
+                    Text(title)
                 }
-                .frame(maxWidth: .infinity).frame(height: 46)
-                .foregroundStyle(.white)
-                .background(Theme.brand.opacity(disabled ? 0.45 : 1), in: RoundedRectangle(cornerRadius: 12))
+                .inkCommit(enabled: !disabled)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .disabled(busy || disabled)
             secondary
         }
@@ -268,7 +273,7 @@ extension PaperActionBar where Secondary == EmptyView {
     }
 }
 
-/// The 46pt rimmed square that sits beside a commit.
+/// The rimmed square that sits beside a commit, as tall as the commit.
 struct PaperSquareButton: View {
     let symbol: String
     let label: String
@@ -276,11 +281,11 @@ struct PaperSquareButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                .frame(width: 46, height: 46)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                .frame(width: Theme.commitHeight, height: Theme.commitHeight)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel(label)
     }
 }
@@ -366,16 +371,16 @@ struct OfflineBanner: View {
     }
 
     private func banner(symbol: String, tint: Color, ground: Color, text: String, trailing: String?) -> some View {
+        // Only the mark is tinted; the words stay body colour (design.thorbis.com).
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 13, weight: .semibold))
-            Text(text).font(Theme.font(13, weight: .medium)).lineLimit(2)
+            Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(tint)
+            Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(2)
             Spacer(minLength: 8)
-            if let trailing { Text(trailing).font(Theme.monoFont(11, weight: .medium)) }
+            if let trailing { Text(trailing).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted) }
         }
-        .foregroundStyle(tint)
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ground, in: RoundedRectangle(cornerRadius: 10))
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }

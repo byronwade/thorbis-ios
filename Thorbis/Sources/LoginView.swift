@@ -70,15 +70,12 @@ struct LoginView: View {
                 }
                 Button { Task { await signIn() } } label: {
                     HStack(spacing: 8) {
-                        if busy { ProgressView().tint(.white) }
+                        if busy { ProgressView().tint(Theme.onInk) }
                         Text("Log in")
                     }
-                    .font(Theme.font(15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 46)
-                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                    .inkCommit()
                 }
+                .buttonStyle(PressStyle())
                 .disabled(busy)
                 .padding(.top, 24)
                 .accessibilityIdentifier("login-submit")
@@ -183,15 +180,12 @@ private struct PasswordResetRequestView: View {
                     }
                     Button { Task { await requestReset() } } label: {
                         HStack(spacing: 8) {
-                            if busy { ProgressView().tint(.white) }
+                            if busy { ProgressView().tint(Theme.onInk) }
                             Text("Send reset link")
                         }
-                        .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 46)
-                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                        .inkCommit()
                     }
+                    .buttonStyle(PressStyle())
                     .disabled(busy || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .padding(.top, 24)
                 }

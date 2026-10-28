@@ -867,10 +867,7 @@ struct InvoicePaymentCollectionSheet: View {
                                 .foregroundStyle(Theme.muted)
                             ShareLink(item: shareURL) {
                                 Label("Share payment link", systemImage: "square.and.arrow.up")
-                                    .font(Theme.font(15, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(maxWidth: .infinity, minHeight: 46)
-                                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                                    .inkCommit()
                             }
                             .accessibilityIdentifier("share-invoice-payment-link")
                             Button("Copy link") { UIPasteboard.general.string = shareURL.absoluteString }

@@ -59,7 +59,7 @@ struct JobDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
-            if let error { ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12) }
+            if let error { ErrorBanner(message: error) { await load() }.padding(.top, 4) }
             if let job {
                 if selectedTab == "Photos" {
                     header(job, compact: true)
@@ -85,8 +85,19 @@ struct JobDetailView: View {
                     }
                 }
             } else if error == nil {
-                ProgressView("Loading job…")
-                    .frame(maxWidth: .infinity, minHeight: 240)
+                // MA-13: the record's shape while it loads, not a lone spinner.
+                VStack(alignment: .leading, spacing: 10) {
+                    Capsule().fill(Theme.fill).frame(width: 140, height: 12)
+                    Capsule().fill(Theme.fill).frame(width: 240, height: 24)
+                    HStack(spacing: 6) {
+                        ForEach(0..<3, id: \.self) { _ in Capsule().fill(Theme.fill).frame(width: 80, height: Theme.chipHeight) }
+                    }
+                    SkeletonRows(count: 4, leading: false).padding(.horizontal, -Theme.gutter).padding(.top, 12)
+                }
+                .padding(.horizontal, Theme.gutter).padding(.top, 12)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading job")
+                Spacer(minLength: 0)
             }
         }
         .background(Theme.background)
@@ -162,17 +173,29 @@ struct JobDetailView: View {
             }
         }
         .sheet(isPresented: $showPause) {
+            // MA-16: Cancel leading, the commit trailing where the thumb is; the form keeps what was typed.
             NavigationStack {
                 Form {
-                    TextField("Why are you pausing?", text: $reason, axis: .vertical)
-                    TextField("What needs to happen next?", text: $nextAction, axis: .vertical)
-                    if let error { Text(error).foregroundStyle(Theme.destructive) }
-                    Button("Pause job") { Task { await pause() } }
-                        .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
+                    Section {
+                        TextField("Why are you pausing?", text: $reason, axis: .vertical)
+                        TextField("What needs to happen next?", text: $nextAction, axis: .vertical)
+                    } footer: {
+                        if let error { Text(error).foregroundStyle(Theme.destructive) }
+                        else { Text("The office sees both on the job.") }
+                    }
                 }
                 .navigationTitle("Pause job")
-                .toolbar { Button("Cancel") { showPause = false }.disabled(busy) }
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showPause = false }.disabled(busy) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Pause") { Task { await pause() } }
+                            .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
+                    }
+                }
             }
+            .presentationDetents([.medium, .large])
+            .interactiveDismissDisabled(busy || !reason.isEmpty || !nextAction.isEmpty)
         }
         .sheet(isPresented: $showSchedule, onDismiss: { Task { await load() } }) {
             if let job {
@@ -233,10 +256,10 @@ struct JobDetailView: View {
                             Label(scheduleLabel(date), systemImage: "clock")
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
-                                .padding(.horizontal, 9)
-                                .frame(height: 24)
-                                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
-                                .padding(.vertical, 10).contentShape(Rectangle())
+                                .padding(.horizontal, 10)
+                                .frame(height: Theme.chipHeight)
+                                .background(Theme.fill, in: Capsule())
+                                .padding(.vertical, 8).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
@@ -247,26 +270,27 @@ struct JobDetailView: View {
                     if let assignedName = assignedDisplayName(for: job) {
                         HStack(spacing: 6) {
                             Text(nameInitials(assignedName))
-                                .font(Theme.font(8, weight: .semibold))
+                                .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.brandText)
-                                .frame(width: 16, height: 16)
+                                .frame(width: 22, height: 22)
+                                .dynamicTypeSize(...DynamicTypeSize.large)
                                 .background(Theme.brandSurface, in: Circle())
                             Text(shortName(assignedName))
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
                         }
-                        .padding(.horizontal, 7)
-                        .frame(height: 24)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.leading, 3).padding(.trailing, 10)
+                        .frame(height: Theme.chipHeight)
+                        .background(Theme.fill, in: Capsule())
                     }
                     MemberChip(customerID: job.customerId)
                     if let balance = invoiceBalanceCents {
                         Text("\(money(balance, currency: "USD")) due")
-                            .font(Theme.monoFont(11, weight: .medium))
+                            .font(Theme.monoFont(12, weight: .medium))
                             .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 9)
-                            .frame(height: 24)
-                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                            .padding(.horizontal, 10)
+                            .frame(height: Theme.chipHeight)
+                            .background(Theme.fill, in: Capsule())
                     }
                 }
             }
@@ -327,9 +351,9 @@ struct JobDetailView: View {
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 9)
-        .frame(height: 24)
-        .background(surface, in: RoundedRectangle(cornerRadius: 8))
-        .padding(.vertical, 10)
+        .frame(height: Theme.chipHeight)
+        .background(surface, in: Capsule())
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
         .accessibilityLabel("Job status, \(job.status.statusLabel)")
     }

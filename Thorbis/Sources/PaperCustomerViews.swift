@@ -44,8 +44,10 @@ struct CustomersView: View {
                 PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withAnimation { showSearch.toggle() } })
                 if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
                 PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
-                if let error = error ?? store.error { ErrorBanner(message: error) }
-                if recordsLoading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if let error = error ?? store.error {
+                    ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
+                }
+                if recordsLoading && records.isEmpty { SkeletonRows() }
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(sections, id: \.0) { letter, customers in
                         PaperGroupHeader(title: letter).padding(.top, 6)
@@ -287,14 +289,15 @@ struct CustomerDetailView: View {
             HStack(spacing: 8) {
                 if canEdit {
                     Button { showCustomerMode = true } label: {
-                        Label("Show to customer", systemImage: "person.crop.rectangle").font(Theme.font(15, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 46).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                        Label("Show to customer", systemImage: "person.crop.rectangle").font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
                     .accessibilityHint("Hands the device to the customer to check and fix their details")
                 }
                 if session.can("job.create", feature: "jobs") {
                     Button { showNewJob = true } label: {
-                        Label("New job", systemImage: "plus").font(Theme.font(15, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 46).foregroundStyle(.white).background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                        Label("New job", systemImage: "plus").inkCommit()
                     }
+                    .buttonStyle(PressStyle())
                 }
             }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
         }

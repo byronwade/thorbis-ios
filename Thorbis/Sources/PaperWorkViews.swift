@@ -73,10 +73,10 @@ struct ScheduleView: View {
                 if !store.jobs.isEmpty && search.isEmpty { todaySummary }
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
-                if let error = store.error { ErrorBanner(message: error) }
+                if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if store.loading && store.jobs.isEmpty {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    SkeletonRows()
                 } else if jobs.isEmpty {
                     emptyState
                 } else if tab == "Map" {
@@ -231,25 +231,24 @@ struct ScheduleView: View {
             Button { Task { await progress(job, .arrived()) } } label: {
                 commitLabel("Mark arrived", symbol: "mappin.and.ellipse", busy: busyJobID == job.id)
             }
-            .buttonStyle(.plain).disabled(busyJobID != nil)
+            .buttonStyle(PressStyle()).disabled(busyJobID != nil)
         case "in_progress":
             Button { Task { await progress(job, .start) } } label: {
                 commitLabel("Start work", symbol: "wrench.and.screwdriver", busy: busyJobID == job.id)
             }
-            .buttonStyle(.plain).disabled(busyJobID != nil)
+            .buttonStyle(PressStyle()).disabled(busyJobID != nil)
         default:
             EmptyView()
         }
     }
 
+    /// MA-08: Next up's one commit is ink and 50 tall; pending keeps the words and swaps the mark.
     private func commitLabel(_ title: String, symbol: String, busy: Bool) -> some View {
         HStack(spacing: 7) {
-            if busy { ProgressView().tint(.white) } else { Image(systemName: symbol) }
+            if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: symbol) }
             Text(title)
         }
-        .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-        .frame(maxWidth: .infinity).frame(height: 40)
-        .background(Theme.brand, in: RoundedRectangle(cornerRadius: 10))
+        .inkCommit()
     }
 
     private func loadHero(_ job: Job) async {
@@ -362,10 +361,10 @@ private extension ScheduleHero {
         Chip(text: pendingStatus == nil ? status.statusLabel : "\(status.statusLabel) · waiting to sync", icon: pendingStatus == nil ? symbol : "clock.arrow.circlepath",
              tint: pendingStatus == nil ? color : Theme.warning,
              bg: pendingStatus != nil ? Theme.warningSurface : status == "en_route" || status == "dispatched" ? Theme.brandSurface : Theme.fill)
-        Text(job.shortRef).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
+        Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
             .lineLimit(1).fixedSize()
-            .padding(.horizontal, 9).frame(minHeight: 24)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 10).frame(minHeight: Theme.chipHeight)
+            .background(Theme.fill, in: Capsule())
     }
 }
 
@@ -440,10 +439,10 @@ struct JobsView: View {
                 OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Title or job number") }
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
-                if let error = store.error { ErrorBanner(message: error) }
+                if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 VStack(alignment: .leading, spacing: 14) {
                     if store.loading && store.jobs.isEmpty {
-                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                        SkeletonRows().padding(.horizontal, -Theme.gutter)
                     } else if tab == "Recent" {
                         group("Recently updated", jobs: Array(jobs.prefix(25)), first: true)
                     } else {

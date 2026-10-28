@@ -115,17 +115,13 @@ struct ServiceLocationSheet: View {
                 }
                 Button { Task { await save() } } label: {
                     Group {
-                        if busy { ProgressView().tint(.white) }
-                        else { Text(isEditing ? "Save changes" : "Add location").font(Theme.font(15, weight: .semibold)) }
+                        if busy { ProgressView().tint(Theme.onInk) }
+                        else { Text(isEditing ? "Save changes" : "Add location") }
                     }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                    .inkCommit(enabled: canAttemptSave)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .disabled(!canAttemptSave)
-                .opacity(canAttemptSave ? 1 : 0.45)
             }
         }
         .padding(.horizontal, 20)
@@ -173,10 +169,10 @@ struct ServiceLocationSheet: View {
         return Button { draft.kind = value } label: {
             Text(title)
                 .font(Theme.font(13, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Color.white : Theme.muted)
+                .foregroundStyle(selected ? Theme.onInk : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 30)
-                .background(selected ? Theme.brand : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .background(selected ? Theme.ink : Theme.fill, in: Capsule())
                 .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
