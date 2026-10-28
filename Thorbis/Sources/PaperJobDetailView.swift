@@ -523,8 +523,8 @@ struct JobDetailView: View {
                             }
                         }
                         .padding(16)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(PressStyle())
@@ -667,8 +667,8 @@ struct JobDetailView: View {
                             if let body = entry.body {
                                 Text(body).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
                                     .textSelection(.enabled)
                             }
                             Text(entry.date.formatted(.dateTime.month(.abbreviated).day())).font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -687,8 +687,8 @@ struct JobDetailView: View {
                         .font(Theme.font(16))
                         .lineLimit(1...6)
                         .padding(.horizontal, 14).padding(.vertical, 11)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22))
-                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.border))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.border))
                     Button { Task { await saveNote() } } label: {
                         Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .medium)) } }
                             .foregroundStyle(Theme.onInk).frame(width: 44, height: 44)
@@ -787,7 +787,7 @@ struct JobDetailView: View {
         Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 
     private func availableTransitions(_ job: JobRecord) -> [String] {

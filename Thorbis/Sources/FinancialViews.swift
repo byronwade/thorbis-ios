@@ -103,8 +103,8 @@ struct EstimateDetailView: View {
                             }
                         }
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     ForEach(record.options ?? []) { option in
                         VStack(alignment: .leading, spacing: 10) {
                             Text(option.title).font(Theme.font(17, weight: .medium))
@@ -117,8 +117,8 @@ struct EstimateDetailView: View {
                             }
                             .padding(15)
                         }
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     }
                     PaperGroupHeader(title: "Actions").padding(.top, 4)
                     NavigationLink { CommercialDocumentView(path: "/v1/estimates/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
@@ -296,7 +296,7 @@ struct InvoiceDetailView: View {
                         commercialDetail("Balance due", money(max(total - record.amountPaid, 0), currency: record.currency))
                     }
                     .padding(.horizontal, 15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
                     } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
@@ -308,8 +308,8 @@ struct InvoiceDetailView: View {
                         ForEach(record.lines) { line in CommercialLineView(line: line, divider: line.id != record.lines.first?.id) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     if let paymentModel {
                         InvoicePaymentsSection(
                             model: paymentModel,
@@ -527,7 +527,7 @@ private func commercialAction(_ title: String, icon: String) -> some View {
     }
     .foregroundStyle(Theme.foreground)
     .padding(15)
-    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
 }
 
 private struct CommercialSecondaryButtonStyle: ButtonStyle {
@@ -537,7 +537,7 @@ private struct CommercialSecondaryButtonStyle: ButtonStyle {
             .foregroundStyle(Theme.foreground)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(15)
-            .background(Theme.card.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(Theme.card.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 }
 
@@ -547,7 +547,7 @@ private extension View {
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 13)
             .frame(minHeight: 46)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 }
 
@@ -737,8 +737,8 @@ struct NewEstimateView: View {
                             .padding(14)
                         }
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     if lines.isEmpty {
                         Text("Start with the price book so prices match what the office set.")
                             .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 10)
@@ -797,7 +797,7 @@ struct NewEstimateView: View {
                     TextField("0.00", text: line.price).keyboardType(.decimalPad)
                         .font(Theme.monoFont(16)).multilineTextAlignment(.trailing)
                         .padding(.horizontal, 10).frame(width: 110, height: 44)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                         .accessibilityLabel("Unit price")
                 }
                 Spacer()
