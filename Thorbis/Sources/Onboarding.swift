@@ -822,6 +822,7 @@ struct BusinessSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = BusinessSetupModel()
     @State private var inviting = false
+    @State private var guided = false
 
     var body: some View {
         let steps = model.steps(session)
@@ -840,6 +841,19 @@ struct BusinessSetupView: View {
                     .padding(.top, 16)
                     .opacity(model.loaded ? 1 : 0)
                     .accessibilityLabel("\(doneCount) of \(steps.count) steps done")
+
+                if session.can("organization.settings.edit") {
+                    Button { guided = true } label: {
+                        Label(doneCount == 0 ? "Start guided setup" : "Continue guided setup", systemImage: "arrow.right.circle")
+                            .font(Theme.font(15, weight: .medium))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+                            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    }
+                    .buttonStyle(PressStyle())
+                    .padding(.top, 20)
+                    .accessibilityIdentifier("setup-guided")
+                }
 
                 VStack(spacing: 0) {
                     ForEach(steps) { step in
@@ -872,6 +886,9 @@ struct BusinessSetupView: View {
         }
         .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
             InviteMemberSheet { _ in }
+        }
+        .fullScreenCover(isPresented: $guided, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
+            NavigationStack { SetupWizardView() }
         }
         .task { await model.refresh(api: api, session: session) }
         .onAppear { Task { await model.refresh(api: api, session: session) } }
@@ -929,8 +946,8 @@ private struct BusinessSetupPrompt: ViewModifier {
                 guard !Task.isCancelled, session.can("organization.settings.edit") else { return }
                 showing = true
             }
-            .sheet(isPresented: $showing) {
-                NavigationStack { BusinessSetupView(presented: true) }
+            .fullScreenCover(isPresented: $showing) {
+                NavigationStack { SetupWizardView() }
             }
     }
 }
@@ -952,7 +969,10 @@ struct OnboardingPreview: View {
         default:
             if session.phase == .ready {
                 NavigationStack {
-                    if screen == "onboard-details" { CompanyDetailsView() } else { BusinessSetupView(presented: true) }
+                    if screen == "onboard-details" { CompanyDetailsView() }
+                    else if screen == "onboard-wizard" { SetupWizardView(start: .company) }
+                    else if screen == "onboard-trade" { SetupWizardView(start: .trade) }
+                    else { BusinessSetupView(presented: true) }
                 }
             } else {
                 ProgressView()

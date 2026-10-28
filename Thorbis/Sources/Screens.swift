@@ -704,10 +704,15 @@ struct MoreView: View {
                 group("Account") {
                     if session.can("organization.settings.edit") {
                         NavigationLink(value: PaperRoute.businessSetup) {
-                            PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Company details, payments, services and team", tile: Theme.markAccent)
+                            PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Trade, company, customers, services, team and payments", tile: Theme.markAccent)
                         }
                         NavigationLink(value: PaperRoute.companyDetails) {
                             PaperMenuRow("Company details", symbol: "building.2", subtitle: "Name, address and phone customers see", tile: Theme.markOlive)
+                        }
+                    }
+                    if session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm") {
+                        NavigationLink(value: PaperRoute.importCustomers) {
+                            PaperMenuRow("Import customers", symbol: "square.and.arrow.down", subtitle: "Bring a CSV from your old software", tile: Theme.markOlive)
                         }
                     }
                     if session.can("organization.settings.edit") {
