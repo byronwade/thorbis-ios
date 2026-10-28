@@ -23,7 +23,8 @@ enum PaperPreview {
               ["onboard-signup", "onboard-company", "onboard-details", "onboard-setup"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
-    static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" }
+    static var isWorkingJobPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-working-job") }
+    static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview }
     static var isPaymentRefundPreview: Bool {
         ["invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation"].contains(screen)
     }
@@ -495,7 +496,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     private static func jobs() -> [[String: Any]] {
         let rows: [(String, String, String, String, Int, Int)] = [
-            ("2214", "0412", "AC not cooling", "dispatched", 10, 30),
+            ("2214", "0412", "AC not cooling", PaperPreview.isWorkingJobPreview ? "in_progress" : "dispatched", 10, 30),
             ("2212", "0413", "Kitchen sink backup — Petrov", "scheduled", 12, 15),
             ("2209", "0414", "Water heater install — Chen", "in_progress", 13, 0),
             ("2218", "0415", "Outlet replacement — Alvarez", "scheduled", 14, 30),

@@ -4,7 +4,10 @@ import XCTest
 final class JobOverviewUITests: XCTestCase {
     func testMoreKeepsEverySecondaryActionAndOpensScheduling() {
         continueAfterFailure = false
-        let app = preview("job")
+        let app = preview("job", working: true)
+        // The financial step appears only after the job's paper finishes loading.
+        // Open the menu on the loaded record, rather than during its initial redraws.
+        XCTAssertTrue(button(startingWith: "Collect ", in: app).waitForExistence(timeout: 15))
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
@@ -24,10 +27,7 @@ final class JobOverviewUITests: XCTestCase {
 
     func testInProgressJobKeepsItsPaymentStepAndWrapUpChecklist() {
         continueAfterFailure = false
-        let app = preview("jobs")
-        let job = app.staticTexts["Water heater install — Chen"].firstMatch
-        XCTAssertTrue(job.waitForExistence(timeout: 15))
-        job.tap()
+        let app = preview("job", working: true)
 
         let collect = button(startingWith: "Collect ", in: app)
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
@@ -52,14 +52,16 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(directions.frame.minY, text.frame.maxY)
         XCTAssertGreaterThan(primary.frame.height, 50)
         XCTAssertTrue(primary.isHittable)
-        app.scrollViews.firstMatch.swipeUp()
+        let content = app.scrollViews.containing(.button, identifier: "Directions in Maps").firstMatch
+        for _ in 0..<3 where !directions.isHittable { content.swipeUp() }
         XCTAssertTrue(directions.isHittable, "Directions must remain reachable below the enlarged header")
         capture(app, name: "Accessible contact actions after scrolling")
     }
 
-    private func preview(_ screen: String, accessibleText: Bool = false) -> XCUIApplication {
+    private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", screen]
+        if working { app.launchArguments += ["--paper-preview-working-job"] }
         if accessibleText {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-thorbis.appearance", "dark"]
         }
