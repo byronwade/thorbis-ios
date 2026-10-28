@@ -63,7 +63,7 @@ struct SignatureCaptureSheet: View {
                                 .frame(minWidth: 44, minHeight: 44)
                         }
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 14).padding(.bottom, 6)
                 }
                 .frame(height: 220)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))

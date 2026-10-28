@@ -32,6 +32,8 @@ struct WorkspaceNoticesView: View {
                     if let error { ErrorBanner(message: error) { await refresh() } }
                     if loading && items.isEmpty && error == nil { SkeletonRows(count: 5) }
                     ForEach(visible) { notice in
+                        // Each notice opens the job it is about.
+                        NavigationLink(value: PaperRoute.job(notice.jobId)) {
                         // MA-11: what and when, with the unread state as a shape (dot) and weight, not a tinted tile.
                         HStack(alignment: .top, spacing: 12) {
                             Circle().fill(notice.read ? Color.clear : Theme.brand).frame(width: 8, height: 8).padding(.top, 7)
@@ -43,11 +45,17 @@ struct WorkspaceNoticesView: View {
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
                             }
                             Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.muted).padding(.top, 4).accessibilityHidden(true)
                         }
                         .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
                         .frame(minHeight: 52)
+                        .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
                         .accessibilityElement(children: .combine)
                         .accessibilityValue(notice.read ? "" : "Unread")
+                        .accessibilityHint("Opens the job")
                     }
                     if nextCursor != nil {
                         Button("Load older notices") { Task { await loadMore() } }
