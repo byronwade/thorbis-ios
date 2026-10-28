@@ -127,12 +127,6 @@ struct EstimateDetailView: View {
                     }
                     if let signature = record.approvalSignature { SignatureBadge(label: "Approved by", signature: signature) }
                     if record.status == "sent", session.can("estimate.approve", feature: "estimates") {
-                        if jobID != nil && (record.options ?? []).isEmpty {
-                            // In person: the customer signs on this phone and that approves it.
-                            Button("Customer approves and signs") { showSignature = true }
-                                .buttonStyle(CommercialSecondaryButtonStyle())
-                                .disabled(busy)
-                        }
                         Button(jobID != nil && (record.options ?? []).isEmpty ? "Approve without a signature" : "Approve estimate") { action = "Approve"; confirm = true }
                             .buttonStyle(CommercialSecondaryButtonStyle())
                             .disabled(busy)
@@ -165,6 +159,10 @@ struct EstimateDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
                 PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
+            } else if let record, record.status == "sent", jobID != nil, (record.options ?? []).isEmpty,
+                      session.can("estimate.approve", feature: "estimates") {
+                // On site, the next step is the customer's yes: keep it one tap away.
+                PaperActionBar(title: "Customer approves and signs", symbol: "signature", busy: busy) { showSignature = true }
             }
         }
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {

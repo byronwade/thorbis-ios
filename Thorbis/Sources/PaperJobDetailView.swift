@@ -1001,14 +1001,8 @@ struct JobProgressTrack: View {
                             .frame(height: 5)
                     }
                 }
-                HStack {
-                    Text(Self.steps[current]).font(Theme.font(12, weight: .semibold)).foregroundStyle(tint)
-                    if status == "paused" { Text("· Paused").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.warning) }
-                    Spacer()
-                    if current < Self.steps.count - 1 {
-                        Text("Next: \(Self.steps[current + 1])").font(Theme.font(12)).foregroundStyle(Theme.muted)
-                    }
-                }
+                // The status chip above names the step and the bottom bar names the next one,
+                // so the track stays a quiet bar without a second line of words.
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Step \(current + 1) of 5, \(Self.steps[current])")
