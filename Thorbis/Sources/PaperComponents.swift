@@ -40,15 +40,7 @@ struct PaperHeader: View {
                 if let search {
                     PaperCircleButton(symbol: "magnifyingglass", label: "Filter \(title.lowercased())", action: search)
                 }
-                Button(action: openAccount) {
-                    Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .frame(width: 36, height: 36).background(Theme.brandSurface, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                        .dynamicTypeSize(...DynamicTypeSize.large)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Account and menu")
+                // One way in: the menu button. The account lives at the bottom of the menu.
             }
             Text(title)
                 .font(Theme.font(34, weight: .bold)).tracking(-0.68)

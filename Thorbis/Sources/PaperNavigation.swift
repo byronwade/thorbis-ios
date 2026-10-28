@@ -166,12 +166,22 @@ struct RootView: View {
                          search: { closeDrawer(); selectedTab = PrimaryTab.search.rawValue },
                          newJob: { closeDrawer(); createJob = true },
                          settings: { closeDrawer(); showSettings = true },
-                         close: closeDrawer)
+                         close: closeDrawer,
+                         current: selectedTab,
+                         switchWorkspace: session.organizations.count > 1 ? { closeDrawer(); workspace = true } : nil)
                     .frame(width: width)
+                    // The menu eases in a little from the left as the card leaves (depth, not decoration).
+                    .offset(x: (progress - 1) * 36)
                     .opacity(progress > 0 ? 1 : 0)
                     .accessibilityHidden(!drawerOpen)
                 phoneTabs()
                     .clipShape(RoundedRectangle(cornerRadius: progress > 0 ? 28 : 0, style: .continuous))
+                    // D-017: a rounded figure on canvas gets a real rim that follows its radius.
+                    .overlay {
+                        if progress > 0 {
+                            RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(Theme.border, lineWidth: 1)
+                        }
+                    }
                     .overlay {
                         if progress > 0 {
                             // D-021: a dim mix over the card, tap or drag it to close.
@@ -218,6 +228,7 @@ struct RootView: View {
     }
 
     private func settleDrawer(open: Bool) {
+        if open != drawerOpen { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         withAnimation(.spring(duration: 0.28, bounce: 0)) {
             drawerOpen = open
             drawerDrag = 0
