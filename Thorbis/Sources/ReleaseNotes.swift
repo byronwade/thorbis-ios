@@ -13,19 +13,21 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
-            id: "2026-10-28-big-money",
+            id: "2026-10-28-job-screen",
             date: "2026-10-28",
             highlights: [
-                .init(symbol: "dollarsign.circle", title: "Money you can read at a glance",
-                      detail: "Balance due, estimate totals and payment amounts are now the biggest thing on the screen."),
-                .init(symbol: "banknote", title: "Record cash or a check in three taps",
-                      detail: "Collect, pick Cash or Check, Record. No extra confirm, and it remembers what you used last."),
-                .init(symbol: "link", title: "Payment links stay in one sheet",
-                      detail: "Creating a payment link now opens in the same sheet, so Done takes you back to the invoice."),
-                .init(symbol: "arrow.up.arrow.down", title: "Amounts roll when they change",
-                      detail: "Record a payment and the balance rolls down to its new amount right where you are."),
+                .init(symbol: "ellipsis.circle", title: "Every job action in one menu",
+                      detail: "Pause, reschedule, assign, deposit and wrap up now live in the ••• at the top right of a job."),
+                .init(symbol: "person.2", title: "Call or text any contact on the job",
+                      detail: "Every contact is listed with their own Call, Text and Email, and how they like to be reached."),
+                .init(symbol: "key", title: "Gate codes, dogs and parking up front",
+                      detail: "Getting in shows each code on its own line. Long press a code to copy it."),
+                .init(symbol: "clock.arrow.circlepath", title: "See what happened on past visits",
+                      detail: "A job lists the customer's earlier visits with the office's note from each one."),
+                .init(symbol: "wrench.and.screwdriver", title: "Equipment and membership on the job",
+                      detail: "Units at the site, their warranty and the customer's plan show without leaving the job."),
             ],
-            fixes: 4
+            fixes: 3
         ),
         ReleaseNote(
             id: "2026-10-28-estimate-builder",
@@ -39,6 +41,21 @@ enum ReleaseNotes {
                       detail: "Edit any line in place, drag to reorder, and undo a removed line."),
             ],
             fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-10-28-big-money",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "dollarsign.circle", title: "Money you can read at a glance",
+                      detail: "Balance due, estimate totals and payment amounts are now the biggest thing on the screen."),
+                .init(symbol: "banknote", title: "Record cash or a check in three taps",
+                      detail: "Collect, pick Cash or Check, Record. No extra confirm, and it remembers what you used last."),
+                .init(symbol: "link", title: "Payment links stay in one sheet",
+                      detail: "Creating a payment link now opens in the same sheet, so Done takes you back to the invoice."),
+                .init(symbol: "arrow.up.arrow.down", title: "Amounts roll when they change",
+                      detail: "Record a payment and the balance rolls down to its new amount right where you are."),
+            ],
+            fixes: 4
         ),
         ReleaseNote(
             id: "2026-10-28-next-step",

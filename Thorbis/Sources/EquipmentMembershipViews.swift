@@ -210,6 +210,8 @@ struct EquipmentEditor: View {
 /// The customer's membership: what plan, the member discount, and when it renews.
 struct CustomerMembershipSection: View {
     let customerID: String
+    /// The job reads the membership; selling and cancelling stay on the customer (JS-01).
+    var editable = true
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @State private var memberships: [MembershipRecord] = []
@@ -219,7 +221,7 @@ struct CustomerMembershipSection: View {
     @State private var cancelling: MembershipRecord?
     @State private var error: String?
 
-    private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
+    private var canEdit: Bool { editable && session.can("customer.edit", feature: "core_crm") }
     private var active: [MembershipRecord] { memberships.filter { $0.status == "active" } }
 
     var body: some View {
