@@ -10,7 +10,11 @@ struct ScheduleMapView: View {
     @Environment(\.openURL) private var openURL
     @State private var places: [String: ServiceLocationRecord] = [:]
     @State private var loaded = false
-    @State private var selectedID: String?
+    /// iPad passes its sidebar selection so a row tap selects and centers the pin.
+    var selection: Binding<String?>? = nil
+    @State private var ownSelection: String?
+    private var selectionBinding: Binding<String?> { selection ?? $ownSelection }
+    private var selectedID: String? { selectionBinding.wrappedValue }
     @State private var position: MapCameraPosition = .automatic
 
     private struct Stop: Identifiable {
@@ -32,7 +36,7 @@ struct ScheduleMapView: View {
     var body: some View {
         let stops = stops
         VStack(alignment: .leading, spacing: 0) {
-            Map(position: $position, selection: $selectedID) {
+            Map(position: $position, selection: selectionBinding) {
                 ForEach(stops) { stop in
                     Annotation(stop.job.title, coordinate: stop.coordinate, anchor: .bottom) {
                         pin(stop, selected: stop.id == selectedID)
@@ -75,6 +79,10 @@ struct ScheduleMapView: View {
             }
         }
         .task(id: jobs.map(\.id)) { await loadPlaces() }
+        // A selection made outside the map (the iPad list) centers its pin too.
+        .onChange(of: selectedID) { _, id in
+            if let stop = stops.first(where: { $0.id == id }) { center(on: stop) }
+        }
     }
 
     private func pin(_ stop: Stop, selected: Bool) -> some View {
@@ -140,7 +148,11 @@ struct ScheduleMapView: View {
     }
 
     private func select(_ stop: Stop) {
-        selectedID = stop.id
+        selectionBinding.wrappedValue = stop.id
+        center(on: stop)
+    }
+
+    private func center(on stop: Stop) {
         withAnimation(.snappy) {
             position = .region(MKCoordinateRegion(center: stop.coordinate, latitudinalMeters: 1_500, longitudinalMeters: 1_500))
         }
@@ -159,5 +171,8 @@ struct ScheduleMapView: View {
         }
         places = found
         loaded = true
+        // A selection made before the stops were known (an iPad row tapped while loading,
+        // or Map entered with a job already picked) centers once the pins exist.
+        if let stop = stops.first(where: { $0.id == selectedID }) { center(on: stop) }
     }
 }

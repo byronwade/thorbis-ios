@@ -15,6 +15,8 @@ struct JobMediaView: View {
     @State private var selectedFilename = "photo.jpg"
     @State private var clientAssetID = UUID().uuidString
     @State private var loading = true
+    /// Bumped by pull-to-refresh so thumbnails that failed to download try again.
+    @State private var thumbnailAttempt = 0
     @State private var busy = false
     @State private var error: String?
     @StateObject private var preview = DocumentPreviewController()
@@ -111,7 +113,7 @@ struct JobMediaView: View {
                         ForEach(photos) { record in
                             Button { open(record) } label: {
                                 VStack(alignment: .leading, spacing: 0) {
-                                    MediaThumbnail(record: record)
+                                    MediaThumbnail(record: record, attempt: thumbnailAttempt)
                                         .frame(maxWidth: .infinity).frame(height: 120)
                                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
                                         .overlay(alignment: .topLeading) {
@@ -239,7 +241,7 @@ struct JobMediaView: View {
             await load()
             if !waiting.isEmpty { await retryWaiting() }
         }
-        .refreshable { await load() }
+        .refreshable { thumbnailAttempt += 1; await load() }
         .onChange(of: selection) { _, item in
             Task {
                 guard let item else { return }

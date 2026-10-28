@@ -29,7 +29,7 @@ struct PaperTabletSchedule: View {
                     if range == "Map" {
                         // iPad gets the same route map as the phone, beside today's list.
                         ScrollView {
-                            ScheduleMapView(jobs: jobs.filter { $0.status != "canceled" }).padding(.top, 16)
+                            ScheduleMapView(jobs: jobs.filter { $0.status != "canceled" }, selection: $selectedID).padding(.top, 16)
                         }
                         .background(Theme.background)
                     } else if let selectedJob {

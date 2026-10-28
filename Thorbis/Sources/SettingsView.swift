@@ -33,7 +33,7 @@ struct SettingsView: View {
 
                 Section("Workspace") {
                     Button { showWorkspaces = true } label: {
-                        row("Company", symbol: "building.2", value: session.activeOrganization?.name ?? "Choose")
+                        row("Company", symbol: "building.2", value: session.activeOrganization?.name ?? "Choose", opens: true)
                     }
                     NavigationLink { CustomizeMenuView() } label: {
                         row("Customize menu", symbol: "slider.horizontal.3", value: nil)
@@ -47,9 +47,9 @@ struct SettingsView: View {
                         Text("Dark").tag("dark")
                     } label: { row("Appearance", symbol: "circle.lefthalf.filled", value: nil) }
                     Button {
-                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                        Task { await notificationsTapped() }
                     } label: {
-                        row("Notifications", symbol: "bell", value: notificationLabel)
+                        row("Notifications", symbol: "bell", value: notificationLabel, opens: true)
                     }
                 }
 
@@ -59,6 +59,7 @@ struct SettingsView: View {
                     }
                 } footer: {
                     Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity).padding(.top, 8)
                 }
             }
@@ -82,17 +83,35 @@ struct SettingsView: View {
         switch notifications {
         case .authorized, .provisional, .ephemeral: "On"
         case .denied: "Off"
-        case .notDetermined: "Not set"
+        case .notDetermined: "Turn on"
         default: nil
         }
     }
 
-    private func row(_ title: String, symbol: String, value: String?) -> some View {
+    /// Not asked yet: ask right here (the system sheet), instead of sending people to Settings
+    /// to find a switch that does not exist until the app has asked. Asked before: open Settings.
+    private func notificationsTapped() async {
+        let center = UNUserNotificationCenter.current()
+        if await center.notificationSettings().authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+            let granted = await center.notificationSettings().authorizationStatus
+            if [.authorized, .provisional, .ephemeral].contains(granted) { UIApplication.shared.registerForRemoteNotifications() }
+            notifications = granted
+        } else if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+            openURL(url)
+        }
+    }
+
+    private func row(_ title: String, symbol: String, value: String?, opens: Bool = false) -> some View {
         HStack(spacing: 12) {
             Image(systemName: symbol).foregroundStyle(Theme.markAccent).frame(width: 22)
             Text(title).foregroundStyle(Theme.foreground)
             Spacer(minLength: 8)
             if let value { Text(value).foregroundStyle(Theme.muted).lineLimit(1) }
+            if opens {
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            }
         }
         .font(Theme.font(15))
     }
