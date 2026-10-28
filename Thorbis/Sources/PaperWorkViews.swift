@@ -521,9 +521,7 @@ struct JobsView: View {
     private func detail(_ job: Job, customer: String) -> String {
         var parts = [customer]
         if let date = JobFiltering.date(job.scheduledFor), !["completed", "canceled"].contains(job.status) {
-            parts.append(Calendar.current.isDateInToday(date)
-                ? "Today \(date.formatted(date: .omitted, time: .shortened))"
-                : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+            parts.append(date.visitLabel())
         } else {
             parts.append(job.status.statusLabel)
         }
