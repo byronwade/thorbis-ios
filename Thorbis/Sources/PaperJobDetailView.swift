@@ -507,17 +507,17 @@ struct JobDetailView: View {
                     NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(estimate.title).font(Theme.font(16, weight: .medium))
+                                Text(estimate.title).font(Theme.font(15, weight: .medium))
                                     .foregroundStyle(Theme.foreground).multilineTextAlignment(.leading)
                                 Spacer(minLength: 8)
                                 if let total = paperLinesTotal(estimate.lines) {
                                     Text(money(total, currency: estimate.lines.first?.unitPrice.currency ?? "USD"))
-                                        .font(Theme.monoFont(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .font(Theme.monoFont(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                 }
                             }
                             HStack(spacing: 8) {
                                 PaperStatusChip(status: estimate.status)
-                                Text("EST-\(estimate.id.suffix(4).uppercased())").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                                Text("EST-\(estimate.id.suffix(4).uppercased())").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                                 Spacer()
                                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
                             }
@@ -537,7 +537,7 @@ struct JobDetailView: View {
     private func summary(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.monoFont(19, weight: .medium))
+            Text(value).font(Theme.monoFont(20, weight: .medium))
         }
     }
 
@@ -660,12 +660,12 @@ struct JobDetailView: View {
                         }
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(entry.title).font(Theme.font(14, weight: .medium))
+                                Text(entry.title).font(Theme.font(15, weight: .medium))
                                 Spacer(minLength: 8)
-                                Text(entry.date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                                Text(entry.date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                             }
                             if let body = entry.body {
-                                Text(body).font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                                Text(body).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                                     .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
@@ -768,7 +768,7 @@ struct JobDetailView: View {
     private func actionLabel(_ title: String, icon: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon).foregroundStyle(Theme.brandText).frame(width: 20)
-            Text(title).font(Theme.font(14, weight: .medium))
+            Text(title).font(Theme.font(15, weight: .medium))
             Spacer()
             Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
         }

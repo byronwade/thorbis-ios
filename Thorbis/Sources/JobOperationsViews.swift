@@ -79,7 +79,7 @@ struct JobCloseoutView: View {
                         }
                     }
                     if closeout.requirements.isEmpty && checks.isEmpty {
-                        Text("Nothing else is required before closing.").font(Theme.font(14)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                        Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                     }
                     if mayRecordUnpaidDisposition {
                         PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
@@ -109,7 +109,7 @@ struct JobCloseoutView: View {
                     }
                     if session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
                         Button("Cancel job", role: .destructive) { confirmCancel = true }
-                            .font(Theme.font(14, weight: .medium)).frame(minHeight: 44).padding(.top, 18)
+                            .font(Theme.font(15, weight: .medium)).frame(minHeight: 44).padding(.top, 18)
                             .disabled(busy)
                     }
                 } else if error == nil {
@@ -265,7 +265,7 @@ struct JobScheduleView: View {
                     if showsCustomTime {
                         HStack {
                             Label("Other time", systemImage: "clock")
-                                .font(Theme.font(14))
+                                .font(Theme.font(15))
                                 .foregroundStyle(Theme.muted)
                             Spacer()
                             DatePicker("Other time", selection: $date, displayedComponents: .hourAndMinute)
@@ -277,7 +277,7 @@ struct JobScheduleView: View {
                         .frame(minHeight: 44)
                     } else {
                         Button("Other time…") { showsCustomTime = true }
-                            .font(Theme.font(14, weight: .medium))
+                            .font(Theme.font(15, weight: .medium))
                             .foregroundStyle(Theme.brandText)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
@@ -426,7 +426,7 @@ struct JobScheduleView: View {
                     .foregroundStyle(selected ? Theme.brand : Theme.subtle)
                     .frame(width: 20, height: 20)
                 Text(label)
-                    .font(Theme.monoFont(14, weight: selected ? .semibold : .medium))
+                    .font(Theme.monoFont(15, weight: selected ? .semibold : .medium))
                     .foregroundStyle(selected ? Theme.brand : Theme.foreground)
                 Spacer(minLength: 8)
                 Text("2 hr window")

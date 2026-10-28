@@ -86,17 +86,17 @@ struct EstimateDetailView: View {
                                 Text("Total").font(Theme.font(15, weight: .medium))
                                 Spacer()
                                 Text(money(total, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                    .font(Theme.monoFont(14, weight: .medium))
+                                    .font(Theme.monoFont(15, weight: .medium))
                             }
                             .padding(15)
                             if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
                                 let memberTotal = record.lines.reduce(0) { $0 + $1.quantity * memberPricing.memberPrice($1.unitPrice.amount) }
                                 HStack {
                                     Label("Member price · \(memberPricing.discountPercent)% off", systemImage: "star")
-                                        .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
                                     Spacer()
                                     Text(money(memberTotal, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                        .font(Theme.monoFont(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                                        .font(Theme.monoFont(15, weight: .medium)).foregroundStyle(Theme.brandText)
                                 }
                                 .padding(.horizontal, 15).padding(.bottom, 15)
                                 .accessibilityElement(children: .combine)
@@ -113,7 +113,7 @@ struct EstimateDetailView: View {
                             HStack {
                                 Text("Option total").font(Theme.font(15, weight: .medium))
                                 Spacer()
-                                Text(money(option.totalAmount, currency: option.currency)).font(Theme.monoFont(14, weight: .medium))
+                                Text(money(option.totalAmount, currency: option.currency)).font(Theme.monoFont(15, weight: .medium))
                             }
                             .padding(15)
                         }
@@ -142,7 +142,7 @@ struct EstimateDetailView: View {
                         .disabled(busy)
                     }
                     if let revision = record.currentRevisionNumber {
-                        Text("Revision \(revision)").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                        Text("Revision \(revision)").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                     }
                 } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
@@ -533,7 +533,7 @@ private func commercialAction(_ title: String, icon: String) -> some View {
 private struct CommercialSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Theme.font(14, weight: .medium))
+            .font(Theme.font(15, weight: .medium))
             .foregroundStyle(Theme.foreground)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(15)
@@ -543,7 +543,7 @@ private struct CommercialSecondaryButtonStyle: ButtonStyle {
 
 private extension View {
     func commercialField() -> some View {
-        font(Theme.font(14))
+        font(Theme.font(15))
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 13)
             .frame(minHeight: 46)
@@ -715,14 +715,14 @@ struct NewEstimateView: View {
                         if session.can("pricebook.view", feature: "price_book") {
                             Button { showPriceBook = true } label: {
                                 Label("Add from price book", systemImage: "book.closed")
-                                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
                                     .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading).padding(.horizontal, 14)
                             }
                             .buttonStyle(.plain)
                         }
                         Button { lines.append(DraftLine()) } label: {
                             Label("Add a custom line", systemImage: "plus")
-                                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.muted)
+                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
                                 .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading).padding(.horizontal, 14)
                         }
                         .buttonStyle(.plain)
@@ -732,7 +732,7 @@ struct NewEstimateView: View {
                             HStack {
                                 Text("Total").font(Theme.font(15, weight: .medium))
                                 Spacer()
-                                Text(total.map { money($0, currency: "USD") } ?? "—").font(Theme.monoFont(14, weight: .medium))
+                                Text(total.map { money($0, currency: "USD") } ?? "—").font(Theme.monoFont(15, weight: .medium))
                             }
                             .padding(14)
                         }

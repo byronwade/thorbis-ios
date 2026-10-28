@@ -87,7 +87,7 @@ struct PaperJobInvoiceContent: View {
 
             HStack(spacing: 12) {
                 Text(balance.balanceCents.map { money($0, currency: invoice.currency) } ?? "—")
-                    .font(Theme.monoFont(28, weight: .medium))
+                    .font(Theme.monoFont(30, weight: .medium))
                     .tracking(-0.5)
                     .foregroundStyle(Theme.foreground)
                     .accessibilityLabel(balance.balanceCents.map { "Balance due \(money($0, currency: displayedInvoice.currency))" } ?? "Balance unavailable")
@@ -132,7 +132,7 @@ struct PaperJobInvoiceContent: View {
                 ForEach(Array(displayedInvoice.lines.enumerated()), id: \.element.id) { index, line in
                     HStack(spacing: 12) {
                         Text(line.description)
-                            .font(Theme.font(14, weight: .medium))
+                            .font(Theme.font(15, weight: .medium))
                             .foregroundStyle(Theme.foreground)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,7 +150,7 @@ struct PaperJobInvoiceContent: View {
                 Divider().overlay(Theme.border)
                 HStack {
                     Text("Total")
-                        .font(Theme.font(14, weight: .medium))
+                        .font(Theme.font(15, weight: .medium))
                         .foregroundStyle(Theme.foreground)
                     Spacer()
                     Text(paymentModel.totalCents.map { money($0, currency: displayedInvoice.currency) } ?? "Unavailable")
@@ -186,7 +186,7 @@ struct PaperJobInvoiceContent: View {
                                 .foregroundStyle(Theme.muted)
                             if let date = event.date {
                                 Text(date.formatted(date: .omitted, time: .shortened))
-                                    .font(Theme.monoFont(11))
+                                    .font(Theme.monoFont(12))
                                     .foregroundStyle(Theme.subtle)
                             }
                         }
