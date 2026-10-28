@@ -229,7 +229,8 @@ struct JobDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showCollectPayment) {
+        // A payment changes the balance the next step reads, wherever it was collected from.
+        .sheet(isPresented: $showCollectPayment, onDismiss: { Task { await loadInvoices() } }) {
             if let invoice = selectedInvoice, let model = invoicePaymentModel {
                 InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
                     .presentationDetents([.large])
