@@ -19,7 +19,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Estimates, estimate detail and workflow | Done | Build from the Price Book on a job, link, send, approve or decline (with an in-person customer signature), revise, option packages. |
 | Invoices, invoice detail and workflow | Done | Create from the job, edit lines, issue, customer authorization signature, collect, record payment, refund. |
 | Payments (collect) | Partial | Card payment link, cash, check and already-collected. Tap to Pay (Stripe Terminal) is built and the server is live; it stays hidden until Apple grants the entitlement. |
-| Money, reports | Done (read) | Money (revenue). Reports: estimate conversion, jobs, schedule backlog and payment activity (payments, refunds and invoice credits by month). XLSX export is web only. |
+| Money, reports | Done (read) | Money (revenue). Reports: estimate conversion, jobs, schedule backlog and payment activity (payments, refunds and invoice credits by month). Who buys (top customers by invoiced revenue). Download as Excel for every web report file, opened in Quick Look to share. |
 | Billing schedules | Done | List, schedule progress (billed, remaining, deposits, retainage), bill the remainder, release retainage, and deposit request on a job. Each command keeps its idempotency key until the server answers. Gated by `progress_billing`. |
 | Pipeline (requests) | Not applicable | The web page is a "Pipeline is on the way" placeholder with no data behind it. |
 | Price book, price item | Done | Browse, detail, and for owners: add, edit (new revision) and remove items. |
@@ -27,7 +27,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Team, team member, roles, role members | Done | Team & permissions list; owners change a person's role from the phone. Invite people by email with a role, see and cancel pending invites, edit roles and per-person access. |
 | Inbox, notices | Done | Staff notices with mark-read. |
 | Search | Done | Searches the whole company through the Search Gateway (`GET /v1/search`): jobs, customers, estimates, invoices and billing schedules. Offline, or if the gateway fails, it searches the jobs and customers saved on the phone and says so. |
-| Settings, notice settings | Done | Account, appearance and sign-out, plus the job-notice matrix (owner, dispatcher and technician × email and in-app). The delivery log is web only. |
+| Settings, notice settings | Done | Account, appearance and sign-out, plus the job-notice matrix (owner, dispatcher and technician × email and in-app). Delivery log of recent job notices. |
 | Offline queue, sync banner | Done | Cached workspace, queued steps and notes, photos kept until uploaded. |
 | Workflows, agent / Brain | Not yet | |
 | Customer portal, document action page | Done | Public estimate decision screen. |
