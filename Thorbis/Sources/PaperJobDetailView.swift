@@ -248,8 +248,8 @@ struct JobDetailView: View {
                 .lineLimit(compact ? 2 : nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
+            // One wrapping row of chips instead of two fixed rows (chips are pills).
+            FlowRow(spacing: 6, lineSpacing: 6) {
                     statusControl(job)
                     if let date = JobFiltering.date(job.scheduledFor) {
                         Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
@@ -264,9 +264,6 @@ struct JobDetailView: View {
                         .buttonStyle(.plain)
                         .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
                     }
-                }
-
-                HStack(spacing: 8) {
                     if let assignedName = assignedDisplayName(for: job) {
                         HStack(spacing: 6) {
                             Text(nameInitials(assignedName))
@@ -292,7 +289,6 @@ struct JobDetailView: View {
                             .frame(height: Theme.chipHeight)
                             .background(Theme.fill, in: Capsule())
                     }
-                }
             }
             if !compact {
                 JobProgressTrack(status: outbox.pendingStatus(for: job.id) ?? job.status).padding(.top, 10)

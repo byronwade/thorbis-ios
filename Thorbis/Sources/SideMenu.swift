@@ -66,6 +66,9 @@ struct SideMenu: View {
     let newJob: () -> Void
     let settings: () -> Void
     let close: () -> Void
+    /// The place showing right now (a MenuItem id, "more" or "search").
+    var current: String = ""
+    var switchWorkspace: (() -> Void)? = nil
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
     @ObservedObject private var recents = RecentItems.shared
@@ -79,11 +82,23 @@ struct SideMenu: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Text(String((session.activeOrganization?.name ?? "T").prefix(1)))
-                    .font(Theme.font(12, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 24, height: 24).background(Theme.brand, in: RoundedRectangle(cornerRadius: 7))
-                Text(session.activeOrganization?.name ?? "Thorbis").font(Theme.font(17, weight: .semibold)).lineLimit(1)
-                Spacer()
+                // The company is a control: tap to switch workspaces.
+                Button { switchWorkspace?() } label: {
+                    HStack(spacing: 10) {
+                        Text(String((session.activeOrganization?.name ?? "T").prefix(1)))
+                            .font(Theme.font(12, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 26, height: 26).background(Theme.brand, in: RoundedRectangle(cornerRadius: 7))
+                        Text(session.activeOrganization?.name ?? "Thorbis").font(Theme.font(17, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                        if switchWorkspace != nil {
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Company: \(session.activeOrganization?.name ?? "Thorbis"). Switch company")
+                Spacer(minLength: 4)
                 PaperCircleButton(symbol: "magnifyingglass", label: "Search", action: search)
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
@@ -149,11 +164,15 @@ struct SideMenu: View {
             .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 4)
     }
 
+    /// D-020: the current place's mark fills and its word lifts; no wash behind the row.
     private func row(_ item: MenuItem) -> some View {
-        Button { open(item) } label: {
+        let here = current == item.rawValue
+        return Button { open(item) } label: {
             HStack(spacing: 14) {
-                Image(systemName: item.symbol).font(.system(size: 17)).foregroundStyle(item.tint).frame(width: 22)
-                Text(item.title).font(Theme.font(15, weight: .medium))
+                Image(systemName: item.symbol).symbolVariant(here ? .fill : .none)
+                    .font(.system(size: 17)).foregroundStyle(here ? Theme.foreground : item.tint).frame(width: 22)
+                Text(item.title).font(Theme.font(15, weight: here ? .semibold : .medium))
+                    .foregroundStyle(here ? Theme.foreground : Theme.foreground.opacity(0.88))
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
@@ -161,5 +180,6 @@ struct SideMenu: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(here ? .isSelected : [])
     }
 }
