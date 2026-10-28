@@ -82,31 +82,44 @@ struct PaperTabs: View {
     let options: [String]
     @Binding var selection: String
     var body: some View {
-        // When the tabs run past the edge, the chosen one scrolls fully into view, so a
-        // half-cut "Activity" never hides which tab is open.
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 2) {
-                    ForEach(options, id: \.self) { option in
-                        Button { selection = option } label: {
-                            Text(option).font(Theme.font(15, weight: .medium))
-                                .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                                .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
-                                .background(selection == option ? Theme.fill : .clear, in: Capsule())
-                                .frame(minHeight: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        .id(option)
-                        .accessibilityAddTraits(selection == option ? .isSelected : [])
-                    }
-                }.padding(.horizontal, Theme.gutter - 4)
-            }
-            .scrollIndicators(.hidden).padding(.bottom, 4)
-            .onChange(of: selection) { _, value in
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+        // Every tab shows in full when it can: first at the normal padding, then a little
+        // tighter (five job tabs on a 6.1" phone). Only past that does the row scroll, and
+        // then the chosen tab scrolls fully into view and the cut edge fades out.
+        ViewThatFits(in: .horizontal) {
+            row(padding: 12).padding(.horizontal, Theme.gutter - 4)
+            row(padding: 8).padding(.horizontal, Theme.gutter - 8)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    row(padding: 12).padding(.horizontal, Theme.gutter - 4)
+                }
+                .scrollIndicators(.hidden)
+                .mask(LinearGradient(stops: [.init(color: .black, location: 0.88), .init(color: .clear, location: 1)],
+                                     startPoint: .leading, endPoint: .trailing))
+                .onChange(of: selection) { _, value in
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+                }
             }
         }
+        .padding(.bottom, 4)
         .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    private func row(padding: CGFloat) -> some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { option in
+                Button { selection = option } label: {
+                    Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
+                        .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
+                        .padding(.horizontal, padding).frame(height: Theme.chipHeight + 4)
+                        .background(selection == option ? Theme.fill : .clear, in: Capsule())
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .id(option)
+                .accessibilityAddTraits(selection == option ? .isSelected : [])
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
