@@ -233,16 +233,16 @@ struct InvoicePaymentsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                HStack(spacing: 7) {
-                    Text("Payments").font(Theme.font(16, weight: .semibold))
-                    Text("\(model.payments.count)")
-                        .font(Theme.monoFont(12, weight: .medium))
-                        .foregroundStyle(Theme.muted)
+                // Same header grammar as "Line items" and "Activity" above and below it.
+                HStack(spacing: 6) {
+                    Text("Payments").font(Theme.font(13, weight: .medium))
+                    Text("\(model.payments.count)").font(Theme.monoFont(12))
                 }
+                .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 2)
                 Spacer()
                 // Collect payment lives in the bottom bar; one entry point, not two.
             }
-            .frame(minHeight: 44)
 
             VStack(spacing: 0) {
                 if let loadError = model.loadError {

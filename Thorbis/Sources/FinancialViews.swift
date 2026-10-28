@@ -594,16 +594,20 @@ struct PaperDocumentRow: View {
 struct PaperStatusChip: View {
     let status: String
     var body: some View {
-        let (tint, ground): (Color, Color) = switch status {
-        case "approved", "paid", "completed": (Theme.success, Theme.successSurface)
-        case "sent", "issued", "open": (Theme.warning, Theme.warningSurface)
-        case "declined", "void", "canceled": (Theme.destructive, Theme.destructiveSurface)
-        default: (Theme.muted, Theme.fill)
+        let tint: Color = switch status {
+        case "approved", "paid", "completed": Theme.success
+        case "sent", "issued", "open": Theme.warning
+        case "declined", "void", "canceled": Theme.destructive
+        default: Theme.muted
         }
-        Text(status == "issued" ? "Unpaid" : status.statusLabel)
-            .font(Theme.font(11, weight: .medium)).foregroundStyle(tint)
-            .padding(.horizontal, 8).frame(minHeight: 20)
-            .background(ground, in: Capsule())
+        // MA-10: the word on the neutral well; the hue is a dot beside it, never the word itself.
+        HStack(spacing: 6) {
+            Circle().fill(tint).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(status == "issued" ? "Unpaid" : status.statusLabel)
+        }
+            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 10).frame(minHeight: Theme.chipHeight)
+            .background(Theme.fill, in: Capsule())
     }
 }
 
@@ -776,8 +780,8 @@ struct NewEstimateView: View {
                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                 } else {
                     TextField("0.00", text: line.price).keyboardType(.decimalPad)
-                        .font(Theme.monoFont(14)).multilineTextAlignment(.trailing)
-                        .padding(.horizontal, 10).frame(width: 110, height: 36)
+                        .font(Theme.monoFont(16)).multilineTextAlignment(.trailing)
+                        .padding(.horizontal, 10).frame(width: 110, height: 44)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                         .accessibilityLabel("Unit price")
                 }

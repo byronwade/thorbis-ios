@@ -166,7 +166,8 @@ struct ScheduleView: View {
                 PaperGroupHeader(title: range == .today ? (isActive ? "Also today" : "Later today") : "More jobs", count: jobs.count - 1)
                     .padding(.horizontal, Theme.gutter)
                 ForEach(jobs.filter { $0.id != first.id }) { job in
-                    ScheduleCompactRow(job: job, customer: store.customerName(job.customerId), timeStyle: .time)
+                    ScheduleCompactRow(job: job, customer: store.customerName(job.customerId),
+                                       timeStyle: range == .unscheduled ? .age : .time)
                 }
             }
         }
@@ -224,7 +225,12 @@ struct ScheduleView: View {
         } else {
             return nil
         }
-        return ["en_route", "arrived", "in_progress"].first { allowed.contains($0) && !(status == "paused" && $0 == "in_progress") }
+        // Only ever forward: a job already in progress never offers "Mark arrived" again.
+        let order = ["scheduled": 0, "dispatched": 0, "en_route": 1, "arrived": 2, "in_progress": 3, "paused": 3]
+        let current = order[status] ?? 0
+        return ["en_route", "arrived", "in_progress"].first {
+            allowed.contains($0) && (order[$0] ?? 0) > current && !(status == "paused" && $0 == "in_progress")
+        }
     }
 
     @ViewBuilder private func commit(for job: Job) -> some View {
@@ -380,8 +386,9 @@ private extension ScheduleHero {
     }
 }
 
-private struct ScheduleCompactRow: View {
-    enum TimeStyle { case time }
+struct ScheduleCompactRow: View {
+    /// `.age` is for jobs without a time: the lane shows how long the job has been waiting.
+    enum TimeStyle { case time, age }
     let job: Job
     let customer: String
     var timeStyle: TimeStyle = .time
@@ -390,12 +397,27 @@ private struct ScheduleCompactRow: View {
 
     private var time: some View {
         Group {
-            if let date = JobFiltering.date(job.scheduledFor) {
+            if timeStyle == .age, let created = JobFiltering.date(job.createdAt) {
+                Text(Self.age(since: created))
+                    .accessibilityLabel("Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
+            } else if let date = JobFiltering.date(job.scheduledFor) {
                 Text(date.formatted(.dateTime.hour().minute()))
-            } else { Text("—") }
+            } else { Text("No time").foregroundStyle(Theme.muted) }
         }
         .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
         .lineLimit(1).minimumScaleFactor(0.8)
+    }
+
+    /// "Today", "2d", "3w": short enough for the 60pt lane.
+    nonisolated static func age(since date: Date, now: Date = .now) -> String {
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: date),
+                                                   to: Calendar.current.startOfDay(for: now)).day ?? 0
+        switch days {
+        case ..<1: return "Today"
+        case 1..<14: return "\(days)d"
+        case 14..<120: return "\(days / 7)w"
+        default: return "\(days / 30)mo"
+        }
     }
 
     var body: some View {

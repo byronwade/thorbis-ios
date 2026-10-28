@@ -302,7 +302,11 @@ final class APIClient: ObservableObject {
 }
 
 extension String {
-    var statusLabel: String { replacingOccurrences(of: "_", with: " ").capitalized }
+    /// Sentence case, like every other label: "In progress", not "In Progress".
+    var statusLabel: String {
+        let words = replacingOccurrences(of: "_", with: " ").lowercased()
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
 }
 
 func relativeDay(_ iso: String?) -> String {

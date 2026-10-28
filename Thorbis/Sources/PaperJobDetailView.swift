@@ -67,20 +67,25 @@ struct JobDetailView: View {
                     JobMediaView(jobID: jobId)
                 } else {
                     ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    // The tabs pin under the nav bar, so switching Overview, Invoice or Activity
+                    // never means scrolling back to the top first.
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     header(job)
-                    tabBar
-                    VStack(alignment: .leading, spacing: 16) {
-                        switch selectedTab {
-                        case "Estimates": estimatesContent(job)
-                        case "Invoice": invoiceContent(job)
-                        case "Activity": activityContent(job)
-                        default: overviewContent(job)
+                    Section {
+                        VStack(alignment: .leading, spacing: 16) {
+                            switch selectedTab {
+                            case "Estimates": estimatesContent(job)
+                            case "Invoice": invoiceContent(job)
+                            case "Activity": activityContent(job)
+                            default: overviewContent(job)
+                            }
                         }
+                        .padding(.horizontal, Theme.gutter)
+                        .padding(.top, selectedTab == "Invoice" ? 4 : 22)
+                        .padding(.bottom, 28)
+                    } header: {
+                        tabBar.background(Theme.background)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, selectedTab == "Invoice" ? 4 : 22)
-                    .padding(.bottom, 28)
                     }
                     }
                 }
@@ -262,6 +267,8 @@ struct JobDetailView: View {
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
+                        // Without scheduling rights the chip is a label, not a button that does nothing.
+                        .allowsHitTesting(session.can("job.assign", feature: "jobs"))
                         .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
                     }
                     if let assignedName = assignedDisplayName(for: job) {
@@ -282,12 +289,18 @@ struct JobDetailView: View {
                     }
                     MemberChip(customerID: job.customerId)
                     if let balance = invoiceBalanceCents {
-                        Text("\(money(balance, currency: "USD")) due")
-                            .font(Theme.monoFont(12, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 10)
-                            .frame(height: Theme.chipHeight)
-                            .background(Theme.fill, in: Capsule())
+                        // The balance chip jumps to the Invoice tab, where it can be collected.
+                        Button { withAnimation(.snappy) { selectedTab = "Invoice" } } label: {
+                            Text("\(money(balance, currency: "USD")) due")
+                                .font(Theme.monoFont(12, weight: .medium))
+                                .foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 10)
+                                .frame(height: Theme.chipHeight)
+                                .background(Theme.fill, in: Capsule())
+                                .padding(.vertical, 8).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityHint("Opens the invoice")
                     }
             }
             if !compact {
@@ -315,40 +328,34 @@ struct JobDetailView: View {
         case "scheduled", "canceled": Theme.muted
         default: Theme.warning
         }
-        let surface: Color = switch job.status {
-        case "completed": Theme.successSurface
-        case "en_route", "dispatched": Theme.brandSurface
-        case "scheduled", "canceled": Theme.fill
-        default: Theme.warningSurface
-        }
         let transitions = availableTransitions(job)
         if transitions.isEmpty {
-            statusChip(job, tint: tint, surface: surface, showsMenu: false)
+            statusChip(job, tint: tint, showsMenu: false)
         } else {
             Menu {
                 ForEach(transitions, id: \.self) { target in
                     Button(transitionTitle(target)) { runTransition(target) }
                 }
             } label: {
-                statusChip(job, tint: tint, surface: surface, showsMenu: true)
+                statusChip(job, tint: tint, showsMenu: true)
             }
             .buttonStyle(.plain)
         }
     }
 
-    private func statusChip(_ job: JobRecord, tint: Color, surface: Color, showsMenu: Bool) -> some View {
+    private func statusChip(_ job: JobRecord, tint: Color, showsMenu: Bool) -> some View {
         let queued = outbox.pendingStatus(for: job.id)
         return HStack(spacing: 5) {
+            // MA-10: the hue rides on the glyph; the word and the pill stay neutral.
             Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(queued == nil ? tint : Theme.warning)
             Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
-                .font(Theme.font(12, weight: .medium))
-            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
+                .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
+            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted) }
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 9)
+        .padding(.horizontal, 10)
         .frame(height: Theme.chipHeight)
-        .background(surface, in: Capsule())
+        .background(Theme.fill, in: Capsule())
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .accessibilityLabel("Job status, \(job.status.statusLabel)")
@@ -421,7 +428,22 @@ struct JobDetailView: View {
                             .frame(minHeight: 44)
                     }
                 }
-                PaperDetailRow("Customer", value: store.customerName(job.customerId))
+                if let customer = store.customers.first(where: { $0.id == job.customerId }),
+                   session.can("customer.view", feature: "core_crm") {
+                    // The customer opens from the job: history, contacts and equipment in one tap.
+                    NavigationLink(value: customer) {
+                        PaperDetailRow(label: "Customer") {
+                            HStack(spacing: 4) {
+                                Text(customer.name).foregroundStyle(Theme.foreground)
+                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle)
+                            }
+                        }
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens the customer")
+                } else {
+                    PaperDetailRow("Customer", value: store.customerName(job.customerId))
+                }
                 if let place = locations.first {
                     Button {
                         if let url = Directions.url(address: place.address, coordinates: place.coordinates) { openURL(url) }
@@ -644,9 +666,9 @@ struct JobDetailView: View {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
                             Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(entry.isNote ? Theme.brandText : Theme.muted)
+                                .foregroundStyle(entry.isNote ? Theme.foreground : Theme.muted)
                                 .frame(width: 26, height: 26)
-                                .background(entry.isNote ? Theme.brandSurface : Theme.fill, in: Circle())
+                                .background(Theme.fill, in: Circle())
                             Rectangle().fill(Theme.border).frame(width: 1).frame(maxHeight: .infinity)
                         }
                         VStack(alignment: .leading, spacing: 6) {
@@ -742,7 +764,7 @@ struct JobDetailView: View {
     }
 
     private func sectionTitle(_ title: String) -> some View {
-        Text(title).font(Theme.font(16, weight: .semibold))
+        Text(title).font(Theme.font(17, weight: .medium))
     }
 
     private func detailRow(_ label: String, _ value: String) -> some View {

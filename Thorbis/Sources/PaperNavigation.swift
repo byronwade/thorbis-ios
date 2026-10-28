@@ -137,7 +137,7 @@ struct RootView: View {
                 case "customers": tab = .customers
                 case "menu", "more": settings = true
                 case "job", "job-invoice": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
-                case "customer": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
+                case "customer", "customer-activity": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
                 default: break
                 }
             }
@@ -355,7 +355,7 @@ struct RootView: View {
                     if PaperPreview.screen == "job-assign" { jobsPath.append(PaperRoute.assign(jobID: job.id)) }
                     if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
                 }
-            case "customer":
+            case "customer", "customer-activity":
                 if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
                     primaryTab = .customers
                     customersPath.append(customer)
@@ -703,6 +703,23 @@ struct PaperGlobalSearch: View {
     @State private var serverQuery = ""
     @State private var serverFailed = false
     @State private var searching = false
+    @ObservedObject private var recents = RecentItems.shared
+    @State private var path = NavigationPath()
+    /// Recent items that still resolve to a record this person can open.
+    private enum RecentTarget { case job(Job), customer(Customer) }
+    private var recentlyOpened: [(RecentItems.Item, RecentTarget)] {
+        recents.items.prefix(5).compactMap { item in
+            switch item.kind {
+            case .job:
+                guard session.can("job.view", feature: "jobs"), let job = store.jobs.first(where: { $0.id == item.id }) else { return nil }
+                return (item, .job(job))
+            case .customer:
+                guard session.can("customer.view", feature: "core_crm"),
+                      let customer = store.customers.first(where: { $0.id == item.id }) else { return nil }
+                return (item, .customer(customer))
+            }
+        }
+    }
     private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var useServer: Bool { !serverFailed && !session.isOffline && serverQuery == trimmed && !trimmed.isEmpty }
     private var jobs: [Job] { trimmed.isEmpty ? [] : JobFiltering.jobs(store.jobs, assignedTo: nil, search: trimmed) }
@@ -714,7 +731,7 @@ struct PaperGlobalSearch: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if trimmed.isEmpty {
@@ -722,11 +739,36 @@ struct PaperGlobalSearch: View {
                         let canViewJobs = session.can("job.view", feature: "jobs")
                         let recent = (canViewJobs ? store.jobs : []).filter { !["completed", "canceled"].contains($0.status) }
                             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }.prefix(6)
-                        if recent.isEmpty {
+                        // What this person opened last comes first, like Mail and Maps search.
+                        let opened = recentlyOpened
+                        if !opened.isEmpty {
+                            PaperGroupHeader(title: "Recently opened").padding(.top, 8)
+                            ForEach(opened, id: \.0) { item, destination in
+                                Button {
+                                    switch destination {
+                                    case .job(let job): path.append(job)
+                                    case .customer(let customer): path.append(customer)
+                                    }
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: item.kind == .job ? "briefcase" : "person")
+                                            .font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 26)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                                            Text(item.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                                        }
+                                        Spacer(minLength: 8)
+                                    }
+                                    .frame(minHeight: 52).contentShape(Rectangle())
+                                }
+                                .buttonStyle(RowPressStyle())
+                            }
+                        }
+                        if recent.isEmpty && opened.isEmpty {
                             PaperEmptyState(symbol: "magnifyingglass", title: "Search your workspace",
                                             message: "Jobs, customers, estimates and invoices across the company.")
-                        } else {
-                            PaperGroupHeader(title: "Open jobs").padding(.top, 8)
+                        } else if !recent.isEmpty {
+                            PaperGroupHeader(title: "Open jobs").padding(.top, opened.isEmpty ? 8 : 16)
                             ForEach(Array(recent)) { job in
                                 NavigationLink(value: job) {
                                     HStack(spacing: 12) {
@@ -740,7 +782,7 @@ struct PaperGlobalSearch: View {
                                     }
                                     .frame(minHeight: 52).contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(RowPressStyle())
                             }
                         }
                     } else if useServer {
@@ -749,6 +791,7 @@ struct PaperGlobalSearch: View {
                             ForEach(results) { result in serverRow(result) }
                         }
                         if server.isEmpty && !searching { ContentUnavailableView.search(text: trimmed) }
+                        if searching { SkeletonRows(count: 2, inset: 0).padding(.top, 8) }
                     } else {
                         if session.isOffline || serverFailed {
                             Label(session.isOffline ? "Offline · searching what's saved on this phone" : "Company search is unavailable · showing what's on this phone",
@@ -766,7 +809,7 @@ struct PaperGlobalSearch: View {
                                         Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
                                         Spacer(minLength: 0)
                                     }.frame(minHeight: 46).contentShape(Rectangle())
-                                }.buttonStyle(.plain)
+                                }.buttonStyle(RowPressStyle())
                             }
                         }
                         if session.can("customer.view", feature: "core_crm"), !customers.isEmpty {
@@ -778,10 +821,10 @@ struct PaperGlobalSearch: View {
                                         Text(customer.name).font(Theme.font(15, weight: .medium))
                                         Spacer(minLength: 0)
                                     }.frame(minHeight: 46).contentShape(Rectangle())
-                                }.buttonStyle(.plain)
+                                }.buttonStyle(RowPressStyle())
                             }
                         }
-                        if searching { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20) }
+                        if searching { SkeletonRows(count: 3, inset: 0).padding(.top, 8) }
                         else if jobs.isEmpty && customers.isEmpty { ContentUnavailableView.search(text: trimmed) }
                     }
                 }
@@ -810,7 +853,7 @@ struct PaperGlobalSearch: View {
             .background(Theme.background)
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Jobs and customers")
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Jobs, customers, invoices")
             .toolbar {
                 if !embedded {
                     ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -848,16 +891,16 @@ struct PaperGlobalSearch: View {
         case "job":
             NavigationLink(value: store.jobs.first { $0.id == result.entityId }
                            ?? Job(id: result.entityId, customerId: nil, title: result.title, status: result.status ?? "scheduled",
-                                  createdAt: nil, updatedAt: nil, allowedTransitions: nil)) { row }.buttonStyle(.plain)
+                                  createdAt: nil, updatedAt: nil, allowedTransitions: nil)) { row }.buttonStyle(RowPressStyle())
         case "customer":
             NavigationLink(value: store.customers.first { $0.id == result.entityId }
-                           ?? Customer(id: result.entityId, name: result.title, archived: nil, createdAt: nil)) { row }.buttonStyle(.plain)
+                           ?? Customer(id: result.entityId, name: result.title, archived: nil, createdAt: nil)) { row }.buttonStyle(RowPressStyle())
         case "estimate":
-            NavigationLink(value: PaperRoute.estimate(result.entityId)) { row }.buttonStyle(.plain)
+            NavigationLink(value: PaperRoute.estimate(result.entityId)) { row }.buttonStyle(RowPressStyle())
         case "invoice":
-            NavigationLink(value: PaperRoute.invoice(result.entityId)) { row }.buttonStyle(.plain)
+            NavigationLink(value: PaperRoute.invoice(result.entityId)) { row }.buttonStyle(RowPressStyle())
         case "billing_schedule":
-            NavigationLink(value: PaperRoute.billingSchedule(result.entityId)) { row }.buttonStyle(.plain)
+            NavigationLink(value: PaperRoute.billingSchedule(result.entityId)) { row }.buttonStyle(RowPressStyle())
         default:
             row.opacity(0.6)
         }

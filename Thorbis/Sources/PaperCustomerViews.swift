@@ -243,7 +243,7 @@ struct CustomerDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
                         Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
@@ -264,7 +264,7 @@ struct CustomerDetailView: View {
                 if let error {
                     ErrorBanner(message: error) { await load() }.padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 }
-                PaperTabs(options: ["Overview", "Jobs", "Activity"], selection: $tab)
+                Section {
                 VStack(alignment: .leading, spacing: 18) {
                     switch tab {
                     case "Overview":
@@ -287,6 +287,10 @@ struct CustomerDetailView: View {
                     default: activitySection
                     }
                 }.padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 24)
+                } header: {
+                    // Pinned like the job page's tabs.
+                    PaperTabs(options: ["Overview", "Jobs", "Activity"], selection: $tab).background(Theme.background)
+                }
             }
         }
         .foregroundStyle(Theme.foreground).background(Theme.background)
@@ -309,8 +313,15 @@ struct CustomerDetailView: View {
             HStack(spacing: 8) {
                 if canEdit {
                     Button { showCustomerMode = true } label: {
-                        Label("Show to customer", systemImage: "person.crop.rectangle").font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        // One line always: the short word takes over when the full one won't fit.
+                        ViewThatFits(in: .horizontal) {
+                            Label("Show to customer", systemImage: "person.crop.rectangle").fixedSize()
+                            Label("Show", systemImage: "person.crop.rectangle").fixedSize()
+                        }
+                        .font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Show to customer")
                     .accessibilityHint("Hands the device to the customer to check and fix their details")
                 }
                 if session.can("job.create", feature: "jobs") {
@@ -323,7 +334,12 @@ struct CustomerDetailView: View {
         }
         .task { await load() }
         .task { await loadSmsConsent() }
-        .onAppear { RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer") }
+        .onAppear {
+            RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
+            #if DEBUG
+            if PaperPreview.enabled && PaperPreview.screen == "customer-activity" { tab = "Activity" }
+            #endif
+        }
         .onChange(of: tab) { _, selectedTab in
             if selectedTab == "Activity" { Task { await loadActivity(reset: true) } }
         }
@@ -443,11 +459,11 @@ struct CustomerDetailView: View {
                         Text(smsConsentLabel)
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
                     }
-                    .foregroundStyle(granted ? Theme.success : Theme.foreground)
+                    .foregroundStyle(Theme.foreground)
                     .frame(minHeight: 44)
                 }
             } else {
-                Text(smsConsentLabel).foregroundStyle(granted ? Theme.success : Theme.foreground)
+                Text(smsConsentLabel).foregroundStyle(Theme.foreground)
             }
         }
         .font(Theme.font(14))
@@ -670,10 +686,11 @@ struct CustomerDetailView: View {
                     ForEach(activity) { event in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: activitySymbol(for: event.kind))
-                                .font(Theme.font(13, weight: .medium))
-                                .foregroundStyle(Theme.brandText)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.muted)
                                 .frame(width: 30, height: 30)
-                                .background(Theme.brandSurface, in: Circle())
+                                .background(Theme.fill, in: Circle())
+                                .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(event.summary).font(Theme.font(14, weight: .medium)).lineLimit(3)
                                 Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
