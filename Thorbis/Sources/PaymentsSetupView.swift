@@ -75,7 +75,38 @@ struct HostedMerchantOnboardingLink: Decodable {
     }
 }
 
+/// `GET /v1/organization/money-availability` (organization MoneyAvailability, BYR-315).
+/// The server writes every sentence; the app only lays them out.
+struct MoneyAvailability: Decodable, Equatable {
+    struct Balance: Decodable, Equatable, Identifiable {
+        let currency: String
+        let available: Int
+        let pending: Int
+        let explanation: String
+        var id: String { currency }
+    }
+    struct Payout: Decodable, Equatable {
+        let state: String
+        let amount: Int
+        let currency: String
+        let arrivalDate: String
+        let title: String
+        let explanation: String
+        let responsibleActor: String
+    }
+    struct Attention: Decodable, Equatable { let title: String; let explanation: String }
+    let version: Int
+    let asOf: String
+    let balances: [Balance]
+    let payouts: [Payout]
+    let attention: Attention?
+}
+
 extension APIClient {
+    func moneyAvailability() async throws -> MoneyAvailability {
+        try await send("GET", "/v1/organization/money-availability")
+    }
+
     func merchantReadiness() async throws -> MerchantReadiness {
         try await send("GET", "/v1/organization/merchant-readiness")
     }
@@ -95,6 +126,7 @@ struct PaymentsSetupView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @State private var readiness: MerchantReadiness?
+    @State private var availability: MoneyAvailability?
     @State private var hosted: URL?
     @State private var busy = false
     @State private var error: String?
@@ -126,6 +158,7 @@ struct PaymentsSetupView: View {
                         if readiness.requirements.currentlyDueCount > 0 { countRow("Due now", readiness.requirements.currentlyDueCount, urgent: true) }
                         if readiness.requirements.eventuallyDueCount > 0 { countRow("Due later", readiness.requirements.eventuallyDueCount, urgent: false) }
                     }
+                    if let availability { moneySection(availability) }
                     if let title = readiness.actionTitle {
                         PrimaryButton(title: title, icon: "arrow.up.forward.square", busy: busy) { Task { await openStripe() } }
                             .padding(.top, 20)
@@ -160,6 +193,52 @@ struct PaymentsSetupView: View {
         .accessibilityElement(children: .combine)
     }
 
+    @ViewBuilder private func moneySection(_ snapshot: MoneyAvailability) -> some View {
+        if let attention = snapshot.attention {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(attention.title, systemImage: "exclamationmark.triangle").font(Theme.font(15, weight: .semibold))
+                Text(attention.explanation).font(Theme.font(13))
+            }
+            .foregroundStyle(Theme.warning)
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 10))
+            .padding(.top, 14)
+        }
+        ForEach(snapshot.balances) { balance in
+            PaperGroupHeader(title: snapshot.balances.count > 1 ? "Balance · \(balance.currency)" : "Balance").padding(.top, 10)
+            amountRow("Available", balance.available, balance.currency)
+            amountRow("Pending", balance.pending, balance.currency)
+            Text(balance.explanation).font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 2)
+        }
+        if !snapshot.payouts.isEmpty {
+            PaperGroupHeader(title: "Recent payouts", count: snapshot.payouts.count).padding(.top, 14)
+            ForEach(Array(snapshot.payouts.enumerated()), id: \.offset) { _, payout in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(payout.title).font(Theme.font(15, weight: .medium))
+                            .foregroundStyle(payout.responsibleActor == "owner" ? Theme.warning : Theme.foreground)
+                        Spacer()
+                        Text(money(payout.amount, currency: payout.currency)).font(Theme.monoFont(14, weight: .medium))
+                    }
+                    Text(payout.explanation).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                }
+                .padding(.vertical, 8)
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private func amountRow(_ title: String, _ amount: Int, _ currency: String) -> some View {
+        HStack {
+            Text(title).font(Theme.font(15, weight: .medium))
+            Spacer()
+            Text(money(amount, currency: currency)).font(Theme.monoFont(15, weight: .medium))
+                .foregroundStyle(amount < 0 ? Theme.warning : Theme.foreground)
+        }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+
     private func countRow(_ title: String, _ count: Int, urgent: Bool) -> some View {
         HStack {
             Text(title).font(Theme.font(15, weight: .medium))
@@ -182,6 +261,16 @@ struct PaymentsSetupView: View {
             guard session.generation == generation else { return }
             self.error = error.localizedDescription
         }
+        await loadMoney()
+    }
+
+    /// Only once Stripe is connected; before that, or if the read is refused, nothing shows.
+    private func loadMoney() async {
+        guard let readiness, readiness.state != "not_started" else { availability = nil; return }
+        let generation = session.generation
+        let value = try? await api.moneyAvailability()
+        guard session.generation == generation else { return }
+        availability = value
     }
 
     private func openStripe() async {
@@ -206,6 +295,7 @@ struct PaymentsSetupView: View {
             guard session.generation == generation else { return }
             readiness = value
             error = nil
+            await loadMoney()
         } catch is CancellationError {} catch {
             await load()
         }
