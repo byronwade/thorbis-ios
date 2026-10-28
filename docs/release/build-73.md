@@ -1,17 +1,17 @@
 # TestFlight 1.0 (73)
 
-Uploaded2026-10-28 at17:08 EDT. Apple processing is complete. Internal Testers is
+Uploaded 2026-10-28 at 17:08 EDT. Apple processing is complete. Internal Testers is
 assigned with two testers; testing notes show Saved. No external beta review was
 submitted and no new tester invitations were sent.
 
-Source:5f48e17af1dd7886f62633270e7440f8ded09edf. PR[#75](https://github.com/byronwade/thorbis-ios/pull/75)
-is stacked on#74. The app now lists all verified documents for the current job,
+Source: 5f48e17af1dd7886f62633270e7440f8ded09edf. PR [#75](https://github.com/byronwade/thorbis-ios/pull/75)
+is stacked on #74. The app now lists all verified documents for the current job,
 keeps payment on the selected invoice, preserves safe stale rows, and offers
 customer document browsing with technician hand-back. Estimate totals are behind
 a disclosure; incomplete reads prevent duplicate-create prompts.
 
-Validation:443/443 full iPhone unit/native UI tests,1/1 additional iPad largest-text
-and dark-mode document check, and12/12 release-script/signing-policy tests passed.
+Validation: 443/443 full iPhone unit/native UI tests, 1/1 additional iPad largest-text
+and dark-mode document check, and 12/12 release-script/signing-policy tests passed.
 The signed archive passed strict integrity, app/widget version consistency and
 Release preview-boundary checks. Tap to Pay remains disabled pending its signed
 distribution qualification; no payment/provider actions were used in verification.
