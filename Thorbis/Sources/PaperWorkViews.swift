@@ -98,7 +98,7 @@ struct ScheduleView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Schedule", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
+                PaperHeader(title: "Schedule", subtitle: subtitle) { withMotion { searchVisible.toggle() } }
                 OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
@@ -476,7 +476,7 @@ struct JobsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Jobs", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
+                PaperHeader(title: "Jobs", subtitle: subtitle) { withMotion { searchVisible.toggle() } }
                 OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Title or job number") }
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)

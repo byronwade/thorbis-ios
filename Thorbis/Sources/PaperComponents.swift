@@ -105,7 +105,7 @@ struct PaperTabs: View {
                                              .init(color: moreTrailing ? .clear : .black, location: 1)],
                                      startPoint: .leading, endPoint: .trailing))
                 .onChange(of: selection) { _, value in
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+                    withMotion(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
                 }
             }
         }
