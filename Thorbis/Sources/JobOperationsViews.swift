@@ -55,10 +55,11 @@ struct JobCloseoutView: View {
                             checklistRow(done: requirement.outcome != "blocked", title: requirement.detail, detail: step?.detail)
                             if let step, let title = step.buttonTitle, step.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) {
                                 Button(title) { Task { await recover(step) } }
-                                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                                    .padding(.horizontal, 12).frame(minHeight: 32)
-                                    .background(Theme.brandSurface, in: Capsule())
+                                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
+                                    .background(Theme.fill, in: Capsule())
                                     .frame(minHeight: 44)
+                                    .buttonStyle(PressStyle())
                                     .disabled(busy)
                             }
                         }
@@ -69,10 +70,11 @@ struct JobCloseoutView: View {
                             checklistRow(done: acknowledged, title: check.label, detail: nil)
                             if !acknowledged && session.can("job.edit", feature: "jobs") {
                                 Button("Confirm") { Task { await acknowledge(check.key) } }
-                                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                                    .padding(.horizontal, 12).frame(minHeight: 32)
-                                    .background(Theme.brandSurface, in: Capsule())
+                                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
+                                    .background(Theme.fill, in: Capsule())
                                     .frame(minHeight: 44)
+                                    .buttonStyle(PressStyle())
                                     .disabled(busy)
                             }
                         }
