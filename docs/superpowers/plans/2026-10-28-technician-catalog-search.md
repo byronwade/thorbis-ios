@@ -147,31 +147,31 @@ git commit -m "feat: share full catalog search across draft editors"
 - Consumes: `PriceBookCatalog.refresh(api:organizationID:sessionGeneration:force:)`, `PriceBookCatalog.items`, existing `URLProtocolFixture` request handler and `Gate`, and Task 1 quantity lookup.
 - Produces: regression coverage for complete multi-page hydration, duplicate-ID handling, stale organization and same-organization/session-generation response rejection, and prior estimate/invoice commercial rules. Do not alter catalog API payload shape.
 
-- [ ] **Step 1: Add `PriceBookCatalogTests.testRefreshLoadsAllPagesAndDeduplicatesIDs`**
+- [x] **Step 1: Add `PriceBookCatalogTests.testRefreshLoadsAllPagesAndDeduplicatesIDs`**
 
 Use a unique organization UUID and `URLProtocolFixture` to return two pages from `/v1/query`; overlap one item ID between pages and place a unique active USD item on page two. Force refresh and assert every distinct item is present once, including the later-page item. Use the fixture’s existing envelope and `price_book_items` field keys only. Clean only this test’s per-organization cache file.
 
-- [ ] **Step 2: Add `PriceBookCatalogTests.testLatePriorOrganizationRefreshCannotReplaceCurrentCatalog`**
+- [x] **Step 2: Add `PriceBookCatalogTests.testLatePriorOrganizationRefreshCannotReplaceCurrentCatalog`**
 
 With one `PriceBookCatalog` and a gated response for organization A, start A’s forced refresh, start and complete organization B’s refresh, then release A. Assert the catalog remains scoped to B and contains B’s items, not A’s. Use unique organization IDs and clean only their cache files.
 
-- [ ] **Step 3: Add `PriceBookCatalogTests.testLatePriorGenerationRefreshCannotReplaceCurrentCatalogForSameOrganization`**
+- [x] **Step 3: Add `PriceBookCatalogTests.testLatePriorGenerationRefreshCannotReplaceCurrentCatalogForSameOrganization`**
 
 With the same organization ID, start a gated refresh using generation A, then start and complete a refresh using generation B. Release A and assert the catalog still contains generation B’s data and the old task cannot clear B’s loading/error state. Use a unique organization UUID and clean only its per-organization cache file.
 
-- [ ] **Step 4: Run the catalog tests as characterization checks**
+- [x] **Step 4: Run the catalog tests as characterization checks**
 
 Run: `xcodebuild test -project Thorbis.xcodeproj -scheme Thorbis -destination 'platform=iOS Simulator,id=FA43B63E-98C9-4336-B1F7-A55E9D4B4B0A' -derivedDataPath /private/tmp/thorbis-ios-payment-derived -clonedSourcePackagesDirPath /private/tmp/thorbis-spm -skipPackageUpdates -jobs 2 -parallel-testing-enabled NO -only-testing:ThorbisTests/PriceBookCatalogTests`
 
 Expected: PASS. Pagination and organization checks pin existing guarantees; the same-organization/session-generation check confirms the Task 2 refresh identity. These are characterization checks, while Task 2’s UI journey is the behavior-changing RED/GREEN test.
 
-- [ ] **Step 5: Run focused existing behavior suites**
+- [x] **Step 5: Run focused existing behavior suites**
 
 Run: `xcodebuild test -project Thorbis.xcodeproj -scheme Thorbis -destination 'platform=iOS Simulator,id=FA43B63E-98C9-4336-B1F7-A55E9D4B4B0A' -derivedDataPath /private/tmp/thorbis-ios-payment-derived -clonedSourcePackagesDirPath /private/tmp/thorbis-spm -skipPackageUpdates -jobs 2 -parallel-testing-enabled NO -only-testing:ThorbisTests/PriceBookSearchTests -only-testing:ThorbisTests/EstimateBuilderTests -only-testing:ThorbisTests/InvoiceLineEditorTests`
 
 Expected: PASS. Confirm exact same-item estimate merge/separate behavior, custom lines, grouping, reorder, delete/undo, valid catalog provenance, line limits, and invoice expected-revision request remain intact.
 
-- [ ] **Step 6: Commit regression coverage**
+- [x] **Step 6: Commit regression coverage**
 
 ```bash
 git add ThorbisTests/PriceBookCatalogTests.swift
