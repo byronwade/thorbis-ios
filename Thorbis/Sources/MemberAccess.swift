@@ -91,12 +91,12 @@ struct MemberAccessView: View {
             } footer: {
                 Text("Role follows their role. Allow adds it for this person. Never blocks it even if their role allows it.")
             }
-            if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+            if let error { Section { ListErrorRow(message: error) } }
         }
         .searchable(text: $search, prompt: "Find a permission")
         .scrollContentBackground(.hidden)
         .background(Theme.background)
-        .overlay { if catalog == nil && error == nil { ProgressView() } }
+        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.background) } }
         .navigationTitle(member.member.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)

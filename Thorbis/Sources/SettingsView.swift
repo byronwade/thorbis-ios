@@ -19,10 +19,11 @@ struct SettingsView: View {
                 Section {
                     VStack(spacing: 8) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(28, weight: .semibold)).foregroundStyle(Theme.brandText)
-                            .frame(width: 72, height: 72).background(Theme.brandSurface, in: Circle())
-                        Text(session.user?.name ?? "Account").font(Theme.font(20, weight: .semibold))
-                        if let email = session.user?.email { Text(email).font(Theme.font(14)).foregroundStyle(Theme.muted) }
+                            .font(Theme.font(24, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .frame(width: 72, height: 72).background(Theme.fill, in: Circle())
+                            .overlay(Circle().stroke(Theme.border))
+                        Text(session.user?.name ?? "Account").font(Theme.font(20, weight: .medium))
+                        if let email = session.user?.email { Text(email).font(Theme.font(15)).foregroundStyle(Theme.muted) }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)

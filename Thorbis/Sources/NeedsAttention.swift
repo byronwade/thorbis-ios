@@ -43,7 +43,15 @@ struct NeedsAttentionView: View {
         let unscheduled = NeedsAttention.unscheduled(store.jobs)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Needs attention", subtitle: loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking…")
+                // Pushed screen: system Back only, so no second menu button under it (MA-05).
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Needs attention").font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking…")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
+                .foregroundStyle(Theme.foreground)
+                .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 if let error { ErrorBanner(message: error) }
                 if !unpaid.isEmpty {
                     PaperGroupHeader(title: "Unpaid invoices", count: unpaid.count).padding(.horizontal, Theme.gutter).padding(.top, 8)

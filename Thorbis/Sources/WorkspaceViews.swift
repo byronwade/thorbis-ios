@@ -25,36 +25,51 @@ struct WorkspaceNoticesView: View {
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 if !available {
-                    PaperEmptyState(symbol: "bell.slash", title: "Inbox unavailable", message: "This account cannot view job notices.")
+                    PaperEmptyState(symbol: "bell.slash", title: "Inbox is off for your role",
+                                    message: "Job notices need the notices permission. An owner can turn it on in Team.")
                 } else {
                     PaperTabs(options: ["All", "Unread"], selection: $filter)
-                    if let error { ErrorBanner(message: error) }
+                    if let error { ErrorBanner(message: error) { await refresh() } }
+                    if loading && items.isEmpty && error == nil { SkeletonRows(count: 5) }
                     ForEach(visible) { notice in
+                        // Each notice opens the job it is about.
+                        NavigationLink(value: PaperRoute.job(notice.jobId)) {
+                        // MA-11: what and when, with the unread state as a shape (dot) and weight, not a tinted tile.
                         HStack(alignment: .top, spacing: 12) {
-                            Circle().fill(notice.read ? Color.clear : Theme.brand).frame(width: 7, height: 7).padding(.top, 7)
+                            Circle().fill(notice.read ? Color.clear : Theme.brand).frame(width: 8, height: 8).padding(.top, 7)
                                 .accessibilityHidden(true)
-                            Image(systemName: "bell").font(.system(size: 14)).foregroundStyle(notice.read ? Theme.muted : Theme.brandText)
-                                .frame(width: 32, height: 32).background(notice.read ? Theme.fill : Theme.brandSurface, in: Circle())
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .semibold))
+                                Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .medium))
                                     .foregroundStyle(notice.read ? Theme.muted : Theme.foreground)
                                 Text([notice.meta, timeLabel(notice.at)].filter { !$0.isEmpty }.joined(separator: " · "))
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
                             }
                             Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.muted).padding(.top, 4).accessibilityHidden(true)
                         }
                         .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+                        .frame(minHeight: 52)
+                        .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
                         .accessibilityElement(children: .combine)
                         .accessibilityValue(notice.read ? "" : "Unread")
+                        .accessibilityHint("Opens the job")
                     }
                     if nextCursor != nil {
-                        Button("Load more") { Task { await loadMore() } }
-                            .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                        Button("Load older notices") { Task { await loadMore() } }
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
                             .frame(maxWidth: .infinity, minHeight: 44).disabled(loading)
                     }
                     if visible.isEmpty && !loading && error == nil {
-                        PaperEmptyState(symbol: "tray", title: filter == "Unread" ? "All caught up" : "No notices yet",
-                                        message: "Assignments and job changes for you land here.")
+                        if filter == "Unread" && !items.isEmpty {
+                            PaperEmptyState(symbol: "checkmark.circle", title: "All caught up",
+                                            message: "You have read every notice.", actionTitle: "Show all notices") { filter = "All" }
+                        } else {
+                            PaperEmptyState(symbol: "tray", title: "No notices yet",
+                                            message: "Assignments and job changes for you land here.")
+                        }
                     }
                 }
             }
@@ -316,8 +331,8 @@ struct WorkspacePriceBookView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !canList {
-                ContentUnavailableView("Price Book unavailable", systemImage: "book.closed",
-                                       description: Text("This account cannot view Price Book items."))
+                PaperEmptyState(symbol: "book.closed", title: "Price book is off for your role",
+                                message: "Viewing prices needs the price book permission. An owner can turn it on in Team.")
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Price book").font(Theme.font(30, weight: .medium)).tracking(-0.6).foregroundStyle(Theme.foreground)
@@ -333,20 +348,24 @@ struct WorkspacePriceBookView: View {
                         ForEach(categories, id: \.self) { option in
                             Button { category = option } label: {
                                 Text(option == "All" ? "All · \(items.count)" : option)
-                                    .font(Theme.font(13, weight: category == option ? .semibold : .medium))
+                                    .font(Theme.font(13, weight: .medium))
                                     .foregroundStyle(category == option ? Theme.foreground : Theme.muted)
-                                    .padding(.horizontal, 14).padding(.vertical, 6)
+                                    .padding(.horizontal, 14).frame(height: Theme.chipHeight)
                                     .background(category == option ? Theme.fill : .clear, in: Capsule())
-                                    .frame(minHeight: 44)
-                            }.buttonStyle(.plain)
+                                    .overlay(Capsule().stroke(category == option ? Theme.border : .clear))
+                                    .frame(minHeight: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressStyle())
+                            .accessibilityAddTraits(category == option ? .isSelected : [])
+                            .sensoryFeedback(.selection, trigger: category)
                         }
                     }.padding(.horizontal, 20)
                 }
                 .scrollIndicators(.hidden)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        if let error { ErrorBanner(message: error) }
-                        if loading { ProgressView("Loading Price Book…") }
+                        if let error { ErrorBanner(message: error) { await refresh() }.padding(.horizontal, -Theme.gutter) }
+                        if loading && items.isEmpty && error == nil { SkeletonRows(count: 6, leading: false, inset: 0) }
                         ForEach(categories.filter { $0 != "All" && (category == "All" || category == $0) }, id: \.self) { groupName in
                             let grouped = visibleItems.filter { $0.kind.capitalized == groupName }
                             if !grouped.isEmpty {
@@ -369,14 +388,24 @@ struct WorkspacePriceBookView: View {
                         }
                         if nextCursor != nil {
                             Button("Load more items") { Task { await loadMore() } }
-                                .font(Theme.font(14, weight: .medium))
+                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .frame(maxWidth: .infinity).frame(minHeight: 44)
                                 .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+                                .buttonStyle(PressStyle())
                                 .disabled(loading)
                         }
                         if visibleItems.isEmpty && !loading && error == nil {
-                            ContentUnavailableView(items.isEmpty ? "No Price Book items" : "No matching items",
-                                systemImage: "book.closed")
+                            if items.isEmpty {
+                                PaperEmptyState(symbol: "book.closed", title: "No price book items yet",
+                                                message: "Services, parts and fees you add here show up when building estimates and invoices.",
+                                                actionTitle: canEdit ? "Add an item" : nil,
+                                                action: canEdit ? { creating = true } : nil)
+                            } else {
+                                PaperEmptyState(symbol: "magnifyingglass", title: "No matching items",
+                                                message: "Nothing in \(category == "All" ? "the price book" : category.lowercased()) matches that search.",
+                                                actionTitle: "Clear filters") { search = ""; category = "All" }
+                            }
                         }
                     }
                     .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 100)
@@ -401,9 +430,8 @@ struct WorkspacePriceBookView: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.description).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                Text("\(item.kind.capitalized) · \(item.unit)")
+                Text(([item.kind.capitalized, item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · "))
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                if item.archivedAt != nil { Text("Archived").font(Theme.font(11)).foregroundStyle(Theme.warning) }
             }
             Spacer(minLength: 6)
             Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
@@ -411,6 +439,13 @@ struct WorkspacePriceBookView: View {
         }
         .frame(minHeight: 50)
         .contentShape(Rectangle())
+        // MA-12: the quick copies people reach for while quoting on the phone.
+        .contextMenu {
+            Button { UIPasteboard.general.string = money(item.sellPrice.amount, currency: item.sellPrice.currency) } label: {
+                Label("Copy price", systemImage: "dollarsign")
+            }
+            Button { UIPasteboard.general.string = item.description } label: { Label("Copy name", systemImage: "doc.on.doc") }
+        }
     }
 
     private func refresh() async {
@@ -539,7 +574,7 @@ struct PriceBookItemEditor: View {
                         Text("Not taxable").tag("non_taxable")
                     }
                 }
-                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+                if let error { Section { ListErrorRow(message: error) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.background)

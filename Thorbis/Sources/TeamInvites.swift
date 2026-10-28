@@ -81,7 +81,7 @@ struct InviteMemberSheet: View {
                 } footer: {
                     Text("They get an email to join and choose a password. Invites expire after 7 days.")
                 }
-                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+                if let error { Section { ListErrorRow(message: error) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.background)

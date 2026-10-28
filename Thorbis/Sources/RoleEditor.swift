@@ -103,12 +103,12 @@ struct RoleEditorView: View {
                     ForEach(capabilities) { capability in capabilityRow(capability) }
                 }
             }
-            if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+            if let error { Section { ListErrorRow(message: error) } }
         }
         .searchable(text: $search, prompt: "Find a permission")
         .scrollContentBackground(.hidden)
         .background(Theme.background)
-        .overlay { if catalog == nil && error == nil { ProgressView() } }
+        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.background) } }
         .navigationTitle(name.isEmpty ? "Role" : name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)

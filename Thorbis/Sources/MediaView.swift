@@ -47,7 +47,7 @@ struct JobMediaView: View {
                 if let selectedData {
                     HStack(spacing: 12) {
                         Image(systemName: selectedMime == "application/pdf" ? "doc" : "photo")
-                            .frame(width: 36, height: 36).background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                            .frame(width: 36, height: 36).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(selectedFilename).font(Theme.font(14, weight: .medium)).lineLimit(1)
                             Text(ByteCountFormatter.string(fromByteCount: Int64(selectedData.count), countStyle: .file))
@@ -68,7 +68,7 @@ struct JobMediaView: View {
                                 ? allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }.count
                                 : allPhotos.filter { $0.tags.contains(option) }.count
                             Button { filter = option } label: {
-                                Text("\(option) · \(count)").font(Theme.font(12, weight: filter == option ? .semibold : .medium))
+                                Text("\(option) · \(count)").font(Theme.font(13, weight: .medium))
                                     .foregroundStyle(filter == option ? Theme.background : Theme.muted)
                                     .padding(.horizontal, 11).frame(height: 28)
                                     .background(filter == option ? Theme.foreground : Theme.fill, in: Capsule())
@@ -88,7 +88,7 @@ struct JobMediaView: View {
                     ForEach(waiting) { photo in
                         HStack(spacing: 12) {
                             Image(systemName: "clock.arrow.circlepath").foregroundStyle(Theme.warning)
-                                .frame(width: 32, height: 32).background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
+                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(photo.tags.first.map { "\($0) photo" } ?? "Photo").font(Theme.font(15, weight: .medium))
                                 Text("Saved on this phone · \(photo.takenAt.formatted(date: .omitted, time: .shortened))")
@@ -111,19 +111,20 @@ struct JobMediaView: View {
                         ForEach(photos) { record in
                             Button { open(record) } label: {
                                 VStack(alignment: .leading, spacing: 0) {
-                                    Image(systemName: "photo").font(.system(size: 22, weight: .light)).foregroundStyle(Theme.muted)
-                                        .frame(maxWidth: .infinity, minHeight: 96)
+                                    MediaThumbnail(record: record)
+                                        .frame(maxWidth: .infinity).frame(height: 120)
+                                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
                                         .overlay(alignment: .topLeading) {
                                             if let tag = ["Before", "After"].first(where: record.tags.contains) {
                                                 Text(tag).font(Theme.font(11, weight: .semibold))
-                                                    .foregroundStyle(tag == "After" ? Theme.success : Theme.foreground)
+                                                    .foregroundStyle(Theme.foreground)
                                                     .padding(.horizontal, 8).frame(height: 24)
-                                                    .background(tag == "After" ? Theme.successSurface : Theme.fill, in: Capsule())
+                                                    .background(Theme.background.opacity(0.9), in: Capsule())
                                                     .padding(8)
                                             }
                                         }
-                                    Text(record.caption ?? record.originalFilename).font(Theme.font(12, weight: .medium)).lineLimit(1)
-                                        .padding(.horizontal, 10).padding(.bottom, 8)
+                                    Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium)).lineLimit(1)
+                                        .padding(.horizontal, 10).padding(.vertical, 8)
                                     if record.uploadState != "stored" {
                                         Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
                                             .padding(.horizontal, 10).padding(.bottom, 8)
@@ -144,7 +145,7 @@ struct JobMediaView: View {
                     Button { open(record) } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "doc").font(.system(size: 15)).foregroundStyle(Theme.muted)
-                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(record.originalFilename).font(Theme.font(15, weight: .medium)).lineLimit(1)
                                 Text(record.uploadState == "stored" ? "PDF" : record.uploadState.statusLabel)

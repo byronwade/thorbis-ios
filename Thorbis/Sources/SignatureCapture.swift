@@ -22,6 +22,12 @@ struct SignatureCaptureSheet: View {
 
     private var hasInk: Bool { SignatureInk.hasInk(strokes) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var blockedReason: String? {
+        if trimmedName.isEmpty { return "Add the customer's name to continue." }
+        if trimmedName.count > 120 { return "Shorten the name to 120 characters." }
+        if !hasInk { return "Have the customer sign above the line." }
+        return nil
+    }
     private var canSubmit: Bool { hasInk && !trimmedName.isEmpty && trimmedName.count <= 120 && !busy }
 
     var body: some View {
@@ -33,14 +39,23 @@ struct SignatureCaptureSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                 TextField("Customer's full name", text: $name)
                     .textContentType(.name)
+                    .submitLabel(.done)
                     .font(Theme.font(17))
                     .padding(.horizontal, 14)
                     .frame(minHeight: 48)
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 ZStack(alignment: .bottomLeading) {
                     pad
+                    // A signature line, like the paper form the customer expects.
+                    HStack(alignment: .lastTextBaseline, spacing: 6) {
+                        Text("×").font(Theme.font(20)).foregroundStyle(.black.opacity(0.45))
+                        Rectangle().fill(.black.opacity(0.2)).frame(height: 1)
+                    }
+                    .padding(.horizontal, 18).padding(.bottom, 52)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                     HStack {
-                        Text("Sign here").font(Theme.font(12)).foregroundStyle(.black.opacity(0.35))
+                        Text("Sign above the line").font(Theme.font(13)).foregroundStyle(.black.opacity(0.45))
                         Spacer()
                         if hasInk {
                             Button("Clear") { strokes = []; uploaded = nil; clientAssetID = UUID().uuidString }
@@ -48,16 +63,21 @@ struct SignatureCaptureSheet: View {
                                 .frame(minWidth: 44, minHeight: 44)
                         }
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 14).padding(.bottom, 6)
                 }
                 .frame(height: 220)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 .accessibilityLabel("Signature pad")
-                if let error { Text(error).font(Theme.font(13)).foregroundStyle(Theme.destructive) }
+                if let error { ListErrorRow(message: error) }
                 Spacer(minLength: 0)
                 PrimaryButton(title: title, busy: busy) { Task { await sign() } }
                     .disabled(!canSubmit)
+                // MA-08: a disabled commit says why, in words under it.
+                if !canSubmit && !busy, let reason = blockedReason {
+                    Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity)
+                }
             }
             .padding(20)
             .background(Theme.background.ignoresSafeArea())
