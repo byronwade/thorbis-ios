@@ -155,3 +155,98 @@ final class JobDocumentsUITests: XCTestCase {
         add(attachment)
     }
 }
+
+@MainActor
+final class JobDocumentsSafetyUITests: XCTestCase {
+    private let invoice = "00000000-0000-4000-8000-000000002209"
+    private let second = "00000000-0000-4000-8000-000000002240"
+
+    func testPartialReadRequiresRefreshBeforeBuildingAnotherEstimate() {
+        let app = launch(["--paper-preview-job-documents-partial"])
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Couldn't load all estimates")).firstMatch.waitForExistence(timeout: 15))
+        app.buttons["Estimates"].tap()
+        XCTAssertTrue(app.buttons["job-estimate-\(invoice.replacingOccurrences(of: "2209", with: "2218"))"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Build an estimate"].exists)
+    }
+
+    func testEqualBalanceCardSelectsTheInvoiceCollectedAfterReturning() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances"], screen: "job-invoice")
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        first.tap()
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 10))
+        collect.tap()
+        XCTAssertTrue(app.navigationBars["Collect payment"].waitForExistence(timeout: 5))
+        let collection = app.scrollViews.containing(.textField, identifier: "Amount to collect in dollars").firstMatch
+        XCTAssertTrue(collection.staticTexts["INV-2209"].exists)
+        XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
+    }
+
+    func testLegacyCustomerRefreshKeepsBothKnownJobInvoices() {
+        let app = launch(["--paper-preview-job-invoices-legacy"])
+        ready(app)
+        handToCustomer(app)
+        XCTAssertTrue(app.buttons["customer-invoice-\(invoice)"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["customer-invoice-\(second)"].exists)
+        XCTAssertFalse(app.staticTexts["No invoices for this job yet."].exists)
+    }
+
+    func testEstimateTotalsRemainAvailableInADisclosure() {
+        let app = launch()
+        ready(app)
+        app.buttons["Estimates"].tap()
+        let disclosure = app.buttons["Estimate totals"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        disclosure.tap()
+        XCTAssertTrue(app.staticTexts["Awaiting approval · USD"].exists)
+        XCTAssertTrue(app.staticTexts["$340.00"].exists)
+    }
+
+    func testStaffDetailRejectsSameInvoiceIDReturnedForAnotherJob() {
+        let app = launch(["--paper-preview-job-invoice-foreign"])
+        XCTAssertTrue(app.buttons["Invoice"].waitForExistence(timeout: 15))
+        app.buttons["Invoice"].tap()
+        let paper = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(paper.waitForExistence(timeout: 10))
+        paper.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This invoice couldn't be verified")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["INV-2209"].exists)
+        XCTAssertFalse(app.buttons["Show to customer"].exists)
+        XCTAssertFalse(app.buttons["Collect payment"].exists)
+    }
+
+    func testChangedJobAtFinalHandbackCannotOpenCollection() {
+        let app = launch(["--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved",
+                          "--paper-preview-job-invoice-foreign-after-auth"])
+        ready(app)
+        handToCustomer(app)
+        let paper = app.buttons["customer-invoice-\(invoice)"]
+        XCTAssertTrue(paper.waitForExistence(timeout: 10))
+        paper.tap()
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 5))
+        pay.tap()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.navigationBars["Collect payment"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["received-payment-methods"].exists)
+    }
+
+    private func launch(_ extra: [String] = [], screen: String = "job") -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", screen, "--paper-preview-working-job", "--paper-preview-job-documents"] + extra
+        app.launch()
+        return app
+    }
+    private func ready(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Collect $340.00")).firstMatch.waitForExistence(timeout: 15))
+    }
+    private func handToCustomer(_ app: XCUIApplication) {
+        app.buttons["Job actions"].tap()
+        app.buttons["Show to customer"].tap()
+        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+    }
+}

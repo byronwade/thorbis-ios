@@ -97,6 +97,44 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
     }
 
+    func testLegacyFailureRetainsPreviouslyVerifiedInvoiceAsStale() async throws {
+        let first = api([.init(200, page([invoice(50), invoice(52)]))])
+        let previous = await JobDocumentsLoader.invoices(scope: scope(), api: first, knownIDs: [], retaining: nil, isCurrent: { true })
+        let second = api([.init(404, problem(404)), .init(200, page([invoice(50)])), .init(503, problem(503))])
+        let result = await JobDocumentsLoader.invoices(scope: scope(), api: second, knownIDs: [id(52)], retaining: previous, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(Set(read.records.map(\.id)), Set([id(50), id(52)]))
+        XCTAssertEqual(read.freshIDs, [id(50)])
+        XCTAssertFalse(read.isComplete)
+        XCTAssertNil(read.preferredInvoice(id: id(52)).flatMap { $0.id == id(52) ? $0 : nil })
+    }
+
+    func testLegacyDeniedOrContradictoryDetailsNeverRetainOldContents() async throws {
+        let deniedOrForeign: [URLProtocolFixture.Reply] = [.init(403, problem(403)), .init(404, problem(404)),
+            .init(200, invoice(52, job: 101)), .init(200, invoice(99)), .init(200, invoice(52, customer: 9))]
+        for last in deniedOrForeign {
+            let first = api([.init(200, page([invoice(50), invoice(52)]))])
+            let previous = await JobDocumentsLoader.invoices(scope: scope(), api: first, knownIDs: [], retaining: nil, isCurrent: { true })
+            let second = api([.init(405, problem(405)), .init(200, page([invoice(50)])), last])
+            let result = await JobDocumentsLoader.invoices(scope: scope(), api: second, knownIDs: [id(52)], retaining: previous, isCurrent: { true })
+            XCTAssertEqual(result?.records.map(\.id), [id(50)])
+        }
+    }
+
+    func testFailedLinksCannotResurrectDeniedOrInvalidOriginEstimate() async throws {
+        let rejected: [URLProtocolFixture.Reply] = [.init(401, problem(401)), .init(403, problem(403)),
+            .init(404, problem(404)), .init(410, problem(410)), .init(200, estimate(10, customer: 9)), .init(200, estimate(99))]
+        for last in rejected {
+            let first = api([.init(200, page([])), .init(200, estimate(10))])
+            let previous = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: first, retaining: nil, isCurrent: { true })
+            let second = api([.init(503, problem(503)), last])
+            let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: second, retaining: previous, isCurrent: { true })
+            XCTAssertTrue(try XCTUnwrap(result).records.isEmpty)
+            XCTAssertTrue(result?.freshIDs.isEmpty == true)
+            XCTAssertFalse(result?.isComplete == true)
+        }
+    }
+
     func testAllInvoicePagesAreIncludedAndPaidDepositDoesNotHideUnpaidInvoice() async throws {
         let client = api([.init(200, page([invoice(52, status: "paid", paid: 10000)], cursor: "page-two")),
                           .init(200, page([invoice(50), invoice(53, status: "draft")]))])
@@ -136,8 +174,110 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertTrue(invoices.allSatisfy { $0.jobId == PaperPreview.jobID })
     }
 
+    func testOlderInvoiceReadCannotReplaceNewerEmptySnapshotOrMemory() async throws {
+        let scope = scope()
+        let oldMemory = JobInvoiceMemory.ids(scope.jobID)
+        defer { JobInvoiceMemory.replace(oldMemory, jobID: scope.jobID) }
+        JobInvoiceMemory.replace([], jobID: scope.jobID)
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = api([.init(200, page([invoice(50)]), gate: gate), .init(200, page([]))])
+        let documents = JobDocumentCollections()
+        let older = Task { await documents.loadInvoices(scope: scope, api: client, isCurrent: { true }) }
+        for _ in 0..<300 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        let newer = await documents.loadInvoices(scope: scope, api: client, isCurrent: { true })
+        XCTAssertTrue(newer)
+        gate.release()
+        let obsolete = await older.value
+        XCTAssertFalse(obsolete)
+        XCTAssertEqual(documents.invoices?.records.map(\.id), [])
+        XCTAssertEqual(JobInvoiceMemory.ids(scope.jobID), [])
+    }
+
+    func testOlderEstimateReadCannotReplaceNewerEmptySnapshot() async throws {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = api([.init(200, page([link(11)]), gate: gate), .init(200, page([]))])
+        let documents = JobDocumentCollections()
+        let older = Task { await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true }) }
+        for _ in 0..<300 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        let newer = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
+        XCTAssertTrue(newer)
+        gate.release()
+        let obsolete = await older.value
+        XCTAssertFalse(obsolete)
+        XCTAssertEqual(documents.estimates?.records.map(\.id), [])
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "An obsolete link read must not request old details")
+    }
+
+    func testSharedCollectionsRecoverKnownInvoicesOnLegacyRefresh() async throws {
+        let scope = scope()
+        let oldMemory = JobInvoiceMemory.ids(scope.jobID)
+        defer { JobInvoiceMemory.replace(oldMemory, jobID: scope.jobID) }
+        JobInvoiceMemory.replace([id(50)], jobID: scope.jobID)
+        let client = api([.init(404, problem(404)), .init(200, page([])), .init(200, invoice(50))])
+        let documents = JobDocumentCollections()
+        let published = await documents.loadInvoices(scope: scope, api: client, isCurrent: { true })
+        XCTAssertTrue(published)
+        XCTAssertEqual(documents.invoices?.records.map(\.id), [id(50)])
+        XCTAssertEqual(documents.invoices?.freshIDs, [id(50)])
+        XCTAssertEqual(documents.invoices?.isComplete, false)
+    }
+
     private func api(_ replies: [URLProtocolFixture.Reply]) -> APIClient {
         APIClient(session: URLProtocolFixture.session(replies), baseURL: "https://app.thorbis.com")
+    }
+
+    func testEstimateCreationWaitsForReadableDocumentsButKeepsCreateOnlyRoles() {
+        XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: true, canView: true, estimatesComplete: false))
+        XCTAssertTrue(JobEstimateCreation.canOpen(canCreate: true, canView: true, estimatesComplete: true))
+        XCTAssertTrue(JobEstimateCreation.canOpen(canCreate: true, canView: false, estimatesComplete: false))
+        XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: false, canView: true, estimatesComplete: true))
+    }
+
+    func testFixedEstimateSummarySeparatesStatusAndCurrencyAndExcludesOptions() throws {
+        let records = try [pricedEstimate(status: "approved", cents: 1000),
+                           pricedEstimate(status: "approved", cents: 2000),
+                           pricedEstimate(status: "sent", cents: 4000),
+                           pricedEstimate(status: "sent", currency: "EUR", cents: 5000),
+                           pricedEstimate(status: "draft", cents: 90000),
+                           pricedEstimate(status: "sent", cents: 80000, options: true)]
+        let summary = try XCTUnwrap(JobEstimateSummary(records: records, complete: true))
+        XCTAssertEqual(summary.amounts, [.init(status: "approved", currency: "USD", cents: 3000),
+                                         .init(status: "sent", currency: "EUR", cents: 5000),
+                                         .init(status: "sent", currency: "USD", cents: 4000)])
+        XCTAssertEqual(summary.optionCount, 1)
+    }
+
+    func testEstimateSummaryNeverPublishesIncompleteInvalidOrOverflowTotals() throws {
+        let good = try pricedEstimate(status: "sent", cents: 1000)
+        XCTAssertNil(JobEstimateSummary(records: [good], complete: false))
+        for bad in try [pricedEstimate(status: "sent", cents: -1),
+                        pricedEstimate(status: "approved", cents: Int.max, quantity: 2),
+                        pricedEstimate(status: "sent", cents: 1, quantity: -1)] {
+            XCTAssertNil(JobEstimateSummary(records: [good, bad], complete: true))
+        }
+        let maximum = try pricedEstimate(status: "sent", cents: Int.max)
+        XCTAssertNil(JobEstimateSummary(records: [maximum, good], complete: true))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(good)) as? [String: Any])
+        var lines = try XCTUnwrap(object["lines"] as? [[String: Any]])
+        lines.append(["id": id(999), "description": "Other currency", "quantity": 1,
+                      "unitPrice": ["amount": 20, "currency": "EUR"]])
+        object["lines"] = lines
+        let mixed = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(JobEstimateSummary(records: [mixed], complete: true))
+    }
+
+    private func pricedEstimate(status: String, currency: String = "USD", cents: Int,
+                                quantity: Int = 1, options: Bool = false) throws -> EstimateRecord {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate)) as? [String: Any])
+        object["status"] = status
+        if !options { object["options"] = NSNull() }
+        object["lines"] = [["id": id(900), "description": "Fixture service", "quantity": quantity,
+                            "unitPrice": ["amount": cents, "currency": currency]]]
+        return try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: object))
     }
     private func page(_ rows: [String], cursor: String? = nil) -> String {
         "{\"items\":[\(rows.joined(separator: ","))],\"nextCursor\":\(cursor.map { "\"\($0)\"" } ?? "null")}"

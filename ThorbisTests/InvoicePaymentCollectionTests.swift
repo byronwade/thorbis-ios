@@ -6,6 +6,50 @@ final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
 
+    func testScopedRefreshRejectsForeignContentsAndLocksExistingPaper() async throws {
+        let scope = JobDocumentScope(jobID: "00000000-0000-4000-8000-000000000001",
+            organizationID: "00000000-0000-4000-8000-000000000002", customerID: "00000000-0000-4000-8000-000000000003")
+        let good = try editedInvoice(["jobId": scope.jobID])
+        for fields: [String: Any] in [["id": paymentID], ["organizationId": paymentID], ["customerId": paymentID],
+                                      ["jobId": paymentID], ["jobId": NSNull()]] {
+            var changed = fields
+            if fields["jobId"] == nil { changed["jobId"] = scope.jobID }
+            let bad = try editedInvoice(changed)
+            let client = APIClient(session: URLProtocolFixture.session([
+                .init(200, good), .init(200, #"{"items":[]}"#), .init(200, bad)
+            ]), baseURL: "https://app.thorbis.com")
+            let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID, expectedJobScope: scope)
+            await model.load()
+            XCTAssertTrue(model.canRecordPayment)
+            await model.load()
+            XCTAssertNil(model.invoice)
+            XCTAssertFalse(model.canRecordPayment)
+            XCTAssertFalse(model.historyComplete)
+            XCTAssertNotNil(model.loadError)
+            XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "Never read history for an unverified invoice")
+        }
+    }
+
+    func testMutationResponseMustKeepTheRequestedInvoiceAndJobScope() async throws {
+        let scope = JobDocumentScope(jobID: "00000000-0000-4000-8000-000000000001",
+            organizationID: "00000000-0000-4000-8000-000000000002", customerID: "00000000-0000-4000-8000-000000000003")
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, try editedInvoice(["jobId": scope.jobID])), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID, expectedJobScope: scope)
+        await model.load()
+        let foreign = try JSONDecoder().decode(InvoiceRecord.self, from: Data(editedInvoice(["jobId": paymentID]).utf8))
+        XCTAssertFalse(model.acceptInvoiceMutationResponse(foreign))
+        XCTAssertNil(model.invoice)
+        XCTAssertFalse(model.canRecordPayment)
+    }
+
+    private func editedInvoice(_ fields: [String: Any]) throws -> String {
+        var value = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(invoice().utf8)) as? [String: Any])
+        fields.forEach { value[$0.key] = $0.value }
+        return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+    }
+
     func testPaymentAmountUsesExactMinorUnitsAndCanonicalLimit() {
         let maximum = 1_000_000_000_000
         XCTAssertEqual(MoneyInput.cents("12.34", maximumCents: maximum), 1234)

@@ -8,6 +8,7 @@ private enum CustomerJobPaper: Hashable {
 /// Lives inside one CustomerModeContainer: browsing never exposes technician controls.
 struct JobCustomerDocumentsView: View {
     let scope: JobDocumentScope
+    @ObservedObject var documents: JobDocumentCollections
     let jobTitle: String
     let customerName: String
     let handBack: () -> Void
@@ -19,8 +20,8 @@ struct JobCustomerDocumentsView: View {
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
-    @State private var estimates: JobDocumentRead<EstimateRecord>?
-    @State private var invoices: JobDocumentRead<InvoiceRecord>?
+    private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
+    private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     @State private var paper: CustomerJobPaper?
     @State private var openingID: String?
     @State private var paymentModel: InvoicePaymentCollectionModel?
@@ -83,8 +84,6 @@ struct JobCustomerDocumentsView: View {
         }
         .task(id: session.generation) {
             paper = nil
-            estimates = nil
-            invoices = nil
             paymentModel = nil
             await refresh()
         }
@@ -148,7 +147,7 @@ struct JobCustomerDocumentsView: View {
                         ? { Task { await pay(invoice.id) } } : nil,
                     onSigned: { updated in
                         guard scope.contains(updated), updated.id == invoice.id else { return }
-                        invoices = invoices?.replacing(updated)
+                        documents.replaceInvoice(updated)
                         paymentModel?.acceptInvoiceMutationResponse(updated)
                         paper = .invoice(updated)
                         invoiceUpdated(updated)
@@ -174,17 +173,15 @@ struct JobCustomerDocumentsView: View {
         error = nil
         let generation = session.generation
         if currentWorkspace && canViewEstimates {
-            let read = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: estimates) {
+            await documents.loadEstimates(scope: scope, api: api) {
                 session.generation == generation && currentWorkspace && canViewEstimates
             }
-            if session.generation == generation { estimates = read }
         }
         guard session.generation == generation, currentWorkspace else { return }
         if canViewInvoices {
-            let read = await JobDocumentsLoader.invoices(scope: scope, api: api, knownIDs: [], retaining: invoices) {
+            await documents.loadInvoices(scope: scope, api: api) {
                 session.generation == generation && currentWorkspace && canViewInvoices
             }
-            if session.generation == generation { invoices = read }
         }
     }
 
@@ -193,11 +190,10 @@ struct JobCustomerDocumentsView: View {
         openingID = id
         defer { openingID = nil }
         let generation = session.generation
-        let read = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: estimates) {
+        let published = await documents.loadEstimates(scope: scope, api: api) {
             session.generation == generation && currentWorkspace && canViewEstimates
         }
-        guard session.generation == generation, currentWorkspace, let read else { return }
-        estimates = read
+        guard session.generation == generation, currentWorkspace, published, let read = estimates else { return }
         guard read.freshIDs.contains(id), let estimate = read.records.first(where: { $0.id == id }) else {
             error = "This estimate couldn't be refreshed. Please try again."
             return
@@ -216,20 +212,19 @@ struct JobCustomerDocumentsView: View {
             guard invoice.id == id, scope.contains(invoice) else {
                 throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)
             }
-            let model = InvoicePaymentCollectionModel(api: api, invoiceID: id)
+            let model = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: scope)
             await model.load()
             guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
             if let latest = model.invoice {
                 guard latest.id == id, scope.contains(latest) else {
                     throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)
                 }
-                invoices = invoices?.replacing(latest)
+                documents.replaceInvoice(latest)
                 paymentModel = model
                 paper = .invoice(latest)
             } else {
                 paymentModel = nil
-                invoices = invoices?.replacing(invoice)
-                paper = .invoice(invoice)
+                throw Problem(title: model.loadError ?? "This invoice couldn't be refreshed", status: nil, detail: nil)
             }
         } catch is CancellationError { } catch { self.error = error.localizedDescription }
     }

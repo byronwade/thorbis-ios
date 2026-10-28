@@ -35,16 +35,16 @@ retaining:isCurrent:) and invoices(scope:api:knownIDs:retaining:isCurrent:) are
 MainActor async and return nil if authority changed. Selection policy prioritizes
 an explicit actionable invoice, then issued balance, draft, other records.
 
-- [ ] Write API-fixture tests for multiple links, duplicate/foreign links, one detail
+- [x] Write API-fixture tests for multiple links, duplicate/foreign links, one detail
   failure, retained same-scope rows, foreign/nil-job invoices, wrong tenant/customer,
   authoritative empty vs404/405 compatibility, all pages and authority switch.
   Run focused tests; Expected: RED on missing helper/behavior.
-- [ ] Implement scoped result loading and pure selection, keeping fresh IDs separate
+- [x] Implement scoped result loading and pure selection, keeping fresh IDs separate
   from retained rows. Validate requested detail identity. No writes in the loader.
-- [ ] Integrate into the job view. Reset snapshots on session generation; publish
+- [x] Integrate into the job view. Reset snapshots on session generation; publish
   and remember IDs only while current. Preserve successful rows on partial failure;
   show retry and block misleading empty/create/next-step states. Keep money logic.
-- [ ] Run focused helper/API/TechJobFlow tests; Expected: all pass. Commit.
+- [x] Run focused helper/API/TechJobFlow tests; Expected: all pass. Commit.
 
 ### Task 2: All-document navigation and customer handoff
 
@@ -58,15 +58,15 @@ CustomerInvoicePresentation. Draft/declined/void papers are read-only. Customer
 payment requests retain exact invoiceID and require staff hand-back before opening
 existing collection. Old contact self-edit is retained as Customer details.
 
-- [ ] Add meaningful regression tests/DEBUG read-only fixtures with multiple papers
+- [x] Add meaningful regression tests/DEBUG read-only fixtures with multiple papers
   on A and B for the same customer, a newer paid deposit and older unpaid invoice,
   and partial estimates. Expected: existing one-document UI fails new checks.
-- [ ] Replace hidden invoice selector with visible document cards and existing
+- [x] Replace hidden invoice selector with visible document cards and existing
   detail routes. Keep estimate creation and draft review available. Include retry
   and stale states, exact reference/status/amount, no combined alternative totals.
-- [ ] Route Show to customer to the job's commercial hub; retain contact editing.
+- [x] Route Show to customer to the job's commercial hub; retain contact editing.
   Reuse lifecycle-safe presenters and owner hand-back, no automatic draft issue.
-- [ ] Verify every intended A row and no B row, selected detail identity, customer
+- [x] Verify every intended A row and no B row, selected detail identity, customer
   document browsing/hand-back, large text/dark mode and invoice collection route.
   Expected: native checks pass without real writes. Commit.
 
@@ -74,9 +74,9 @@ existing collection. Old contact self-edit is retained as Customer details.
 
 **Files:** ReleaseNotes.swift, release/evidence/execution notes.
 
-- [ ] Add What's new. Run full scheme once after final source changes. Expected:
+- [x] Add What's new. Run full scheme once after final source changes. Expected:
   zero failures/skips. Investigate failures; never hide them with automatic retries.
-- [ ] Fresh most-capable review of this batch. Fix blockers RED→GREEN and full suite;
+- [x] Fresh most-capable review of this batch. Fix blockers RED→GREEN and full suite;
   ledger minors/rulings. Preserve contracts and current released features.
 - [ ] Archive/audit/upload next unused build, verify Apple processing/Internal
   Testers and save testing notes. Record evidence, push and attach a draft PR.
