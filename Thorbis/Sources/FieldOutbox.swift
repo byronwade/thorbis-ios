@@ -118,6 +118,14 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
 
     var viaCommand: Bool { command != nil && restOnly != true }
 
+    /// Payments and signatures have no other copy once their sheet closes, so they must reach disk.
+    var isDurableOnly: Bool {
+        switch action {
+        case .invoiceSignature, .payment: true
+        default: false
+        }
+    }
+
     /// The job status this change moves to, for showing the step as waiting (OF-02).
     var expectedStatus: String? {
         switch action {
@@ -260,12 +268,14 @@ final class FieldOutbox: ObservableObject {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    private func persist() {
-        guard let file else { return }
+    @discardableResult
+    private func persist() -> Bool {
+        guard let file else { return false }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try JSONEncoder().encode(entries).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        } catch {}
+            return true
+        } catch { return false }
     }
 
     @discardableResult
@@ -281,7 +291,11 @@ final class FieldOutbox: ObservableObject {
                                 createdAt: Date(), action: action)
         entry.label = label
         entries.append(entry)
-        persist()
+        // Money and ink only count as saved once they are on disk; the caller keeps its own copy otherwise.
+        if !persist(), entry.isDurableOnly {
+            entries.removeAll { $0.id == entry.id }
+            return nil
+        }
         return entry
     }
 
@@ -296,7 +310,11 @@ final class FieldOutbox: ObservableObject {
             try png.write(to: signatureDirectory.appendingPathComponent("\(payload.clientAssetId).png"),
                           options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         } catch { return nil }
-        return enqueue(.invoiceSignature(payload), policyVersion: policyVersion)
+        guard let entry = enqueue(.invoiceSignature(payload), policyVersion: policyVersion) else {
+            try? FileManager.default.removeItem(at: signatureDirectory.appendingPathComponent("\(payload.clientAssetId).png"))
+            return nil
+        }
+        return entry
     }
 
     func signatureData(_ clientAssetID: String) -> Data? {

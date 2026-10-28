@@ -20,8 +20,13 @@ struct JobCloseoutView: View {
     @State private var unpaidReason = ""
     @State private var unpaidNextAction = ""
     private var mayRecordUnpaidDisposition: Bool {
-        guard let closeout, !closeout.unmet.isEmpty, session.can("job.edit", feature: "jobs") else { return false }
-        return closeout.unmet.allSatisfy { $0.kind == "payment_or_unpaid_disposition" } && closeout.policy.requiredChecks.contains { $0.kind == "payment_or_unpaid_disposition" && $0.allowUnpaidDisposition == true }
+        // Notes, photos and checks waiting on this phone already count; only the unpaid balance is left.
+        guard let closeout, !remainingUnmet.isEmpty, session.can("job.edit", feature: "jobs") else { return false }
+        return remainingUnmet.allSatisfy { $0.kind == "payment_or_unpaid_disposition" } && closeout.policy.requiredChecks.contains { $0.kind == "payment_or_unpaid_disposition" && $0.allowUnpaidDisposition == true }
+    }
+    /// What the server still lists as missing, minus what is waiting on this phone (OF-02).
+    private var remainingUnmet: [FieldCloseoutRequirement] {
+        closeout?.unmet.filter { !waitingSatisfies($0) } ?? []
     }
     private var validDisposition: Bool {
         mayRecordUnpaidDisposition && !unpaidReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !unpaidNextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && unpaidReason.utf16.count <= 2000 && unpaidNextAction.utf16.count <= 2000
@@ -64,7 +69,7 @@ struct JobCloseoutView: View {
     }
     private var canComplete: Bool {
         guard let closeout else { return false }
-        let ready = closeout.completable || closeout.unmet.allSatisfy { waitingSatisfies($0) }
+        let ready = closeout.completable || remainingUnmet.isEmpty
         return session.can("job.complete", feature: "jobs") && allowsComplete && (ready || validDisposition)
     }
 

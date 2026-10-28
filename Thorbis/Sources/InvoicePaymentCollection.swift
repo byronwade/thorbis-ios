@@ -225,7 +225,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             pendingRequest = request
         }
 
-        if offlineCopy, queueOffline(request) { return true }
+        if offlineCopy {
+            if queueOffline(request) { return true }
+            paymentError = "Couldn't save this payment on the phone. Try again."
+            return false
+        }
         isRecording = true
         paymentError = nil
         defer { isRecording = false }
@@ -364,8 +368,12 @@ struct InvoicePaymentsSection: View {
             }
         }
         .onChange(of: outbox.syncGeneration) { _, _ in
-            // A queued payment may have just recorded: show the server's invoice and history.
-            Task { await model.load() }
+            // A queued payment or signature may have just landed: show the server's invoice, its
+            // authorization and history, even when the amount paid didn't change.
+            Task {
+                await model.load()
+                if let updated = model.invoice { onInvoiceUpdated(updated) }
+            }
         }
         .onChange(of: model.invoice?.amountPaid) { _, _ in
             if let updated = model.invoice { onInvoiceUpdated(updated) }
@@ -877,7 +885,8 @@ struct InvoicePaymentCollectionSheet: View {
         let last = InvoiceCollectionOption.lastUsed
         _method = State(initialValue: model.pendingRequest?.method ?? (last == .check ? .check : .cash))
         // OF-09: without signal the sheet opens on cash, the way that still works.
-        let opening = model.offlineCopy && (last == nil || last == .paymentLink) ? .cash : (last ?? .paymentLink)
+        // Cash or check still waiting to record also rules out the full-balance link (OF-08).
+        let opening = (model.offlineCopy || model.waitingCents > 0) && (last == nil || last == .paymentLink) ? .cash : (last ?? .paymentLink)
         // A locked cash or check retry opens on its own tender, so it can still go to the queue offline.
         let locked: InvoiceCollectionOption = switch model.pendingRequest?.method {
         case .cash: .cash
@@ -900,7 +909,7 @@ struct InvoicePaymentCollectionSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         amountHero
-                        if tapToPayAvailable && !hasLockedIntent && !offline { tapToPayCard }
+                        if tapToPayAvailable && !hasLockedIntent && !offline && !paymentWaiting { tapToPayCard }
                         paymentOptions
                         receiptRow
                         if option == .alreadyCollected {
@@ -976,7 +985,7 @@ struct InvoicePaymentCollectionSheet: View {
             }
             .task {
                 // Open on the iPhone reader when this workspace and phone can take cards in person.
-                if tapToPayAvailable && model.pendingRequest == nil && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
+                if tapToPayAvailable && model.pendingRequest == nil && !paymentWaiting && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
                 await loadReceiptDestination()
             }
         }
@@ -1074,6 +1083,7 @@ struct InvoicePaymentCollectionSheet: View {
     }
 
     private func charge() async {
+        guard !paymentWaiting else { return }
         let tapToPay = tapToPayController
         let before = model.payments.count
         await tapToPay.charge(api: api) { [model] in
@@ -1094,8 +1104,9 @@ struct InvoicePaymentCollectionSheet: View {
                 .foregroundStyle(Theme.muted)
                 .padding(.horizontal, 2)
             VStack(spacing: 0) {
-                optionRow(title: "Card · send payment link", subtitle: offline ? "Card payments need signal" : "Text or email a secure card checkout",
-                          icon: "link", selected: option == .paymentLink, busy: isCreatingPayLink, needsSignal: true) {
+                optionRow(title: "Card · send payment link", subtitle: paymentLinkSubtitle,
+                          icon: "link", selected: option == .paymentLink, busy: isCreatingPayLink, needsSignal: true,
+                          unavailable: paymentWaiting) {
                     guard !hasLockedIntent && !model.waitingForProjection else { return }
                     option = .paymentLink
                     amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
@@ -1195,8 +1206,19 @@ struct InvoicePaymentCollectionSheet: View {
     /// No signal, or only the copy saved on this phone: card, link and Tap to Pay can't work (OF-09).
     private var offline: Bool { session.isOffline || model.offlineCopy }
 
+    /// Cash or check on this phone that hasn't recorded yet. Tap to Pay and the link charge the
+    /// whole balance, so they wait until it lands rather than charge money already taken (OF-08).
+    private var paymentWaiting: Bool { model.waitingCents > 0 }
+
+    private var paymentLinkSubtitle: String {
+        if offline { return "Card payments need signal" }
+        if paymentWaiting { return "After the waiting payment records" }
+        return "Text or email a secure card checkout"
+    }
+
     private func optionRow(title: String, subtitle: String, icon: String, selected: Bool,
-                           busy: Bool = false, needsSignal: Bool = false, action: @escaping () -> Void) -> some View {
+                           busy: Bool = false, needsSignal: Bool = false, unavailable: Bool = false,
+                           action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
@@ -1221,7 +1243,7 @@ struct InvoicePaymentCollectionSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(busy || !session.can("invoice.payment.create", feature: "payments") || !model.canRecordPayment || (needsSignal && offline))
+        .disabled(busy || !session.can("invoice.payment.create", feature: "payments") || !model.canRecordPayment || (needsSignal && offline) || unavailable)
         .accessibilityHint(subtitle)
     }
 
@@ -1248,8 +1270,9 @@ struct InvoicePaymentCollectionSheet: View {
         if model.waitingForProjection { return true }
         guard session.can("invoice.payment.create", feature: "payments"), model.canRecordPayment else { return false }
         if offline && option != .cash && option != .check { return false }
-        if option == .tapToPay { return tapToPayAvailable && (model.outstandingCents ?? 0) > 0 && tapToPay?.busy != true }
-        if option == .paymentLink { return model.outstandingCents == amountCents }
+        if (option == .tapToPay || option == .paymentLink) && paymentWaiting { return false }
+        if option == .tapToPay { return tapToPayAvailable && (model.collectableCents ?? 0) > 0 && tapToPay?.busy != true }
+        if option == .paymentLink { return model.collectableCents == amountCents }
         guard let amountCents else { return false }
         if hasLockedIntent {
             return model.pendingRequest?.amount.amount == amountCents && model.pendingRequest?.method == method
@@ -1307,7 +1330,7 @@ struct InvoicePaymentCollectionSheet: View {
 
     private func createPayLink() async {
         guard session.can("invoice.payment.create", feature: "payments"),
-              model.canRecordPayment, model.outstandingCents == amountCents else { return }
+              model.canRecordPayment, !paymentWaiting, model.outstandingCents == amountCents else { return }
         isCreatingPayLink = true
         defer { isCreatingPayLink = false }
         do {
