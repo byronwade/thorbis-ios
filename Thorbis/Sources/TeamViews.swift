@@ -108,6 +108,11 @@ struct TeamView: View {
     }
 
     private var roles: [String] { ["All"] + Array(Set(members.map(\.roleLabel))).sorted() }
+    private var teamSubtitle: String {
+        if members.isEmpty { return loading ? "Loading your team…" : "People and what they can do" }
+        let pending = canInvite && !invitations.isEmpty ? " · \(invitations.count) invited" : ""
+        return "\(members.count) \(members.count == 1 ? "person" : "people")\(pending)"
+    }
     private var visible: [RoleMember] {
         members.filter { member in
             (filter == "All" || member.roleLabel == filter) &&
@@ -120,13 +125,14 @@ struct TeamView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("BUSINESS SETTINGS").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                    Text("Team & permissions").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
+                    // MA-05: large title, one muted subtitle line.
+                    Text("Team").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
+                    Text(teamSubtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 PaperSearchField(text: $search, prompt: "Search team members")
                 if roles.count > 2 { PaperTabs(options: roles, selection: $filter) }
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error) { await load() } }
                 if loading && members.isEmpty { SkeletonRows(count: 6) }
                 VStack(alignment: .leading, spacing: 0) {
                     if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count) }
@@ -139,18 +145,33 @@ struct TeamView: View {
                                 Text(member.member.email).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
                             }
                             Spacer(minLength: 8)
+                            // Role is a word on a quiet capsule; owner reads by weight, not a brand tint.
                             Text(member.roleLabel)
                                 .font(Theme.font(12, weight: .medium))
-                                .foregroundStyle(member.member.isLegalOwner ? Theme.brandText : Theme.muted)
-                                .padding(.horizontal, 9).frame(minHeight: 24)
-                                .background(member.member.isLegalOwner ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                                .foregroundStyle(member.member.isLegalOwner ? Theme.foreground : Theme.muted)
+                                .padding(.horizontal, 10).frame(height: 24)
+                                .background(Theme.fill, in: Capsule())
+                            if canManage && !member.member.isLegalOwner {
+                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                            }
                         }
                         .frame(minHeight: 56)
                         .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                         .accessibilityElement(children: .combine)
                         .accessibilityHint(canManage && !member.member.isLegalOwner ? "Change role" : "")
+                        // MA-12: long-press mirrors what the row already offers.
+                        .contextMenu {
+                            Button { UIPasteboard.general.string = member.member.email } label: { Label("Copy email", systemImage: "doc.on.doc") }
+                            if let mail = URL(string: "mailto:\(member.member.email)") {
+                                Link(destination: mail) { Label("Email", systemImage: "envelope") }
+                            }
+                            if canManage && !member.member.isLegalOwner {
+                                Button { opening = member } label: { Label("Change role", systemImage: "person.badge.key") }
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, Theme.gutter)
@@ -323,11 +344,11 @@ struct MemberRoleSheet: View {
                 } footer: {
                     Text(loaded && roles.isEmpty ? "No custom roles yet. Create roles from Thorbis on the web." : "Their access changes as soon as you pick a role.")
                 }
-                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+                if let error { Section { ListErrorRow(message: error) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.background)
-            .overlay { if !loaded { ProgressView() } }
+            .overlay(alignment: .top) { if !loaded { SkeletonRows(count: 4, leading: false).background(Theme.background) } }
             .navigationTitle("Change role")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) } }

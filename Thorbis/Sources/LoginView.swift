@@ -62,11 +62,15 @@ struct LoginView: View {
                     .padding(.top, 8)
 
                 if let message = error ?? session.error {
-                    Text(message)
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.destructive)
-                        .padding(.top, 12)
-                        .accessibilityIdentifier("login-error")
+                    // MA-15: plain words in body colour; only the mark is tinted.
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.destructive)
+                        Text(message).foregroundStyle(Theme.foreground)
+                    }
+                    .font(Theme.font(15))
+                    .padding(.top, 12)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("login-error")
                 }
                 Button { Task { await signIn() } } label: {
                     HStack(spacing: 8) {
@@ -134,7 +138,7 @@ private extension View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(minHeight: 46)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
     }
 }
@@ -146,6 +150,7 @@ private struct PasswordResetRequestView: View {
     @State private var email: String
     @State private var busy = false
     @State private var outcome: String?
+    @FocusState private var emailFocused: Bool
 
     init(initialEmail: String) { _email = State(initialValue: initialEmail) }
 
@@ -154,7 +159,7 @@ private struct PasswordResetRequestView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Reset your password")
-                        .font(Theme.font(26, weight: .bold))
+                        .font(Theme.font(24, weight: .medium))
                         .foregroundStyle(Theme.foreground)
                     Text("Enter the email you use for Thorbis. If reset is available for that account, we’ll send a link.")
                         .font(Theme.font(15))
@@ -170,24 +175,17 @@ private struct PasswordResetRequestView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textFieldStyle(.plain)
+                        .submitLabel(.send)
+                        .onSubmit { Task { await requestReset() } }
+                        .focused($emailFocused)
                         .paperField()
                         .padding(.top, 8)
                     if let outcome {
                         Text(outcome)
-                            .font(Theme.font(14))
+                            .font(Theme.font(15))
                             .foregroundStyle(Theme.foreground)
                             .padding(.top, 20)
                     }
-                    Button { Task { await requestReset() } } label: {
-                        HStack(spacing: 8) {
-                            if busy { ProgressView().tint(Theme.onInk) }
-                            Text("Send reset link")
-                        }
-                        .inkCommit()
-                    }
-                    .buttonStyle(PressStyle())
-                    .disabled(busy || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .padding(.top, 24)
                 }
                 .padding(20)
                 .frame(maxWidth: 430, alignment: .leading)
@@ -196,12 +194,24 @@ private struct PasswordResetRequestView: View {
             .background(Theme.background.ignoresSafeArea())
             .navigationTitle("Password reset")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            // MA-16: Cancel leading, the commit trailing in the sheet's bar.
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if busy {
+                        ProgressView()
+                    } else {
+                        Button("Send link") { Task { await requestReset() } }
+                            .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .onAppear { if email.isEmpty { emailFocused = true } }
         }
     }
 
     private func requestReset() async {
-        guard !busy else { return }
+        guard !busy, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         busy = true
         defer { busy = false }
         struct Request: Encodable { let email: String }
