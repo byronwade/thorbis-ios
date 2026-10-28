@@ -58,6 +58,11 @@ enum PaperWorkGroups {
 
 /// Paper 18 / 79: the technician's day. "Next up" carries the one commit that
 /// moves the job forward (On my way), so the old Arrive tab lives here now.
+enum ScheduleLead {
+    /// Statuses that mean the tech is already on this job.
+    static let activeStatuses: Set<String> = ["en_route", "arrived", "in_progress", "paused"]
+}
+
 struct ScheduleView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
@@ -143,17 +148,24 @@ struct ScheduleView: View {
         return first.map { "\(part), \($0)" } ?? part
     }
 
+    /// The job the tech is on right now leads, even when an earlier slot is still open;
+    /// otherwise the next one by time.
+    private var leadJob: Job? {
+        jobs.first { ScheduleLead.activeStatuses.contains($0.status) } ?? jobs.first
+    }
+
     @ViewBuilder private var dayContent: some View {
-        if let first = jobs.first {
-            PaperGroupHeader(title: range == .unscheduled ? "Needs a time" : "Next up")
+        if let first = leadJob {
+            let isActive = ScheduleLead.activeStatuses.contains(first.status)
+            PaperGroupHeader(title: range == .unscheduled ? "Needs a time" : isActive ? "Now" : "Next up")
                 .padding(.horizontal, Theme.gutter).padding(.top, 4)
             ScheduleHero(job: first, customer: store.customerName(first.customerId), pendingStatus: outbox.pendingStatus(for: first.id)) { commit(for: first) }
                 .padding(.bottom, 16)
                 .task(id: "\(first.id)|\(first.status)|\(first.updatedAt ?? "")") { await loadHero(first) }
             if jobs.count > 1 {
-                PaperGroupHeader(title: range == .today ? "Later today" : "More jobs", count: jobs.count - 1)
+                PaperGroupHeader(title: range == .today ? (isActive ? "Also today" : "Later today") : "More jobs", count: jobs.count - 1)
                     .padding(.horizontal, Theme.gutter)
-                ForEach(Array(jobs.dropFirst())) { job in
+                ForEach(jobs.filter { $0.id != first.id }) { job in
                     ScheduleCompactRow(job: job, customer: store.customerName(job.customerId), timeStyle: .time)
                 }
             }
