@@ -540,7 +540,8 @@ final class CompanyDetailsModel: ObservableObject {
     var dirty: Bool { profile?.catalog.contains { changed($0.factKey) } ?? false }
 
     /// Confirms each changed fact in turn; a refused one keeps its typed value and says why.
-    func save(api: APIClient, session: SessionController) async -> Bool {
+    /// `only` limits the save to some facts (one setup step), leaving other edits untouched.
+    func save(api: APIClient, session: SessionController, only: Set<String>? = nil) async -> Bool {
         guard let profile, let actor = session.user?.id, let org = session.activeOrganization?.id,
               org.lowercased() == profile.organizationId.lowercased() else {
             loadError = "The open company changed. Close this screen and try again."
@@ -550,7 +551,7 @@ final class CompanyDetailsModel: ObservableObject {
         defer { saving = false }
         fieldErrors = [:]
         var allSaved = true
-        for entry in profile.catalog where changed(entry.factKey) {
+        for entry in profile.catalog where changed(entry.factKey) && (only?.contains(entry.factKey) ?? true) {
             let value = (drafts[entry.factKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             do {
                 try await api.confirmOrganizationFact(entry.factKey, value: value, actorID: actor, organizationID: org)

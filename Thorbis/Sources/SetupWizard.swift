@@ -510,7 +510,7 @@ struct SetupWizardView: View {
                 stepError = missing.count == 1 ? "Fill in the field marked above." : "Fill in the \(missing.count) fields marked above."
                 return
             }
-            guard await facts.save(api: api, session: session) else {
+            guard await facts.save(api: api, session: session, only: Set(step.facts)) else {
                 stepError = facts.loadError ?? "Some details were not saved. Check the fields marked above."
                 return
             }
