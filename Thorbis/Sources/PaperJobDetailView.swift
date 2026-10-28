@@ -267,6 +267,8 @@ struct JobDetailView: View {
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
+                        // Without scheduling rights the chip is a label, not a button that does nothing.
+                        .allowsHitTesting(session.can("job.assign", feature: "jobs"))
                         .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
                     }
                     if let assignedName = assignedDisplayName(for: job) {
@@ -287,12 +289,18 @@ struct JobDetailView: View {
                     }
                     MemberChip(customerID: job.customerId)
                     if let balance = invoiceBalanceCents {
-                        Text("\(money(balance, currency: "USD")) due")
-                            .font(Theme.monoFont(12, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 10)
-                            .frame(height: Theme.chipHeight)
-                            .background(Theme.fill, in: Capsule())
+                        // The balance chip jumps to the Invoice tab, where it can be collected.
+                        Button { withAnimation(.snappy) { selectedTab = "Invoice" } } label: {
+                            Text("\(money(balance, currency: "USD")) due")
+                                .font(Theme.monoFont(12, weight: .medium))
+                                .foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 10)
+                                .frame(height: Theme.chipHeight)
+                                .background(Theme.fill, in: Capsule())
+                                .padding(.vertical, 8).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityHint("Opens the invoice")
                     }
             }
             if !compact {
