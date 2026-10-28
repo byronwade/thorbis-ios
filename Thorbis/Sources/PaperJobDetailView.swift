@@ -559,7 +559,7 @@ struct JobDetailView: View {
             if !session.can("invoice.view", feature: "invoicing") {
                 emptyCard("Invoice access is unavailable.")
             } else if !invoicesLoaded {
-                ProgressView("Loading invoices…").frame(maxWidth: .infinity).padding(30)
+                SkeletonRows(count: 3, leading: false, inset: 0)
             } else if invoices.isEmpty {
                 PaperEmptyState(symbol: "doc.plaintext", title: "No invoice yet",
                                 message: "Start the invoice from this job. Lines come from its approved estimate; you can edit them before sending.",
@@ -586,10 +586,13 @@ struct JobDetailView: View {
                             Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
                         }
                         .foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 10)
-                        .frame(minHeight: 36)
+                        .padding(.horizontal, 12)
+                        .frame(height: Theme.chipHeight)
                         .background(Theme.fill, in: Capsule())
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
+                    .accessibilityLabel("Choose invoice")
                 }
                 if let invoice = selectedInvoice {
                     if let model = invoicePaymentModel, loadedInvoiceModelID == invoice.id {
@@ -600,8 +603,7 @@ struct JobDetailView: View {
                             onInvoiceUpdated: updateInvoice
                         )
                     } else {
-                        ProgressView("Loading invoice…")
-                            .frame(maxWidth: .infinity, minHeight: 100)
+                        SkeletonRows(count: 4, leading: false, inset: 0)
                     }
                 }
             }

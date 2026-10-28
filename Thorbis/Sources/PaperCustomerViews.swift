@@ -254,20 +254,27 @@ struct CustomerDetailView: View {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { metadataChips }.fixedSize()
                     VStack(alignment: .leading, spacing: 6) { metadataChips }
-                }.padding(.horizontal, 20).padding(.bottom, 10)
+                }.padding(.horizontal, Theme.gutter).padding(.bottom, 10)
                 PaperQuickActions(phone: contacts.first(where: \.primary)?.phone ?? record?.phone,
                                   email: contacts.first(where: \.primary)?.email ?? record?.email,
                                   directions: (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
                     .padding(.horizontal, Theme.gutter).padding(.bottom, 14)
                 // Next visit sits above everything else: it's why most people open a customer.
                 if session.can("job.view", feature: "jobs") { nextVisit.padding(.horizontal, Theme.gutter).padding(.bottom, 8) }
-                if let error { ErrorBanner(message: error) }
-                if record == nil && error == nil { ProgressView("Loading customer…").padding(20) }
-                details
+                if let error {
+                    ErrorBanner(message: error) { await load() }.padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                }
                 PaperTabs(options: ["Overview", "Jobs", "Activity"], selection: $tab)
                 VStack(alignment: .leading, spacing: 18) {
                     switch tab {
                     case "Overview":
+                        // Details live under Overview so the tabs sit near the top of the page
+                        // instead of below a long block the person has to scroll past.
+                        if record == nil && error == nil {
+                            SkeletonRows(count: 4, leading: false, inset: 0)
+                        } else {
+                            details
+                        }
                         CustomerMembershipSection(customerID: customer.id)
                         contactsSection
                         locationsSection
@@ -279,7 +286,7 @@ struct CustomerDetailView: View {
                     case "Activity": activitySection
                     default: activitySection
                     }
-                }.padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 24)
+                }.padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 24)
             }
         }
         .foregroundStyle(Theme.foreground).background(Theme.background)
@@ -391,7 +398,7 @@ struct CustomerDetailView: View {
                 if let terms = record.billingTerms { detailRow("Billing terms", value: terms) }
                 if smsConsentLoaded { smsConsentRow }
             }
-        }.padding(.horizontal, 20).padding(.bottom, 18)
+        }
     }
     /// The customer's open job first: what a dispatcher or tech opens a customer to find.
     @ViewBuilder private var nextVisit: some View {
@@ -410,11 +417,11 @@ struct CustomerDetailView: View {
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
                         Spacer(minLength: 8)
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle)
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle)
                     }
                     .frame(minHeight: 52).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowPressStyle())
             }
         }
     }
@@ -635,7 +642,7 @@ struct CustomerDetailView: View {
                         }
                         Spacer()
                     }.frame(minHeight: 44).contentShape(Rectangle())
-                }.buttonStyle(.plain)
+                }.buttonStyle(RowPressStyle())
             }
             if jobs.isEmpty { emptyText("No jobs") }
         }
@@ -651,21 +658,14 @@ struct CustomerDetailView: View {
                 emptyText("You don’t have access to customer activity.")
             } else {
                 if let activityError {
-                    if activity.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            emptyText("Activity did not load.")
-                            Button("Retry activity") { Task { await loadActivity(reset: true) } }
-                                .frame(minHeight: 44).accessibilityIdentifier("customer-activity-retry")
-                        }
-                    } else {
-                        ErrorBanner(message: activityError)
-                        if activityCursor == nil {
-                            Button("Retry activity") { Task { await loadActivity(reset: true) } }
-                                .frame(minHeight: 44).accessibilityIdentifier("customer-activity-retry")
-                        }
+                    ErrorBanner(message: activity.isEmpty ? "Activity did not load. \(activityError)" : activityError) {
+                        // A failed "load earlier" keeps its cursor, so retry continues the page
+                        // instead of throwing away what already loaded.
+                        await loadActivity(reset: activityCursor == nil)
                     }
+                    .accessibilityIdentifier("customer-activity-retry")
                 }
-                if activityLoading && activity.isEmpty { ProgressView("Loading activity…").padding(.vertical, 10) }
+                if activityLoading && activity.isEmpty { SkeletonRows(count: 4, inset: 0) }
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(activity) { event in
                         HStack(alignment: .top, spacing: 10) {
@@ -693,7 +693,9 @@ struct CustomerDetailView: View {
                     } label: {
                         Text(activityLoading ? "Loading…" : activityError == nil ? "Load earlier activity" : "Retry earlier activity")
                             .font(Theme.font(13, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(PressStyle())
                     .disabled(activityLoading)
                 }
             }
