@@ -20,7 +20,7 @@ The goal is a production iOS app at parity with the Thorbis web app (`Thorbis-Ta
 | Pipeline (requests) | Not yet | |
 | Price book, price item | Done | Browse, detail, and for owners: add, edit (new revision) and remove items. |
 | Properties, equipment, fleet, agreements | Partial | Equipment and memberships are on the server (customer equipment with warranty, membership plans, member pricing on estimates). Fleet and properties stay "On this phone" records. |
-| Team, team member, roles, role members | Done (read) | Team & permissions list with roles for owners and admins. Invites and role changes are web only. |
+| Team, team member, roles, role members | Done | Team & permissions list; owners change a person's role from the phone. Invites and role editing stay on the web. |
 | Inbox, notices | Done | Staff notices with mark-read. |
 | Search | Done | Searches the whole company through the Search Gateway (`GET /v1/search`): jobs, customers, estimates, invoices and billing schedules. Offline, or if the gateway fails, it searches the jobs and customers saved on the phone and says so. |
 | Settings, notice settings | Done | Account, appearance and sign-out, plus the job-notice matrix (owner, dispatcher and technician × email and in-app). The delivery log is web only. |
