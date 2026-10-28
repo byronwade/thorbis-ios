@@ -78,7 +78,7 @@ struct EstimateDetailView: View {
                                       status: record.status, date: record.createdAt)
                     PaperGroupHeader(title: "Line items", count: record.lines.count).padding(.top, 4)
                     VStack(spacing: 0) {
-                        ForEach(record.lines) { line in CommercialLineView(line: line) }
+                        ForEach(record.lines) { line in CommercialLineView(line: line, divider: line.id != record.lines.first?.id) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                         if !record.lines.isEmpty, let total = paperLinesTotal(record.lines) {
                             Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15)
@@ -109,7 +109,7 @@ struct EstimateDetailView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text(option.title).font(Theme.font(17, weight: .medium))
                             Text(option.description).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            ForEach(option.lines) { line in CommercialLineView(line: line) }
+                            ForEach(option.lines) { line in CommercialLineView(line: line, divider: line.id != option.lines.first?.id) }
                             HStack {
                                 Text("Option total").font(Theme.font(15, weight: .medium))
                                 Spacer()
@@ -305,7 +305,7 @@ struct InvoiceDetailView: View {
                     }
                     PaperGroupHeader(title: "Line items", count: record.lines.count).padding(.top, 4)
                     VStack(spacing: 0) {
-                        ForEach(record.lines) { line in CommercialLineView(line: line) }
+                        ForEach(record.lines) { line in CommercialLineView(line: line, divider: line.id != record.lines.first?.id) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -463,24 +463,32 @@ struct InvoiceDetailView: View {
     }
 }
 
+/// One priced line, same type as the job's Invoice tab: 15/500 description over a 13pt
+/// "2 × $60.00", the line total in mono, and a hairline between lines.
 struct CommercialLineView: View {
     let line: FieldLine
+    var divider = false
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(line.description).font(Theme.font(14, weight: .medium))
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(line.description).font(Theme.font(15, weight: .medium))
                 Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
             let total = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
             if !total.overflow {
                 Text(money(total.partialValue, currency: line.unitPrice.currency))
-                    .font(Theme.font(14, weight: .medium))
+                    .font(Theme.monoFont(13, weight: .medium))
             }
         }
         .foregroundStyle(Theme.foreground)
         .padding(15)
+        .frame(minHeight: 56)
+        .overlay(alignment: .top) {
+            if divider { Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15) }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
