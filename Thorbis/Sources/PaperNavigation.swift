@@ -137,7 +137,7 @@ struct RootView: View {
                 case "customers": tab = .customers
                 case "menu", "more": settings = true
                 case "job", "job-invoice": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
-                case "customer": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
+                case "customer", "customer-activity": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
                 default: break
                 }
             }
@@ -355,7 +355,7 @@ struct RootView: View {
                     if PaperPreview.screen == "job-assign" { jobsPath.append(PaperRoute.assign(jobID: job.id)) }
                     if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
                 }
-            case "customer":
+            case "customer", "customer-activity":
                 if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
                     primaryTab = .customers
                     customersPath.append(customer)

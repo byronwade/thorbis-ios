@@ -472,25 +472,37 @@ struct PaperQuickActions: View {
         let dialable = dialable
         let mail = email.flatMap { $0.contains("@") ? URL(string: "mailto:\($0)") : nil }
         if dialable != nil || mail != nil || directions != nil {
-            HStack(spacing: 8) {
-                if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
-                    action("Call", symbol: "phone", label: "Call") { openURL(call) }
-                    action("Text", symbol: "message", label: "Text") { openURL(text) }
-                }
-                if let mail { action("Email", symbol: "envelope", label: "Email") { openURL(mail) } }
-                if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps") { openURL(directions) } }
+            // Glyph beside word when all of them fit at full size; otherwise every button
+            // stacks glyph over word, so none is squeezed smaller than its neighbours.
+            ViewThatFits(in: .horizontal) {
+                row(dialable: dialable, mail: mail, stacked: false)
+                row(dialable: dialable, mail: mail, stacked: true)
             }
         }
     }
 
-    private func action(_ title: String, symbol: String, label: String, perform: @escaping () -> Void) -> some View {
-        Button(action: perform) {
-            // One line, glyph then word: the same reach as a tile, in less height.
-            HStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
-                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1).minimumScaleFactor(0.8)
+    private func row(dialable: String?, mail: URL?, stacked: Bool) -> some View {
+        HStack(spacing: 8) {
+            if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
+                action("Call", symbol: "phone", label: "Call", stacked: stacked) { openURL(call) }
+                action("Text", symbol: "message", label: "Text", stacked: stacked) { openURL(text) }
             }
+            if let mail { action("Email", symbol: "envelope", label: "Email", stacked: stacked) { openURL(mail) } }
+            if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps", stacked: stacked) { openURL(directions) } }
+        }
+    }
+
+    private func action(_ title: String, symbol: String, label: String, stacked: Bool, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            // Glyph then word: the same reach as a tile, in less height.
+            let layout = stacked ? AnyLayout(VStackLayout(spacing: 3)) : AnyLayout(HStackLayout(spacing: 6))
+            layout {
+                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
+                Text(title).font(Theme.font(stacked ? 13 : 15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).fixedSize()
+            }
+            .padding(.horizontal, stacked ? 4 : 10)
+            .padding(.vertical, stacked ? 6 : 0)
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .contentShape(Rectangle())

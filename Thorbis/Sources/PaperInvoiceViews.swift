@@ -102,13 +102,16 @@ struct PaperJobInvoiceContent: View {
     }
 
     private var statusChip: some View {
-        let color = statusColor
-        return Text(balance.statusLabel)
+        // Status is a word on the neutral well (MA-10); only a small dot carries the hue.
+        return HStack(spacing: 6) {
+            Circle().fill(statusColor).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(balance.statusLabel)
+        }
             .font(Theme.font(12, weight: .medium))
-            .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(statusSurface, in: Capsule())
+            .foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 10)
+            .frame(height: Theme.chipHeight)
+            .background(Theme.fill, in: Capsule())
     }
 
     private var statusColor: Color {
@@ -117,14 +120,6 @@ struct PaperJobInvoiceContent: View {
         case "Unpaid", "Partially paid": Theme.warning
         case "Voided": Theme.destructive
         default: Theme.muted
-        }
-    }
-
-    private var statusSurface: Color {
-        switch balance.statusLabel {
-        case "Paid": Theme.successSurface
-        case "Unpaid", "Partially paid": Theme.warningSurface
-        default: Theme.fill
         }
     }
 

@@ -313,8 +313,15 @@ struct CustomerDetailView: View {
             HStack(spacing: 8) {
                 if canEdit {
                     Button { showCustomerMode = true } label: {
-                        Label("Show to customer", systemImage: "person.crop.rectangle").font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        // One line always: the short word takes over when the full one won't fit.
+                        ViewThatFits(in: .horizontal) {
+                            Label("Show to customer", systemImage: "person.crop.rectangle").fixedSize()
+                            Label("Show", systemImage: "person.crop.rectangle").fixedSize()
+                        }
+                        .font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Show to customer")
                     .accessibilityHint("Hands the device to the customer to check and fix their details")
                 }
                 if session.can("job.create", feature: "jobs") {
@@ -327,7 +334,12 @@ struct CustomerDetailView: View {
         }
         .task { await load() }
         .task { await loadSmsConsent() }
-        .onAppear { RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer") }
+        .onAppear {
+            RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
+            #if DEBUG
+            if PaperPreview.enabled && PaperPreview.screen == "customer-activity" { tab = "Activity" }
+            #endif
+        }
         .onChange(of: tab) { _, selectedTab in
             if selectedTab == "Activity" { Task { await loadActivity(reset: true) } }
         }
@@ -447,11 +459,11 @@ struct CustomerDetailView: View {
                         Text(smsConsentLabel)
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
                     }
-                    .foregroundStyle(granted ? Theme.success : Theme.foreground)
+                    .foregroundStyle(Theme.foreground)
                     .frame(minHeight: 44)
                 }
             } else {
-                Text(smsConsentLabel).foregroundStyle(granted ? Theme.success : Theme.foreground)
+                Text(smsConsentLabel).foregroundStyle(Theme.foreground)
             }
         }
         .font(Theme.font(14))
