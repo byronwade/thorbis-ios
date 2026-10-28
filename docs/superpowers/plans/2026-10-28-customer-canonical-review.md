@@ -107,14 +107,14 @@ Commit as `fix: show canonical customer terms before signing`.
 - Consumes: Task1/2 completed implementation and source range from d834fa9.
 - Produces: verified native source ready for a separate signed TestFlight release phase; full customer add-ons remain unfinished.
 
-- [ ] **Step 1: Run full frozen-source native scheme**
+- [x] **Step 1: Run full frozen-source native scheme**
 
 Run the full Thorbis scheme on the owned iPhone using a new xcresult. Expected: every executed case passes, zero failures/skips; record actual count and source fingerprints. Run the existing release-script checks if release inputs changed or their last evidence no longer applies.
 
-- [ ] **Step 2: Perform one fresh whole-branch review**
+- [x] **Step 2: Perform one fresh whole-branch review**
 
 Use executing-plans' review package and requesting-code-review on the most capable available model. Supply spec, plan, Review Focus and ledger rulings. Regrade by user effect; resolve Important findings once with failing regressions then a passing full scheme. No re-review loop.
 
-- [ ] **Step 3: Commit verification record**
+- [x] **Step 3: Commit verification record**
 
 Record exact commands/results, accepted/deferred rulings and remaining C1-C3 scope. Commit as `docs: verify canonical customer estimate review`. Continue to the separately authorized archive/upload/group verification phase; do not mark the continuous app goal complete.
