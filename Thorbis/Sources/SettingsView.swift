@@ -38,6 +38,11 @@ struct SettingsView: View {
                     NavigationLink { CustomizeMenuView() } label: {
                         row("Customize menu", symbol: "slider.horizontal.3", value: nil)
                     }
+                    if session.can("organization.settings.edit") {
+                        NavigationLink { ReviewRequestsView() } label: {
+                            row("Review requests", symbol: "star.bubble", value: nil)
+                        }
+                    }
                 }
 
                 Section("This phone") {

@@ -497,8 +497,10 @@ enum CompanyFact {
         ["business_address", "mailing_address", "business_description", "service_areas"].contains(key)
     }
 
-    /// Group order: what setup needs, what customers see, then the legal paperwork.
+    /// Group order: what setup needs, what customers see, then the legal paperwork. 3 is shown elsewhere.
     static func group(_ entry: OrganizationProfile.Entry) -> Int {
+        // Review requests have their own screen (Settings › Review requests).
+        if ["review_link", "review_requests"].contains(entry.factKey) { return 3 }
         if entry.required { return 0 }
         if entry.tier >= 2 || ["dba_names", "mailing_address"].contains(entry.factKey) { return 2 }
         return 1
