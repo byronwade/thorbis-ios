@@ -23,7 +23,7 @@ enum ReleaseNotes {
                 .init(symbol: "creditcard", title: "Issue and collect in one step",
                       detail: "Issuing an invoice opens payment right away, and a paid job goes back to Wrap up."),
             ],
-            fixes: 2
+            fixes: 3
         ),
         ReleaseNote(
             id: "2026-10-28-whats-new",
