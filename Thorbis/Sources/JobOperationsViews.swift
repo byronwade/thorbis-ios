@@ -120,6 +120,7 @@ struct JobCloseoutView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
@@ -559,6 +560,7 @@ struct JobFollowUpsView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $booking) { record in
