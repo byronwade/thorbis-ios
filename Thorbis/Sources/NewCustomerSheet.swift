@@ -30,7 +30,7 @@ struct NewCustomerSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("New customer").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                    Text("New customer").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                         .accessibilityAddTraits(.isHeader)
                     field("Name", text: $request.name, prompt: "Danielle Marlowe", focus: .name)
                         .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
@@ -90,8 +90,8 @@ struct NewCustomerSheet: View {
                 .font(Theme.font(16))
                 .focused($focused, equals: focus)
                 .padding(.horizontal, 14).frame(minHeight: 46)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
         }
     }
 
@@ -109,13 +109,13 @@ struct NewCustomerSheet: View {
                 Text("Use \(existing.name)").font(Theme.font(14, weight: .semibold))
                     .frame(maxWidth: .infinity).frame(minHeight: 44)
                     .foregroundStyle(Theme.brand)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             }
             .buttonStyle(.plain)
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
         .accessibilityElement(children: .contain)
     }
 

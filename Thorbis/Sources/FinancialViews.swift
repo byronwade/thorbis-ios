@@ -15,7 +15,7 @@ struct EstimatesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) }
-                if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(estimates: records) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 6)
@@ -104,8 +104,8 @@ struct EstimateDetailView: View {
                             }
                         }
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                     ForEach(record.options ?? []) { option in
                         VStack(alignment: .leading, spacing: 10) {
                             Text(option.title).font(Theme.font(16, weight: .semibold))
@@ -119,7 +119,7 @@ struct EstimateDetailView: View {
                             .font(Theme.font(14, weight: .semibold))
                             .padding(15)
                         }
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     }
                     Text("Actions").font(Theme.font(16, weight: .semibold)).padding(.top, 8)
                     NavigationLink { CommercialDocumentView(path: "/v1/estimates/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
@@ -230,7 +230,7 @@ struct InvoicesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) }
-                if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(invoices: records) }
                 ForEach(paperDocumentGroups(records, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 6)
@@ -296,7 +296,7 @@ struct InvoiceDetailView: View {
                         commercialDetail("Balance due", money(max(total - record.amountPaid, 0), currency: record.currency))
                     }
                     .padding(.horizontal, 15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
                     } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
@@ -308,7 +308,7 @@ struct InvoiceDetailView: View {
                         ForEach(record.lines) { line in CommercialLineView(line: line) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     if let paymentModel {
                         InvoicePaymentsSection(
                             model: paymentModel,
@@ -486,12 +486,12 @@ struct CommercialLineView: View {
 private func commercialHeading(ref: String, title: String, status: String, date: String?) -> some View {
     VStack(alignment: .leading, spacing: 9) {
         Text(ref).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-        Text(title).font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+        Text(title).font(Theme.font(24, weight: .medium)).tracking(-0.36)
         HStack(spacing: 8) {
             Text(status).font(Theme.font(12, weight: .medium))
                 .foregroundStyle(Theme.warning)
                 .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
+                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             if let date = JobFiltering.date(date) {
                 Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -519,7 +519,7 @@ private func commercialAction(_ title: String, icon: String) -> some View {
     }
     .foregroundStyle(Theme.foreground)
     .padding(15)
-    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
 }
 
 private struct CommercialSecondaryButtonStyle: ButtonStyle {
@@ -529,7 +529,7 @@ private struct CommercialSecondaryButtonStyle: ButtonStyle {
             .foregroundStyle(Theme.foreground)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(15)
-            .background(Theme.card.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: 12))
+            .background(Theme.card.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 }
 
@@ -539,7 +539,7 @@ private extension View {
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 13)
             .frame(minHeight: 46)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
     }
 }
 
@@ -603,7 +603,7 @@ struct PaperStatusChip: View {
         Text(status == "issued" ? "Unpaid" : status.statusLabel)
             .font(Theme.font(11, weight: .medium)).foregroundStyle(tint)
             .padding(.horizontal, 8).frame(minHeight: 20)
-            .background(ground, in: RoundedRectangle(cornerRadius: 6))
+            .background(ground, in: Capsule())
     }
 }
 
@@ -669,7 +669,7 @@ struct NewEstimateView: View {
                         Text("NEW ESTIMATE\(jobID.map { " · JOB-\($0.suffix(4).uppercased())" } ?? "")")
                             .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
                         TextField("Estimate title", text: $title, axis: .vertical)
-                            .font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                            .font(Theme.font(24, weight: .medium)).tracking(-0.36)
                             .accessibilityLabel("Estimate title")
                         HStack(spacing: 6) {
                             Chip(text: "Draft", icon: "circle.dashed")
@@ -718,8 +718,8 @@ struct NewEstimateView: View {
                             .padding(14)
                         }
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                     if lines.isEmpty {
                         Text("Start with the price book so prices match what the office set.")
                             .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 10)
@@ -778,7 +778,7 @@ struct NewEstimateView: View {
                     TextField("0.00", text: line.price).keyboardType(.decimalPad)
                         .font(Theme.monoFont(14)).multilineTextAlignment(.trailing)
                         .padding(.horizontal, 10).frame(width: 110, height: 36)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                         .accessibilityLabel("Unit price")
                 }
                 Spacer()

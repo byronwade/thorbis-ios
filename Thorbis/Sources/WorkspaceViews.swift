@@ -167,7 +167,7 @@ struct WorkspaceRevenueView: View {
                         content(report)
                     }
                 } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    SkeletonRows(count: 4, leading: false, inset: 0)
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
@@ -261,8 +261,8 @@ struct WorkspaceRevenueView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
         .accessibilityElement(children: .combine)
     }
 
@@ -371,7 +371,7 @@ struct WorkspacePriceBookView: View {
                             Button("Load more items") { Task { await loadMore() } }
                                 .font(Theme.font(14, weight: .medium))
                                 .frame(maxWidth: .infinity).frame(minHeight: 44)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                                 .disabled(loading)
                         }
                         if visibleItems.isEmpty && !loading && error == nil {

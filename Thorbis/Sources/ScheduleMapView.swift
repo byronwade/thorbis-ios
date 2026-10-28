@@ -45,9 +45,9 @@ struct ScheduleMapView: View {
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
             .mapControls { MapUserLocationButton(); MapCompass() }
             .frame(height: 380)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5)
                 if !loaded { ProgressView() }
             }
             .padding(.horizontal, Theme.gutter)
@@ -110,8 +110,8 @@ struct ScheduleMapView: View {
             }
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
     }
 
     private func stopRow(_ stop: Stop) -> some View {

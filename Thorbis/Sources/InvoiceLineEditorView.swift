@@ -64,7 +64,7 @@ struct InvoiceLineEditorView: View {
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
 
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
@@ -105,8 +105,8 @@ struct InvoiceLineEditorView: View {
                         }
                         .disabled(busy || !canEdit || editor.hasUnsupportedLineSources || editor.lines.count >= 500)
                     }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
 
                     if editor.needsPriceBookOverrideReason {
                         VStack(alignment: .leading, spacing: 6) {
@@ -116,8 +116,8 @@ struct InvoiceLineEditorView: View {
                                 .lineLimit(2...4)
                                 .font(Theme.font(14))
                                 .padding(12)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
                                 .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
                                 .accessibilityLabel("Reason for Price Book change")
                         }
@@ -150,7 +150,7 @@ struct InvoiceLineEditorView: View {
                         .font(Theme.font(15, weight: .semibold))
                         .foregroundStyle(Theme.foreground)
                         .frame(width: 132, height: 46)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                         .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
                     PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
                         .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
@@ -200,7 +200,7 @@ struct InvoiceLineEditorView: View {
                     .font(Theme.font(12, weight: .medium))
                     .foregroundStyle(editor.invoice.status == "draft" ? Theme.warning : Theme.muted)
                     .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 Text("Revision \(editor.invoice.linesRevision)")
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
             }

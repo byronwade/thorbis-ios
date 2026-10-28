@@ -205,6 +205,8 @@ struct RowPressStyle: ButtonStyle {
 struct SkeletonRows: View {
     var count = 6
     var leading = true
+    /// Zero when the parent already pads to the gutter.
+    var inset: CGFloat = Theme.gutter
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -220,7 +222,7 @@ struct SkeletonRows: View {
                 .frame(minHeight: 52)
             }
         }
-        .padding(.horizontal, Theme.gutter)
+        .padding(.horizontal, inset)
         .padding(.top, 8)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading")

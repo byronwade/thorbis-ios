@@ -99,7 +99,7 @@ struct ReportsView: View {
         .task { await load() }
     }
 
-    private var loadingState: some View { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+    private var loadingState: some View { SkeletonRows(count: 4, leading: false, inset: 0) }
 
     @ViewBuilder private func operationsContent(_ report: OperationsReport) -> some View {
         if report.truncated { incomplete }
@@ -216,8 +216,8 @@ struct ReportsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
         .accessibilityElement(children: .combine)
     }
 
@@ -233,8 +233,8 @@ struct ReportsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
         .accessibilityElement(children: .combine)
     }
 

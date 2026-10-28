@@ -114,7 +114,7 @@ struct PaperJobInvoiceContent: View {
             .foregroundStyle(color)
             .padding(.horizontal, 8)
             .frame(height: 24)
-            .background(statusSurface, in: RoundedRectangle(cornerRadius: 8))
+            .background(statusSurface, in: Capsule())
     }
 
     private var statusColor: Color {
@@ -174,8 +174,8 @@ struct PaperJobInvoiceContent: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
         }
     }
 

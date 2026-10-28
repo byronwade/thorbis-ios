@@ -94,7 +94,7 @@ struct BillingSchedulesView: View {
                 }
                 .padding(.bottom, 12)
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                if loading && schedules.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if loading && schedules.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 ForEach(paperDocumentGroups(schedules, status: \.status, order: ["open", "closed"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status == "open" ? "Open" : "Closed", count: group.count).padding(.top, 6)
                     ForEach(group) { schedule in
@@ -157,7 +157,7 @@ struct BillingScheduleDetailView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("SOV-\(progress.schedule.id.suffix(4).uppercased()) · \(store.customerName(progress.schedule.customerId))")
                             .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                        Text("Billing schedule").font(Theme.font(26, weight: .semibold)).tracking(-0.39).accessibilityAddTraits(.isHeader)
+                        Text("Billing schedule").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                         PaperStatusChip(status: progress.schedule.status == "open" ? "open" : "closed")
                     }
                     .padding(.bottom, 14)
@@ -209,7 +209,7 @@ struct BillingScheduleDetailView: View {
                             .frame(minHeight: 44).padding(.top, 8).disabled(busy)
                     }
                 } else if error == nil {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    SkeletonRows(count: 4, leading: false, inset: 0)
                 }
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter).padding(.top, 8) }
             }
@@ -291,7 +291,7 @@ struct JobDepositSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Request a deposit").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                Text("Request a deposit").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                 Text("Creates a deposit invoice from the job's approved estimate. It's credited against later bills.")
                     .font(Theme.font(14)).foregroundStyle(Theme.muted)
                 HStack(spacing: 8) {
@@ -300,7 +300,7 @@ struct JobDepositSheet: View {
                         .onChange(of: amount) { _, _ in key = UUID().uuidString }
                 }
                 .padding(.horizontal, 14).frame(minHeight: 60)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
                 Spacer()
             }

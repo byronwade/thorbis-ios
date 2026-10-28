@@ -66,13 +66,13 @@ struct JobAssignmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Assign technician").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                Text("Assign technician").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
                 if !session.can("job.assign", feature: "jobs") {
                     PaperEmptyState(symbol: "person.crop.circle.badge.xmark", title: "Assignment unavailable", message: "Your role can't assign jobs in this workspace.")
                 } else {
                     if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                    if loading { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30) }
+                    if loading { SkeletonRows(count: 4, inset: 0) }
                     if isCurrent, let job {
                         PaperDetailRow("Assigned now", value: job.assignedToUserId.map { current in
                             assignees.first(where: { $0.userId == current })?.displayName ?? "Someone outside your roster"

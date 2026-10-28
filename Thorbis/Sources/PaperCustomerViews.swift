@@ -255,7 +255,7 @@ struct CustomerDetailView: View {
                     if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
                         Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
                     }
-                    Text(record?.name ?? customer.name).font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                    Text(record?.name ?? customer.name).font(Theme.font(24, weight: .medium)).tracking(-0.36)
                         .accessibilityAddTraits(.isHeader)
                 }.padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 12)
                 ViewThatFits(in: .horizontal) {
@@ -501,7 +501,7 @@ struct CustomerDetailView: View {
             if let contactMutationError {
                 Text(contactMutationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 9))
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                     .accessibilityIdentifier("contact-mutation-error")
             }
             ForEach(contacts) { contact in
@@ -542,7 +542,7 @@ struct CustomerDetailView: View {
             if let locationError {
                 Text(locationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 9))
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                     .accessibilityIdentifier("location-mutation-error")
             }
             ForEach(locations) { location in

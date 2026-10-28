@@ -142,12 +142,12 @@ struct EstimateRevisionEditorView: View {
             Text("EST-\(editor.estimate.id.suffix(4).uppercased()) · REVISION \(editor.estimate.currentRevisionNumber ?? 0)")
                 .font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
             Text("New replacement draft")
-                .font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                .font(Theme.font(24, weight: .medium)).tracking(-0.36)
             Text(editor.estimate.status.statusLabel)
                 .font(Theme.font(12, weight: .medium))
                 .foregroundStyle(Theme.warning)
                 .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
+                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
         }
         .padding(.bottom, 6)
     }
@@ -167,7 +167,7 @@ struct EstimateRevisionEditorView: View {
             .font(Theme.font(12)).foregroundStyle(Theme.muted)
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 
     private var lineSection: some View {
@@ -208,8 +208,8 @@ struct EstimateRevisionEditorView: View {
                 }
                 .disabled(busy || !canEdit || editor.lines.count >= 500 || editor.hasUnsupportedLineSources)
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
         }
     }
 
@@ -233,7 +233,7 @@ struct EstimateRevisionEditorView: View {
                 Text("No alternate packages")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(15).background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(15).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             }
             ForEach($editor.options) { $option in
                 EstimateRevisionOptionEditor(
@@ -351,8 +351,8 @@ private struct EstimateRevisionOptionEditor: View {
             }
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
     }
 }
 
@@ -417,6 +417,6 @@ private extension View {
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 13)
             .frame(minHeight: 46)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
     }
 }

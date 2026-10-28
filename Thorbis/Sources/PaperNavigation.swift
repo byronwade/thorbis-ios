@@ -544,7 +544,7 @@ struct RootView: View {
             Button { search = true } label: {
                 HStack(spacing: 8) { Image(systemName: "magnifyingglass"); Text("Search"); Spacer() }
                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.horizontal, 10)
-                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: 9))
+                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             }.padding(.bottom, 12)
             if session.can("job.view", feature: "jobs") {
                 sidebarRow("Schedule", icon: "calendar", target: .schedule, count: JobFiltering.schedule(store.jobs, range: .today).count)
@@ -575,7 +575,7 @@ struct RootView: View {
                 Text(title).font(Theme.font(14, weight: tab == target ? .medium : .regular))
                 Spacer()
                 if let count { Text("\(count)").font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted) }
-            }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 9))
+            }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
         }.accessibilityAddTraits(tab == target ? .isSelected : [])
     }
 

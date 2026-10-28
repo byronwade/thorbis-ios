@@ -293,8 +293,8 @@ struct PaperSearchField: View {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
             TextField(prompt, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled()
             if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search") }
-        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
     }
 }
 
@@ -469,7 +469,7 @@ struct PaperQuickActions: View {
                 Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
             }
             .frame(maxWidth: .infinity, minHeight: 52)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

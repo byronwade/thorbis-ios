@@ -525,7 +525,7 @@ struct CustomerSelfEditView: View {
         let changes = draft?.changeSummary ?? []
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Review changes").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                Text("Review changes").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader)
                 Text("These save to the customer's record and activity under your name.")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)

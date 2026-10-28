@@ -38,7 +38,7 @@ struct JobCloseoutView: View {
                     Text("JOB-\(jobID.suffix(4).uppercased())\(job.map { " · \(store.customerName($0.customerId))" } ?? "")")
                         .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
                     Text(job?.status == "completed" ? "Job complete" : "Wrap up this job")
-                        .font(Theme.font(26, weight: .semibold)).tracking(-0.39).accessibilityAddTraits(.isHeader)
+                        .font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                 }
                 .padding(.bottom, 14)
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
@@ -112,7 +112,7 @@ struct JobCloseoutView: View {
                             .disabled(busy)
                     }
                 } else if error == nil {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    SkeletonRows(count: 4, leading: false, inset: 0)
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
@@ -156,8 +156,8 @@ struct JobCloseoutView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
     }
 
     private func load() async {
@@ -354,7 +354,7 @@ struct JobScheduleView: View {
                 .foregroundStyle(showsCalendar ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -399,7 +399,7 @@ struct JobScheduleView: View {
                 .foregroundStyle(selected ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -498,10 +498,10 @@ struct JobFollowUpsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Follow-ups").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                Text("Follow-ups").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30) }
+                if loading && records.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 if !records.isEmpty { PaperGroupHeader(title: "On this job", count: records.count) }
                 ForEach(records) { record in
                     VStack(alignment: .leading, spacing: 6) {
@@ -531,8 +531,8 @@ struct JobFollowUpsView: View {
                         }
                     }
                     .padding(14)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                     .padding(.bottom, 8)
                 }
                 if session.can("job.edit", feature: "jobs") {
@@ -575,8 +575,8 @@ struct JobFollowUpsView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
     }
 
     private func load() async {

@@ -43,7 +43,7 @@ struct JobMediaView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let error = error ?? preview.error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                if loading || preview.loading { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20) }
+                if loading || preview.loading { SkeletonRows(count: 2, inset: 0) }
                 if let selectedData {
                     HStack(spacing: 12) {
                         Image(systemName: selectedMime == "application/pdf" ? "doc" : "photo")
@@ -58,8 +58,8 @@ struct JobMediaView: View {
                             .font(Theme.font(13, weight: .medium)).frame(minHeight: 44).disabled(busy)
                     }
                     .padding(12)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 }
                 if !allPhotos.isEmpty {
                     HStack(spacing: 6) {
@@ -130,8 +130,8 @@ struct JobMediaView: View {
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                             }
                             .buttonStyle(.plain)
                             .disabled(busy || preview.loading || record.uploadState != "stored")
@@ -189,8 +189,8 @@ struct JobMediaView: View {
                         PhotosPicker(selection: $selection, matching: .images) {
                             Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)
                                 .frame(width: 46, height: 46)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         }
                         .disabled(busy)
                         .accessibilityLabel("Choose from library")
@@ -202,8 +202,8 @@ struct JobMediaView: View {
                         } label: {
                             Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
                                 .frame(width: 46, height: 46)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         }
                         .disabled(busy)
                         .accessibilityLabel("Add a document")

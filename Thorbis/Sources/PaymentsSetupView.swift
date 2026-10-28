@@ -136,13 +136,13 @@ struct PaymentsSetupView: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("BUSINESS SETTINGS").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                    Text("Payments").font(Theme.font(26, weight: .semibold)).tracking(-0.39).accessibilityAddTraits(.isHeader)
+                    Text("Payments").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                     Text("Card payments and payouts run through Stripe. Stripe holds your bank and identity details; Thorbis never sees them.")
                         .font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
                 .padding(.bottom, 12)
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                if readiness == nil && error == nil { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30) }
+                if readiness == nil && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
                 if let readiness {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(readiness.headline).font(Theme.font(17, weight: .semibold))
@@ -201,7 +201,7 @@ struct PaymentsSetupView: View {
             }
             .foregroundStyle(Theme.warning)
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             .padding(.top, 14)
         }
         ForEach(snapshot.balances) { balance in

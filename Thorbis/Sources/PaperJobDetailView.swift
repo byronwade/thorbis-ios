@@ -489,7 +489,7 @@ struct JobDetailView: View {
                 }
                 PaperGroupHeader(title: "Estimates", count: jobEstimates.count)
                 if !estimatesLoaded {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20)
+                    SkeletonRows(count: 2, leading: false, inset: 0)
                 } else if jobEstimates.isEmpty {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
                                     message: "Build one from the price book. It's added to this job automatically.")
@@ -514,8 +514,8 @@ struct JobDetailView: View {
                             }
                         }
                         .padding(16)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -656,8 +656,8 @@ struct JobDetailView: View {
                             if let body = entry.body {
                                 Text(body).font(Theme.font(14)).foregroundStyle(Theme.foreground)
                                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
                                     .textSelection(.enabled)
                             }
                             Text(entry.date.formatted(.dateTime.month(.abbreviated).day())).font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -679,11 +679,11 @@ struct JobDetailView: View {
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 22))
                         .overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.border))
                     Button { Task { await saveNote() } } label: {
-                        Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold)) } }
-                            .foregroundStyle(.white).frame(width: 44, height: 44)
-                            .background(Theme.brand.opacity(canSaveNote ? 1 : 0.4), in: Circle())
+                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .medium)) } }
+                            .foregroundStyle(Theme.onInk).frame(width: 44, height: 44)
+                            .background(Theme.ink.opacity(canSaveNote ? 1 : 0.35), in: Circle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .disabled(!canSaveNote || busy)
                     .accessibilityLabel("Save note")
                 }
@@ -776,7 +776,7 @@ struct JobDetailView: View {
         Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 
     private func availableTransitions(_ job: JobRecord) -> [String] {
