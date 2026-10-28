@@ -520,6 +520,12 @@ struct SetupWizardView: View {
             stepError = "Import the file first, or tap Skip for now."
             return
         }
+        if step == .payments {
+            // Only Stripe's own answer finishes Get paid; otherwise it stays open to come back to.
+            await loadPayments()
+            guard step == origin else { return }
+            if !finished.contains(.payments) { skip(); return }
+        }
         finished.insert(step)
         skipped.remove(step)
         SetupProgress.saveSkipped(skipped, organizationID: session.activeOrganization?.id)
