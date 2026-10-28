@@ -976,6 +976,7 @@ struct JobDetailView: View {
             }
             invoices = mine.sorted { $0.createdAt > $1.createdAt }
             mine.forEach { JobInvoiceMemory.remember($0.id, jobID: jobId) }
+            JobDetailCache.save(invoices: invoices, jobID: jobId)
             invoicesLoaded = true
             invoicesFailed = missed
             if let selectedInvoice {
@@ -984,6 +985,17 @@ struct JobDetailView: View {
             }
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
+            if error.isConnectivityFailure, let saved = JobDetailCache.invoices(jobId) {
+                // OF-04: the job's invoices as last seen, so cash and check still work without signal.
+                invoices = saved
+                invoicesLoaded = true
+                invoicesFailed = false
+                if let selectedInvoice {
+                    selectedInvoiceID = selectedInvoice.id
+                    await loadInvoicePayments(for: selectedInvoice)
+                }
+                return
+            }
             self.error = error.localizedDescription
             invoicesLoaded = true
             invoicesFailed = true
@@ -1010,6 +1022,8 @@ struct JobDetailView: View {
         if loadedInvoiceModelID != invoice.id {
             loadedInvoiceModelID = invoice.id
             invoicePaymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: invoice.id)
+            invoicePaymentModel?.outbox = outbox
+            invoicePaymentModel?.policyVersion = session.policyVersion ?? 0
         }
         await invoicePaymentModel?.load()
     }

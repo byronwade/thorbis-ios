@@ -175,4 +175,100 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertTrue(box.entries.isEmpty)
         XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, ["/v1/commands", "/v1/jobs/\(jobA)/notes"])
     }
+    // MARK: - Closeout, signatures and cash offline (design.thorbis.com/offline)
+
+    private let invoice = "019f0000-0000-7000-8000-0000000000e1"
+
+    private func payment(_ key: String) -> String {
+        #"{"id":"019f0000-0000-7000-8000-0000000000f1","organizationId":"\#(org)","invoiceId":"\#(invoice)","amount":{"amount":48000,"currency":"USD"},"method":"cash","status":"recorded","collectionEvidence":{"purpose":"physical_service","source":{"kind":"job","id":"\#(jobA)"}},"idempotencyKey":"\#(key)","recordedAt":"2026-10-28T12:00:00Z"}"#
+    }
+
+    func testCloseoutChecksAndCompletionGoThroughTheCommandEndpointWithStrictPayloads() async throws {
+        let box = outbox()
+        let check = try XCTUnwrap(box.enqueue(.acknowledgeCheck(.init(jobId: jobA, checkKey: "cleanup")), policyVersion: 2, label: "Area cleaned up"))
+        let complete = try XCTUnwrap(box.enqueue(.complete(.init(jobId: jobA)), policyVersion: 2))
+        XCTAssertEqual(box.pendingStatus(for: jobA), "completed")
+        XCTAssertEqual(box.waitingChecks(jobID: jobA), ["cleanup"])
+        XCTAssertEqual(check.summary, "Confirmed: Area cleaned up")
+        let reply = #"{"outcomes":[{"commandId":"\#(check.id)","status":"applied","result":{}},{"commandId":"\#(complete.id)","status":"applied","result":{}}]}"#
+
+        await box.drain(api: api([.init(200, reply)]), useCommandEndpoint: true)
+
+        XCTAssertTrue(box.entries.isEmpty)
+        let body = try XCTUnwrap(URLProtocolFixture.recorded.first?.body)
+        let commands = try XCTUnwrap((JSONSerialization.jsonObject(with: body) as? [String: Any])?["commands"] as? [[String: Any]])
+        XCTAssertEqual(commands.map { $0["command"] as? String }, ["jobs.acknowledgeCheck", "jobs.complete"])
+        XCTAssertEqual(commands[0]["payload"] as? [String: String], ["jobId": jobA, "checkKey": "cleanup"])
+        XCTAssertEqual(commands[1]["payload"] as? [String: String], ["jobId": jobA], "No label or empty disposition reaches the strict schema")
+    }
+
+    func testCashNeverEntersTheCommandQueueAndLandsInOrderWithItsOwnKey() async throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Collected cash")), policyVersion: 1))
+        let cash = OutboxEntry.PaymentPayload(invoiceId: invoice, jobId: jobA, amountCents: 48000, method: "cash", idempotencyKey: "cash-1")
+        let queued = try XCTUnwrap(box.enqueue(.payment(cash), policyVersion: 1))
+        XCTAssertEqual(box.enqueue(.payment(cash), policyVersion: 1)?.id, queued.id, "The same collected payment is queued once")
+        let complete = try XCTUnwrap(box.enqueue(.complete(.init(jobId: jobA)), policyVersion: 1))
+        XCTAssertNil(queued.command)
+        XCTAssertEqual(queued.summary, "Cash $480.00")
+        XCTAssertEqual(box.waitingPayments(invoiceID: invoice).map(\.amountCents), [48000])
+
+        await box.drain(api: api([
+            .init(200, #"{"outcomes":[{"commandId":"\#(note.id)","status":"applied","result":{}}]}"#),
+            .init(201, payment("cash-1")),
+            .init(200, #"{"outcomes":[{"commandId":"\#(complete.id)","status":"applied","result":{}}]}"#),
+        ]), useCommandEndpoint: true)
+
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertEqual(box.lastSyncSent, 3)
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, [
+            "/v1/commands", "/v1/invoices/\(invoice)/payments", "/v1/commands",
+        ], "The payment lands before the completion that may depend on it")
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(URLProtocolFixture.recorded[1].body)) as? [String: Any])
+        XCTAssertEqual(sent["idempotencyKey"] as? String, "cash-1")
+        XCTAssertEqual(sent["method"] as? String, "cash")
+    }
+
+    func testARefusedPaymentWaitsForReviewAndHoldsTheJobsLaterChanges() async throws {
+        let box = outbox()
+        let cash = try XCTUnwrap(box.enqueue(.payment(.init(invoiceId: invoice, jobId: jobA, amountCents: 48000, method: "cash", idempotencyKey: "cash-2")), policyVersion: 1))
+        box.enqueue(.complete(.init(jobId: jobA)), policyVersion: 1)
+
+        await box.drain(api: api([
+            .init(422, #"{"title":"Unprocessable","status":422,"detail":"The payment cannot be greater than the invoice balance."}"#),
+        ]), useCommandEndpoint: true)
+
+        XCTAssertEqual(box.entries.first { $0.id == cash.id }?.state, .rejected("The payment cannot be greater than the invoice balance."))
+        XCTAssertTrue(box.pending.isEmpty, "The completion is held behind the refused payment")
+        XCTAssertEqual(box.needsReview.count, 2)
+    }
+
+    func testATimedOutPaymentThatAlreadyLandedIsClearedNotRefused() async throws {
+        let box = outbox()
+        box.enqueue(.payment(.init(invoiceId: invoice, jobId: jobA, amountCents: 48000, method: "cash", idempotencyKey: "cash-3")), policyVersion: 1)
+
+        await box.drain(api: api([
+            .init(409, #"{"title":"Conflict","status":409,"detail":"Idempotency key reused"}"#),
+            .init(200, #"{"items":[\#(payment("cash-3"))],"nextCursor":null}"#),
+        ]), useCommandEndpoint: false)
+
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertEqual(box.lastSyncSent, 1)
+    }
+
+    func testASignatureKeepsItsInkOnThePhoneUntilItIsSent() throws {
+        let box = outbox()
+        let asset = UUID().uuidString.lowercased()
+        let payload = OutboxEntry.SignaturePayload(jobId: jobA, invoiceId: invoice, expectedLinesRevision: 3, signerName: "Danielle Marlowe",
+                                                   signedAt: "2026-10-28T12:00:00Z", clientAssetId: asset)
+        let entry = try XCTUnwrap(box.enqueueSignature(Data([0x89, 0x50, 0x4e, 0x47]), payload: payload, policyVersion: 1))
+        XCTAssertNil(entry.command)
+        XCTAssertEqual(box.signatureData(asset), Data([0x89, 0x50, 0x4e, 0x47]))
+        XCTAssertEqual(box.waitingSignature(invoiceID: invoice)?.signerName, "Danielle Marlowe")
+
+        box.dismiss(entry)
+
+        XCTAssertNil(box.signatureData(asset), "Discarding removes the ink with the change")
+        XCTAssertNil(box.waitingSignature(invoiceID: invoice))
+    }
 }

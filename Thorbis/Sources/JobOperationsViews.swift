@@ -5,6 +5,7 @@ struct JobCloseoutView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @EnvironmentObject var outbox: FieldOutbox
     @State private var closeout: FieldCloseout?
     @State private var job: JobRecord?
     @State private var error: String?
@@ -25,10 +26,32 @@ struct JobCloseoutView: View {
     private var validDisposition: Bool {
         mayRecordUnpaidDisposition && !unpaidReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !unpaidNextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && unpaidReason.utf16.count <= 2000 && unpaidNextAction.utf16.count <= 2000
     }
+    /// OF-02: a completion saved on this phone shows as done-and-waiting, never as synced.
+    private var completionWaiting: Bool { outbox.pendingStatus(for: jobID) == "completed" }
+    private var isCompleted: Bool { job?.status == "completed" || completionWaiting }
+    /// The status this phone expects, and what the server last allowed from it.
+    private var allowsComplete: Bool {
+        guard let job else { return false }
+        if let queued = outbox.pendingStatus(for: jobID) { return outbox.offlineSteps(from: queued).contains("completed") }
+        return job.allowedTransitions?.contains("completed") == true
+    }
+    /// Work saved on this phone that will satisfy a blocked requirement once it lands (OF-01).
+    private func waitingSatisfies(_ requirement: FieldCloseoutRequirement) -> Bool {
+        guard requirement.outcome == "blocked", let closeout else { return false }
+        switch requirement.kind {
+        case "notes": return !outbox.pendingNotes(for: jobID).isEmpty
+        case "photos":
+            return closeout.facts.photoCount + PendingPhotoStore.list(jobID: jobID).count >= closeout.policy.requiredPhotoCount
+        case "check": return outbox.waitingChecks(jobID: jobID).contains(String(requirement.requirement.dropFirst("check:".count)))
+        case "payment_or_unpaid_disposition":
+            return outbox.entries.contains { if case .payment(let payment) = $0.action { payment.jobId == jobID } else { false } }
+        default: return false
+        }
+    }
     private var canComplete: Bool {
         guard let closeout else { return false }
-        return session.can("job.complete", feature: "jobs") && job?.allowedTransitions?.contains("completed") == true
-            && (closeout.completable || validDisposition)
+        let ready = closeout.completable || closeout.unmet.allSatisfy { waitingSatisfies($0) }
+        return session.can("job.complete", feature: "jobs") && allowsComplete && (ready || validDisposition)
     }
 
     /// Paper 83: a short checklist, then one commit.
@@ -37,23 +60,28 @@ struct JobCloseoutView: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())", text: job.map { store.customerName($0.customerId) })
-                    Text(job?.status == "completed" ? "Job complete" : "Wrap up this job")
+                    Text(isCompleted ? "Job complete" : "Wrap up this job")
                         .font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
+                    if completionWaiting { WaitingToSyncLabel() }
                 }
                 .padding(.bottom, 14)
                 if let error { ErrorBanner(message: error, retry: closeout == nil ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
                 if let closeout {
                     let checks = closeout.policy.requiredChecks.filter { $0.kind == nil || $0.kind == "acknowledgement" }
-                    let done = closeout.requirements.filter { $0.outcome != "blocked" }.count
-                        + checks.filter { closeout.facts.acknowledgedCheckKeys.contains($0.key) }.count
+                    let waitingChecks = outbox.waitingChecks(jobID: jobID)
+                    let done = closeout.requirements.filter { $0.outcome != "blocked" || waitingSatisfies($0) }.count
+                        + checks.filter { closeout.facts.acknowledgedCheckKeys.contains($0.key) || waitingChecks.contains($0.key) }.count
                     PaperGroupHeader(title: "Before you close") {
                         Text("\(done) of \(closeout.requirements.count + checks.count)").font(Theme.monoFont(12))
                     }
                     ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
                         let step = CloseoutNextStep(requirement)
+                        let waiting = waitingSatisfies(requirement)
                         HStack(spacing: 12) {
-                            checklistRow(done: requirement.outcome != "blocked", title: requirement.detail, detail: step?.detail)
-                            if let step, let title = step.buttonTitle, step.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) {
+                            checklistRow(done: requirement.outcome != "blocked" || waiting, title: requirement.detail,
+                                         detail: waiting ? "Waiting to sync" : step?.detail)
+                            if !waiting, !session.isOffline, let step, let title = step.buttonTitle,
+                               step.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) {
                                 Button(title) { Task { await recover(step) } }
                                     .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
                                     .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
@@ -65,10 +93,11 @@ struct JobCloseoutView: View {
                         }
                     }
                     ForEach(checks, id: \.key) { check in
-                        let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key)
+                        let waiting = waitingChecks.contains(check.key)
+                        let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key) || waiting
                         HStack(spacing: 12) {
-                            checklistRow(done: acknowledged, title: check.label, detail: nil)
-                            if !acknowledged && session.can("job.edit", feature: "jobs") {
+                            checklistRow(done: acknowledged, title: check.label, detail: waiting ? "Waiting to sync" : nil)
+                            if !acknowledged && !isCompleted && session.can("job.edit", feature: "jobs") {
                                 Button("Confirm") { Task { await acknowledge(check.key) } }
                                     .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
                                     .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
@@ -76,13 +105,14 @@ struct JobCloseoutView: View {
                                     .frame(minHeight: 44)
                                     .buttonStyle(PressStyle())
                                     .disabled(busy)
+                                    .accessibilityHint(check.label)
                             }
                         }
                     }
                     if closeout.requirements.isEmpty && checks.isEmpty {
                         Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                     }
-                    if mayRecordUnpaidDisposition {
+                    if mayRecordUnpaidDisposition && !isCompleted {
                         PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
                         Picker("Reason", selection: $unpaidReasonCode) {
                             Text("Customer will pay later").tag("customer_will_pay_later")
@@ -96,7 +126,7 @@ struct JobCloseoutView: View {
                         Text("Completing with this leaves payment outstanding and creates an office follow-up.")
                             .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
                     }
-                    if job?.status == "completed" {
+                    if job?.status == "completed" && !session.isOffline {
                         PaperGroupHeader(title: "Billing").padding(.top, 18)
                         if session.can("invoice.create", feature: "invoicing") {
                             Button { Task { await completionInvoice() } } label: {
@@ -108,7 +138,8 @@ struct JobCloseoutView: View {
                                 .buttonStyle(RowPressStyle())
                         }
                     }
-                    if session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
+                    // OF-09: cancelling races with dispatch, so it needs signal and says so by not offering it.
+                    if !session.isOffline, !isCompleted, session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
                         Button("Cancel job", role: .destructive) { confirmCancel = true }
                             .font(Theme.font(15, weight: .medium)).frame(minHeight: 44).padding(.top, 18)
                             .disabled(busy)
@@ -124,7 +155,7 @@ struct JobCloseoutView: View {
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            if job?.status != "completed", session.can("job.complete", feature: "jobs"), job?.allowedTransitions?.contains("completed") == true {
+            if !isCompleted, session.can("job.complete", feature: "jobs"), allowsComplete {
                 PaperActionBar(title: "Complete job", symbol: "checkmark", busy: busy, disabled: !canComplete) { confirmComplete = true }
             }
         }
@@ -166,28 +197,71 @@ struct JobCloseoutView: View {
 
     private func load() async {
         do {
-            job = try await api.fieldJob(jobID)
-            closeout = try await api.fieldCloseout(jobID)
+            let loadedJob = try await api.fieldJob(jobID)
+            let loadedCloseout = try await api.fieldCloseout(jobID)
+            job = loadedJob
+            closeout = loadedCloseout
+            outbox.learn(loadedJob)
+            JobDetailCache.save(loadedJob)
+            JobDetailCache.save(closeout: loadedCloseout, jobID: jobID)
             error = nil
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {} catch {
+            if error.isConnectivityFailure {
+                // OF-04: the last copy of this checklist, so it can still be worked without signal.
+                job = job ?? JobDetailCache.job(jobID)
+                closeout = closeout ?? JobDetailCache.closeout(jobID)
+                if job != nil, closeout != nil { self.error = nil; return }
+                self.error = "This checklist hasn't been opened with signal on this phone yet. Open it again when you're back online."
+                return
+            }
+            self.error = error.localizedDescription
+        }
+    }
+    /// Saves to the phone first when there is no signal, or when the request finds none (OF-01).
+    private func queueOffline(_ action: OutboxEntry.Action, label: String? = nil) {
+        outbox.enqueue(action, policyVersion: session.policyVersion ?? 0, label: label)
+        error = nil
     }
     private func acknowledge(_ key: String) async {
+        let label = closeout?.policy.requiredChecks.first { $0.key == key }?.label
+        if session.isOffline || !outbox.pending.filter({ $0.jobID == jobID }).isEmpty {
+            queueOffline(.acknowledgeCheck(.init(jobId: jobID, checkKey: key)), label: label)
+            if !session.isOffline { Task { await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync")) } }
+            return
+        }
         busy = true
         defer { busy = false }
         do { _ = try await api.acknowledgeFieldCheck(jobID, checkKey: key); await load() }
-        catch is CancellationError {} catch { self.error = error.localizedDescription }
+        catch is CancellationError {} catch {
+            if error.isConnectivityFailure { queueOffline(.acknowledgeCheck(.init(jobId: jobID, checkKey: key)), label: label) }
+            else { self.error = error.localizedDescription }
+        }
     }
     private func complete() async {
+        let reason = unpaidReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = unpaidNextAction.trimmingCharacters(in: .whitespacesAndNewlines)
+        let disposition: FieldUnpaidDisposition? = validDisposition ? .init(reasonCode: unpaidReasonCode, reason: reason, followUpNextAction: next) : nil
+        let queued = OutboxEntry.Action.complete(.init(jobId: jobID, unpaidDisposition: validDisposition
+            ? .init(reasonCode: unpaidReasonCode, reason: reason, followUpNextAction: next) : nil))
+        // Anything already waiting for this job lands first, so the completion queues behind it.
+        if session.isOffline || !outbox.pending.filter({ $0.jobID == jobID }).isEmpty {
+            queueOffline(queued)
+            completed += 1
+            if !session.isOffline { Task { await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync")) } }
+            return
+        }
         busy = true
         defer { busy = false }
         do {
-            let disposition: FieldUnpaidDisposition? = validDisposition ? .init(reasonCode: unpaidReasonCode, reason: unpaidReason.trimmingCharacters(in: .whitespacesAndNewlines), followUpNextAction: unpaidNextAction.trimmingCharacters(in: .whitespacesAndNewlines)) : nil
             job = try await api.completeFieldJob(jobID, request: .init(unpaidDisposition: disposition))
             completed += 1
             await load()
             await store.refresh(api)
         }
-        catch is CancellationError {} catch { self.error = error.localizedDescription }
+        catch is CancellationError {} catch {
+            if error.isConnectivityFailure { queueOffline(queued); completed += 1 }
+            else { self.error = error.localizedDescription }
+        }
     }
     private func cancel() async {
         busy = true

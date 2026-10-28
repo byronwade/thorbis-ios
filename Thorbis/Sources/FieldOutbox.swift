@@ -1,12 +1,17 @@
 import Foundation
 
-/// A job change made without signal. It is saved to disk before it is ever sent, so a
-/// killed app or a dropped connection resends the same `commandId`, which the server
-/// answers as `duplicate` instead of applying it twice.
+/// A field change made without signal (design.thorbis.com/offline, OF-01). It is saved to disk
+/// before it is ever sent, so a killed app or a dropped connection resends the same id
+/// (`commandId`, payment `idempotencyKey`, media `clientAssetId`), which the server answers
+/// as a duplicate instead of applying it twice (OF-05).
 struct OutboxEntry: Codable, Identifiable, Equatable {
     enum Action: Codable, Equatable {
         case progress(ProgressPayload)
         case note(NotePayload)
+        case acknowledgeCheck(CheckPayload)
+        case complete(CompletePayload)
+        case invoiceSignature(SignaturePayload)
+        case payment(PaymentPayload)
     }
 
     /// `jobs.progress` input (domains/jobs progressJobInputSchema, a strict object).
@@ -22,6 +27,47 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     struct NotePayload: Codable, Equatable {
         let jobId: String
         let body: String
+    }
+
+    /// `jobs.acknowledgeCheck` input (acknowledgeCloseoutCheckInputSchema).
+    struct CheckPayload: Codable, Equatable {
+        let jobId: String
+        let checkKey: String
+    }
+
+    /// `jobs.complete` input (completeJobInputSchema); replays are a natural key on the job.
+    struct CompletePayload: Codable, Equatable {
+        struct Disposition: Codable, Equatable {
+            let reasonCode: String
+            let reason: String
+            let followUpNextAction: String
+        }
+        let jobId: String
+        var unpaidDisposition: Disposition? = nil
+    }
+
+    /// A customer's sign-on-glass for an invoice. Not an offline command: the ink stays on the
+    /// phone under `clientAssetId`, then uploads and authorizes the exact line revision the
+    /// customer saw through the REST routes.
+    struct SignaturePayload: Codable, Equatable {
+        let jobId: String
+        let invoiceId: String
+        let expectedLinesRevision: Int
+        let signerName: String
+        let signedAt: String
+        let clientAssetId: String
+    }
+
+    /// Cash or check taken without signal (OF-08). Never a `/v1/commands` entry: packages/sync
+    /// keeps `payments.record` online-only, so this waits as a record and goes through the normal
+    /// payment route once online, where the server checks the balance. The idempotency key is the
+    /// one the collect sheet minted, so a retry can never record it twice.
+    struct PaymentPayload: Codable, Equatable {
+        let invoiceId: String
+        var jobId: String? = nil
+        let amountCents: Int
+        let method: String
+        let idempotencyKey: String
     }
 
     enum State: Codable, Equatable {
@@ -43,18 +89,41 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     /// Set when the command endpoint answered policy_superseded: the change is resent
     /// through the REST route, which authorizes against current policy itself.
     var restOnly: Bool? = nil
+    /// What the person saw when they made it, for Review ("Confirmed: Area cleaned up").
+    var label: String? = nil
 
+    /// The record whose changes land in order (OF-06): the job, or the invoice for a payment
+    /// on an invoice with no job.
     var jobID: String {
         switch action {
         case .progress(let payload): payload.jobId
         case .note(let payload): payload.jobId
+        case .acknowledgeCheck(let payload): payload.jobId
+        case .complete(let payload): payload.jobId
+        case .invoiceSignature(let payload): payload.jobId
+        case .payment(let payload): payload.jobId ?? payload.invoiceId
         }
     }
 
-    var command: String {
+    /// The registered offline command, or nil for changes that only replay through REST.
+    var command: String? {
         switch action {
         case .progress: "jobs.progress"
         case .note: "jobs.addNote"
+        case .acknowledgeCheck: "jobs.acknowledgeCheck"
+        case .complete: "jobs.complete"
+        case .invoiceSignature, .payment: nil
+        }
+    }
+
+    var viaCommand: Bool { command != nil && restOnly != true }
+
+    /// The job status this change moves to, for showing the step as waiting (OF-02).
+    var expectedStatus: String? {
+        switch action {
+        case .progress(let payload): payload.to
+        case .complete: "completed"
+        default: nil
         }
     }
 
@@ -68,6 +137,10 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
             default: "Status → \(payload.to.statusLabel)"
             }
         case .note: "Note"
+        case .acknowledgeCheck: label.map { "Confirmed: \($0)" } ?? "Checklist item confirmed"
+        case .complete: "Completed job"
+        case .invoiceSignature(let payload): "Signature from \(payload.signerName)"
+        case .payment(let payload): "\(payload.method.capitalized) \(money(payload.amountCents, currency: "USD"))"
         }
     }
 }
@@ -98,14 +171,18 @@ final class FieldOutbox: ObservableObject {
     @Published private(set) var syncing = false
     /// How many changes the last sync sent, for the "back online" banner.
     @Published private(set) var lastSyncSent = 0
+    /// Photos waiting in `PendingPhotoStore`, counted in the one sync line (OF-03).
+    @Published private(set) var waitingPhotos = 0
 
     var pending: [OutboxEntry] { entries.filter { $0.state == .pending } }
+    /// Everything on this phone that hasn't reached the server yet.
+    var waitingCount: Int { pending.count + waitingPhotos }
     var needsReview: [OutboxEntry] { entries.filter { $0.state != .pending } }
 
     /// design.thorbis.com MA-17: signing out deletes this phone's saved work, so the dialog says
     /// what would be lost.
     var signOutWarning: String {
-        let waiting = entries.count + otherWorkspaceEntryCount
+        let waiting = entries.count + otherWorkspaceEntryCount + waitingPhotos
         return waiting == 0
             ? "Jobs and customers saved on this phone are removed. You can sign back in at any time."
             : "\(waiting) change\(waiting == 1 ? "" : "s") on this phone \(waiting == 1 ? "hasn't" : "haven't") synced yet. Signing out deletes \(waiting == 1 ? "it" : "them")."
@@ -160,12 +237,20 @@ final class FieldOutbox: ObservableObject {
         guard identity?.actorID != actorID || identity?.organizationID != organizationID else { return }
         identity = (actorID, organizationID)
         entries = file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) } ?? []
+        countPhotos()
+    }
+
+    /// Re-reads the waiting photo count after a photo is saved or sent.
+    func countPhotos() {
+        let count = PendingPhotoStore.list().count
+        if waitingPhotos != count { waitingPhotos = count }
     }
 
     /// Sign-out: unsent changes for this phone are deleted with the session.
     func clearAll() {
         identity = nil
         entries = []
+        waitingPhotos = 0
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -178,14 +263,52 @@ final class FieldOutbox: ObservableObject {
     }
 
     @discardableResult
-    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int) -> OutboxEntry? {
+    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, label: String? = nil) -> OutboxEntry? {
         guard let identity else { return nil }
-        let entry = OutboxEntry(id: UUID().uuidString.lowercased(), deviceId: deviceID, actorId: identity.actorID,
+        // A second tap on the same collected payment is the same payment, not another one.
+        if case .payment(let payment) = action,
+           let existing = entries.first(where: { if case .payment(let other) = $0.action { other.idempotencyKey == payment.idempotencyKey } else { false } }) {
+            return existing
+        }
+        var entry = OutboxEntry(id: UUID().uuidString.lowercased(), deviceId: deviceID, actorId: identity.actorID,
                                 organizationId: identity.organizationID, policyVersion: policyVersion,
                                 createdAt: Date(), action: action)
+        entry.label = label
         entries.append(entry)
         persist()
         return entry
+    }
+
+    private var signatureDirectory: URL { directory.appendingPathComponent("Signatures", isDirectory: true) }
+
+    /// Keeps a customer's ink on the phone and queues the invoice authorization that uses it.
+    @discardableResult
+    func enqueueSignature(_ png: Data, payload: OutboxEntry.SignaturePayload, policyVersion: Int) -> OutboxEntry? {
+        guard identity != nil, UUID(uuidString: payload.clientAssetId) != nil else { return nil }
+        do {
+            try FileManager.default.createDirectory(at: signatureDirectory, withIntermediateDirectories: true)
+            try png.write(to: signatureDirectory.appendingPathComponent("\(payload.clientAssetId).png"),
+                          options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } catch { return nil }
+        return enqueue(.invoiceSignature(payload), policyVersion: policyVersion)
+    }
+
+    func signatureData(_ clientAssetID: String) -> Data? {
+        try? Data(contentsOf: signatureDirectory.appendingPathComponent("\(clientAssetID).png"))
+    }
+
+    /// Cash and check waiting to record on an invoice (OF-08). Never counted as paid.
+    func waitingPayments(invoiceID: String) -> [OutboxEntry.PaymentPayload] {
+        entries.compactMap { if case .payment(let payment) = $0.action, payment.invoiceId == invoiceID { payment } else { nil } }
+    }
+
+    func waitingSignature(invoiceID: String) -> OutboxEntry.SignaturePayload? {
+        entries.lazy.compactMap { if case .invoiceSignature(let payload) = $0.action, payload.invoiceId == invoiceID { payload } else { nil } }.last
+    }
+
+    /// Checklist items confirmed on this phone and not yet on the server.
+    func waitingChecks(jobID: String) -> Set<String> {
+        Set(entries.compactMap { if case .acknowledgeCheck(let check) = $0.action, check.jobId == jobID { check.checkKey } else { nil } })
     }
 
     func learn(_ job: JobRecord) {
@@ -199,7 +322,7 @@ final class FieldOutbox: ObservableObject {
 
     /// Drops a refused change; the job's held changes go back in the queue.
     func dismiss(_ entry: OutboxEntry) {
-        entries.removeAll { $0.id == entry.id }
+        finish(entry.id)
         release(jobID: entry.jobID)
         persist()
     }
@@ -221,42 +344,63 @@ final class FieldOutbox: ObservableObject {
 
     private static let lifecycleRank = ["scheduled": 0, "dispatched": 1, "en_route": 2, "arrived": 3, "in_progress": 4, "completed": 5]
 
-    /// A step that timed out on the phone may still have reached the server. If the job is
-    /// already at or past that step, the change is done, not refused.
+    /// A change that timed out on the phone may still have reached the server. If the server
+    /// already shows it, the change is done, not refused.
     private func alreadyApplied(_ entry: OutboxEntry, api: APIClient) async -> Bool {
-        guard case .progress(let payload) = entry.action, let target = Self.lifecycleRank[payload.to],
-              let job = try? await api.fieldJob(payload.jobId), let current = Self.lifecycleRank[job.status] else { return false }
-        return current >= target
+        switch entry.action {
+        case .progress(let payload):
+            guard let target = Self.lifecycleRank[payload.to], let job = try? await api.fieldJob(payload.jobId),
+                  let current = Self.lifecycleRank[job.status] else { return false }
+            return current >= target
+        case .complete(let payload):
+            return (try? await api.fieldJob(payload.jobId))?.status == "completed"
+        case .acknowledgeCheck(let payload):
+            return (try? await api.fieldCloseout(payload.jobId))?.facts.acknowledgedCheckKeys.contains(payload.checkKey) == true
+        case .invoiceSignature(let payload):
+            return (try? await api.fieldInvoice(payload.invoiceId))?.customerAuthorization?.linesRevision == payload.expectedLinesRevision
+        case .payment(let payload):
+            return (try? await api.fieldPayments(payload.invoiceId))?.contains { $0.idempotencyKey == payload.idempotencyKey } == true
+        case .note:
+            return false
+        }
     }
 
     /// The status this phone expects a job to have once its queued changes land.
     func pendingStatus(for jobID: String) -> String? {
-        pending.last { $0.jobID == jobID && { if case .progress = $0.action { true } else { false } }($0) }
-            .flatMap { if case .progress(let payload) = $0.action { payload.to } else { nil } }
+        pending.last { $0.jobID == jobID && $0.expectedStatus != nil }?.expectedStatus
     }
 
     func pendingNotes(for jobID: String) -> [OutboxEntry] {
         entries.filter { $0.jobID == jobID && { if case .note = $0.action { true } else { false } }($0) }
     }
 
-    /// Sends queued changes oldest first. Uses the offline command endpoint when the
-    /// workspace has it, otherwise the same REST routes the app uses online.
+    /// Sends queued changes oldest first, in order (OF-06). Runs of offline commands go to the
+    /// command endpoint when the workspace has it; signatures, payments and everything on a
+    /// workspace without it go through the same REST routes the app uses online.
     func drain(api: APIClient, useCommandEndpoint: Bool) async {
         guard !syncing, !pending.isEmpty else { return }
         syncing = true
         defer { syncing = false }
         var sent = 0
-        if useCommandEndpoint {
-            sent = await drainCommands(api: api)
-            // Changes the command endpoint refused only for a stale permission snapshot.
-            if pending.contains(where: { $0.restOnly == true }) { sent += await drainREST(api: api, onlyRestFallback: true) }
-        } else {
-            sent = await drainREST(api: api)
+        while let first = pending.first {
+            if useCommandEndpoint && first.viaCommand {
+                let run = Array(pending.prefix { $0.viaCommand }.prefix(50))
+                guard let applied = await sendCommands(run, api: api) else { break }
+                sent += applied
+            } else {
+                switch await sendREST(first, api: api) {
+                case .sent: sent += 1
+                case .refused: continue
+                case .stop: lastSyncSent = sent; return
+                }
+            }
         }
         lastSyncSent = sent
     }
 
-    private func drainCommands(api: APIClient) async -> Int {
+    /// Sends one batch; nil means stop (no signal, a server error, or a batch the server did
+    /// not fully answer, which stops the loop rather than spinning).
+    private func sendCommands(_ batch: [OutboxEntry], api: APIClient) async -> Int? {
         struct Envelope: Encodable {
             let commandId, deviceId, actorId, organizationId: String
             let policyVersion: Int
@@ -270,88 +414,121 @@ final class FieldOutbox: ObservableObject {
                 switch action {
                 case .progress(let payload): try payload.encode(to: encoder)
                 case .note(let payload): try payload.encode(to: encoder)
+                case .acknowledgeCheck(let payload): try payload.encode(to: encoder)
+                case .complete(let payload): try payload.encode(to: encoder)
+                case .invoiceSignature, .payment: break // Never batched: `command` is nil.
                 }
             }
         }
         struct Batch: Encodable { let commands: [Envelope] }
         struct Result: Decodable { let outcomes: [OutboxOutcome] }
-        var sent = 0
         let stamp = ISO8601DateFormatter()
         stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        while true {
-            let batch = Array(pending.filter { $0.restOnly != true }.prefix(50))
-            guard !batch.isEmpty else { break }
-            let envelopes = batch.map {
-                Envelope(commandId: $0.id, deviceId: $0.deviceId, actorId: $0.actorId, organizationId: $0.organizationId,
-                         policyVersion: $0.policyVersion, command: $0.command, clientCreatedAt: stamp.string(from: $0.createdAt),
-                         payload: AnyPayload(action: $0.action))
-            }
-            do {
-                let result: Result = try await api.send("POST", "/v1/commands", body: Batch(commands: envelopes))
-                for outcome in result.outcomes {
-                    if outcome.status == "applied" || outcome.status == "duplicate" {
-                        entries.removeAll { $0.id == outcome.commandId }
-                        sent += 1
-                    } else if outcome.category == "policy_superseded",
-                              let index = entries.firstIndex(where: { $0.id == outcome.commandId }) {
-                        entries[index].restOnly = true
-                    } else if let entry = entries.first(where: { $0.id == outcome.commandId }), outcome.category == "conflict",
-                              await alreadyApplied(entry, api: api) {
-                        entries.removeAll { $0.id == outcome.commandId }
-                        sent += 1
-                    } else {
-                        reject(outcome.commandId, reason: outcome.detail ?? outcome.category ?? "The server refused this change.")
-                    }
-                }
-                persist()
-                // A batch the server did not fully answer stops the loop rather than spinning.
-                if result.outcomes.count < batch.count { break }
-            } catch {
-                break // No signal or a server error: everything stays queued.
+        let envelopes = batch.compactMap { entry in
+            entry.command.map {
+                Envelope(commandId: entry.id, deviceId: entry.deviceId, actorId: entry.actorId, organizationId: entry.organizationId,
+                         policyVersion: entry.policyVersion, command: $0, clientCreatedAt: stamp.string(from: entry.createdAt),
+                         payload: AnyPayload(action: entry.action))
             }
         }
-        return sent
+        var sent = 0
+        do {
+            let result: Result = try await api.send("POST", "/v1/commands", body: Batch(commands: envelopes))
+            for outcome in result.outcomes {
+                if outcome.status == "applied" || outcome.status == "duplicate" {
+                    finish(outcome.commandId)
+                    sent += 1
+                } else if outcome.category == "policy_superseded",
+                          let index = entries.firstIndex(where: { $0.id == outcome.commandId }) {
+                    entries[index].restOnly = true
+                } else if let entry = entries.first(where: { $0.id == outcome.commandId }), outcome.category == "conflict",
+                          await alreadyApplied(entry, api: api) {
+                    finish(outcome.commandId)
+                    sent += 1
+                } else {
+                    reject(outcome.commandId, reason: outcome.detail ?? outcome.category ?? "The server refused this change.")
+                }
+            }
+            persist()
+            let answered = Set(result.outcomes.map(\.commandId))
+            return batch.allSatisfy { answered.contains($0.id) } ? sent : nil
+        } catch {
+            return nil // No signal or a server error: everything stays queued.
+        }
     }
 
-    private func drainREST(api: APIClient, onlyRestFallback: Bool = false) async -> Int {
-        var sent = 0
-        for entry in pending where !onlyRestFallback || entry.restOnly == true {
-            guard entries.first(where: { $0.id == entry.id })?.state == .pending else { continue }
-            do {
-                switch entry.action {
-                case .progress(let payload):
-                    let request: FieldProgressRequest = switch payload.to {
-                    case "en_route": .enRoute(etaMinutes: payload.etaMinutes)
-                    case "arrived": .arrived(method: .manual)
-                    case "in_progress": .start
-                    case "dispatched": .dispatched
-                    default: .scheduled
-                    }
-                    _ = try await api.progressFieldJob(payload.jobId, request: request)
-                case .note(let payload):
-                    _ = try await api.addFieldNote(payload.jobId, body: payload.body)
+    private enum RESTResult { case sent, refused, stop }
+
+    private func sendREST(_ entry: OutboxEntry, api: APIClient) async -> RESTResult {
+        do {
+            switch entry.action {
+            case .progress(let payload):
+                let request: FieldProgressRequest = switch payload.to {
+                case "en_route": .enRoute(etaMinutes: payload.etaMinutes)
+                case "arrived": .arrived(method: .manual)
+                case "in_progress": .start
+                case "dispatched": .dispatched
+                default: .scheduled
                 }
-                entries.removeAll { $0.id == entry.id }
-                sent += 1
-                persist()
-            } catch is CancellationError {
-                break
-            } catch {
-                if error.isConnectivityFailure { break }
-                if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status), status != 401, status != 429 {
-                    if status == 409, await alreadyApplied(entry, api: api) {
-                        entries.removeAll { $0.id == entry.id }
-                        sent += 1
-                    } else {
-                        reject(entry.id, reason: problem.errorDescription ?? "The server refused this change.")
-                    }
+                _ = try await api.progressFieldJob(payload.jobId, request: request)
+            case .note(let payload):
+                _ = try await api.addFieldNote(payload.jobId, body: payload.body)
+            case .acknowledgeCheck(let payload):
+                _ = try await api.acknowledgeFieldCheck(payload.jobId, checkKey: payload.checkKey)
+            case .complete(let payload):
+                let disposition = payload.unpaidDisposition.map {
+                    FieldUnpaidDisposition(reasonCode: $0.reasonCode, reason: $0.reason, followUpNextAction: $0.followUpNextAction)
+                }
+                _ = try await api.completeFieldJob(payload.jobId, request: .init(unpaidDisposition: disposition))
+            case .invoiceSignature(let payload):
+                guard let png = signatureData(payload.clientAssetId) else {
+                    reject(entry.id, reason: "The signature is no longer on this phone. Ask the customer to sign again.")
                     persist()
-                    continue
+                    return .refused
                 }
-                break // 5xx, 401 or rate limit: try again later.
+                let asset = try await MediaTransfer(api: api).upload(jobID: payload.jobId, clientAssetID: payload.clientAssetId,
+                                                                     kind: "photo", mime: "image/png", originalFilename: "signature.png",
+                                                                     data: png, tags: ["signature"])
+                _ = try await api.authorizeFieldInvoice(payload.invoiceId, expectedLinesRevision: payload.expectedLinesRevision,
+                                                        signature: .init(signerName: payload.signerName, signedAt: payload.signedAt,
+                                                                         imageMediaId: asset.id))
+            case .payment(let payload):
+                guard let method = FieldPaymentMethod(rawValue: payload.method) else {
+                    reject(entry.id, reason: "This payment method can't be recorded from the phone.")
+                    persist()
+                    return .refused
+                }
+                _ = try await api.recordFieldPayment(payload.invoiceId, request: .init(
+                    amount: .init(amount: payload.amountCents, currency: "USD"), method: method, idempotencyKey: payload.idempotencyKey))
             }
+            finish(entry.id)
+            persist()
+            return .sent
+        } catch is CancellationError {
+            return .stop
+        } catch {
+            if error.isConnectivityFailure { return .stop }
+            if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status), status != 401, status != 429 {
+                if status == 409, await alreadyApplied(entry, api: api) {
+                    finish(entry.id)
+                    persist()
+                    return .sent
+                }
+                reject(entry.id, reason: problem.errorDescription ?? "The server refused this change.")
+                persist()
+                return .refused
+            }
+            return .stop // 5xx, 401, rate limit or a storage hiccup: try again later.
         }
-        return sent
+    }
+
+    /// Clears a change the server has, with the ink it no longer needs.
+    private func finish(_ id: String) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        if case .invoiceSignature(let payload) = entries[index].action {
+            try? FileManager.default.removeItem(at: signatureDirectory.appendingPathComponent("\(payload.clientAssetId).png"))
+        }
+        entries.remove(at: index)
     }
 
     #if DEBUG

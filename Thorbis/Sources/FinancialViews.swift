@@ -364,6 +364,7 @@ struct InvoiceDetailView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @EnvironmentObject private var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @State private var record: InvoiceRecord?
     @State private var error: String?
@@ -401,6 +402,13 @@ struct InvoiceDetailView: View {
                     }
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
+                    } else if let waiting = outbox.waitingSignature(invoiceID: record.id), waiting.expectedLinesRevision == record.linesRevision {
+                        // OF-02: signed on this phone, not yet on the server.
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Signed by \(waiting.signerName)").font(Theme.font(15, weight: .medium))
+                            WaitingToSyncLabel()
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
                         Button { showSignature = true } label: { commercialAction("Get customer signature", icon: "signature") }
                             .buttonStyle(.plain)
@@ -450,7 +458,15 @@ struct InvoiceDetailView: View {
                 let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                 SignatureCaptureSheet(title: "Sign for \(money(total, currency: record.currency))",
                                       summary: "By signing, \(store.customerName(record.customerId)) authorizes the work and charges on this invoice.",
-                                      jobID: jobID, suggestedName: store.customerName(record.customerId)) { signature in
+                                      jobID: jobID, suggestedName: store.customerName(record.customerId),
+                                      queueOffline: { png, assetID, signer, signedAt in
+                                          // OF-01: the ink stays on the phone and authorizes this exact revision once online.
+                                          outbox.enqueueSignature(png, payload: .init(jobId: jobID, invoiceId: record.id,
+                                                                                      expectedLinesRevision: record.linesRevision,
+                                                                                      signerName: signer, signedAt: signedAt,
+                                                                                      clientAssetId: assetID),
+                                                                  policyVersion: session.policyVersion ?? 0) != nil
+                                      }) { signature in
                     do {
                         self.record = try await api.authorizeFieldInvoice(id, expectedLinesRevision: record.linesRevision, signature: signature)
                         return nil
@@ -570,6 +586,8 @@ struct InvoiceDetailView: View {
     private func load() async {
         if paymentModel == nil {
             paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id)
+            paymentModel?.outbox = outbox
+            paymentModel?.policyVersion = session.policyVersion ?? 0
         }
         guard let paymentModel else { return }
         await paymentModel.load()

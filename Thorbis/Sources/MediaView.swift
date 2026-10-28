@@ -8,6 +8,7 @@ struct JobMediaView: View {
     let jobID: String
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @State private var records: [MediaAssetRecord] = []
     @State private var selection: PhotosPickerItem?
     @State private var selectedData: Data?
@@ -319,6 +320,7 @@ struct JobMediaView: View {
             return
         }
         waiting = PendingPhotoStore.list(jobID: jobID)
+        outbox.countPhotos()
         await send(photo)
     }
 
@@ -331,6 +333,7 @@ struct JobMediaView: View {
                                                          originalFilename: photo.filename, data: data, tags: photo.tags)
             PendingPhotoStore.remove(photo)
             waiting = PendingPhotoStore.list(jobID: jobID)
+            outbox.countPhotos()
             error = nil
             await load()
         } catch is CancellationError {

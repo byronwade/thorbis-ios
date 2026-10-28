@@ -8,9 +8,12 @@ struct SignatureCaptureSheet: View {
     let summary: String
     let jobID: String
     var suggestedName = ""
+    /// Saves the ink on the phone to send once online (OF-01); nil where signing needs signal.
+    var queueOffline: (@MainActor (_ png: Data, _ clientAssetID: String, _ signerName: String, _ signedAt: String) -> Bool)? = nil
     /// Runs the approval or authorization with the uploaded signature; returns an error message on failure.
     let submit: (FieldSignatureInput) async -> String?
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var strokes: [[CGPoint]] = []
@@ -98,10 +101,21 @@ struct SignatureCaptureSheet: View {
         }
     }
 
+    /// OF-01: without signal the ink is saved on the phone and sent once online, when the caller
+    /// allows it. Returns true when it was saved.
+    private func saveForLater(key: String) -> Bool {
+        guard let queueOffline, let png = SignatureInk.png(strokes) else { return false }
+        return queueOffline(png, key, trimmedName, ISO8601DateFormatter().string(from: Date()))
+    }
+
     private func sign() async {
         busy = true
         defer { busy = false }
         error = nil
+        if session.isOffline, uploaded == nil, saveForLater(key: clientAssetID) {
+            dismiss()
+            return
+        }
         do {
             let key = clientAssetID
             let mediaID: String
@@ -122,6 +136,10 @@ struct SignatureCaptureSheet: View {
             if let message = await submit(input) { error = message } else { dismiss() }
         } catch is CancellationError {
         } catch {
+            if error.isConnectivityFailure, uploaded == nil, saveForLater(key: clientAssetID) {
+                dismiss()
+                return
+            }
             self.error = error.isConnectivityFailure ? "Signing needs a connection. Try again when you have signal." : error.localizedDescription
         }
     }

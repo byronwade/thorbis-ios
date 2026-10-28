@@ -13,6 +13,21 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-work-offline",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "wifi.slash", title: "Wrap up a job with no signal",
+                      detail: "Confirm the checklist and complete the job offline. It all sends once you're back online."),
+                .init(symbol: "banknote", title: "Take cash or a check offline",
+                      detail: "The payment waits on the invoice and records itself the moment you have signal again."),
+                .init(symbol: "signature", title: "Customers can sign without signal",
+                      detail: "The signature is kept on your phone and added to the invoice when you reconnect."),
+                .init(symbol: "arrow.triangle.2.circlepath", title: "One line shows what's waiting",
+                      detail: "The top of the app counts changes and photos still on your phone, then says when they've synced."),
+            ],
+            fixes: 0
+        ),
+        ReleaseNote(
             id: "2026-10-28-job-screen",
             date: "2026-10-28",
             highlights: [
