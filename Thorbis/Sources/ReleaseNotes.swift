@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-sizes-any-order",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "ruler", title: "Sizes found however you type them",
+                      detail: "Pipe 10 mm finds an item written Pipe 10mm, and the words can go in any order."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-28-exact-model-numbers",
             date: "2026-10-28",
             highlights: [

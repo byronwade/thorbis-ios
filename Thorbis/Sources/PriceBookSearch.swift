@@ -83,7 +83,11 @@ struct PriceBookSearchIndex {
         }
         // "R-410A" typed against a book that writes "R410A": try the query with each letter word
         // joined to its neighbouring number too, the same join the index makes.
-        let spellings = Set([queryWords, Self.joinedModelWords(queryWords)]).map { ($0, $0.joined(separator: " ")) }
+        // "R-410A" against "R410A", or "pipe 10 mm" against "Pipe 10mm": also try each typed number
+        // joined to the word before it and to the word after it.
+        let spellings = Set([
+            queryWords, Self.joinedModelWords(queryWords, after: false), Self.joinedModelWords(queryWords, after: true),
+        ]).map { ($0, $0.joined(separator: " ")) }
         var scored: [(entry: Entry, tier: Int, frecency: Double)] = []
         for entry in candidates {
             guard let tier = spellings.compactMap({ Self.tier(of: entry, queryWords: $0.0, normalizedQuery: $0.1) }).min()
@@ -118,22 +122,30 @@ struct PriceBookSearchIndex {
 
     // MARK: Matching
 
-    /// Each letter word joined to the number next to it ("r", "410a" → "r410a"); two numbers never
+    /// Each number joined to a letter word beside it ("r", "410a" → "r410a"; "10", "mm" → "10mm").
+    /// `after` tries the word after the number first, otherwise the word before; two numbers never
     /// join. The index adds the same joins for descriptions.
-    static func joinedModelWords(_ words: [String]) -> [String] {
+    static func joinedModelWords(_ words: [String], after: Bool) -> [String] {
         var joined: [String] = []
-        var index = words.startIndex
-        while index < words.endIndex {
+        var previousFree = false
+        var index = 0
+        while index < words.count {
             let word = words[index]
-            let next = words.index(after: index)
-            if next < words.endIndex,
-               word.contains(where: \.isNumber) != words[next].contains(where: \.isNumber) {
-                joined.append(word + words[next])
-                index = words.index(after: next)
+            let nextFree = index + 1 < words.count && !words[index + 1].contains(where: \.isNumber)
+            if !word.contains(where: \.isNumber) {
+                joined.append(word)
+                previousFree = true
+            } else if nextFree && (after || !previousFree) {
+                joined.append(word + words[index + 1])
+                index += 1
+                previousFree = false
+            } else if previousFree, let previous = joined.popLast() {
+                joined.append(previous + word)
+                previousFree = false
             } else {
                 joined.append(word)
-                index = next
             }
+            index += 1
         }
         return joined
     }
