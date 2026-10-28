@@ -72,7 +72,7 @@ struct ReportsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Reports").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text("Live from the server · UTC periods").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text("How work and money are moving").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
                 if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab) }
@@ -239,7 +239,12 @@ struct ReportsView: View {
     }
 
     private func footer(_ version: Int, _ generatedAt: String) -> some View {
-        Text("Live server report · v\(version)").font(Theme.monoFont(11)).foregroundStyle(Theme.muted).padding(.top, 16)
+        Text(generatedLabel(generatedAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 16)
+    }
+
+    private func generatedLabel(_ raw: String) -> String {
+        guard let date = JobFiltering.date(raw) else { return "Months follow UTC" }
+        return "Updated \(date.formatted(.relative(presentation: .named))) · months follow UTC"
     }
 
     private func monthName(_ raw: String) -> String {
