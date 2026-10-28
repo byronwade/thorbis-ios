@@ -23,7 +23,8 @@ struct EstimatesView: View {
                         NavigationLink { EstimateDetailView(id: record.id) } label: {
                             PaperDocumentRow(reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
                                              subtitle: store.customerName(record.customerId), status: record.status,
-                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
+                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") },
+                                             showsStatus: false)
                         }.buttonStyle(RowPressStyle())
                     }
                 }
@@ -241,7 +242,8 @@ struct InvoicesView: View {
                             PaperDocumentRow(reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
                                              subtitle: record.status == "issued" ? (due.map { "\(money($0, currency: record.currency)) due" } ?? "Balance unavailable") : "Paid \(money(record.amountPaid, currency: record.currency))",
                                              status: record.status,
-                                             amount: total.map { money($0, currency: record.currency) })
+                                             amount: total.map { money($0, currency: record.currency) },
+                                             showsStatus: false)
                         }.buttonStyle(RowPressStyle())
                     }
                 }
@@ -563,28 +565,36 @@ func paperDocumentGroups<T>(_ records: [T], status: KeyPath<T, String>, order: [
     return keys.map { ($0, grouped[$0] ?? []) }
 }
 
-/// Paper's document row: mono reference, title over a muted line, status chip, mono amount.
+/// Paper's document row, shaped like job and customer rows: the title over one muted line
+/// ("customer · EST-1A2B", reference in mono), the amount on the right. Lists grouped by
+/// status pass `showsStatus: false`, since the group header already says it.
 struct PaperDocumentRow: View {
     let reference: String
     let title: String
     let subtitle: String
     let status: String
     let amount: String?
+    var showsStatus = true
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(reference).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
-                Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(subtitle).font(Theme.font(13)).lineLimit(1)
+                    Text("·").font(Theme.font(13))
+                    Text(reference).font(Theme.monoFont(12, weight: .medium)).fixedSize()
+                }
+                .foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
                 if let amount { Text(amount).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground) }
-                PaperStatusChip(status: status)
+                if showsStatus { PaperStatusChip(status: status) }
             }
         }
-        .padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
