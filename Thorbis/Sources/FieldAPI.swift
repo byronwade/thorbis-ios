@@ -1078,6 +1078,11 @@ extension APIClient {
 
     func fieldInvoices() async throws -> [InvoiceRecord] { try await allFieldPages("/v1/invoices") }
     func fieldInvoice(_ id: String) async throws -> InvoiceRecord { try await send("GET", fieldPath("/v1/invoices", id: id)) }
+    /// A job's invoices, drafts included (`GET /v1/jobs/{id}/invoices`). Unlike the invoice list this
+    /// answers for a technician through the assigned job, so a fresh device still sees the job's paper.
+    func fieldJobInvoices(_ jobID: String) async throws -> [InvoiceRecord] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/invoices"))
+    }
     func ensureFieldCompletionInvoice(_ jobID: String) async throws -> InvoiceRecord {
         try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/completion-invoice"), body: EmptyObject())
     }

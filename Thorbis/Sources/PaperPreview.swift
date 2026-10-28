@@ -352,19 +352,34 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": [waiting]]
         case "/v1/query":
-            let priceBookID = "00000000-0000-4000-8000-000000009201"
+            // The first item keeps the id the preview estimate's price book line points at.
+            let catalog: [(String, String, String, Int)] = [
+                ("Replace capacitor", "each", "material", 12500),
+                ("Capacitor, 45/5 MFD dual run", "each", "material", 14500),
+                ("Capacitor, 35/5 MFD dual run", "each", "material", 13500),
+                ("Hard start kit with capacitor", "each", "material", 21000),
+                ("Diagnostic visit", "visit", "service", 8900),
+                ("Condenser coil cleaning", "each", "service", 12000),
+                ("Refrigerant R-410A", "lb", "material", 9500),
+                ("Licensed technician labor", "hour", "labor", 14000),
+                ("Contactor, 30 amp single pole", "each", "material", 6800),
+                ("Surge protector, installed", "each", "assembly", 39500),
+            ]
+            let items: [[String: Any]] = catalog.enumerated().map { offset, entry in
+                let id = String(format: "00000000-0000-4000-8000-%012d", 9201 + offset)
+                return ["id": id, "resourceId": "price_book_items", "label": entry.0,
+                        "subtitle": "\(entry.2.capitalized) · \(entry.1)",
+                        "fields": ["price_book_items.id": id,
+                                   "price_book_items.current_revision": 4,
+                                   "price_book_items.description": entry.0,
+                                   "price_book_items.unit": entry.1,
+                                   "price_book_items.sell_price_amount": entry.3,
+                                   "price_book_items.currency": "USD",
+                                   "price_book_items.tax_classification": "taxable",
+                                   "price_book_items.kind": entry.2]]
+            }
             return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
-                    "items": [["id": priceBookID, "resourceId": "price_book_items", "label": "Replace capacitor",
-                               "subtitle": "Material · each",
-                               "fields": ["price_book_items.id": priceBookID,
-                                          "price_book_items.current_revision": 4,
-                                          "price_book_items.description": "Replace capacitor",
-                                          "price_book_items.unit": "each",
-                                          "price_book_items.sell_price_amount": 12500,
-                                          "price_book_items.currency": "USD",
-                                          "price_book_items.tax_classification": "taxable",
-                                          "price_book_items.kind": "material"]]],
-                    "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
+                    "items": items, "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
         default: break
         }
         for job in jobs() {
@@ -374,6 +389,37 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
+            if path == "/v1/jobs/\(id)/booking-call" {
+                return ["call": [
+                    "id": "00000000-0000-4000-8000-000000009601", "status": "completed", "direction": "inbound",
+                    "callerNumber": "(555) 010-0100", "callerName": "Dana Ruiz", "jobId": id,
+                    "linkedAt": "2026-10-27T15:20:00Z", "startedAt": "2026-10-27T15:12:00Z", "endedAt": "2026-10-27T15:15:12Z",
+                    "durationSeconds": 192,
+                    "recording": ["status": "available", "durationSeconds": 192,
+                                  "contentPath": "/v1/calls/00000000-0000-4000-8000-000000009601/recording"],
+                    "summary": ["text": "Water heater leaking at the base since this morning. Works from home; call 30 minutes ahead. Side gate code 4471.",
+                                "source": "model"],
+                    "transcriptStatus": "available",
+                    "transcript": [
+                        ["sequence": 1, "speaker": "business", "text": "Thanks for calling, how can we help?"],
+                        ["sequence": 2, "speaker": "caller", "text": "My water heater is leaking at the bottom. There's a puddle in the garage."],
+                        ["sequence": 3, "speaker": "business", "text": "We can have someone out tomorrow morning. Any gate code or pets?"],
+                        ["sequence": 4, "speaker": "caller", "text": "Side gate is 4471. The dog is friendly. Please call half an hour before."],
+                    ],
+                    "disclosure": "This call may be recorded for quality and training.",
+                ]]
+            }
+            if path == "/v1/jobs/\(id)/visit-history" {
+                return ["items": [
+                    ["id": "00000000-0000-4000-8000-000000009501", "title": "Spring AC tune-up", "status": "completed",
+                     "notes": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit.",
+                     "assignedToUserId": "00000000-0000-4000-8000-000000008801", "scheduledFor": "2026-04-14T16:00:00Z",
+                     "completedAt": "2026-04-14T17:20:00Z", "createdAt": "2026-04-02T10:00:00Z"],
+                    ["id": "00000000-0000-4000-8000-000000009502", "title": "Water heater flush", "status": "completed",
+                     "notes": "Sediment heavy. Anode rod due next year.", "assignedToUserId": actor,
+                     "scheduledFor": "2025-11-03T15:00:00Z", "completedAt": "2025-11-03T16:05:00Z", "createdAt": "2025-10-28T10:00:00Z"]
+                ]]
+            }
         }
         for customer in customers() {
             guard let id = customer["id"] as? String, let name = customer["name"] as? String, let address = customer["address"] as? String else { continue }

@@ -153,9 +153,14 @@ struct PublicEstimateActionView: View {
                 .tracking(-0.35)
                 .foregroundStyle(Theme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Revision \(action.revisionNumber) · \(money(selectedOption?.totalAmount ?? action.totalAmount, currency: action.currency))")
-                .font(Theme.monoFont(13, weight: .medium))
-                .foregroundStyle(Theme.muted)
+            // MF-01/CP-02: the price is the biggest thing on the estimate, labelled.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Total").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: action.currency))
+                    .moneyStyle(.hero).foregroundStyle(Theme.foreground)
+            }
+            .padding(.top, 6)
+            .accessibilityElement(children: .combine)
         }
 
         if let message = model.actionError {
@@ -185,11 +190,11 @@ struct PublicEstimateActionView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(line.description).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
                                 Text("\(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each")
-                                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
                             }
                             Spacer(minLength: 8)
                             Text(money(line.quantity * line.unitPrice, currency: action.currency))
-                                .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .moneyStyle(.row).foregroundStyle(Theme.foreground)
                         }
                         .padding(.vertical, 12)
                         if index != lines.count - 1 { Rectangle().fill(Theme.border).frame(height: 1) }
@@ -269,7 +274,7 @@ struct PublicEstimateActionView: View {
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 ForEach(action.scopeLines ?? []) { line in
                     Label("\(line.description) — \(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each", systemImage: "checkmark")
-                        .font(Theme.font(13)).foregroundStyle(Theme.foreground)
+                        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.foreground)
                 }
             }
             .padding(16)
@@ -286,7 +291,7 @@ struct PublicEstimateActionView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(option.title).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
                         Spacer(minLength: 6)
-                        Text(money(option.totalAmount, currency: option.currency)).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                        Text(money(option.totalAmount, currency: option.currency)).moneyStyle(.total).foregroundStyle(Theme.foreground)
                     }
                     Text(option.description).font(Theme.font(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
