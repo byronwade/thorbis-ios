@@ -81,6 +81,9 @@ struct PaperCircleButton: View {
 struct PaperTabs: View {
     let options: [String]
     @Binding var selection: String
+    /// True while tabs remain past the trailing edge; the fade shows only then, so the
+    /// last tab is never left dimmed once you've scrolled to it.
+    @State private var moreTrailing = true
     var body: some View {
         // Every tab shows in full when it can: first at the normal padding, then a little
         // tighter (five job tabs on a 6.1" phone). Only past that does the row scroll, and
@@ -93,7 +96,13 @@ struct PaperTabs: View {
                     row(padding: 12).padding(.horizontal, Theme.gutter - 4)
                 }
                 .scrollIndicators(.hidden)
-                .mask(LinearGradient(stops: [.init(color: .black, location: 0.88), .init(color: .clear, location: 1)],
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.x + geometry.containerSize.width < geometry.contentSize.width - 1
+                } action: { _, value in
+                    moreTrailing = value
+                }
+                .mask(LinearGradient(stops: [.init(color: .black, location: 0.88),
+                                             .init(color: moreTrailing ? .clear : .black, location: 1)],
                                      startPoint: .leading, endPoint: .trailing))
                 .onChange(of: selection) { _, value in
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
