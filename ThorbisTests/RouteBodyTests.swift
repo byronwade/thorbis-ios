@@ -55,4 +55,23 @@ final class RouteBodyTests: XCTestCase {
         XCTAssertEqual(body["expectedRoleRevision"] as? Int, 5)
         XCTAssertEqual(body["desiredRoleId"] as? String, "00000000-0000-4000-8000-000000000777")
     }
+
+    func testRoleReviseSendsGrantsWithoutTheRoleId() async throws {
+        let roleID = "00000000-0000-4000-8000-000000000777"
+        let reply = #"{"role":{"id":"\#(roleID)","currentRevision":6},"revision":{"name":"Tech","description":"","grants":[]}}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        let grants = [RoleGrant(capability: "estimate.discount", scope: "assigned", conditions: ["maxDiscountPercent": 10]),
+                      RoleGrant(capability: "invoice.refund", scope: "organization", effect: "deny")]
+        let saved = try await client.reviseOrganizationRole(roleID, expectedRevision: 5, name: "Tech", description: "", grants: grants)
+        XCTAssertEqual(saved.role.currentRevision, 6)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.url?.path, "/v1/organization/roles/\(roleID)/revise")
+        let body = try json(request.body)
+        XCTAssertNil(body["roleId"])
+        XCTAssertEqual(body["expectedRevision"] as? Int, 5)
+        let sent = try XCTUnwrap(body["grants"] as? [[String: Any]])
+        XCTAssertEqual(sent.count, 2)
+        XCTAssertEqual((sent[0]["conditions"] as? [String: Int])?["maxDiscountPercent"], 10)
+        XCTAssertEqual(sent[1]["effect"] as? String, "deny")
+    }
 }

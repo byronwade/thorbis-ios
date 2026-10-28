@@ -93,6 +93,10 @@ struct TeamView: View {
     @State private var search = ""
     @State private var filter = "All"
     @State private var changing: RoleMember?
+    @State private var customRoles: [OrganizationRole] = []
+    @State private var naming = false
+    @State private var newRoleName = ""
+    @State private var editingRoleID: String?
     /// Changing someone's access needs both owner capabilities, the same pair the server checks.
     private var canManage: Bool {
         session.can("organization.permissions.manage") && session.can("organization.members.manage")
@@ -145,6 +149,23 @@ struct TeamView: View {
                     }
                 }
                 .padding(.horizontal, Theme.gutter)
+                if canManage {
+                    VStack(alignment: .leading, spacing: 0) {
+                        PaperGroupHeader(title: "Roles", count: customRoles.count) {
+                            Button { newRoleName = ""; naming = true } label: {
+                                Image(systemName: "plus").frame(width: 44, height: 44).contentShape(Rectangle())
+                            }
+                            .accessibilityLabel("New role")
+                        }
+                        ForEach(customRoles) { role in
+                            Button { editingRoleID = role.id } label: {
+                                PaperMenuRow(role.revision.name, symbol: "person.badge.key", subtitle: role.revision.description?.isEmpty == false ? role.revision.description : nil, tile: Theme.markOlive)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                }
                 if !loading && visible.isEmpty && error == nil {
                     PaperEmptyState(symbol: "person.2", title: search.isEmpty ? "No team members" : "No matches", message: "Invite people and change roles from Thorbis on the web.")
                 }
@@ -162,6 +183,16 @@ struct TeamView: View {
         .sheet(item: $changing) { member in
             MemberRoleSheet(member: member) { await load() }
         }
+        .navigationDestination(item: $editingRoleID) { id in
+            RoleEditorView(roleID: id) { await load() }
+        }
+        .alert("New role", isPresented: $naming) {
+            TextField("Role name", text: $newRoleName)
+            Button("Create") { Task { await createRole() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Then choose what this role can do.")
+        }
     }
 
     private func load() async {
@@ -172,11 +203,24 @@ struct TeamView: View {
             let loaded = try await api.roleMembers()
             guard session.generation == generation else { return }
             members = loaded
+            if canManage { customRoles = (try? await api.organizationRoles()) ?? customRoles }
             error = nil
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
             self.error = error.localizedDescription
         }
+    }
+}
+
+extension TeamView {
+    fileprivate func createRole() async {
+        let trimmed = newRoleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let created = try await api.createOrganizationRole(name: trimmed, description: "", idempotencyKey: UUID().uuidString)
+            await load()
+            editingRoleID = created.role.id
+        } catch { self.error = error.localizedDescription }
     }
 }
 
