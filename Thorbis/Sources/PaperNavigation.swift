@@ -790,7 +790,7 @@ struct PaperGlobalSearch: View {
                             PaperGroupHeader(title: label(type), count: results.count).padding(.top, 8)
                             ForEach(results) { result in serverRow(result) }
                         }
-                        if server.isEmpty && !searching { ContentUnavailableView.search(text: trimmed) }
+                        if server.isEmpty && !searching { PaperEmptyState.search(trimmed) }
                         if searching { SkeletonRows(count: 2, inset: 0).padding(.top, 8) }
                     } else {
                         if session.isOffline || serverFailed {
@@ -825,7 +825,7 @@ struct PaperGlobalSearch: View {
                             }
                         }
                         if searching { SkeletonRows(count: 3, inset: 0).padding(.top, 8) }
-                        else if jobs.isEmpty && customers.isEmpty { ContentUnavailableView.search(text: trimmed) }
+                        else if jobs.isEmpty && customers.isEmpty { PaperEmptyState.search(trimmed) }
                     }
                 }
                 .padding(.horizontal, Theme.gutter)
