@@ -68,7 +68,7 @@ struct JobMediaView: View {
                                 ? allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }.count
                                 : allPhotos.filter { $0.tags.contains(option) }.count
                             Button { filter = option } label: {
-                                Text("\(option) · \(count)").font(Theme.font(12, weight: filter == option ? .semibold : .medium))
+                                Text("\(option) · \(count)").font(Theme.font(13, weight: .medium))
                                     .foregroundStyle(filter == option ? Theme.background : Theme.muted)
                                     .padding(.horizontal, 11).frame(height: 28)
                                     .background(filter == option ? Theme.foreground : Theme.fill, in: Capsule())
@@ -111,19 +111,20 @@ struct JobMediaView: View {
                         ForEach(photos) { record in
                             Button { open(record) } label: {
                                 VStack(alignment: .leading, spacing: 0) {
-                                    Image(systemName: "photo").font(.system(size: 22, weight: .light)).foregroundStyle(Theme.muted)
-                                        .frame(maxWidth: .infinity, minHeight: 96)
+                                    MediaThumbnail(record: record)
+                                        .frame(maxWidth: .infinity).frame(height: 120)
+                                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
                                         .overlay(alignment: .topLeading) {
                                             if let tag = ["Before", "After"].first(where: record.tags.contains) {
                                                 Text(tag).font(Theme.font(11, weight: .semibold))
-                                                    .foregroundStyle(tag == "After" ? Theme.success : Theme.foreground)
+                                                    .foregroundStyle(Theme.foreground)
                                                     .padding(.horizontal, 8).frame(height: 24)
-                                                    .background(tag == "After" ? Theme.successSurface : Theme.fill, in: Capsule())
+                                                    .background(Theme.background.opacity(0.9), in: Capsule())
                                                     .padding(8)
                                             }
                                         }
-                                    Text(record.caption ?? record.originalFilename).font(Theme.font(12, weight: .medium)).lineLimit(1)
-                                        .padding(.horizontal, 10).padding(.bottom, 8)
+                                    Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium)).lineLimit(1)
+                                        .padding(.horizontal, 10).padding(.vertical, 8)
                                     if record.uploadState != "stored" {
                                         Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
                                             .padding(.horizontal, 10).padding(.bottom, 8)
