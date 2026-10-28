@@ -74,8 +74,8 @@ struct EstimateDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 if let error { ErrorBanner(message: error) }
                 if let record {
-                    commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased()) · \(store.customerName(record.customerId))", title: record.title,
-                                      status: record.status.statusLabel, date: record.createdAt)
+                    commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased())", context: store.customerName(record.customerId), title: record.title,
+                                      status: record.status, date: record.createdAt)
                     Text("Line items")
                         .font(Theme.font(17, weight: .medium))
                         .padding(.top, 8)
@@ -290,7 +290,7 @@ struct InvoiceDetailView: View {
                 if let record {
                     // Who it's for and what's owed come first; the line revision is bookkeeping, not for people.
                     commercialHeading(ref: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
-                                      status: record.status.statusLabel, date: record.issuedAt ?? record.createdAt)
+                                      status: record.status, date: record.issuedAt ?? record.createdAt)
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                     VStack(spacing: 0) {
                         commercialDetail("Total", money(total, currency: record.currency))
@@ -485,15 +485,14 @@ struct CommercialLineView: View {
     }
 }
 
-private func commercialHeading(ref: String, title: String, status: String, date: String?) -> some View {
+/// Same header shape as job and customer pages: eyebrow, 24/500 title, then the status as the
+/// shared dot-and-word chip (approved isn't amber, draft isn't amber) and the date.
+private func commercialHeading(ref: String, context: String? = nil, title: String, status: String, date: String?) -> some View {
     VStack(alignment: .leading, spacing: 9) {
-        Text(ref).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+        PaperEyebrow(reference: ref, text: context)
         Text(title).font(Theme.font(24, weight: .medium)).tracking(-0.36)
         HStack(spacing: 8) {
-            Text(status).font(Theme.font(12, weight: .medium))
-                .foregroundStyle(Theme.warning)
-                .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            PaperStatusChip(status: status)
             if let date = JobFiltering.date(date) {
                 Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
