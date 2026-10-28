@@ -93,6 +93,7 @@ struct TeamView: View {
     @State private var search = ""
     @State private var filter = "All"
     @State private var changing: RoleMember?
+    @State private var opening: RoleMember?
     @State private var customRoles: [OrganizationRole] = []
     @State private var naming = false
     @State private var newRoleName = ""
@@ -126,7 +127,7 @@ struct TeamView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count) }
                     ForEach(visible) { member in
-                        Button { if canManage && !member.member.isLegalOwner { changing = member } } label: {
+                        Button { if canManage && !member.member.isLegalOwner { opening = member } } label: {
                         HStack(spacing: 12) {
                             Avatar(name: member.member.displayName, size: 34)
                             VStack(alignment: .leading, spacing: 2) {
@@ -169,7 +170,7 @@ struct TeamView: View {
                 if !loading && visible.isEmpty && error == nil {
                     PaperEmptyState(symbol: "person.2", title: search.isEmpty ? "No team members" : "No matches", message: "Invite people and change roles from Thorbis on the web.")
                 }
-                Text(canManage ? "Tap a person to change their role. Invite people from Thorbis on the web." : "Invite people and change roles from Thorbis on the web.")
+                Text(canManage ? "Tap a person to change their role or what they can do. Invite people from Thorbis on the web." : "Invite people and change roles from Thorbis on the web.")
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity).padding(.top, 20)
             }
@@ -182,6 +183,9 @@ struct TeamView: View {
         .task { await load() }
         .sheet(item: $changing) { member in
             MemberRoleSheet(member: member) { await load() }
+        }
+        .navigationDestination(item: $opening) { member in
+            MemberAccessView(member: member) { await load() }
         }
         .navigationDestination(item: $editingRoleID) { id in
             RoleEditorView(roleID: id) { await load() }

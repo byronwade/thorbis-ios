@@ -74,4 +74,17 @@ final class RouteBodyTests: XCTestCase {
         XCTAssertEqual((sent[0]["conditions"] as? [String: Int])?["maxDiscountPercent"], 10)
         XCTAssertEqual(sent[1]["effect"] as? String, "deny")
     }
+
+    func testPersonOverrideRevokesWithNullPolicyAndTargetsTheMember() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), .init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        try await client.saveMemberOverride("mem_42", grants: [RoleGrant(capability: "job.assign", scope: "team")], denies: ["invoice.refund"],
+                                            expectedVersion: 2, idempotencyKey: "a")
+        try await client.saveMemberOverride("mem_42", grants: [], denies: [], expectedVersion: 3, idempotencyKey: "b")
+        let first = try json(URLProtocolFixture.recorded[0].body)
+        XCTAssertEqual((first["target"] as? [String: String])?["memberId"], "mem_42")
+        XCTAssertEqual(((first["policy"] as? [String: Any])?["userDenies"] as? [String]), ["invoice.refund"])
+        let second = try json(URLProtocolFixture.recorded[1].body)
+        XCTAssertTrue(second["policy"] is NSNull)
+        XCTAssertEqual(second["expectedVersion"] as? Int, 3)
+    }
 }
