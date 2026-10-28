@@ -14,7 +14,7 @@ struct EstimatesView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(estimates: records) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
@@ -72,7 +72,7 @@ struct EstimateDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
                     commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased())", context: store.customerName(record.customerId), title: record.title,
                                       status: record.status, date: record.createdAt)
@@ -228,7 +228,7 @@ struct InvoicesView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(invoices: records) }
                 ForEach(paperDocumentGroups(records, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
@@ -284,7 +284,7 @@ struct InvoiceDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let error { ErrorBanner(message: error) }
+                if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
                     // Who it's for and what's owed come first; the line revision is bookkeeping, not for people.
                     commercialHeading(ref: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
