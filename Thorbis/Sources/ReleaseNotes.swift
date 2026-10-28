@@ -19,7 +19,7 @@ enum ReleaseNotes {
                 .init(symbol: "arrow.forward.circle", title: "One button runs the whole job",
                       detail: "The button at the bottom of a job is always the next step, from On my way to Collect."),
                 .init(symbol: "person.crop.rectangle", title: "Show an estimate in one tap",
-                      detail: "Show to customer sends a new estimate and hands it over. No separate Send step."),
+                      detail: "Show to customer sends a new estimate and hands it over, with no separate Send step."),
                 .init(symbol: "creditcard", title: "Issue and collect in one step",
                       detail: "Issuing an invoice opens payment right away, and a paid job goes back to Wrap up."),
             ],
