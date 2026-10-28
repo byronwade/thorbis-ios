@@ -53,7 +53,8 @@ struct EstimatesView: View {
         .task { await load() }
         .refreshable { await load() }
         .toolbar {
-            if session.can("estimate.create", feature: "estimates") { Button("New estimate", systemImage: "plus") { showCreate = true } }
+            // Neutral like the back button beside it; blue stays for links and selection.
+            if session.can("estimate.create", feature: "estimates") { Button("New estimate", systemImage: "plus") { showCreate = true }.tint(Theme.foreground) }
         }
         .sheet(isPresented: $showCreate, onDismiss: { Task { await load() } }) { NewEstimateView() }
     }
