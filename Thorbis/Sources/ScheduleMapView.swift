@@ -45,9 +45,9 @@ struct ScheduleMapView: View {
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
             .mapControls { MapUserLocationButton(); MapCompass() }
             .frame(height: 380)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5)
                 if !loaded { ProgressView() }
             }
             .padding(.horizontal, Theme.gutter)
@@ -101,18 +101,17 @@ struct ScheduleMapView: View {
             }
             HStack(spacing: 8) {
                 NavigationLink(value: stop.job) {
-                    Text("Open job").font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    Text("Open job").inkCommit()
                 }
+                .buttonStyle(PressStyle())
                 if let url = Directions.url(address: stop.place.address, coordinates: stop.place.coordinates) {
                     PaperSquareButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps") { openURL(url) }
                 }
             }
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
     }
 
     private func stopRow(_ stop: Stop) -> some View {

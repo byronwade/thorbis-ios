@@ -37,13 +37,13 @@ struct NoticeSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("BUSINESS SETTINGS").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                    Text("Job notices").font(Theme.font(26, weight: .semibold)).tracking(-0.39).accessibilityAddTraits(.isHeader)
+                    Text("Job notices").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                     Text("Who hears about it when a job is booked, changes or is canceled. Turning a channel off stops that send.")
                         .font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
                 .padding(.bottom, 12)
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                if !loaded && error == nil { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30) }
+                if !loaded && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
                 if loaded {
                     ForEach(roles, id: \.0) { role, label in
                         PaperGroupHeader(title: label).padding(.top, 6)

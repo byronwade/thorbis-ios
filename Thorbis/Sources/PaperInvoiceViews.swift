@@ -60,15 +60,9 @@ struct PaperJobInvoiceContent: View {
         Group {
             switch PaperInvoiceContentState.resolve(invoiceID: invoice.id, model: paymentModel) {
             case .loading:
-                ProgressView("Loading invoice…")
-                    .frame(maxWidth: .infinity, minHeight: 100)
+                SkeletonRows(count: 4, leading: false, inset: 0)
             case .failed(let message):
-                VStack(alignment: .leading, spacing: 8) {
-                    ErrorBanner(message: message)
-                    Button("Retry invoice") { Task { await paymentModel.load() } }
-                        .font(Theme.font(13, weight: .medium))
-                        .frame(minHeight: 44, alignment: .leading)
-                }
+                ErrorBanner(message: message) { await paymentModel.load() }
             case .ready:
                 VStack(alignment: .leading, spacing: 18) {
                     balanceHeader
@@ -114,7 +108,7 @@ struct PaperJobInvoiceContent: View {
             .foregroundStyle(color)
             .padding(.horizontal, 8)
             .frame(height: 24)
-            .background(statusSurface, in: RoundedRectangle(cornerRadius: 8))
+            .background(statusSurface, in: Capsule())
     }
 
     private var statusColor: Color {
@@ -174,8 +168,8 @@ struct PaperJobInvoiceContent: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
         }
     }
 

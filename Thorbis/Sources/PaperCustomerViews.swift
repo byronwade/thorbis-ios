@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Native translation of Paper's Customers and Customer detail artboards.
 struct CustomersView: View {
@@ -6,6 +7,8 @@ struct CustomersView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
     @State private var showNew = false
+    @State private var newJobFor: Customer?
+    @Environment(\.openURL) private var openURL
     @State private var showSearch = false
     @State private var search = ""
     @State private var newName = ""
@@ -27,8 +30,10 @@ struct CustomersView: View {
     }
     private var activeJobs: Int { store.jobs.filter { !["completed", "canceled"].contains($0.status) }.count }
 
-    /// Paper 47: an alphabetical book, one letter per section.
+    /// Paper 47: an alphabetical book, one letter per section. Recent keeps its newest-first
+    /// order in one group; letters would re-sort it and break the point of the tab.
     private var sections: [(String, [CustomerRecord])] {
+        if scope == .recent { return items.isEmpty ? [] : [("Recently added", items)] }
         let grouped = Dictionary(grouping: items) { customer -> String in
             let letter = customer.name.trimmingCharacters(in: .whitespaces).prefix(1).uppercased()
             return letter.rangeOfCharacter(from: .letters) == nil ? "#" : letter
@@ -44,8 +49,10 @@ struct CustomersView: View {
                 PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withAnimation { showSearch.toggle() } })
                 if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
                 PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
-                if let error = error ?? store.error { ErrorBanner(message: error) }
-                if recordsLoading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if let error = error ?? store.error {
+                    ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
+                }
+                if recordsLoading && records.isEmpty { SkeletonRows() }
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(sections, id: \.0) { letter, customers in
                         PaperGroupHeader(title: letter).padding(.top, 6)
@@ -73,22 +80,14 @@ struct CustomersView: View {
         .background(Theme.background).toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             if session.can("customer.create", feature: "core_crm") && !items.isEmpty {
-                HStack {
-                    Spacer()
-                    Button { showNew = true } label: {
-                        Label("New customer", systemImage: "plus").font(Theme.font(14, weight: .semibold))
-                            .padding(.horizontal, 16).frame(minHeight: 44)
-                            .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
-                    }
-                    .buttonStyle(.plain).disabled(busy)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                FloatingCreateButton(title: "New customer", disabled: busy) { showNew = true }
             }
         }
         .task(id: store.customers.map(\.id).sorted().joined(separator: "|")) { await loadCustomers() }
         .sheet(isPresented: $showNew) {
             NewCustomerSheet { _ in Task { await loadCustomers() } }
         }
+        .sheet(item: $newJobFor) { customer in NewJobSheet(preselected: customer) }
     }
     private func customerRow(_ customer: CustomerRecord) -> some View {
         let open = store.jobs.first { $0.customerId == customer.id && !["completed", "canceled"].contains($0.status) }
@@ -106,9 +105,25 @@ struct CustomersView: View {
                 Spacer(minLength: 4)
                 if let open { StatusRing(status: open.status).accessibilityHidden(true) }
             }
-            .frame(minHeight: 52).contentShape(Rectangle())
+            .padding(.horizontal, 8)
+            .frame(minHeight: 56).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowPressStyle())
+        // MA-12: the common actions on long-press; each also exists on the customer.
+        .contextMenu {
+            if let phone = customer.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 {
+                if let call = URL(string: "tel:\(phone)") { Button("Call", systemImage: "phone") { openURL(call) } }
+                if let text = URL(string: "sms:\(phone)") { Button("Text", systemImage: "message") { openURL(text) } }
+            }
+            if let address = customer.address, !address.isEmpty, let maps = Directions.url(address: address, coordinates: nil) {
+                Button("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") { openURL(maps) }
+            }
+            if !customer.archived && session.can("job.create", feature: "jobs") {
+                Button("New job for \(customer.name)", systemImage: "plus") { newJobFor = listCustomer }
+            }
+            Button("Copy name", systemImage: "doc.on.doc") { UIPasteboard.general.string = customer.name }
+        }
+        .padding(.horizontal, -8)
     }
 
     private func rowDetail(jobCount: Int, open: Job?) -> String {
@@ -233,26 +248,33 @@ struct CustomerDetailView: View {
                     if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
                         Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
                     }
-                    Text(record?.name ?? customer.name).font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                    Text(record?.name ?? customer.name).font(Theme.font(24, weight: .medium)).tracking(-0.36)
                         .accessibilityAddTraits(.isHeader)
                 }.padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 12)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { metadataChips }.fixedSize()
                     VStack(alignment: .leading, spacing: 6) { metadataChips }
-                }.padding(.horizontal, 20).padding(.bottom, 10)
+                }.padding(.horizontal, Theme.gutter).padding(.bottom, 10)
                 PaperQuickActions(phone: contacts.first(where: \.primary)?.phone ?? record?.phone,
                                   email: contacts.first(where: \.primary)?.email ?? record?.email,
                                   directions: (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
                     .padding(.horizontal, Theme.gutter).padding(.bottom, 14)
                 // Next visit sits above everything else: it's why most people open a customer.
                 if session.can("job.view", feature: "jobs") { nextVisit.padding(.horizontal, Theme.gutter).padding(.bottom, 8) }
-                if let error { ErrorBanner(message: error) }
-                if record == nil && error == nil { ProgressView("Loading customer…").padding(20) }
-                details
+                if let error {
+                    ErrorBanner(message: error) { await load() }.padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                }
                 PaperTabs(options: ["Overview", "Jobs", "Activity"], selection: $tab)
                 VStack(alignment: .leading, spacing: 18) {
                     switch tab {
                     case "Overview":
+                        // Details live under Overview so the tabs sit near the top of the page
+                        // instead of below a long block the person has to scroll past.
+                        if record == nil && error == nil {
+                            SkeletonRows(count: 4, leading: false, inset: 0)
+                        } else {
+                            details
+                        }
                         CustomerMembershipSection(customerID: customer.id)
                         contactsSection
                         locationsSection
@@ -264,7 +286,7 @@ struct CustomerDetailView: View {
                     case "Activity": activitySection
                     default: activitySection
                     }
-                }.padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 24)
+                }.padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 24)
             }
         }
         .foregroundStyle(Theme.foreground).background(Theme.background)
@@ -287,14 +309,15 @@ struct CustomerDetailView: View {
             HStack(spacing: 8) {
                 if canEdit {
                     Button { showCustomerMode = true } label: {
-                        Label("Show to customer", systemImage: "person.crop.rectangle").font(Theme.font(15, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 46).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                        Label("Show to customer", systemImage: "person.crop.rectangle").font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
                     .accessibilityHint("Hands the device to the customer to check and fix their details")
                 }
                 if session.can("job.create", feature: "jobs") {
                     Button { showNewJob = true } label: {
-                        Label("New job", systemImage: "plus").font(Theme.font(15, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 46).foregroundStyle(.white).background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                        Label("New job", systemImage: "plus").inkCommit()
                     }
+                    .buttonStyle(PressStyle())
                 }
             }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
         }
@@ -375,7 +398,7 @@ struct CustomerDetailView: View {
                 if let terms = record.billingTerms { detailRow("Billing terms", value: terms) }
                 if smsConsentLoaded { smsConsentRow }
             }
-        }.padding(.horizontal, 20).padding(.bottom, 18)
+        }
     }
     /// The customer's open job first: what a dispatcher or tech opens a customer to find.
     @ViewBuilder private var nextVisit: some View {
@@ -394,11 +417,11 @@ struct CustomerDetailView: View {
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
                         Spacer(minLength: 8)
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle)
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.subtle)
                     }
                     .frame(minHeight: 52).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowPressStyle())
             }
         }
     }
@@ -478,7 +501,7 @@ struct CustomerDetailView: View {
             if let contactMutationError {
                 Text(contactMutationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 9))
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                     .accessibilityIdentifier("contact-mutation-error")
             }
             ForEach(contacts) { contact in
@@ -519,7 +542,7 @@ struct CustomerDetailView: View {
             if let locationError {
                 Text(locationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 9))
+                    .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                     .accessibilityIdentifier("location-mutation-error")
             }
             ForEach(locations) { location in
@@ -619,7 +642,7 @@ struct CustomerDetailView: View {
                         }
                         Spacer()
                     }.frame(minHeight: 44).contentShape(Rectangle())
-                }.buttonStyle(.plain)
+                }.buttonStyle(RowPressStyle())
             }
             if jobs.isEmpty { emptyText("No jobs") }
         }
@@ -635,21 +658,14 @@ struct CustomerDetailView: View {
                 emptyText("You don’t have access to customer activity.")
             } else {
                 if let activityError {
-                    if activity.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            emptyText("Activity did not load.")
-                            Button("Retry activity") { Task { await loadActivity(reset: true) } }
-                                .frame(minHeight: 44).accessibilityIdentifier("customer-activity-retry")
-                        }
-                    } else {
-                        ErrorBanner(message: activityError)
-                        if activityCursor == nil {
-                            Button("Retry activity") { Task { await loadActivity(reset: true) } }
-                                .frame(minHeight: 44).accessibilityIdentifier("customer-activity-retry")
-                        }
+                    ErrorBanner(message: activity.isEmpty ? "Activity did not load. \(activityError)" : activityError) {
+                        // A failed "load earlier" keeps its cursor, so retry continues the page
+                        // instead of throwing away what already loaded.
+                        await loadActivity(reset: activityCursor == nil)
                     }
+                    .accessibilityIdentifier("customer-activity-retry")
                 }
-                if activityLoading && activity.isEmpty { ProgressView("Loading activity…").padding(.vertical, 10) }
+                if activityLoading && activity.isEmpty { SkeletonRows(count: 4, inset: 0) }
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(activity) { event in
                         HStack(alignment: .top, spacing: 10) {
@@ -677,7 +693,9 @@ struct CustomerDetailView: View {
                     } label: {
                         Text(activityLoading ? "Loading…" : activityError == nil ? "Load earlier activity" : "Retry earlier activity")
                             .font(Theme.font(13, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(PressStyle())
                     .disabled(activityLoading)
                 }
             }

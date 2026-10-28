@@ -121,13 +121,13 @@ struct TeamView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("BUSINESS SETTINGS").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                    Text("Team & permissions").font(Theme.font(26, weight: .semibold)).tracking(-0.39).accessibilityAddTraits(.isHeader)
+                    Text("Team & permissions").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 PaperSearchField(text: $search, prompt: "Search team members")
                 if roles.count > 2 { PaperTabs(options: roles, selection: $filter) }
                 if let error { ErrorBanner(message: error) }
-                if loading && members.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if loading && members.isEmpty { SkeletonRows(count: 6) }
                 VStack(alignment: .leading, spacing: 0) {
                     if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count) }
                     ForEach(visible) { member in
@@ -222,8 +222,8 @@ struct TeamView: View {
             if let notice {
                 Text(notice).font(Theme.font(13)).foregroundStyle(Theme.foreground)
                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).strokeBorder(Theme.border))
                     .padding(.horizontal, Theme.gutter)
                     .onTapGesture { self.notice = nil }
             }

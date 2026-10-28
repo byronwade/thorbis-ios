@@ -42,6 +42,14 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertTrue(relaunched.entries.isEmpty, "Another actor never sees these changes")
     }
 
+    func testSignOutWarningCountsChangesQueuedInOtherWorkspaces() {
+        let box = outbox()
+        box.enqueue(.note(.init(jobId: jobA, body: "Gate code 4417")), policyVersion: 4)
+        box.bind(actorID: actor, organizationID: "019f0000-0000-7000-8000-000000000002")
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertTrue(box.signOutWarning.hasPrefix("1 change"), "Sign-out deletes every workspace's queue, so the warning counts them all")
+    }
+
     func testCommandEnvelopesMatchTheServerContractAndAppliedOrDuplicateClearTheQueue() async throws {
         let box = outbox()
         let progress = try XCTUnwrap(box.enqueue(.progress(.init(jobId: jobA, to: "arrived", arrival: .init(method: "manual"))), policyVersion: 4))

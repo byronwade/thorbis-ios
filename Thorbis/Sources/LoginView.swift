@@ -21,8 +21,8 @@ struct LoginView: View {
                 ThorbisLogoLockup(markSize: 30, wordmarkSize: 19)
 
                 Text("Welcome back")
-                    .font(Theme.font(34, weight: .bold))
-                    .tracking(-0.68)
+                    .font(Theme.font(30, weight: .medium))
+                    .tracking(-0.6)
                     .foregroundStyle(Theme.foreground)
                     .padding(.top, 20)
                     .accessibilityAddTraits(.isHeader)
@@ -70,15 +70,12 @@ struct LoginView: View {
                 }
                 Button { Task { await signIn() } } label: {
                     HStack(spacing: 8) {
-                        if busy { ProgressView().tint(.white) }
+                        if busy { ProgressView().tint(Theme.onInk) }
                         Text("Log in")
                     }
-                    .font(Theme.font(15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 46)
-                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                    .inkCommit()
                 }
+                .buttonStyle(PressStyle())
                 .disabled(busy)
                 .padding(.top, 24)
                 .accessibilityIdentifier("login-submit")
@@ -137,8 +134,8 @@ private extension View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(minHeight: 46)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
     }
 }
 
@@ -183,15 +180,12 @@ private struct PasswordResetRequestView: View {
                     }
                     Button { Task { await requestReset() } } label: {
                         HStack(spacing: 8) {
-                            if busy { ProgressView().tint(.white) }
+                            if busy { ProgressView().tint(Theme.onInk) }
                             Text("Send reset link")
                         }
-                        .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 46)
-                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                        .inkCommit()
                     }
+                    .buttonStyle(PressStyle())
                     .disabled(busy || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .padding(.top, 24)
                 }

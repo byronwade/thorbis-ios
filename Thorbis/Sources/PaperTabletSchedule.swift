@@ -118,7 +118,7 @@ struct PaperTabletSchedule: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 10).padding(.vertical, 6).frame(minHeight: 56)
-            .background(selected ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 10))
+            .background(selected ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             .contentShape(Rectangle())
         }.buttonStyle(.plain)
             .accessibilityLabel("\(time(job.scheduledFor)), \(job.title), \(job.status.statusLabel)")

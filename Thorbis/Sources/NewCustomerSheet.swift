@@ -30,7 +30,7 @@ struct NewCustomerSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("New customer").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                    Text("New customer").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                         .accessibilityAddTraits(.isHeader)
                     field("Name", text: $request.name, prompt: "Danielle Marlowe", focus: .name)
                         .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
@@ -40,9 +40,11 @@ struct NewCustomerSheet: View {
                     field("Email", text: $email, prompt: "name@example.com", focus: .email)
                         .textContentType(.emailAddress).keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .submitLabel(.next).onSubmit { focused = .address }
                     if !emailValid { Text("Check the email address.").font(Theme.font(12)).foregroundStyle(Theme.destructive) }
                     field("Service address", text: $address, prompt: "412 Birchwood Ln, Sacramento", focus: .address)
-                        .textContentType(.fullStreetAddress)
+                        .textContentType(.fullStreetAddress).submitLabel(.done)
+                        .onSubmit { if valid { Task { await save() } } }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                         Picker("Account", selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 })) {
@@ -76,7 +78,8 @@ struct NewCustomerSheet: View {
             }
             .onAppear { focused = .name }
             .task(id: CustomerPhoneLookup.digits(phone)) { await checkPhone() }
-            .interactiveDismissDisabled(busy)
+            // MA-16: typed details aren't lost to a stray swipe; Cancel still leaves.
+            .interactiveDismissDisabled(busy || !trimmedName.isEmpty || !phone.isEmpty || !email.isEmpty || !address.isEmpty)
         }
     }
 
@@ -87,8 +90,8 @@ struct NewCustomerSheet: View {
                 .font(Theme.font(16))
                 .focused($focused, equals: focus)
                 .padding(.horizontal, 14).frame(minHeight: 46)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
         }
     }
 
@@ -106,13 +109,13 @@ struct NewCustomerSheet: View {
                 Text("Use \(existing.name)").font(Theme.font(14, weight: .semibold))
                     .frame(maxWidth: .infinity).frame(minHeight: 44)
                     .foregroundStyle(Theme.brand)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             }
             .buttonStyle(.plain)
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
         .accessibilityElement(children: .contain)
     }
 

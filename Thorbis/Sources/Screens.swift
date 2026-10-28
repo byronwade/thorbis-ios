@@ -33,15 +33,17 @@ struct NewJobSheet: View {
                     Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Cancel new job").disabled(busy)
                     Spacer()
                     HStack(spacing: 5) {
-                        Text(String((session.activeOrganization?.name ?? "W").prefix(1))).font(Theme.font(9, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 16, height: 16).background(Theme.brand, in: RoundedRectangle(cornerRadius: 5))
+                        Image("ThorbisMark").resizable().scaledToFit().frame(width: 16, height: 16).accessibilityHidden(true)
                         Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(13, weight: .medium)).lineLimit(1)
                     }.padding(.horizontal, 12).frame(height: 30).background(Theme.fill, in: Capsule())
                     Spacer()
                     Button { Task { await create() } } label: {
-                        Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up") } }
-                            .foregroundStyle(.white).frame(width: 38, height: 38).background(Theme.brand, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle())
-                    }.accessibilityLabel("Create job")
+                        // MA-08: the create commit is ink; an icon-only control is a circle.
+                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .medium)) } }
+                            .foregroundStyle(Theme.onInk).frame(width: 38, height: 38)
+                            .background(Theme.ink.opacity(draft.canCreate ? 1 : 0.35), in: Circle())
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                    }.buttonStyle(PressStyle()).accessibilityLabel("Create job")
                         .disabled(busy || !draft.canCreate || !session.can("job.create", feature: "jobs"))
                 }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 10)
                 ScrollView {
@@ -139,6 +141,8 @@ struct NewJobSheet: View {
                     if let createdJobID { JobDetailView(jobId: createdJobID) }
                 }
         }
+        // A swipe never throws away a typed title (MA-16).
+        .interactiveDismissDisabled(busy || (savedJobID == nil && !draft.title.isEmpty))
     }
 
     private var customerPicker: some View {
@@ -383,25 +387,15 @@ struct CustomerContactSheet: View {
             ZStack {
                 Text(contact == nil ? "New contact" : "Edit contact")
                     .font(Theme.font(17, weight: .semibold))
+                // MA-16: Cancel leading; the one commit is the ink button at the bottom.
                 HStack {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .font(Theme.font(13, weight: .semibold))
-                            .foregroundStyle(Theme.foreground)
-                            .frame(width: 32, height: 32)
-                            .background(Theme.fill, in: Circle())
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel(contact == nil ? "Cancel new contact" : "Cancel contact changes")
-                    .disabled(busy)
+                    Button("Cancel") { dismiss() }
+                        .font(Theme.font(15))
+                        .foregroundStyle(Theme.foreground)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityLabel(contact == nil ? "Cancel new contact" : "Cancel contact changes")
+                        .disabled(busy)
                     Spacer()
-                    Button("Save") { Task { await save() } }
-                        .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(Theme.brandText)
-                        .frame(minHeight: 44)
-                        .disabled(!canSave)
-                        .opacity(canSave ? 1 : 0.45)
                 }
             }
             .frame(height: 40)
@@ -415,7 +409,7 @@ struct CustomerContactSheet: View {
                         Text("Role")
                             .font(Theme.font(13, weight: .medium))
                             .foregroundStyle(Theme.muted)
-                        HStack(spacing: 6) {
+                        FlowRow(spacing: 6, lineSpacing: 0) {
                             ForEach(Self.roles, id: \.self) { option in
                                 roleChip(option, selected: !usesCustomRole && role == option) {
                                     role = option
@@ -479,17 +473,13 @@ struct CustomerContactSheet: View {
                 }
                 Button { Task { await save() } } label: {
                     Group {
-                        if busy { ProgressView().tint(.white) }
-                        else { Text(contact == nil ? "Save contact" : "Save changes").font(Theme.font(15, weight: .semibold)) }
+                        if busy { ProgressView().tint(Theme.onInk) }
+                        else { Text(contact == nil ? "Save contact" : "Save changes") }
                     }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                    .inkCommit(enabled: canSave)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .disabled(!canSave)
-                .opacity(canSave ? 1 : 0.45)
 
                 if contact == nil {
                     Text("The first contact is set as primary automatically.")
@@ -506,7 +496,7 @@ struct CustomerContactSheet: View {
         .toolbar(.hidden, for: .navigationBar)
         .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.hidden)
-        .presentationCornerRadius(20)
+        .presentationCornerRadius(Theme.cardRadius)
         .presentationBackground(Theme.card)
         .interactiveDismissDisabled(busy)
     }
@@ -517,32 +507,48 @@ struct CustomerContactSheet: View {
                 .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(Theme.muted)
             TextField(placeholder, text: text)
-                .font(field == .phone ? Theme.monoFont(14) : Theme.font(15))
+                // design.thorbis.com mobile: input type is at least 16.
+                .font(field == .phone ? Theme.monoFont(16) : Theme.font(16))
                 .keyboardType(field == .phone ? .phonePad : field == .email ? .emailAddress : .default)
                 .textInputAutocapitalization(field == .email || field == .phone ? .never : .words)
                 .autocorrectionDisabled()
+                .textContentType(field == .name ? .name : field == .phone ? .telephoneNumber : field == .email ? .emailAddress : nil)
                 .focused($focusedField, equals: field)
+                // MA-16: return moves to the next field; the last one saves.
+                .submitLabel(nextField(after: field) == nil ? .done : .next)
+                .onSubmit {
+                    if let next = nextField(after: field) { focusedField = next } else { Task { await save() } }
+                }
                 .padding(.horizontal, 14)
-                .frame(height: 46)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
+                .frame(height: 48)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(focusedField == field ? Theme.brand : Theme.border,
+                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                        .stroke(focusedField == field ? Theme.foreground : Theme.border,
                                 lineWidth: focusedField == field ? 1.5 : 1)
                 }
+        }
+    }
+
+    private func nextField(after field: ContactField) -> ContactField? {
+        switch field {
+        case .name: .phone
+        case .phone: showsEmail ? .email : nil
+        case .customRole: showsEmail ? .email : nil
+        case .email: nil
         }
     }
 
     private func roleChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if selected { Image(systemName: "checkmark").font(Theme.font(10, weight: .semibold)) }
-                Text(title).font(Theme.font(13, weight: selected ? .semibold : .medium))
+                if selected { Image(systemName: "checkmark").font(.system(size: 11, weight: .medium)) }
+                Text(title).font(Theme.font(13, weight: .medium))
             }
-            .foregroundStyle(selected ? Color.white : Theme.muted)
+            .foregroundStyle(selected ? Theme.onInk : Theme.muted)
             .padding(.horizontal, 12)
             .frame(height: 30)
-            .background(selected ? Theme.brand : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+            .background(selected ? Theme.ink : Theme.fill, in: Capsule())
             .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
@@ -576,8 +582,11 @@ struct MoreView: View {
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject var api: APIClient
+    @EnvironmentObject private var outbox: FieldOutbox
     @State private var showWorkspaces = false
     @State private var showNewJob = false
+    @State private var confirmSignOut = false
+
 
     var body: some View {
         ScrollView {
@@ -613,7 +622,7 @@ struct MoreView: View {
                     HStack(spacing: 12) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
                             .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-                            .frame(width: 40, height: 40).background(Theme.brand, in: Circle())
+                            .frame(width: 40, height: 40).background(Theme.brandText, in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
                             Text(session.user?.name ?? "Account").font(Theme.font(16, weight: .medium))
                             if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
@@ -630,7 +639,7 @@ struct MoreView: View {
                         }
                         .pickerStyle(.menu).labelsHidden().tint(Theme.muted)
                     }
-                    Button { Task { await session.signOut() } } label: {
+                    Button { confirmSignOut = true } label: {
                         PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
                     }
                 }
@@ -638,43 +647,23 @@ struct MoreView: View {
                     .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity).padding(.top, 28).padding(.bottom, 32)
             }
-            .foregroundStyle(Theme.foreground).buttonStyle(.plain)
+            .foregroundStyle(Theme.foreground).buttonStyle(RowPressStyle())
         }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
         .sheet(isPresented: $showNewJob) { NewJobSheet() }
+        .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
+        } message: {
+            Text(outbox.signOutWarning)
+        }
     }
 
-    /// Paper's workspace switcher with the compose action beside it.
+    /// MA-05: the same header as every tab root (menu button, 30/500 title). Switching
+    /// workspace and New job live in the side menu, so they are not repeated here.
     private var workspaceHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Button { showWorkspaces = true } label: {
-                    HStack(spacing: 8) {
-                        Image("ThorbisMark").resizable().scaledToFit().padding(3)
-                            .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
-                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.border))
-                            .accessibilityHidden(true)
-                        Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .semibold)).lineLimit(1)
-                        if session.organizations.count > 1 {
-                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
-                        }
-                    }
-                    .padding(.horizontal, 10).frame(minHeight: 44)
-                    .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
-                }
-                .allowsHitTesting(session.organizations.count > 1)
-                .accessibilityLabel("Workspace, \(session.activeOrganization?.name ?? "")")
-                Spacer()
-                if session.can("job.create", feature: "jobs") {
-                    PaperCircleButton(symbol: "square.and.pencil", label: "New job") { showNewJob = true }
-                }
-            }
-            Text("More").font(Theme.font(34, weight: .bold)).tracking(-0.68).padding(.top, 10)
-                .accessibilityAddTraits(.isHeader)
-        }
-        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 4)
+        PaperHeader(title: "More", subtitle: session.activeOrganization?.name ?? "Workspace")
     }
 
     private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {

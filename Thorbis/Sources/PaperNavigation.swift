@@ -12,6 +12,7 @@ struct RootView: View {
     /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
     @State private var customPaths: [String: NavigationPath] = [:]
     @State private var drawerOpen = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Live finger travel while dragging the menu open or closed.
     @State private var drawerDrag: CGFloat = 0
     @State private var showSettings = false
@@ -152,8 +153,11 @@ struct RootView: View {
         }
     }
 
-    /// ChatGPT-style push: the menu sits underneath and the whole app slides right as a rounded
-    /// card, following the finger both ways. Motion is transform-only (design.thorbis.com Motion).
+    /// ChatGPT-style push (design.thorbis.com MA-03, MA-04): the menu sits underneath and the whole
+    /// app slides right as one card that follows the finger both ways. The menu eases in from 30% of
+    /// its width (parallax), the card dims to 40% and rounds to 24 with progress, and release settles
+    /// on a critically damped spring from the finger's projected end. Transform and opacity only, so
+    /// nothing re-lays out mid-gesture. With Reduce Motion nothing slides: the menu fades in over the app.
     private func phoneNavigation() -> some View {
         GeometryReader { geometry in
             let width = min(geometry.size.width * 0.82, 330)
@@ -170,42 +174,55 @@ struct RootView: View {
                          current: selectedTab,
                          switchWorkspace: session.organizations.count > 1 ? { closeDrawer(); workspace = true } : nil)
                     .frame(width: width)
-                    // The menu eases in a little from the left as the card leaves (depth, not decoration).
-                    .offset(x: (progress - 1) * 36)
-                    .opacity(progress > 0 ? 1 : 0)
+                    .offset(x: reduceMotion ? 0 : -width * 0.3 * (1 - progress))
+                    .opacity(reduceMotion ? progress : (progress > 0 ? 1 : 0))
+                    .zIndex(reduceMotion ? 2 : 0)
+                    .allowsHitTesting(drawerOpen)
                     .accessibilityHidden(!drawerOpen)
                 phoneTabs()
-                    .clipShape(RoundedRectangle(cornerRadius: progress > 0 ? 28 : 0, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: reduceMotion ? 0 : 24 * progress, style: .continuous))
                     // D-017: a rounded figure on canvas gets a real rim that follows its radius.
                     .overlay {
-                        if progress > 0 {
-                            RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(Theme.border, lineWidth: 1)
-                        }
+                        RoundedRectangle(cornerRadius: reduceMotion ? 0 : 24 * progress, style: .continuous)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                            .opacity(reduceMotion ? 0 : progress)
+                            .allowsHitTesting(false)
                     }
+                    // MA-04: while the menu is open the app is inert for VoiceOver too.
+                    .accessibilityHidden(drawerOpen)
                     .overlay {
-                        if progress > 0 {
-                            // D-021: a dim mix over the card, tap or drag it to close.
-                            Color.black.opacity(0.4 * progress)
-                                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                                .onTapGesture { closeDrawer() }
-                                .accessibilityLabel("Close menu")
-                                .accessibilityAddTraits(.isButton)
-                        }
+                        // D-021: a dim mix over the card; tap or drag it to close. It is the one
+                        // element VoiceOver finds over the app while the menu is open.
+                        Color.black.opacity(0.4 * progress)
+                            .clipShape(RoundedRectangle(cornerRadius: reduceMotion ? 0 : 24 * progress, style: .continuous))
+                            .contentShape(Rectangle())
+                            .onTapGesture { closeDrawer() }
+                            .allowsHitTesting(drawerOpen)
+                            .accessibilityElement()
+                            .accessibilityLabel("Close menu")
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction { closeDrawer() }
+                            .accessibilityHidden(!drawerOpen)
                     }
-                    .offset(x: offset)
+                    .offset(x: reduceMotion ? 0 : offset)
                     .simultaneousGesture(drawerOpen ? closeDrag(width: width) : nil)
                     .overlay(alignment: .leading) {
                         // Swipe in from the left edge at a tab's first screen; elsewhere the
                         // system back swipe keeps that edge.
                         if !drawerOpen && atTabRoot {
-                            Color.clear.frame(width: 20).contentShape(Rectangle())
+                            Color.clear.frame(width: 24).contentShape(Rectangle())
                                 .gesture(openDrag(width: width))
                                 .accessibilityHidden(true)
                         }
                     }
-                    .ignoresSafeArea(edges: progress > 0 ? .vertical : [])
+                    .zIndex(1)
+                    // Always full-bleed, so the card's corners meet the screen's and opening the
+                    // menu never changes the layout under the finger.
+                    .ignoresSafeArea(.container)
             }
             .background(Theme.surface.ignoresSafeArea())
+            // Rotation or a new window size closes the menu instead of leaving it half-open.
+            .onChange(of: geometry.size.width) { if drawerOpen { closeDrawer() } }
         }
     }
 
@@ -229,7 +246,8 @@ struct RootView: View {
 
     private func settleDrawer(open: Bool) {
         if open != drawerOpen { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-        withAnimation(.spring(duration: 0.28, bounce: 0)) {
+        // MA-03: critically damped (no bounce) at 0.3 s; Reduce Motion fades in 150 ms.
+        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.3, dampingFraction: 1)) {
             drawerOpen = open
             drawerDrag = 0
         }
@@ -526,7 +544,7 @@ struct RootView: View {
             Button { search = true } label: {
                 HStack(spacing: 8) { Image(systemName: "magnifyingglass"); Text("Search"); Spacer() }
                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.horizontal, 10)
-                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: 9))
+                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             }.padding(.bottom, 12)
             if session.can("job.view", feature: "jobs") {
                 sidebarRow("Schedule", icon: "calendar", target: .schedule, count: JobFiltering.schedule(store.jobs, range: .today).count)
@@ -557,7 +575,7 @@ struct RootView: View {
                 Text(title).font(Theme.font(14, weight: tab == target ? .medium : .regular))
                 Spacer()
                 if let count { Text("\(count)").font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted) }
-            }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 9))
+            }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
         }.accessibilityAddTraits(tab == target ? .isSelected : [])
     }
 

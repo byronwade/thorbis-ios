@@ -18,6 +18,7 @@ struct EstimateRevisionEditorView: View {
     @State private var error: String?
     @State private var staleRevision = false
     @State private var confirmReload = false
+    @State private var confirmDiscard = false
     @State private var priceBookTarget: PriceBookTarget?
 
     init(estimate: EstimateRecord, onSaved: @escaping (EstimateRecord) -> Void) {
@@ -103,9 +104,11 @@ struct EstimateRevisionEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.disabled(busy)
+                    Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
             }
+            .keyboardDoneButton()
+            .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .safeAreaInset(edge: .bottom) {
                 PrimaryButton(title: "Save revised draft", busy: busy) { Task { await save() } }
                     .disabled(!canSave)
@@ -142,12 +145,12 @@ struct EstimateRevisionEditorView: View {
             Text("EST-\(editor.estimate.id.suffix(4).uppercased()) · REVISION \(editor.estimate.currentRevisionNumber ?? 0)")
                 .font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
             Text("New replacement draft")
-                .font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                .font(Theme.font(24, weight: .medium)).tracking(-0.36)
             Text(editor.estimate.status.statusLabel)
                 .font(Theme.font(12, weight: .medium))
                 .foregroundStyle(Theme.warning)
                 .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
+                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
         }
         .padding(.bottom, 6)
     }
@@ -167,7 +170,7 @@ struct EstimateRevisionEditorView: View {
             .font(Theme.font(12)).foregroundStyle(Theme.muted)
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 
     private var lineSection: some View {
@@ -208,8 +211,8 @@ struct EstimateRevisionEditorView: View {
                 }
                 .disabled(busy || !canEdit || editor.lines.count >= 500 || editor.hasUnsupportedLineSources)
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
         }
     }
 
@@ -233,7 +236,7 @@ struct EstimateRevisionEditorView: View {
                 Text("No alternate packages")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(15).background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(15).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             }
             ForEach($editor.options) { $option in
                 EstimateRevisionOptionEditor(
@@ -351,8 +354,8 @@ private struct EstimateRevisionOptionEditor: View {
             }
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
     }
 }
 
@@ -368,43 +371,21 @@ private struct EstimateRevisionLineRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 TextField("Line item description", text: $line.description, axis: .vertical)
-                    .font(Theme.font(14, weight: .medium)).lineLimit(1...3)
+                    .font(Theme.font(15, weight: .medium)).lineLimit(1...3)
                     .accessibilityLabel("Line item description")
-                if canMoveUp || canMoveDown {
-                    Button(action: moveUp) {
-                        Image(systemName: "arrow.up").foregroundStyle(Theme.muted)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }
-                    .disabled(!canMoveUp).accessibilityLabel("Move line item up")
-                    Button(action: moveDown) {
-                        Image(systemName: "arrow.down").foregroundStyle(Theme.muted)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }
-                    .disabled(!canMoveDown).accessibilityLabel("Move line item down")
-                }
-                Button(action: remove) {
-                    Image(systemName: "trash").foregroundStyle(Theme.destructive)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .accessibilityLabel("Remove \(line.description.isEmpty ? "line item" : line.description)")
+                LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
+                                moveUp: moveUp, moveDown: moveDown, remove: remove)
             }
-            HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Text("Qty").font(Theme.font(12)).foregroundStyle(Theme.muted)
-                    TextField("1", text: $line.quantity).keyboardType(.numberPad)
-                        .font(Theme.monoFont(12)).frame(width: 52).accessibilityLabel("Quantity")
-                }
+            HStack(spacing: 8) {
+                Text("Qty").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                LineNumberField(label: "Quantity", placeholder: "1", text: $line.quantity)
                 Spacer(minLength: 8)
-                HStack(spacing: 4) {
-                    Text("$").foregroundStyle(Theme.muted)
-                    TextField("0.00", text: $line.unitPrice).keyboardType(.decimalPad)
-                        .font(Theme.monoFont(13, weight: .medium)).multilineTextAlignment(.trailing)
-                        .frame(minWidth: 78, maxWidth: 112).accessibilityLabel("Unit price in dollars")
-                }
+                LineNumberField(label: "Unit price in dollars", placeholder: "0.00", text: $line.unitPrice,
+                                prefix: "$", decimal: true, width: 128)
             }
             if case .some(.priceBookSelection(_, let revision)) = line.source {
                 Text("Price Book · Revision \(revision)")
-                    .font(Theme.monoFont(10)).foregroundStyle(Theme.muted)
+                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -417,6 +398,6 @@ private extension View {
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 13)
             .frame(minHeight: 46)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
     }
 }

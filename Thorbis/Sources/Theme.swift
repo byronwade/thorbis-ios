@@ -5,11 +5,34 @@ import UIKit
 enum Theme {
     /// Paper's type ramp at its default size. Each step scales with the
     /// Dynamic Type style closest to its size (HIG-008).
+    /// design.thorbis.com MA-09: weights 400 and 500 only, nothing smaller than 12. Heavier
+    /// requests resolve to 500 and smaller sizes to 12, so every call site follows the rule.
     static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size)).weight(weight)
+        let size = onRamp(size)
+        return Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
     }
     static func monoFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom("GeistMono-Regular", size: size, relativeTo: textStyle(for: size)).weight(weight)
+        let size = onRamp(size)
+        return Font.custom("GeistMono-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
+    }
+    static let minimumSize: CGFloat = 12
+    /// MA-09: every size lands on the ramp 12/13/15/17/20/24/30 (16 stays for inputs, so
+    /// iOS never zooms a field). Stray sizes like 14 or 26 snap to the nearest step.
+    static func onRamp(_ size: CGFloat) -> CGFloat {
+        switch size {
+        case ..<13: minimumSize
+        case 13..<14: 13
+        case 14..<16: 15
+        case 16..<17: 16
+        case 17..<18.5: 17
+        case 18.5..<22: 20
+        case 22..<27: 24
+        default: 30
+        }
+    }
+    static func allowed(_ weight: Font.Weight) -> Font.Weight {
+        let heavier: [Font.Weight] = [.semibold, .bold, .heavy, .black]
+        return heavier.contains(weight) ? .medium : weight
     }
     static func textStyle(for size: CGFloat) -> Font.TextStyle {
         switch size {
@@ -25,6 +48,13 @@ enum Theme {
     }
     /// Paper's screen gutter.
     static let gutter: CGFloat = 20
+    /// MA-10: controls and fields 12, cards and sheets 14; chips and pill tabs are capsules.
+    static let controlRadius: CGFloat = 12
+    static let cardRadius: CGFloat = 14
+    /// MA-10: chips are 28 tall.
+    static let chipHeight: CGFloat = 28
+    /// MA-08: the commit is 50 tall.
+    static let commitHeight: CGFloat = 50
     // Dark values retain the Paper Mobile palette. Light surfaces are the
     // design.thorbis.com warm canvas/panel/well/ink tokens converted from OKLCH.
     static let card = adaptive(light: 0xFDFCFA, dark: 0x232323)
@@ -43,6 +73,9 @@ enum Theme {
         return (traits.userInterfaceStyle == .dark ? UIColor.white : UIColor.black)
             .withAlphaComponent(high ? 0.6 : traits.userInterfaceStyle == .dark ? 0.08 : 0.12)
     })
+    /// MA-08: a commit is ink (the type colour) with inverse type and a hairline rim.
+    static let ink = foreground
+    static let onInk = adaptive(light: 0xFDFCFA, dark: 0x191919, highLight: 0xFFFFFF, highDark: 0x000000)
     static let brand = Color(hex: 0x2F6BFF)
     /// Brand used as text or a link; plain brand is below 4.5:1 on both grounds.
     static let brandText = adaptive(light: 0x2558E0, dark: 0x5285FF)
@@ -86,12 +119,12 @@ struct Chip: View {
     var bg: Color = Theme.fill
     var body: some View {
         HStack(spacing: 5) {
-            if let icon { Image(systemName: icon).font(Theme.font( 10, weight: .semibold)) }
-            Text(text).font(Theme.font( 12, weight: .medium)).lineLimit(1).fixedSize()
+            if let icon { Image(systemName: icon).font(.system(size: 11, weight: .medium)) }
+            Text(text).font(Theme.font(12, weight: .medium)).lineLimit(1).fixedSize()
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, 9).frame(minHeight: 24)
-        .background(bg, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 10).frame(minHeight: Theme.chipHeight)
+        .background(bg, in: Capsule())
     }
 }
 
@@ -133,14 +166,79 @@ struct PrimaryButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                if busy { ProgressView().tint(.white) } else if let icon { Image(systemName: icon) }
-                Text(title).font(Theme.font( 15, weight: .semibold))
+            HStack(spacing: 7) {
+                if busy { ProgressView().tint(Theme.onInk) } else if let icon { Image(systemName: icon) }
+                Text(title)
             }
-            .frame(maxWidth: .infinity).frame(height: 46)
-            .foregroundStyle(.white)
-            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+            .inkCommit()
         }
+        .buttonStyle(PressStyle())
         .disabled(busy)
+    }
+}
+
+extension View {
+    /// MA-08: the screen's one commit. Ink fill, inverse type 17/500, 50 tall, radius 12, a
+    /// hairline rim so it holds its edge on the dark canvas. Disabled fades the ink, never turns it grey-blue.
+    func inkCommit(enabled: Bool = true, height: CGFloat = Theme.commitHeight) -> some View {
+        self
+            .font(Theme.font(17, weight: .medium))
+            .foregroundStyle(Theme.onInk)
+            .frame(maxWidth: .infinity).frame(height: height)
+            .background(Theme.ink.opacity(enabled ? 1 : 0.35), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+    }
+}
+
+/// MA-07: every button answers the finger at once. It dips to 0.97 and 85% opacity while
+/// pressed and comes back in 120 ms; with Reduce Motion only the opacity changes.
+struct PressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// MA-07: a list row shows the well fill while pressed, edge to edge of its content.
+struct RowPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Theme.fill : .clear,
+                        in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+/// MA-13: the shape of what is coming. Rows the size of the real ones, static (no shimmer),
+/// so Reduce Motion needs nothing different; VoiceOver hears one "Loading" instead.
+struct SkeletonRows: View {
+    var count = 6
+    var leading = true
+    /// Zero when the parent already pads to the gutter.
+    var inset: CGFloat = Theme.gutter
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<count, id: \.self) { index in
+                HStack(spacing: 12) {
+                    if leading { Circle().fill(Theme.fill).frame(width: 22, height: 22) }
+                    VStack(alignment: .leading, spacing: 7) {
+                        Capsule().fill(Theme.fill).frame(width: index.isMultiple(of: 2) ? 190 : 150, height: 12)
+                        Capsule().fill(Theme.fill.opacity(0.7)).frame(width: index.isMultiple(of: 3) ? 120 : 170, height: 10)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: 52)
+            }
+        }
+        .padding(.horizontal, inset)
+        .padding(.top, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading")
     }
 }

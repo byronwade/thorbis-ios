@@ -6,6 +6,8 @@ import UserNotifications
 struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
+    @State private var confirmSignOut = false
     @Environment(\.dismiss) private var dismiss
     @State private var showWorkspaces = false
     @State private var notifications: UNAuthorizationStatus?
@@ -51,7 +53,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Button(role: .destructive) { Task { dismiss(); await session.signOut() } } label: {
+                    Button(role: .destructive) { confirmSignOut = true } label: {
                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right").foregroundStyle(Theme.destructive)
                     }
                 } footer: {
@@ -66,6 +68,11 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
+            .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+                Button("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }
+            } message: {
+                Text(outbox.signOutWarning)
+            }
             .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
         }
     }

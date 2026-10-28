@@ -102,6 +102,15 @@ final class FieldOutbox: ObservableObject {
     var pending: [OutboxEntry] { entries.filter { $0.state == .pending } }
     var needsReview: [OutboxEntry] { entries.filter { $0.state != .pending } }
 
+    /// design.thorbis.com MA-17: signing out deletes this phone's saved work, so the dialog says
+    /// what would be lost.
+    var signOutWarning: String {
+        let waiting = entries.count + otherWorkspaceEntryCount
+        return waiting == 0
+            ? "Jobs and customers saved on this phone are removed. You can sign back in at any time."
+            : "\(waiting) change\(waiting == 1 ? "" : "s") on this phone \(waiting == 1 ? "hasn't" : "haven't") synced yet. Signing out deletes \(waiting == 1 ? "it" : "them")."
+    }
+
     private let directory: URL
     private var identity: (actorID: String, organizationID: String)?
     private let deviceID: String
@@ -127,6 +136,18 @@ final class FieldOutbox: ObservableObject {
         guard let identity else { return nil }
         let safe = "\(identity.actorID)_\(identity.organizationID)".filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
         return directory.appendingPathComponent("\(safe).json")
+    }
+
+    /// Changes queued in other workspaces on this phone; `clearAll()` deletes those too, so the
+    /// sign-out warning has to count them.
+    private var otherWorkspaceEntryCount: Int {
+        let current = file?.lastPathComponent
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files
+            .filter { $0.pathExtension == "json" && $0.lastPathComponent != current }
+            .compactMap { try? Data(contentsOf: $0) }
+            .compactMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) }
+            .reduce(0) { $0 + $1.count }
     }
 
     /// Bound to the verified actor and workspace; another identity never sees these changes.

@@ -59,7 +59,7 @@ struct JobDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
-            if let error { ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12) }
+            if let error { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
             if let job {
                 if selectedTab == "Photos" {
                     header(job, compact: true)
@@ -85,8 +85,19 @@ struct JobDetailView: View {
                     }
                 }
             } else if error == nil {
-                ProgressView("Loading job…")
-                    .frame(maxWidth: .infinity, minHeight: 240)
+                // MA-13: the record's shape while it loads, not a lone spinner.
+                VStack(alignment: .leading, spacing: 10) {
+                    Capsule().fill(Theme.fill).frame(width: 140, height: 12)
+                    Capsule().fill(Theme.fill).frame(width: 240, height: 24)
+                    HStack(spacing: 6) {
+                        ForEach(0..<3, id: \.self) { _ in Capsule().fill(Theme.fill).frame(width: 80, height: Theme.chipHeight) }
+                    }
+                    SkeletonRows(count: 4, leading: false).padding(.horizontal, -Theme.gutter).padding(.top, 12)
+                }
+                .padding(.horizontal, Theme.gutter).padding(.top, 12)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading job")
+                Spacer(minLength: 0)
             }
         }
         .background(Theme.background)
@@ -162,17 +173,29 @@ struct JobDetailView: View {
             }
         }
         .sheet(isPresented: $showPause) {
+            // MA-16: Cancel leading, the commit trailing where the thumb is; the form keeps what was typed.
             NavigationStack {
                 Form {
-                    TextField("Why are you pausing?", text: $reason, axis: .vertical)
-                    TextField("What needs to happen next?", text: $nextAction, axis: .vertical)
-                    if let error { Text(error).foregroundStyle(Theme.destructive) }
-                    Button("Pause job") { Task { await pause() } }
-                        .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
+                    Section {
+                        TextField("Why are you pausing?", text: $reason, axis: .vertical)
+                        TextField("What needs to happen next?", text: $nextAction, axis: .vertical)
+                    } footer: {
+                        if let error { Text(error).foregroundStyle(Theme.destructive) }
+                        else { Text("The office sees both on the job.") }
+                    }
                 }
                 .navigationTitle("Pause job")
-                .toolbar { Button("Cancel") { showPause = false }.disabled(busy) }
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showPause = false }.disabled(busy) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Pause") { Task { await pause() } }
+                            .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
+                    }
+                }
             }
+            .presentationDetents([.medium, .large])
+            .interactiveDismissDisabled(busy || !reason.isEmpty || !nextAction.isEmpty)
         }
         .sheet(isPresented: $showSchedule, onDismiss: { Task { await load() } }) {
             if let job {
@@ -194,7 +217,7 @@ struct JobDetailView: View {
     @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
         if let job {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                ShareLink(item: "\(job.title) · \(job.id)") {
+                ShareLink(item: JobShareText.text(title: job.title, customer: store.customerName(job.customerId), scheduledFor: job.scheduledFor)) {
                     Image(systemName: "square.and.arrow.up")
                 }
                 .accessibilityLabel("Share job")
@@ -220,8 +243,8 @@ struct JobDetailView: View {
                 .foregroundStyle(Theme.muted)
                 .lineLimit(1)
             Text(job.title)
-                .font(Theme.font(26, weight: .semibold))
-                .tracking(-0.39)
+                .font(Theme.font(24, weight: .medium))
+                .tracking(-0.36)
                 .lineLimit(compact ? 2 : nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
@@ -233,36 +256,37 @@ struct JobDetailView: View {
                             Label(scheduleLabel(date), systemImage: "clock")
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
-                                .padding(.horizontal, 9)
-                                .frame(height: 24)
+                                .padding(.horizontal, 10)
+                                .frame(height: Theme.chipHeight)
                                 .background(Theme.fill, in: Capsule())
-                                .padding(.vertical, 10).contentShape(Rectangle())
+                                .padding(.vertical, 8).contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                         .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
                     }
                     if let assignedName = assignedDisplayName(for: job) {
                         HStack(spacing: 6) {
                             Text(nameInitials(assignedName))
-                                .font(Theme.font(8, weight: .semibold))
+                                .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.brandText)
-                                .frame(width: 16, height: 16)
+                                .frame(width: 22, height: 22)
+                                .dynamicTypeSize(...DynamicTypeSize.large)
                                 .background(Theme.brandSurface, in: Circle())
                             Text(shortName(assignedName))
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
                         }
-                        .padding(.horizontal, 7)
-                        .frame(height: 24)
+                        .padding(.leading, 3).padding(.trailing, 10)
+                        .frame(height: Theme.chipHeight)
                         .background(Theme.fill, in: Capsule())
                     }
                     MemberChip(customerID: job.customerId)
                     if let balance = invoiceBalanceCents {
                         Text("\(money(balance, currency: "USD")) due")
-                            .font(Theme.monoFont(11, weight: .medium))
+                            .font(Theme.monoFont(12, weight: .medium))
                             .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 9)
-                            .frame(height: 24)
+                            .padding(.horizontal, 10)
+                            .frame(height: Theme.chipHeight)
                             .background(Theme.fill, in: Capsule())
                     }
             }
@@ -316,16 +340,16 @@ struct JobDetailView: View {
         let queued = outbox.pendingStatus(for: job.id)
         return HStack(spacing: 5) {
             Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .medium))
             Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
                 .font(Theme.font(12, weight: .medium))
             if showsMenu { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 9)
-        .frame(height: 24)
-        .background(surface, in: RoundedRectangle(cornerRadius: 8))
-        .padding(.vertical, 10)
+        .frame(height: Theme.chipHeight)
+        .background(surface, in: Capsule())
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
         .accessibilityLabel("Job status, \(job.status.statusLabel)")
     }
@@ -405,11 +429,11 @@ struct JobDetailView: View {
                         PaperDetailRow(label: "Address") {
                             HStack(spacing: 4) {
                                 Text(place.address).foregroundStyle(Theme.brandText)
-                                Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.brandText)
                             }
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .accessibilityHint("Opens driving directions in Maps")
                     let access = [place.gateCode.map { "Gate \($0)" }, place.alarmCode.map { "Alarm \($0)" },
                                   place.dogOnSite.map { "Dog: \($0)" }, place.parking.map { "Parking: \($0)" }].compactMap { $0 }
@@ -431,18 +455,18 @@ struct JobDetailView: View {
                     Button { runTransition(target) } label: {
                         PaperMenuRow(transitionTitle(target), symbol: transitionSymbol(target))
                     }
-                    .buttonStyle(.plain).disabled(busy)
+                    .buttonStyle(RowPressStyle()).disabled(busy)
                 }
                 if session.can("job.assign", feature: "jobs") {
                     Button { showSchedule = true } label: { PaperMenuRow("Schedule", symbol: "calendar", subtitle: "Pick a day and arrival window") }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowPressStyle())
                     NavigationLink { JobAssignmentView(jobID: jobId) } label: { PaperMenuRow("Assign technician", symbol: "person.crop.circle.badge.plus") }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowPressStyle())
                 }
                 NavigationLink { JobCloseoutView(jobID: jobId) } label: { PaperMenuRow("Wrap up", symbol: "checkmark.seal", subtitle: "Closeout checklist") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowPressStyle())
                 NavigationLink { JobFollowUpsView(jobID: jobId) } label: { PaperMenuRow("Follow-ups", symbol: "list.bullet") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowPressStyle())
             }
         }
     }
@@ -465,7 +489,7 @@ struct JobDetailView: View {
                 }
                 PaperGroupHeader(title: "Estimates", count: jobEstimates.count)
                 if !estimatesLoaded {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20)
+                    SkeletonRows(count: 2, leading: false, inset: 0)
                 } else if jobEstimates.isEmpty {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
                                     message: "Build one from the price book. It's added to this job automatically.")
@@ -490,11 +514,11 @@ struct JobDetailView: View {
                             }
                         }
                         .padding(16)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                 }
             }
         }
@@ -535,7 +559,7 @@ struct JobDetailView: View {
             if !session.can("invoice.view", feature: "invoicing") {
                 emptyCard("Invoice access is unavailable.")
             } else if !invoicesLoaded {
-                ProgressView("Loading invoices…").frame(maxWidth: .infinity).padding(30)
+                SkeletonRows(count: 3, leading: false, inset: 0)
             } else if invoices.isEmpty {
                 PaperEmptyState(symbol: "doc.plaintext", title: "No invoice yet",
                                 message: "Start the invoice from this job. Lines come from its approved estimate; you can edit them before sending.",
@@ -545,7 +569,7 @@ struct JobDetailView: View {
                     Button { showDeposit = true } label: {
                         PaperMenuRow("Request a deposit", symbol: "banknote", subtitle: "Bill part up front from the approved estimate")
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowPressStyle())
                 }
             } else {
                 if invoices.count > 1 {
@@ -559,13 +583,16 @@ struct JobDetailView: View {
                         HStack(spacing: 7) {
                             Text("INV-\((selectedInvoice?.id ?? invoices[0].id).suffix(4).uppercased())")
                                 .font(Theme.monoFont(12, weight: .medium))
-                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                            Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
                         }
                         .foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 10)
-                        .frame(minHeight: 36)
+                        .padding(.horizontal, 12)
+                        .frame(height: Theme.chipHeight)
                         .background(Theme.fill, in: Capsule())
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
+                    .accessibilityLabel("Choose invoice")
                 }
                 if let invoice = selectedInvoice {
                     if let model = invoicePaymentModel, loadedInvoiceModelID == invoice.id {
@@ -576,8 +603,7 @@ struct JobDetailView: View {
                             onInvoiceUpdated: updateInvoice
                         )
                     } else {
-                        ProgressView("Loading invoice…")
-                            .frame(maxWidth: .infinity, minHeight: 100)
+                        SkeletonRows(count: 4, leading: false, inset: 0)
                     }
                 }
             }
@@ -609,7 +635,7 @@ struct JobDetailView: View {
                             .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
                             .frame(minHeight: 44).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .accessibilityAddTraits(activityFilter == filter ? .isSelected : [])
                 }
             }
@@ -617,7 +643,7 @@ struct JobDetailView: View {
                 ForEach(timeline(job)) { entry in
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
-                            Image(systemName: entry.symbol).font(.system(size: 11, weight: .semibold))
+                            Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(entry.isNote ? Theme.brandText : Theme.muted)
                                 .frame(width: 26, height: 26)
                                 .background(entry.isNote ? Theme.brandSurface : Theme.fill, in: Circle())
@@ -632,8 +658,8 @@ struct JobDetailView: View {
                             if let body = entry.body {
                                 Text(body).font(Theme.font(14)).foregroundStyle(Theme.foreground)
                                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
                                     .textSelection(.enabled)
                             }
                             Text(entry.date.formatted(.dateTime.month(.abbreviated).day())).font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -655,11 +681,11 @@ struct JobDetailView: View {
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 22))
                         .overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.border))
                     Button { Task { await saveNote() } } label: {
-                        Group { if busy { ProgressView().tint(.white) } else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold)) } }
-                            .foregroundStyle(.white).frame(width: 44, height: 44)
-                            .background(Theme.brand.opacity(canSaveNote ? 1 : 0.4), in: Circle())
+                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .medium)) } }
+                            .foregroundStyle(Theme.onInk).frame(width: 44, height: 44)
+                            .background(Theme.ink.opacity(canSaveNote ? 1 : 0.35), in: Circle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .disabled(!canSaveNote || busy)
                     .accessibilityLabel("Save note")
                 }
@@ -735,7 +761,7 @@ struct JobDetailView: View {
             Image(systemName: icon).foregroundStyle(Theme.brandText).frame(width: 20)
             Text(title).font(Theme.font(14, weight: .medium))
             Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
         }
         .foregroundStyle(Theme.foreground)
         .padding(15)
@@ -744,7 +770,7 @@ struct JobDetailView: View {
 
     private func actionButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { actionLabel(title, icon: icon) }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .disabled(busy)
     }
 
@@ -752,7 +778,7 @@ struct JobDetailView: View {
         Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 
     private func availableTransitions(_ job: JobRecord) -> [String] {
@@ -794,6 +820,14 @@ struct JobDetailView: View {
     private func runTransition(_ target: String) {
         if target == "paused" { showPause = true }
         else { Task { await advance(target) } }
+    }
+
+    /// Try again re-runs every load this page has attempted, so a failed invoice or estimate
+    /// fetch is retried too, not just the job.
+    private func retry() async {
+        await load()
+        if invoicesLoaded { await loadInvoices() }
+        if estimatesLoaded, let job { await loadJobEstimates(job) }
     }
 
     private func loadInvoices() async {

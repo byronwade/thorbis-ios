@@ -38,7 +38,7 @@ struct JobCloseoutView: View {
                     Text("JOB-\(jobID.suffix(4).uppercased())\(job.map { " · \(store.customerName($0.customerId))" } ?? "")")
                         .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
                     Text(job?.status == "completed" ? "Job complete" : "Wrap up this job")
-                        .font(Theme.font(26, weight: .semibold)).tracking(-0.39).accessibilityAddTraits(.isHeader)
+                        .font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                 }
                 .padding(.bottom, 14)
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
@@ -99,11 +99,11 @@ struct JobCloseoutView: View {
                         if session.can("invoice.create", feature: "invoicing") {
                             Button { Task { await completionInvoice() } } label: {
                                 PaperMenuRow("Open completion invoice", symbol: "doc.plaintext")
-                            }.buttonStyle(.plain).disabled(busy)
+                            }.buttonStyle(RowPressStyle()).disabled(busy)
                         }
                         if let invoiceID, session.can("invoice.view", feature: "invoicing") {
                             NavigationLink { InvoiceDetailView(id: invoiceID) } label: { PaperMenuRow("View invoice", symbol: "doc.text") }
-                                .buttonStyle(.plain)
+                                .buttonStyle(RowPressStyle())
                         }
                     }
                     if session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
@@ -112,7 +112,7 @@ struct JobCloseoutView: View {
                             .disabled(busy)
                     }
                 } else if error == nil {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    SkeletonRows(count: 4, leading: false, inset: 0)
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
@@ -156,8 +156,8 @@ struct JobCloseoutView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
     }
 
     private func load() async {
@@ -308,7 +308,7 @@ struct JobScheduleView: View {
         .foregroundStyle(Theme.foreground)
         .presentationDetents([.height(430), .large])
         .presentationDragIndicator(.visible)
-        .presentationCornerRadius(20)
+        .presentationCornerRadius(Theme.cardRadius)
         .presentationBackground(Theme.card)
         .interactiveDismissDisabled(busy)
     }
@@ -330,7 +330,7 @@ struct JobScheduleView: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .accessibilityLabel("Close schedule picker")
             .disabled(busy)
         }
@@ -347,18 +347,18 @@ struct JobScheduleView: View {
             } label: {
                 HStack(spacing: 6) {
                     Text("Pick date")
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
                         .rotationEffect(.degrees(showsCalendar ? 180 : 0))
                 }
                 .font(Theme.font(13, weight: showsCalendar ? .semibold : .medium))
                 .foregroundStyle(showsCalendar ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .accessibilityAddTraits(showsCalendar ? .isSelected : [])
             Spacer(minLength: 0)
         }
@@ -399,11 +399,11 @@ struct JobScheduleView: View {
                 .foregroundStyle(selected ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -435,7 +435,7 @@ struct JobScheduleView: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowPressStyle())
         .accessibilityLabel("\(label), two hour arrival window")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -498,10 +498,10 @@ struct JobFollowUpsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Follow-ups").font(Theme.font(26, weight: .semibold)).tracking(-0.39)
+                Text("Follow-ups").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30) }
+                if loading && records.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 if !records.isEmpty { PaperGroupHeader(title: "On this job", count: records.count) }
                 ForEach(records) { record in
                     VStack(alignment: .leading, spacing: 6) {
@@ -531,8 +531,8 @@ struct JobFollowUpsView: View {
                         }
                     }
                     .padding(14)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                     .padding(.bottom, 8)
                 }
                 if session.can("job.edit", feature: "jobs") {
@@ -575,8 +575,8 @@ struct JobFollowUpsView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
     }
 
     private func load() async {
@@ -650,6 +650,8 @@ struct FollowUpBookingSheet: View {
             }
             .onAppear { if need.isEmpty { need = followUp.nextAction } }
         }
+        .interactiveDismissDisabled(busy)
+        .presentationCornerRadius(Theme.cardRadius)
     }
 
     private var window: (Date, Date)? {

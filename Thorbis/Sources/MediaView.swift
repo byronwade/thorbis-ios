@@ -43,7 +43,7 @@ struct JobMediaView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let error = error ?? preview.error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                if loading || preview.loading { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20) }
+                if loading || preview.loading { SkeletonRows(count: 2, inset: 0) }
                 if let selectedData {
                     HStack(spacing: 12) {
                         Image(systemName: selectedMime == "application/pdf" ? "doc" : "photo")
@@ -58,8 +58,8 @@ struct JobMediaView: View {
                             .font(Theme.font(13, weight: .medium)).frame(minHeight: 44).disabled(busy)
                     }
                     .padding(12)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 }
                 if !allPhotos.isEmpty {
                     HStack(spacing: 6) {
@@ -117,8 +117,8 @@ struct JobMediaView: View {
                                             if let tag = ["Before", "After"].first(where: record.tags.contains) {
                                                 Text(tag).font(Theme.font(11, weight: .semibold))
                                                     .foregroundStyle(tag == "After" ? Theme.success : Theme.foreground)
-                                                    .padding(.horizontal, 7).frame(height: 20)
-                                                    .background(tag == "After" ? Theme.successSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 6))
+                                                    .padding(.horizontal, 8).frame(height: 24)
+                                                    .background(tag == "After" ? Theme.successSurface : Theme.fill, in: Capsule())
                                                     .padding(8)
                                             }
                                         }
@@ -130,8 +130,8 @@ struct JobMediaView: View {
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                             }
                             .buttonStyle(.plain)
                             .disabled(busy || preview.loading || record.uploadState != "stored")
@@ -179,20 +179,18 @@ struct JobMediaView: View {
                     HStack(spacing: 8) {
                         Button { showCamera = true } label: {
                             HStack(spacing: 7) {
-                                if busy { ProgressView().tint(.white) } else { Image(systemName: "camera") }
+                                if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "camera") }
                                 Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")
                             }
-                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).frame(height: 46)
-                            .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                            .inkCommit()
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
                         .disabled(busy || !UIImagePickerController.isSourceTypeAvailable(.camera))
                         PhotosPicker(selection: $selection, matching: .images) {
                             Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)
                                 .frame(width: 46, height: 46)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         }
                         .disabled(busy)
                         .accessibilityLabel("Choose from library")
@@ -204,8 +202,8 @@ struct JobMediaView: View {
                         } label: {
                             Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
                                 .frame(width: 46, height: 46)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         }
                         .disabled(busy)
                         .accessibilityLabel("Add a document")

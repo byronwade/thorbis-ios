@@ -36,7 +36,7 @@ struct SignatureCaptureSheet: View {
                     .font(Theme.font(17))
                     .padding(.horizontal, 14)
                     .frame(minHeight: 48)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 ZStack(alignment: .bottomLeading) {
                     pad
                     HStack {
@@ -51,8 +51,8 @@ struct SignatureCaptureSheet: View {
                     .padding(.horizontal, 14)
                 }
                 .frame(height: 220)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
+                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 .accessibilityLabel("Signature pad")
                 if let error { Text(error).font(Theme.font(13)).foregroundStyle(Theme.destructive) }
                 Spacer(minLength: 0)
@@ -174,6 +174,6 @@ struct SignatureBadge: View {
         .foregroundStyle(Theme.success)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 }

@@ -20,7 +20,7 @@ struct WorkspaceNoticesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Inbox").font(Theme.font(34, weight: .bold)).tracking(-0.68).accessibilityAddTraits(.isHeader)
+                    Text("Inbox").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
@@ -151,7 +151,7 @@ struct WorkspaceRevenueView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Money").font(Theme.font(34, weight: .bold)).tracking(-0.68).accessibilityAddTraits(.isHeader)
+                    Text("Money").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text("Revenue and receivables · live").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.bottom, 16)
@@ -167,7 +167,7 @@ struct WorkspaceRevenueView: View {
                         content(report)
                     }
                 } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    SkeletonRows(count: 4, leading: false, inset: 0)
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
@@ -241,7 +241,8 @@ struct WorkspaceRevenueView: View {
                     Capsule()
                         .fill(index == months.count - 1 ? Theme.brand : Theme.muted.opacity(0.45))
                         .frame(width: 6, height: max(4, 44 * CGFloat(month.collected) / CGFloat(peak)))
-                    Text(monthName(month.month, long: false).uppercased()).font(Theme.monoFont(10, weight: .medium))
+                    Text(monthName(month.month, long: false).uppercased()).font(Theme.monoFont(12, weight: .medium))
+                        .lineLimit(1).minimumScaleFactor(0.85)
                         .foregroundStyle(index == months.count - 1 ? Theme.foreground : Theme.muted)
                 }
                 .frame(maxWidth: .infinity)
@@ -260,8 +261,8 @@ struct WorkspaceRevenueView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
         .accessibilityElement(children: .combine)
     }
 
@@ -319,7 +320,7 @@ struct WorkspacePriceBookView: View {
                                        description: Text("This account cannot view Price Book items."))
             } else {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Price book").font(Theme.font(34, weight: .bold)).tracking(-0.68).foregroundStyle(Theme.foreground)
+                    Text("Price book").font(Theme.font(30, weight: .medium)).tracking(-0.6).foregroundStyle(Theme.foreground)
                         .accessibilityAddTraits(.isHeader)
                     Text("\(items.count) item\(items.count == 1 ? "" : "s")\(nextCursor == nil ? "" : " loaded")")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
@@ -370,7 +371,7 @@ struct WorkspacePriceBookView: View {
                             Button("Load more items") { Task { await loadMore() } }
                                 .font(Theme.font(14, weight: .medium))
                                 .frame(maxWidth: .infinity).frame(minHeight: 44)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                                 .disabled(loading)
                         }
                         if visibleItems.isEmpty && !loading && error == nil {

@@ -21,8 +21,9 @@ struct ThorbisLogoLockup: View {
     }
 }
 
-/// Paper's tab-root header (primitives sheet: 34/700 large title, 15 muted subtitle,
-/// trailing 36pt circles). The title scrolls with its content; the tab bar stays put.
+/// The tab-root header (design.thorbis.com MA-05): a 44-tall top row with the menu button leading and
+/// at most one circle trailing, then the 30/500 large title and one muted subtitle line. The title
+/// scrolls with its content; the tab bar stays put.
 struct PaperHeader: View {
     let title: String
     var icon: String = ""
@@ -38,12 +39,13 @@ struct PaperHeader: View {
                 PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
                 Spacer(minLength: 0)
                 if let search {
-                    PaperCircleButton(symbol: "magnifyingglass", label: "Filter \(title.lowercased())", action: search)
+                    // Filters this list; the tab bar's search finds anything. Different glyphs, different jobs.
+                    PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: search)
                 }
                 // One way in: the menu button. The account lives at the bottom of the menu.
             }
             Text(title)
-                .font(Theme.font(34, weight: .bold)).tracking(-0.68)
+                .font(Theme.font(30, weight: .medium)).tracking(-0.6)
                 .lineLimit(1).minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
             Text(subtitle)
@@ -70,7 +72,7 @@ struct PaperCircleButton: View {
                 .frame(width: size, height: size).background(Theme.fill, in: Circle())
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel(label)
     }
 }
@@ -80,19 +82,31 @@ struct PaperTabs: View {
     let options: [String]
     @Binding var selection: String
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 2) {
-                ForEach(options, id: \.self) { option in
-                    Button { selection = option } label: {
-                        Text(option).font(Theme.font(13, weight: selection == option ? .semibold : .medium))
-                            .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(selection == option ? Theme.fill : .clear, in: Capsule())
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityAddTraits(selection == option ? .isSelected : [])
-                }
-            }.padding(.horizontal, Theme.gutter - 4)
-        }.scrollIndicators(.hidden).padding(.bottom, 4)
+        // When the tabs run past the edge, the chosen one scrolls fully into view, so a
+        // half-cut "Activity" never hides which tab is open.
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 2) {
+                    ForEach(options, id: \.self) { option in
+                        Button { selection = option } label: {
+                            Text(option).font(Theme.font(15, weight: .medium))
+                                .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
+                                .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
+                                .background(selection == option ? Theme.fill : .clear, in: Capsule())
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .id(option)
+                        .accessibilityAddTraits(selection == option ? .isSelected : [])
+                    }
+                }.padding(.horizontal, Theme.gutter - 4)
+            }
+            .scrollIndicators(.hidden).padding(.bottom, 4)
+            .onChange(of: selection) { _, value in
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+            }
+        }
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }
 
@@ -136,7 +150,7 @@ struct StatusRing: View {
     }
 }
 
-/// Paper's quiet empty state: line icon, one sentence, an optional text action.
+/// MA-14: what will be here, in one sentence, and one bordered button that starts it.
 struct PaperEmptyState: View {
     let symbol: String
     let title: String
@@ -148,12 +162,18 @@ struct PaperEmptyState: View {
         VStack(spacing: 8) {
             Image(systemName: symbol).font(.system(size: 26, weight: .light)).foregroundStyle(Theme.muted)
                 .padding(.bottom, 6)
-            Text(title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-            Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                .multilineTextAlignment(.center)
+            Text(message).font(Theme.font(15)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                    .frame(minHeight: 44)
+                Button(action: action) {
+                    Text(actionTitle).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 18).frame(minHeight: 44)
+                        .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                }
+                .buttonStyle(PressStyle())
+                .padding(.top, 8)
             }
         }
         .frame(maxWidth: .infinity)
@@ -167,13 +187,23 @@ struct PaperDetailRow<Value: View>: View {
     @ViewBuilder var value: Value
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).font(Theme.font(14)).foregroundStyle(Theme.muted).fixedSize()
-            Spacer(minLength: 8)
-            value.font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                .multilineTextAlignment(.trailing)
+        // A short value sits on the label's line; a long one (gate codes, notes) goes under it,
+        // left-aligned, instead of a ragged right-aligned paragraph.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted).fixedSize()
+                Spacer(minLength: 8)
+                value.font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                value.font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 8)
         }
-        .frame(minHeight: 42)
+        .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
     }
 }
@@ -227,7 +257,7 @@ extension PaperMenuRow where Trailing == AnyView {
     }
 }
 
-/// Paper's sticky bottom bar: one blue commit, at most one quiet square beside it.
+/// The sticky bottom bar: one ink commit (MA-08), at most one quiet square beside it.
 struct PaperActionBar<Secondary: View>: View {
     let title: String
     var symbol: String? = nil
@@ -240,14 +270,12 @@ struct PaperActionBar<Secondary: View>: View {
         HStack(spacing: 8) {
             Button(action: action) {
                 HStack(spacing: 7) {
-                    if busy { ProgressView().tint(.white) } else if let symbol { Image(systemName: symbol).font(.system(size: 15, weight: .semibold)) }
-                    Text(title).font(Theme.font(15, weight: .semibold))
+                    if busy { ProgressView().tint(Theme.onInk) } else if let symbol { Image(systemName: symbol).font(.system(size: 15, weight: .medium)) }
+                    Text(title)
                 }
-                .frame(maxWidth: .infinity).frame(height: 46)
-                .foregroundStyle(.white)
-                .background(Theme.brand.opacity(disabled ? 0.45 : 1), in: RoundedRectangle(cornerRadius: 12))
+                .inkCommit(enabled: !disabled)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .disabled(busy || disabled)
             secondary
         }
@@ -262,7 +290,7 @@ extension PaperActionBar where Secondary == EmptyView {
     }
 }
 
-/// The 46pt rimmed square that sits beside a commit.
+/// The rimmed square that sits beside a commit, as tall as the commit.
 struct PaperSquareButton: View {
     let symbol: String
     let label: String
@@ -270,11 +298,11 @@ struct PaperSquareButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                .frame(width: 46, height: 46)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border))
+                .frame(width: Theme.commitHeight, height: Theme.commitHeight)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel(label)
     }
 }
@@ -287,8 +315,8 @@ struct PaperSearchField: View {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
             TextField(prompt, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled()
             if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search") }
-        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
     }
 }
 
@@ -360,16 +388,16 @@ struct OfflineBanner: View {
     }
 
     private func banner(symbol: String, tint: Color, ground: Color, text: String, trailing: String?) -> some View {
+        // Only the mark is tinted; the words stay body colour (design.thorbis.com).
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 13, weight: .semibold))
-            Text(text).font(Theme.font(13, weight: .medium)).lineLimit(2)
+            Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(tint)
+            Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(2)
             Spacer(minLength: 8)
-            if let trailing { Text(trailing).font(Theme.monoFont(11, weight: .medium)) }
+            if let trailing { Text(trailing).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted) }
         }
-        .foregroundStyle(tint)
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ground, in: RoundedRectangle(cornerRadius: 10))
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -457,16 +485,17 @@ struct PaperQuickActions: View {
 
     private func action(_ title: String, symbol: String, label: String, perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            VStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                    .frame(height: 18)
-                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
+            // One line, glyph then word: the same reach as a tile, in less height.
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
+                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel(label)
     }
 }
@@ -512,3 +541,109 @@ struct FlowRow: Layout {
     }
 }
 
+
+/// One "more" control for an editable line (MA-12): keeps the description wide instead of
+/// three icon buttons beside it.
+struct LineItemActions: View {
+    let name: String
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let moveUp: () -> Void
+    let moveDown: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        Menu { LineItemMenuItems(canMoveUp: canMoveUp, canMoveDown: canMoveDown, moveUp: moveUp, moveDown: moveDown, remove: remove) } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Actions for \(name.isEmpty ? "line item" : name)")
+    }
+}
+
+struct LineItemMenuItems: View {
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let moveUp: () -> Void
+    let moveDown: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        if canMoveUp { Button(action: moveUp) { Label("Move up", systemImage: "arrow.up") } }
+        if canMoveDown { Button(action: moveDown) { Label("Move down", systemImage: "arrow.down") } }
+        Button(role: .destructive, action: remove) { Label("Remove line", systemImage: "trash") }
+    }
+}
+
+/// A number field on a line: a 44-tall well so the thumb can hit it, readable mono type.
+struct LineNumberField: View {
+    let label: String
+    let placeholder: String
+    @Binding var text: String
+    var prefix: String?
+    var decimal = false
+    var width: CGFloat = 64
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let prefix { Text(prefix).font(Theme.monoFont(15)).foregroundStyle(Theme.muted) }
+            TextField(placeholder, text: $text)
+                .keyboardType(decimal ? .decimalPad : .numberPad)
+                .font(Theme.monoFont(15, weight: .medium))
+                .multilineTextAlignment(.trailing)
+                .accessibilityLabel(label)
+        }
+        .padding(.horizontal, 10)
+        .frame(width: width, height: 44)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+    }
+}
+
+extension View {
+    /// Number pads have no return key: one Done above the keyboard (MA-16).
+    func keyboardDoneButton() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                .frame(minWidth: 44, minHeight: 44)
+            }
+        }
+    }
+
+    /// Cancel and swipe never throw away edits silently (MA-16, MA-17).
+    func discardChangesGuard(hasChanges: Bool, busy: Bool, isPresented: Binding<Bool>, discard: @escaping () -> Void) -> some View {
+        interactiveDismissDisabled(busy || hasChanges)
+            .confirmationDialog("Discard your changes?", isPresented: isPresented, titleVisibility: .visible) {
+                Button("Discard changes", role: .destructive, action: discard)
+                Button("Keep editing", role: .cancel) {}
+            }
+    }
+}
+
+/// The list's create action, in the thumb zone above the tab bar (MA-02): the same pill on
+/// Jobs and Customers instead of a plus on one screen and a pill on the other.
+struct FloatingCreateButton: View {
+    let title: String
+    var disabled = false
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Spacer()
+            Button(action: action) {
+                Label(title, systemImage: "plus").font(Theme.font(15, weight: .medium))
+                    .padding(.horizontal, 16).frame(minHeight: 44)
+                    .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle()).disabled(disabled)
+        }
+        .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+    }
+}

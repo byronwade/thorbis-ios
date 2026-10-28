@@ -46,25 +46,15 @@ struct ServiceLocationSheet: View {
             ZStack {
                 Text(isEditing ? "Edit location" : "New location")
                     .font(Theme.font(17, weight: .semibold))
+                // MA-16: Cancel leading; the one commit is the ink button at the bottom.
                 HStack {
-                    Button { dismiss() } label: {
-                        Image(systemName: "chevron.left")
-                            .font(Theme.font(13, weight: .semibold))
-                            .foregroundStyle(Theme.foreground)
-                            .frame(width: 32, height: 32)
-                            .background(Theme.fill, in: Circle())
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("Cancel location changes")
-                    .disabled(busy)
+                    Button("Cancel") { dismiss() }
+                        .font(Theme.font(15))
+                        .foregroundStyle(Theme.foreground)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityLabel("Cancel location changes")
+                        .disabled(busy)
                     Spacer()
-                    Button("Save") { Task { await save() } }
-                        .font(Theme.font(15, weight: .semibold))
-                        .foregroundStyle(Theme.brandText)
-                        .frame(minHeight: 44)
-                        .disabled(!canAttemptSave)
-                        .opacity(canAttemptSave ? 1 : 0.45)
                 }
             }
             .frame(minHeight: 44)
@@ -115,17 +105,13 @@ struct ServiceLocationSheet: View {
                 }
                 Button { Task { await save() } } label: {
                     Group {
-                        if busy { ProgressView().tint(.white) }
-                        else { Text(isEditing ? "Save changes" : "Add location").font(Theme.font(15, weight: .semibold)) }
+                        if busy { ProgressView().tint(Theme.onInk) }
+                        else { Text(isEditing ? "Save changes" : "Add location") }
                     }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12))
+                    .inkCommit(enabled: canAttemptSave)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .disabled(!canAttemptSave)
-                .opacity(canAttemptSave ? 1 : 0.45)
             }
         }
         .padding(.horizontal, 20)
@@ -135,7 +121,7 @@ struct ServiceLocationSheet: View {
         .toolbar(.hidden, for: .navigationBar)
         .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.hidden)
-        .presentationCornerRadius(20)
+        .presentationCornerRadius(Theme.cardRadius)
         .presentationBackground(Theme.card)
         .interactiveDismissDisabled(busy)
     }
@@ -152,19 +138,38 @@ struct ServiceLocationSheet: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
             TextField(placeholder, text: text, axis: multiline ? .vertical : .horizontal)
-                .font(field == .latitude || field == .longitude || field == .gateCode || field == .alarmCode ? Theme.monoFont(14) : Theme.font(15))
+                // design.thorbis.com mobile: input type is at least 16.
+                .font(field == .latitude || field == .longitude || field == .gateCode || field == .alarmCode ? Theme.monoFont(16) : Theme.font(16))
                 .keyboardType(keyboard)
                 .textInputAutocapitalization(capitalization)
                 .autocorrectionDisabled(field == .latitude || field == .longitude || field == .gateCode || field == .alarmCode)
+                .textContentType(field == .address ? .fullStreetAddress : nil)
                 .focused($focusedField, equals: field)
+                // MA-16: return moves to the next field (multi-line fields keep return for new lines).
+                .submitLabel(field == .parking ? .done : .next)
+                .onSubmit { focusedField = next(after: field) }
                 .padding(.horizontal, 14)
-                .frame(minHeight: multiline ? 70 : 46, maxHeight: multiline ? 84 : 46, alignment: .topLeading)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
+                .frame(minHeight: multiline ? 70 : 48, maxHeight: multiline ? 84 : 48, alignment: .topLeading)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(focusedField == field ? Theme.brand : Theme.border,
+                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                        .stroke(focusedField == field ? Theme.foreground : Theme.border,
                                 lineWidth: focusedField == field ? 1.5 : 1)
                 }
+        }
+    }
+
+    private func next(after field: LocationField) -> LocationField? {
+        switch field {
+        case .label: .address
+        case .address: .notes
+        case .notes: .latitude
+        case .latitude: .longitude
+        case .longitude: .gateCode
+        case .gateCode: .alarmCode
+        case .alarmCode: .dogOnSite
+        case .dogOnSite: .parking
+        case .parking: nil
         }
     }
 
@@ -173,10 +178,10 @@ struct ServiceLocationSheet: View {
         return Button { draft.kind = value } label: {
             Text(title)
                 .font(Theme.font(13, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Color.white : Theme.muted)
+                .foregroundStyle(selected ? Theme.onInk : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 30)
-                .background(selected ? Theme.brand : Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                .background(selected ? Theme.ink : Theme.fill, in: Capsule())
                 .frame(minHeight: 44)
         }
         .buttonStyle(.plain)
