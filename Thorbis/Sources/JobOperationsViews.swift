@@ -264,8 +264,10 @@ struct JobCloseoutView: View {
         let disposition: FieldUnpaidDisposition? = validDisposition ? .init(reasonCode: unpaidReasonCode, reason: reason, followUpNextAction: next) : nil
         let queued = OutboxEntry.Action.complete(.init(jobId: jobID, unpaidDisposition: validDisposition
             ? .init(reasonCode: unpaidReasonCode, reason: reason, followUpNextAction: next) : nil))
-        // Anything already waiting for this job lands first, so the completion queues behind it.
-        if session.isOffline || !outbox.pending.filter({ $0.jobID == jobID }).isEmpty {
+        // Anything already waiting for this job, photos included, lands first, so the completion
+        // queues behind it and the outbox holds it until those uploads finish.
+        if session.isOffline || !outbox.pending.filter({ $0.jobID == jobID }).isEmpty
+            || !PendingPhotoStore.list(jobID: jobID).isEmpty {
             queueOffline(queued)
             completed += 1
             if !session.isOffline { Task { await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync")) } }

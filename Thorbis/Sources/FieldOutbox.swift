@@ -229,6 +229,18 @@ final class FieldOutbox: ObservableObject {
         return directory.appendingPathComponent("\(safe).json")
     }
 
+    /// Payments recorded from the queue, kept on disk so a restart offline still holds them
+    /// against the older saved invoice copy.
+    private var recordedFile: URL? { file?.deletingPathExtension().appendingPathExtension("recorded") }
+
+    private func persistRecorded() {
+        guard let recordedFile else { return }
+        // The newest few are enough: older ones are long in every saved payment history.
+        if recordedPayments.count > 50 { recordedPayments.removeFirst(recordedPayments.count - 50) }
+        try? JSONEncoder().encode(recordedPayments)
+            .write(to: recordedFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
     /// Changes queued in other workspaces on this phone; `clearAll()` deletes those too, so the
     /// sign-out warning has to count them.
     private var otherWorkspaceEntryCount: Int {
@@ -246,11 +258,14 @@ final class FieldOutbox: ObservableObject {
         guard let actorID, let organizationID else {
             identity = nil
             entries = []
+            recordedPayments = []
             return
         }
         guard identity?.actorID != actorID || identity?.organizationID != organizationID else { return }
         identity = (actorID, organizationID)
         entries = file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) } ?? []
+        recordedPayments = recordedFile.flatMap { try? Data(contentsOf: $0) }
+            .flatMap { try? JSONDecoder().decode([OutboxEntry.PaymentPayload].self, from: $0) } ?? []
         countPhotos()
     }
 
@@ -264,6 +279,7 @@ final class FieldOutbox: ObservableObject {
     func clearAll() {
         identity = nil
         entries = []
+        recordedPayments = []
         waitingPhotos = 0
         try? FileManager.default.removeItem(at: directory)
     }
@@ -563,6 +579,7 @@ final class FieldOutbox: ObservableObject {
         }
         if case .payment(let payment) = entries[index].action, entries[index].state == .pending {
             recordedPayments.append(payment)
+            persistRecorded()
         }
         entries.remove(at: index)
     }
