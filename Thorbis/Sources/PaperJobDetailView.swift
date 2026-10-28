@@ -256,7 +256,7 @@ struct JobDetailView: View {
                     statusControl(job)
                     if let date = JobFiltering.date(job.scheduledFor) {
                         Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
-                            Label(scheduleLabel(date), systemImage: "clock")
+                            Label(date.visitLabel(), systemImage: "clock")
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
                                 .padding(.horizontal, 10)
@@ -352,12 +352,6 @@ struct JobDetailView: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .accessibilityLabel("Job status, \(job.status.statusLabel)")
-    }
-
-    private func scheduleLabel(_ date: Date) -> String {
-        let time = date.formatted(.dateTime.hour().minute())
-        if Calendar.current.isDateInToday(date) { return "Today · \(time)" }
-        return "\(date.formatted(.dateTime.weekday())) · \(time)"
     }
 
     private func assignedDisplayName(for job: JobRecord) -> String? {

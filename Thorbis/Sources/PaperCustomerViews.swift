@@ -131,9 +131,7 @@ struct CustomersView: View {
         guard let open else { return count }
         if let date = JobFiltering.date(open.scheduledFor), ["scheduled", "dispatched"].contains(open.status) {
             // Same words as the Jobs list ("Today 4:00 PM", "In progress"), so a visit reads alike everywhere.
-            let when = Calendar.current.isDateInToday(date) ? "Today \(date.formatted(date: .omitted, time: .shortened))"
-                : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-            return "\(count) · \(when)"
+            return "\(count) · \(date.visitLabel())"
         }
         return "\(count) · \(open.status.statusLabel)"
     }
@@ -429,7 +427,7 @@ struct CustomerDetailView: View {
                         StatusRing(status: job.status).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                            Text([JobFiltering.date(job.scheduledFor).map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()) } ?? "No time yet",
+                            Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
                                   job.status.statusLabel].joined(separator: " · "))
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
