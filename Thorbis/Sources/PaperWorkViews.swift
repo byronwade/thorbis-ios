@@ -255,7 +255,14 @@ struct ScheduleView: View {
             }
             .buttonStyle(PressStyle()).disabled(busyJobID != nil)
         default:
-            EmptyView()
+            // On the job already: the next thing is wrapping it up, so that is the commit.
+            if (outbox.pendingStatus(for: job.id) ?? job.status) == "in_progress", session.can("job.edit", feature: "jobs") {
+                NavigationLink { JobCloseoutView(jobID: job.id) } label: {
+                    commitLabel("Wrap up", symbol: "checkmark.seal", busy: false)
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityHint("Opens the closeout checklist for this job")
+            }
         }
     }
 
