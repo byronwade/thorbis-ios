@@ -9,7 +9,15 @@ struct EstimatesView: View {
     @State private var error: String?
     @State private var search = ""
     @State private var showCreate = false
-    private var visible: [EstimateRecord] { records.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) } }
+    /// Title, customer or reference, so "EST-4F2A" or a customer's name finds it too.
+    private var visible: [EstimateRecord] {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return records }
+        return records.filter { record in
+            [record.title, store.customerName(record.customerId), "EST-\(record.id.suffix(4).uppercased())"]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -28,6 +36,9 @@ struct EstimatesView: View {
                         }.buttonStyle(RowPressStyle())
                     }
                 }
+                if !records.isEmpty && visible.isEmpty {
+                    PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
+                }
                 if !loading && records.isEmpty && error == nil {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates yet", message: "Estimates you build for customers appear here.",
                                     actionTitle: session.can("estimate.create", feature: "estimates") ? "New estimate" : nil, action: { showCreate = true })
@@ -38,7 +49,7 @@ struct EstimatesView: View {
         .background(Theme.background)
         .navigationTitle("Estimates")
         .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $search)
+        .searchable(text: $search, prompt: "Title, customer or EST number")
         .task { await load() }
         .refreshable { await load() }
         .toolbar {
@@ -228,13 +239,23 @@ struct InvoicesView: View {
     @State private var records: [InvoiceRecord] = []
     @State private var error: String?
     @State private var loading = true
+    @State private var search = ""
+    /// Customer or reference, the two things a tech has in hand when a customer calls about a bill.
+    private var visible: [InvoiceRecord] {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return records }
+        return records.filter { record in
+            [store.customerName(record.customerId), "INV-\(record.id.suffix(4).uppercased())"]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(invoices: records) }
-                ForEach(paperDocumentGroups(records, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
+                ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
                         NavigationLink { InvoiceDetailView(id: record.id) } label: {
@@ -248,6 +269,9 @@ struct InvoicesView: View {
                         }.buttonStyle(RowPressStyle())
                     }
                 }
+                if !records.isEmpty && visible.isEmpty {
+                    PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
+                }
                 if !loading && records.isEmpty && error == nil {
                     PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices created from jobs appear here.")
                 }
@@ -257,6 +281,7 @@ struct InvoicesView: View {
         .background(Theme.background)
         .navigationTitle("Invoices")
         .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $search, prompt: "Customer or INV number")
         .task { await load() }
         .refreshable { await load() }
     }
