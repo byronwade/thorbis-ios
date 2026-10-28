@@ -490,6 +490,7 @@ struct PaperQuickActions: View {
             if let mail { action("Email", symbol: "envelope", label: "Email", stacked: stacked) { openURL(mail) } }
             if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps", stacked: stacked) { openURL(directions) } }
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func action(_ title: String, symbol: String, label: String, stacked: Bool, perform: @escaping () -> Void) -> some View {
@@ -497,13 +498,15 @@ struct PaperQuickActions: View {
             // Glyph then word: the same reach as a tile, in less height.
             let layout = stacked ? AnyLayout(VStackLayout(spacing: 3)) : AnyLayout(HStackLayout(spacing: 6))
             layout {
+                // A fixed glyph box keeps every word on one baseline, whatever the symbol's height.
                 Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .frame(width: 22, height: 20)
                 Text(title).font(Theme.font(stacked ? 13 : 15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .lineLimit(1).fixedSize()
             }
             .padding(.horizontal, stacked ? 4 : 10)
             .padding(.vertical, stacked ? 6 : 0)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: 44, maxHeight: .infinity)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .contentShape(Rectangle())
         }
