@@ -263,6 +263,11 @@ struct PriceBookUsageStore {
 /// The whole active price book for the signed-in organization, kept on the device so search is
 /// instant and works offline (EB-01). Opening a builder shows the cached copy at once and
 /// refreshes it in the background.
+struct PriceBookCatalogContext: Hashable {
+    let organizationID: String?
+    let sessionGeneration: UUID
+}
+
 @MainActor
 final class PriceBookCatalog: ObservableObject {
     static let shared = PriceBookCatalog()
@@ -276,26 +281,37 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var usage: [String: PriceBookUsage] = [:]
     private(set) var organizationID: String?
     private var lastRefresh: Date?
-    private var loadingOrganizationID: String?
+    private(set) var context: PriceBookCatalogContext?
+    private var loadingRequest: (context: PriceBookCatalogContext, id: UUID)?
 
     /// Shows the cached catalog for `organizationID` right away, then reloads every page.
-    func refresh(api: APIClient, organizationID: String?, force: Bool = false) async {
-        guard let organizationID else { return }
-        if self.organizationID != organizationID {
+    func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID, force: Bool = false) async {
+        guard !Task.isCancelled else { return }
+        let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration)
+        if context != requested {
+            context = requested
             self.organizationID = organizationID
-            apply(Self.readCache(organizationID) ?? [])
-            usage = PriceBookUsageStore(organizationID: organizationID).load()
+            apply(organizationID.flatMap(Self.readCache) ?? [])
+            usage = organizationID.map { PriceBookUsageStore(organizationID: $0).load() } ?? [:]
             lastRefresh = nil
+            error = nil
+        }
+        guard let organizationID else {
+            loadingRequest = nil
+            loading = false
+            return
         }
         if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < 60 { return }
-        // One load per organization: switching workspaces starts the new one's load, and the
-        // old load's result is dropped below because the organization no longer matches.
-        guard loadingOrganizationID != organizationID else { return }
-        loadingOrganizationID = organizationID
+        guard loadingRequest?.context != requested else { return }
+        let request = UUID()
+        loadingRequest = (requested, request)
         loading = true
+        let current: @MainActor () -> Bool = {
+            self.context == requested && self.loadingRequest?.id == request && !Task.isCancelled
+        }
         defer {
-            if loadingOrganizationID == organizationID {
-                loadingOrganizationID = nil
+            if loadingRequest?.id == request {
+                loadingRequest = nil
                 loading = false
             }
         }
@@ -306,18 +322,23 @@ final class PriceBookCatalog: ObservableObject {
             var pages = 0
             repeat {
                 let page = try await api.priceBookItems(limit: 200, cursor: cursor)
+                guard current() else { return }
                 for item in page.items where seen.insert(item.id).inserted { all.append(item) }
                 cursor = page.nextCursor
                 pages += 1
             } while cursor != nil && pages < Self.maximumPages
-            guard self.organizationID == organizationID else { return }
+            guard current() else { return }
+            guard cursor == nil else {
+                throw Problem(title: "Couldn't load the whole price book", status: nil,
+                              detail: "Refresh the catalog before using items that are missing.")
+            }
             apply(all)
             lastRefresh = Date()
             error = nil
             Self.writeCache(all, organizationID: organizationID)
         } catch is CancellationError {
         } catch {
-            guard self.organizationID == organizationID else { return }
+            guard current() else { return }
             self.error = error.localizedDescription
         }
     }
@@ -379,7 +400,9 @@ final class PriceBookCatalog: ObservableObject {
     func clear() {
         organizationID = nil
         lastRefresh = nil
-        loadingOrganizationID = nil
+        context = nil
+        loadingRequest = nil
+        error = nil
         loading = false
         usage = [:]
         apply([])

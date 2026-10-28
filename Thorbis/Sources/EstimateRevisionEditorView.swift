@@ -76,9 +76,10 @@ struct EstimateRevisionEditorView: View {
             ScrollView {
                 if searching {
                     PriceBookResultsList(
-                        catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                        quantityOnEstimate: { targetLines.quantity(ofPriceBookItem: $0) },
-                        addItem: add, addCustom: addCustom,
+                        catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
+                            query: query, kind: kind, canUsePriceBook: canUsePriceBook,
+                        quantityInCurrentDraft: { targetLines.quantity(ofPriceBookItem: $0) },
+                        secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom,
                         retry: { Task { await refreshCatalog(force: true) } }
                     )
                 } else {
@@ -159,7 +160,7 @@ struct EstimateRevisionEditorView: View {
             }
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
-            .task { await refreshCatalog() }
+            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
             .confirmationDialog("Reload the latest estimate?", isPresented: $confirmReload, titleVisibility: .visible) {
                 Button("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }
@@ -266,7 +267,10 @@ struct EstimateRevisionEditorView: View {
 
     private func refreshCatalog(force: Bool = false) async {
         guard canUsePriceBook else { return }
-        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
+        let org = session.activeOrganization?.id
+        let generation = session.generation
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: force)
+        guard !Task.isCancelled, session.generation == generation, session.activeOrganization?.id == org else { return }
         classifyLines()
     }
 

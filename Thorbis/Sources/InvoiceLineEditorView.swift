@@ -174,13 +174,10 @@ struct InvoiceLineEditorView: View {
         }
         .sheet(isPresented: $showPriceBook) {
             NavigationStack {
-                PaperPriceBookPicker(api: api, currency: invoice.currency, customerID: invoice.customerId) { item in
-                    do {
-                        try editor.addPriceBookItem(item)
-                        error = nil
-                    } catch {
-                        self.error = error.localizedDescription
-                    }
+                PaperPriceBookPicker(api: api, currency: invoice.currency, customerID: invoice.customerId,
+                    draft: $editor) { item in
+                    try editor.addPriceBookItem(item)
+                    error = nil
                 }
                 .environmentObject(session)
             }
@@ -300,12 +297,15 @@ private struct EditableInvoiceLineRow: View {
                     .font(Theme.font(15, weight: .medium))
                     .lineLimit(1...3)
                     .accessibilityLabel("Line item description")
+                    .accessibilityIdentifier("invoice-line-description-\(line.id)")
                 LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
                                 moveUp: moveUp, moveDown: moveDown, remove: remove)
             }
             HStack(spacing: 8) {
                 Text("Qty").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 LineNumberField(label: "Quantity", placeholder: "1", text: $line.quantity)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("invoice-line-quantity-\(line.id)")
                 if let unit = line.unitLabel, !unit.isEmpty {
                     Text("/ \(unit)").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
@@ -333,127 +333,88 @@ struct PaperPriceBookPicker: View {
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     let currency: String
-    /// When set and the customer is a member, each item also shows the member price.
     var customerID: String? = nil
-    let onSelect: (PriceBookListItem) -> Void
+    @Binding var draft: InvoiceLineEditorState
+    let onSelect: (PriceBookListItem) throws -> Void
 
+    @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var memberPricing: MemberPricing?
-    @State private var items: [PriceBookListItem] = []
-    @State private var cursor: String?
     @State private var search = ""
-    @State private var loading = false
+    @State private var kind: PriceBookKindFilter = .all
     @State private var error: String?
+    @FocusState private var focus: EstimateBuilderFocus?
 
-    private var visibleItems: [PriceBookListItem] {
-        items.filter { item in
-            item.archivedAt == nil && item.sellPrice.currency == currency &&
-            (search.isEmpty || item.description.localizedCaseInsensitiveContains(search) ||
-             item.kind.localizedCaseInsensitiveContains(search) || item.unit.localizedCaseInsensitiveContains(search))
-        }
+    private var context: PriceBookCatalogContext {
+        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
+    }
+    private var canUsePriceBook: Bool {
+        session.can("pricebook.view", feature: "price_book") && currency == "USD"
     }
 
     var body: some View {
+        let currentDraft = draft
         VStack(spacing: 0) {
-            if !session.can("pricebook.view", feature: "price_book") {
+            if !canUsePriceBook {
                 ContentUnavailableView("Price Book unavailable", systemImage: "book.closed",
-                    description: Text("This account cannot select Price Book items."))
+                    description: Text(currency == "USD" ? "This account cannot select Price Book items." : "Catalog selection requires a USD invoice."))
             } else {
-                PaperSearchField(text: $search, prompt: "Search loaded items")
-                List {
-                    if let error { ErrorBanner(message: error) }
-                    ForEach(visibleItems) { item in
-                        Button {
-                            onSelect(item)
-                            dismiss()
-                        } label: {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.description).font(Theme.font(14, weight: .medium))
-                                        .foregroundStyle(Theme.foreground)
-                                    Text("\(item.kind.capitalized) · \(item.unit) · Revision \(item.revision)")
-                                        .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                                }
-                                Spacer(minLength: 8)
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                                        .moneyStyle(.row).foregroundStyle(Theme.foreground)
-                                    if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
-                                        // MF-05: no green on money; the word "Member" carries it.
-                                        Text("Member \(money(memberPricing.memberPrice(item.sellPrice.amount), currency: item.sellPrice.currency))")
-                                            .font(Theme.moneyFont(.line)).foregroundStyle(Theme.foreground)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 5)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Theme.card)
-                    }
-                    if cursor != nil {
-                        Button { Task { await loadMore() } } label: {
-                            HStack {
-                                Spacer()
-                                if loading { ProgressView() } else { Text("Load more items") }
-                                Spacer()
-                            }
-                        }
-                        .disabled(loading)
-                        .listRowBackground(Theme.card)
-                    }
-                    if visibleItems.isEmpty && !loading && error == nil {
-                        ContentUnavailableView(items.isEmpty ? "No active Price Book items" : "No matching items",
-                                               systemImage: "book.closed")
-                            .listRowBackground(Theme.background)
+                EstimateSearchBar(query: $search, kind: $kind, focus: $focus, searching: focus == .search,
+                    prompt: "Search price book", finish: { focus = nil })
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("price-book-search")
+                ScrollView {
+                    VStack(spacing: 0) {
+                        if let error { ErrorBanner(message: error).padding(.horizontal, Theme.gutter) }
+                        PriceBookResultsList(catalog: catalog, context: context, query: search, kind: kind,
+                            canUsePriceBook: canUsePriceBook,
+                            quantityInCurrentDraft: { currentDraft.quantity(ofPriceBookItem: $0) },
+                            secondaryPriceText: memberPriceText, addItem: select, addCustomLine: nil,
+                            retry: { Task { await refresh(force: true) } })
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .background(Theme.background)
-                .refreshable { await refresh() }
-                .task { await refresh() }
-                .task(id: customerID) {
-                    guard let customerID else { return }
-                    memberPricing = try? await api.memberPricing(customerID)
-                }
+                .scrollDismissesKeyboard(.interactively)
+                .refreshable { await refresh(force: true) }
             }
         }
         .background(Theme.background)
         .navigationTitle("Add from Price Book")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+        }
+        .task(id: context) {
+            memberPricing = nil
+            error = nil
+            await refresh()
+        }
+        .task(id: "\(context.organizationID ?? "")|\(context.sessionGeneration)|\(customerID ?? "")") {
+            memberPricing = nil
+            guard canUsePriceBook, let customerID else { return }
+            let expected = context
+            let pricing = try? await api.memberPricing(customerID)
+            guard !Task.isCancelled, context == expected else { return }
+            memberPricing = pricing
         }
     }
 
-    private func refresh() async {
-        guard !loading else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await api.priceBookItems(limit: 50)
-            items = page.items
-            cursor = page.nextCursor
-            error = nil
-        } catch is CancellationError {
-        } catch {
-            self.error = error.localizedDescription
-        }
+    private func refresh(force: Bool = false) async {
+        guard canUsePriceBook else { return }
+        let expected = context
+        await catalog.refresh(api: api, organizationID: expected.organizationID,
+                              sessionGeneration: expected.sessionGeneration, force: force)
     }
 
-    private func loadMore() async {
-        guard !loading, let cursor else { return }
-        loading = true
-        defer { loading = false }
+    private func select(_ item: PriceBookListItem) {
+        guard canUsePriceBook, catalog.context == context else { return }
         do {
-            let page = try await api.priceBookItems(limit: 50, cursor: cursor)
-            let existing = Set(items.map(\.id))
-            items.append(contentsOf: page.items.filter { !existing.contains($0.id) })
-            self.cursor = page.nextCursor
+            try onSelect(item)
             error = nil
-        } catch is CancellationError {
-        } catch {
-            self.error = error.localizedDescription
-        }
+            catalog.recordUse(item.id)
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func memberPriceText(_ item: PriceBookListItem) -> String? {
+        guard let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 else { return nil }
+        return "Member \(money(memberPricing.memberPrice(item.sellPrice.amount), currency: item.sellPrice.currency))"
     }
 }

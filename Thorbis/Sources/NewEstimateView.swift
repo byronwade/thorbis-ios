@@ -51,9 +51,10 @@ struct NewEstimateView: View {
             ScrollView {
                 if searching {
                     PriceBookResultsList(
-                        catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                        quantityOnEstimate: { lines.quantity(ofPriceBookItem: $0) },
-                        addItem: add, addCustom: addCustom, retry: { Task { await refreshCatalog(force: true) } }
+                        catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
+                            query: query, kind: kind, canUsePriceBook: canUsePriceBook,
+                        quantityInCurrentDraft: { lines.quantity(ofPriceBookItem: $0) },
+                        secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom, retry: { Task { await refreshCatalog(force: true) } }
                     )
                 } else {
                     builder
@@ -90,7 +91,7 @@ struct NewEstimateView: View {
             }
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
-            .task { await refreshCatalog() }
+            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .task {
                 guard lines.isEmpty else { return }
                 try? await Task.sleep(for: .milliseconds(450))
@@ -145,7 +146,10 @@ struct NewEstimateView: View {
 
     private func refreshCatalog(force: Bool = false) async {
         guard canUsePriceBook else { return }
-        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
+        let org = session.activeOrganization?.id
+        let generation = session.generation
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: force)
+        guard !Task.isCancelled, session.generation == generation, session.activeOrganization?.id == org else { return }
     }
 
     private func add(_ item: PriceBookListItem) {

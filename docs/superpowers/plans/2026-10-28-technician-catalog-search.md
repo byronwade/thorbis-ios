@@ -96,7 +96,7 @@ git commit -m "feat: expose invoice price book draft quantity"
 - Consumes: Task 1 `InvoiceLineEditorState.quantity(ofPriceBookItem:)`; updated `PriceBookCatalog.refresh(api:organizationID:sessionGeneration:force:)`; existing `PriceBookResultsList.addItem` tap behavior; invoice selection validation `InvoiceLineEditorState.addPriceBookItem(_:) throws`.
 - Produces: a shared list initializer with these semantic parameters: `catalog`, `query`, `kind`, `canUsePriceBook`, `quantityInCurrentDraft: (String) -> Int?`, `secondaryPriceText: (PriceBookListItem) -> String?`, `addItem: (PriceBookListItem) -> Void`, `addCustomLine: ((String) -> Void)?`, and `retry`. Preserve `PriceBookResultsList`’s existing `@ObservedObject` catalog and current search/filter inputs. Change `PaperPriceBookPicker`’s selection callback to `let onSelect: (PriceBookListItem) throws -> Void` so a failure is displayed in the picker and a success can leave it open.
 
-- [ ] **Step 1: Add a deterministic preview fixture and write the UI regression test**
+- [x] **Step 1: Add a deterministic preview fixture and write the UI regression test**
 
 In `PaperPreview.swift`’s `/v1/query` fixture, add a launch-argument-gated Price Book pagination mode for the `invoice-editor` preview. Return 50 first-page entries with the existing `price_book_items` field schema and a valid UUID cursor, followed by one uniquely named second-page sentinel item and `nextCursor: null`. Keep the fixture disabled for all other previews and preserve existing sample catalog contents/Stage A work.
 
@@ -104,31 +104,31 @@ Create `PriceBookPickerUITests.testInvoicePickerSearchesLaterPageAndStaysOpenFor
 
 Add stable accessibility identifiers `price-book-search` and `price-book-item-<item ID>` where needed for reliable selection and assertions. Do not add saved server writes to this preview journey.
 
-- [ ] **Step 2: Run the new UI test and confirm the intended RED**
+- [x] **Step 2: Run the new UI test and confirm the intended RED**
 
 Run: `xcodebuild test -project Thorbis.xcodeproj -scheme Thorbis -destination 'platform=iOS Simulator,id=FA43B63E-98C9-4336-B1F7-A55E9D4B4B0A' -derivedDataPath /private/tmp/thorbis-ios-payment-derived -clonedSourcePackagesDirPath /private/tmp/thorbis-spm -skipPackageUpdates -jobs 2 -parallel-testing-enabled NO -only-testing:ThorbisUITests/PriceBookPickerUITests/testInvoicePickerSearchesLaterPageAndStaysOpenForMultipleAdds`
 
 Expected: after the fixture is active, the existing picker cannot find the sentinel because it searches only its loaded first page. After adding full-catalog search, the same test must still fail at the assertion that the picker remains open, because current selection dismisses it.
 
-- [ ] **Step 3: Generalize `PriceBookResultsList`**
+- [x] **Step 3: Generalize `PriceBookResultsList`**
 
 In `EstimateBuilder.swift`, replace the estimate-specific `quantityOnEstimate` input with `quantityInCurrentDraft: (String) -> Int?`. Add `secondaryPriceText: (PriceBookListItem) -> String?` and make `addCustomLine` optional. Preserve ranked result generation, recents, filters, error/retry/empty states and result count. Render optional secondary price text without changing the catalog sell price; update accessibility hints to say the tap adds one item to the current draft.
 
-- [ ] **Step 4: Adapt both estimate call sites without changing editor semantics**
+- [x] **Step 4: Adapt both estimate call sites without changing editor semantics**
 
 In `NewEstimateView.swift` and `EstimateRevisionEditorView.swift`, pass their existing `quantity(ofPriceBookItem:)` closure and custom-line action to `addCustomLine`; provide no secondary price. Keep `EstimateBuilderTarget.optionID` and `.group` as the destination and leave `add(_:)`, whole-option state, save, reorder, undo, and custom-line behavior intact. In the same integration step, change `PriceBookCatalog.refresh` to `func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID, force: Bool = false) async`, update both estimate callers to pass `session.generation`, and track current/in-flight identity as `(organizationID, sessionGeneration)`. A session-generation change for the same organization must force a new request while retaining that organization’s cache; gate results, errors, and loading cleanup on both identity fields so an old request cannot publish or clear the new request’s state. Keep disk cache keyed only by organization ID.
 
-- [ ] **Step 5: Replace invoice-only pagination with the shared results list**
+- [x] **Step 5: Replace invoice-only pagination with the shared results list**
 
 In `InvoiceLineEditorView.swift`, remove `PaperPriceBookPicker`’s independent `items`, `cursor`, `visibleItems`, `refresh()`, and `loadMore()` path. Bind it to `PriceBookCatalog.shared`; refresh with captured `session.activeOrganization?.id` and `session.generation` through `catalog.refresh(api:organizationID:sessionGeneration:force:)`. Key the view task by both values and, after awaits, guard `!Task.isCancelled`, the current organization ID, and the current session generation before applying view-local state. Keep the existing customer member-pricing task and pass its display value through `secondaryPriceText`; do not use it as the invoice line price.
 
 Pass `editor.quantity(ofPriceBookItem:)` as the current-draft closure and `nil` for `addCustomLine`. Use a throwing selection closure that calls `editor.addPriceBookItem(_:)`; on success clear the local picker error and call `catalog.recordUse(item.id)`, and on failure show the message in the picker without dismissing it. Keep search, query, and kind selection intact after success. Retain the picker’s existing close control and the invoice editor’s separate “Add line item” action.
 
-- [ ] **Step 6: Run the UI regression test GREEN**
+- [x] **Step 6: Run the UI regression test GREEN**
 
 Run the command from Step 2. Expected: the sentinel from page two is searchable; two taps leave the picker open, show count two, and create two separate quantity-one invoice lines.
 
-- [ ] **Step 7: Commit the shared picker behavior**
+- [x] **Step 7: Commit the shared picker behavior**
 
 ```bash
 git add Thorbis/Sources/EstimateBuilder.swift Thorbis/Sources/NewEstimateView.swift Thorbis/Sources/EstimateRevisionEditorView.swift Thorbis/Sources/InvoiceLineEditorView.swift Thorbis/Sources/PaperPreview.swift ThorbisUITests/PriceBookPickerUITests.swift

@@ -229,7 +229,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   url.path == "/v1/estimates/00000000-0000-4000-8000-000000002238" {
             status = 503
             payload = ["status": 503, "title": "Preview estimate unavailable"]
-        } else if url.scheme == "https", url.host == "app.thorbis.com", let fixture = Self.fixture(path: url.path) {
+        } else if url.scheme == "https", url.host == "app.thorbis.com", let fixture = Self.fixture(path: url.path, queryItems: URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []) {
             status = 200
             payload = fixture
         } else {
@@ -246,7 +246,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     override func stopLoading() {}
 
-    private static func fixture(path: String) -> Any? {
+    private static func fixture(path: String, queryItems: [URLQueryItem] = []) -> Any? {
         let actor = PaperPreview.actorID
         let org = PaperPreview.organizationID
         let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400))
@@ -463,6 +463,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": [waiting]]
         case "/v1/query":
+            if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages"),
+               queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
+                let cursor = "00000000-0000-4000-8000-000000009988"
+                let later = queryItems.first(where: { $0.name == "cursor" })?.value == cursor
+                let rows = later ? [(9999, "Camera sewer inspection")] : (1...50).map { (9700 + $0, "Plumbing catalog service \($0)") }
+                let items: [[String: Any]] = rows.map { number, title in
+                    let id = String(format: "00000000-0000-4000-8000-%012d", number)
+                    return ["id": id, "resourceId": "price_book_items", "label": title, "subtitle": "Service · flat",
+                            "fields": ["price_book_items.id": id, "price_book_items.current_revision": 4,
+                                       "price_book_items.description": title, "price_book_items.unit": "flat",
+                                       "price_book_items.sell_price_amount": 24500, "price_book_items.currency": "USD",
+                                       "price_book_items.tax_classification": "taxable", "price_book_items.kind": "service"]]
+                }
+                return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
+                        "items": items, "nextCursor": later ? NSNull() : cursor, "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
+            }
             // The first item keeps the id the preview estimate's price book line points at.
             let catalog: [(String, String, String, Int)] = [
                 ("Replace capacitor", "each", "material", 12500),
