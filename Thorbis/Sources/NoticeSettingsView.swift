@@ -36,13 +36,12 @@ struct NoticeSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("BUSINESS SETTINGS").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                    Text("Job notices").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
-                    Text("Who hears about it when a job is booked, changes or is canceled. Turning a channel off stops that send.")
-                        .font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.top, 4)
+                    Text("Job notices").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
+                    Text("Who hears when a job is booked, changed or canceled")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.bottom, 12)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -Theme.gutter) }
                 if !loaded && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
                 if loaded {
                     ForEach(roles, id: \.0) { role, label in
@@ -53,7 +52,7 @@ struct NoticeSettingsView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(channelName).font(Theme.font(15, weight: .medium))
                                     Text(channel == "email" ? "\(label) email for booked, changed and canceled jobs" : "\(label) in-app feed for the same updates")
-                                        .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
                                 }
                             }
                             .tint(Theme.brand)

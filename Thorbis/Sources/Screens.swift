@@ -645,6 +645,28 @@ struct CustomerContactSheet: View {
     }
 }
 
+/// MA-11: each More row says what it is at a glance, so phone-only lists get their own glyph
+/// and a one-line subtitle instead of four identical folders.
+extension LocalWorkspaceSection {
+    var moreSymbol: String {
+        switch self {
+        case .fleet: "car"
+        case .equipment: "wrench.and.screwdriver"
+        case .agreements: "signature"
+        case .team: "person.badge.plus"
+        }
+    }
+
+    var moreSubtitle: String {
+        switch self {
+        case .fleet: "Vehicles, plates and drivers"
+        case .equipment: "Units you service, kept on this phone"
+        case .agreements: "Service plans, kept on this phone"
+        case .team: "People not yet in Thorbis"
+        }
+    }
+}
+
 /// Paper 29 and 65 together: every destination that is not a tab, then account settings.
 struct MoreView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
@@ -674,7 +696,7 @@ struct MoreView: View {
                                 }
                             }
                             ForEach(local, id: \.self) { section in
-                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: "folder", tile: Theme.markBurnt) }
+                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt) }
                             }
                         }
                     }
