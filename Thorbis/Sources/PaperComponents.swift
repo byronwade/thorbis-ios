@@ -82,19 +82,30 @@ struct PaperTabs: View {
     let options: [String]
     @Binding var selection: String
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 2) {
-                ForEach(options, id: \.self) { option in
-                    Button { selection = option } label: {
-                        Text(option).font(Theme.font(13, weight: selection == option ? .semibold : .medium))
-                            .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(selection == option ? Theme.fill : .clear, in: Capsule())
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityAddTraits(selection == option ? .isSelected : [])
-                }
-            }.padding(.horizontal, Theme.gutter - 4)
-        }.scrollIndicators(.hidden).padding(.bottom, 4)
+        // When the tabs run past the edge, the chosen one scrolls fully into view, so a
+        // half-cut "Activity" never hides which tab is open.
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 2) {
+                    ForEach(options, id: \.self) { option in
+                        Button { selection = option } label: {
+                            Text(option).font(Theme.font(15, weight: .medium))
+                                .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
+                                .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
+                                .background(selection == option ? Theme.fill : .clear, in: Capsule())
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .id(option)
+                        .accessibilityAddTraits(selection == option ? .isSelected : [])
+                    }
+                }.padding(.horizontal, Theme.gutter - 4)
+            }
+            .scrollIndicators(.hidden).padding(.bottom, 4)
+            .onChange(of: selection) { _, value in
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+            }
+        }
         .sensoryFeedback(.selection, trigger: selection)
     }
 }
@@ -474,16 +485,17 @@ struct PaperQuickActions: View {
 
     private func action(_ title: String, symbol: String, label: String, perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            VStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                    .frame(height: 18)
-                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
+            // One line, glyph then word: the same reach as a tile, in less height.
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
+                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity, minHeight: 52)
+            .frame(maxWidth: .infinity, minHeight: 44)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel(label)
     }
 }

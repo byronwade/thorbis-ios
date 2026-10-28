@@ -35,6 +35,16 @@ final class AppearanceTests: XCTestCase {
         XCTAssertEqual(Theme.minimumSize, 12)
     }
 
+    func testEverySizeLandsOnTheRamp() {
+        let ramp: Set<CGFloat> = [12, 13, 15, 16, 17, 20, 24, 30]
+        for size in stride(from: CGFloat(8), through: 40, by: 1) {
+            XCTAssertTrue(ramp.contains(Theme.onRamp(size)), "\(size) snapped to \(Theme.onRamp(size))")
+        }
+        XCTAssertEqual(Theme.onRamp(14), 15)
+        XCTAssertEqual(Theme.onRamp(26), 24)
+        XCTAssertEqual(Theme.onRamp(34), 30)
+    }
+
     // Catches unreadable labels on cards/fields, including Increase Contrast.
     func testInformationalTextIsReadableOnEverySurface() {
         for style: UIUserInterfaceStyle in [.light, .dark] {

@@ -8,14 +8,28 @@ enum Theme {
     /// design.thorbis.com MA-09: weights 400 and 500 only, nothing smaller than 12. Heavier
     /// requests resolve to 500 and smaller sizes to 12, so every call site follows the rule.
     static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let size = max(size, minimumSize)
+        let size = onRamp(size)
         return Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
     }
     static func monoFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let size = max(size, minimumSize)
+        let size = onRamp(size)
         return Font.custom("GeistMono-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
     }
     static let minimumSize: CGFloat = 12
+    /// MA-09: every size lands on the ramp 12/13/15/17/20/24/30 (16 stays for inputs, so
+    /// iOS never zooms a field). Stray sizes like 14 or 26 snap to the nearest step.
+    static func onRamp(_ size: CGFloat) -> CGFloat {
+        switch size {
+        case ..<13: minimumSize
+        case 13..<14: 13
+        case 14..<16: 15
+        case 16..<17: 16
+        case 17..<18.5: 17
+        case 18.5..<22: 20
+        case 22..<27: 24
+        default: 30
+        }
+    }
     static func allowed(_ weight: Font.Weight) -> Font.Weight {
         let heavier: [Font.Weight] = [.semibold, .bold, .heavy, .black]
         return heavier.contains(weight) ? .medium : weight
