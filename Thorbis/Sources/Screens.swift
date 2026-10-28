@@ -21,6 +21,8 @@ struct NewJobSheet: View {
     @State private var timeSaved = false
     @State private var techSaved = false
     @State private var pickingCustomer = false
+    @State private var newCustomerName = ""
+    @State private var wantsNewCustomer = false
     @FocusState private var titleFocused: Bool
     private var canAssign: Bool { session.can("job.assign", feature: "jobs") }
 
@@ -134,15 +136,19 @@ struct NewJobSheet: View {
                 }
                 .onAppear { if draft.title.isEmpty { titleFocused = true } }
                 .toolbar(.hidden, for: .navigationBar)
-                .sheet(isPresented: $pickingCustomer) {
+                // The new-customer sheet opens once the picker has finished closing; presenting
+                // both in one pass would drop the second sheet.
+                .sheet(isPresented: $pickingCustomer, onDismiss: {
+                    if wantsNewCustomer { wantsNewCustomer = false; showNewCustomer = true }
+                }) {
                     CustomerPickerSheet(selectedID: draft.customerID,
                                         canCreate: session.can("customer.create", feature: "core_crm"),
-                                        onNew: { pickingCustomer = false; showNewCustomer = true }) { id in
+                                        onNew: { typed in newCustomerName = typed; wantsNewCustomer = true; pickingCustomer = false }) { id in
                         draft.customerID = id; error = nil; pickingCustomer = false
                     }
                 }
                 .sheet(isPresented: $showNewCustomer) {
-                    NewCustomerSheet { customer in draft.customerID = customer.id; error = nil }
+                    NewCustomerSheet(initialName: newCustomerName) { customer in draft.customerID = customer.id; error = nil }
                 }
                 .sheet(isPresented: $pickingWhen) {
                     NavigationStack {
@@ -282,7 +288,8 @@ struct NewJobSheet: View {
 struct CustomerPickerSheet: View {
     let selectedID: String
     let canCreate: Bool
-    let onNew: () -> Void
+    /// Gets what was typed, so the new customer starts with that name.
+    let onNew: (String) -> Void
     let onPick: (String) -> Void
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
@@ -302,7 +309,7 @@ struct CustomerPickerSheet: View {
         NavigationStack {
             List {
                 if canCreate {
-                    Button(action: onNew) {
+                    Button { onNew(query) } label: {
                         Label(query.isEmpty ? "New customer" : "New customer “\(query)”", systemImage: "person.badge.plus")
                             .font(Theme.font(15, weight: .medium)).frame(minHeight: 44, alignment: .leading)
                     }
