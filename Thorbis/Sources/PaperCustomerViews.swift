@@ -686,10 +686,11 @@ struct CustomerDetailView: View {
                     ForEach(activity) { event in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: activitySymbol(for: event.kind))
-                                .font(Theme.font(13, weight: .medium))
-                                .foregroundStyle(Theme.brandText)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.muted)
                                 .frame(width: 30, height: 30)
-                                .background(Theme.brandSurface, in: Circle())
+                                .background(Theme.fill, in: Circle())
+                                .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(event.summary).font(Theme.font(14, weight: .medium)).lineLimit(3)
                                 Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)

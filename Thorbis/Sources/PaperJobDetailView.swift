@@ -666,9 +666,9 @@ struct JobDetailView: View {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
                             Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(entry.isNote ? Theme.brandText : Theme.muted)
+                                .foregroundStyle(entry.isNote ? Theme.foreground : Theme.muted)
                                 .frame(width: 26, height: 26)
-                                .background(entry.isNote ? Theme.brandSurface : Theme.fill, in: Circle())
+                                .background(Theme.fill, in: Circle())
                             Rectangle().fill(Theme.border).frame(width: 1).frame(maxHeight: .infinity)
                         }
                         VStack(alignment: .leading, spacing: 6) {
