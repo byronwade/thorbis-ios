@@ -67,20 +67,25 @@ struct JobDetailView: View {
                     JobMediaView(jobID: jobId)
                 } else {
                     ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    // The tabs pin under the nav bar, so switching Overview, Invoice or Activity
+                    // never means scrolling back to the top first.
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     header(job)
-                    tabBar
-                    VStack(alignment: .leading, spacing: 16) {
-                        switch selectedTab {
-                        case "Estimates": estimatesContent(job)
-                        case "Invoice": invoiceContent(job)
-                        case "Activity": activityContent(job)
-                        default: overviewContent(job)
+                    Section {
+                        VStack(alignment: .leading, spacing: 16) {
+                            switch selectedTab {
+                            case "Estimates": estimatesContent(job)
+                            case "Invoice": invoiceContent(job)
+                            case "Activity": activityContent(job)
+                            default: overviewContent(job)
+                            }
                         }
+                        .padding(.horizontal, Theme.gutter)
+                        .padding(.top, selectedTab == "Invoice" ? 4 : 22)
+                        .padding(.bottom, 28)
+                    } header: {
+                        tabBar.background(Theme.background)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, selectedTab == "Invoice" ? 4 : 22)
-                    .padding(.bottom, 28)
                     }
                     }
                 }

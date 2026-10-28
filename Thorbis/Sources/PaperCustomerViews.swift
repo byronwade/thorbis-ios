@@ -243,7 +243,7 @@ struct CustomerDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
                         Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
@@ -264,7 +264,7 @@ struct CustomerDetailView: View {
                 if let error {
                     ErrorBanner(message: error) { await load() }.padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 }
-                PaperTabs(options: ["Overview", "Jobs", "Activity"], selection: $tab)
+                Section {
                 VStack(alignment: .leading, spacing: 18) {
                     switch tab {
                     case "Overview":
@@ -287,6 +287,10 @@ struct CustomerDetailView: View {
                     default: activitySection
                     }
                 }.padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 24)
+                } header: {
+                    // Pinned like the job page's tabs.
+                    PaperTabs(options: ["Overview", "Jobs", "Activity"], selection: $tab).background(Theme.background)
+                }
             }
         }
         .foregroundStyle(Theme.foreground).background(Theme.background)
