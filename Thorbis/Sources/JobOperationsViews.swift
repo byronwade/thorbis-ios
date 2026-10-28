@@ -339,7 +339,7 @@ struct JobScheduleView: View {
             .accessibilityLabel("Close schedule picker")
             .disabled(busy)
         }
-        .frame(height: 44)
+        .frame(minHeight: 44)
         .padding(.horizontal, 20)
     }
 

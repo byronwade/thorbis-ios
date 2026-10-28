@@ -589,7 +589,7 @@ struct CustomerContactSheet: View {
                     if let next = nextField(after: field) { focusedField = next } else { Task { await save() } }
                 }
                 .padding(.horizontal, 14)
-                .frame(height: 48)
+                .frame(minHeight: 48)
                 .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
