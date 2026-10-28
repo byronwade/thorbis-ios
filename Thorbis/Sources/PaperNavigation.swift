@@ -7,6 +7,7 @@ struct RootView: View {
     @EnvironmentObject private var outbox: FieldOutbox
     @State private var tab: TabletSection = .more
     @EnvironmentObject private var layout: MenuLayout
+    @EnvironmentObject private var whatsNew: WhatsNew
     /// The selected phone tab: a MenuItem id, "more" or "search".
     @State private var selectedTab = PrimaryTab.initial.rawValue
     /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
@@ -53,6 +54,21 @@ struct RootView: View {
             if PaperPreview.enabled { return }
             #endif
             await layout.refreshCompanyLayout(api: api)
+        }
+        // MA-19: once after an update, risen over the home screen rather than during launch.
+        .task {
+            #if DEBUG
+            if PaperPreview.enabled, PaperPreview.screen != "whats-new" { return }
+            #endif
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            // A link, notification or Live Activity opened the app for a reason, before or during
+            // the pause; the notes wait for the next launch.
+            if store.openedForRecord { whatsNew.skipThisLaunch = true }
+            whatsNew.presentIfNeeded()
+        }
+        .sheet(item: $whatsNew.showing, onDismiss: { whatsNew.dismissed() }) { content in
+            WhatsNewSheet(content: content) { whatsNew.dismissed() }
         }
     }
 
@@ -605,6 +621,7 @@ enum PaperRoute: Hashable {
     case invoice(String)
     case followUps(jobID: String)
     case customizeMenu
+    case whatsNew
     case attention
     case payments
     case job(String)
@@ -652,6 +669,7 @@ struct PaperRouteView: View {
         case .invoice(let id): InvoiceDetailView(id: id)
         case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
         case .customizeMenu: CustomizeMenuView()
+        case .whatsNew: WhatsNewHistoryView()
         case .attention: NeedsAttentionView()
         case .payments: PaymentsSetupView()
         case .job(let id): JobDetailView(jobId: id)
