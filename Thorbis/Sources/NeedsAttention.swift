@@ -97,7 +97,14 @@ struct NeedsAttentionView: View {
     private func since(_ verb: String, _ raw: String?) -> String {
         guard let date = JobFiltering.date(raw) else { return verb }
         let days = Calendar.current.dateComponents([.day], from: date, to: .now).day ?? 0
-        return days <= 0 ? "\(verb) today" : "\(verb) \(days) day\(days == 1 ? "" : "s") ago"
+        // "99 days ago" makes you count; past two weeks speak in weeks, then months.
+        func ago(_ n: Int, _ unit: String) -> String { "\(verb) \(n) \(unit)\(n == 1 ? "" : "s") ago" }
+        switch days {
+        case ...0: return "\(verb) today"
+        case 1..<14: return ago(days, "day")
+        case 14..<60: return ago(days / 7, "week")
+        default: return ago(days / 30, "month")
+        }
     }
 
     private func row(title: String, detail: String, trailing: String, tint: Color) -> some View {

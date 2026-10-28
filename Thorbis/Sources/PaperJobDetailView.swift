@@ -529,9 +529,9 @@ struct JobDetailView: View {
                 let waiting = jobEstimates.filter { $0.status == "sent" }.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
                 if !jobEstimates.isEmpty {
                     HStack(spacing: 0) {
-                        summary("Awaiting approval", money(waiting, currency: "USD"))
+                        summary("Awaiting approval", money(waiting, currency: "USD"), quiet: waiting == 0)
                         Rectangle().fill(Theme.border).frame(width: 1, height: 40).padding(.horizontal, 16)
-                        summary("Approved", money(approved, currency: "USD"))
+                        summary("Approved", money(approved, currency: "USD"), quiet: approved == 0)
                     }
                     .padding(.bottom, 6)
                 }
@@ -573,10 +573,11 @@ struct JobDetailView: View {
         .task(id: job.id) { await loadJobEstimates(job) }
     }
 
-    private func summary(_ label: String, _ value: String) -> some View {
+    /// A zero total is muted, so the figure that matters ("$970.00 awaiting") reads first.
+    private func summary(_ label: String, _ value: String, quiet: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).moneyStyle(.total)
+            Text(value).moneyStyle(.total).foregroundStyle(quiet ? Theme.subtle : Theme.foreground)
         }
     }
 
