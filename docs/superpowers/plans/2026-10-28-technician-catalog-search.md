@@ -184,13 +184,13 @@ git commit -m "test: cover price book pagination and session scope"
 
 **Interfaces:** consumes all implementation and tests from Tasks 1–3.
 
-- [ ] **Step 1: Run all unit and UI tests**
+- [x] **Step 1: Run all unit and UI tests**
 
 Run: `xcodebuild test -project Thorbis.xcodeproj -scheme Thorbis -destination 'platform=iOS Simulator,id=FA43B63E-98C9-4336-B1F7-A55E9D4B4B0A' -derivedDataPath /private/tmp/thorbis-ios-payment-derived -clonedSourcePackagesDirPath /private/tmp/thorbis-spm -skipPackageUpdates -jobs 2 -parallel-testing-enabled NO`
 
 Expected: all existing and new test targets pass. If the target simulator is unavailable, use the project’s available iOS simulator destination and report the exact destination used; do not change app behavior to work around a local simulator issue.
 
-- [ ] **Step 2: Review the focused diff**
+- [x] **Step 2: Review the focused diff**
 
 Run: `git diff --check` and inspect the Task 1–3 file diff. Confirm no edit touches customer add-on contracts, catalog photo fields, payment/refund/retry flows, invoice issuance, or unrelated Stage A behavior. Confirm the preview fixture is opt-in and uses the existing Price Book envelope only.
 

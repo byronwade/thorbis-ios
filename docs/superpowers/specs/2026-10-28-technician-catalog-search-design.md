@@ -1,6 +1,7 @@
 # Technician price book search and continuous-add design
 
-**Status:** design ready for planned implementation  
+**Status:** design ready for planned implementation
+
 **Repository baseline:** `21106d0` (app source verified at `5f48e17`) in `/private/tmp/thorbis-ios-payment-ux`; existing Stage A job-document changes are unrelated and must be preserved.
 
 ## Goal
