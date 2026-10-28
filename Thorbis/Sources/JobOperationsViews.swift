@@ -51,7 +51,9 @@ struct JobCloseoutView: View {
     /// Cash and check waiting on this phone cover every unpaid balance on the job's invoices as
     /// last seen. A partial payment leaves the requirement (and the unpaid disposition) showing.
     private var waitingPaymentsCoverBalance: Bool {
-        let owing = (JobDetailCache.invoices(jobID) ?? []).filter { $0.status == "issued" }.compactMap { invoice -> (String, Int)? in
+        // The single invoice copy is newer when a payment was recorded on the invoice screen.
+        let invoices = (JobDetailCache.invoices(jobID) ?? []).map { JobDetailCache.invoice($0.id) ?? $0 }
+        let owing = invoices.filter { $0.status == "issued" }.compactMap { invoice -> (String, Int)? in
             let total = invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
             let due = total - invoice.amountPaid
             return due > 0 ? (invoice.id, due) : nil
@@ -173,6 +175,8 @@ struct JobCloseoutView: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        // Queued confirmations landed: show the server's checklist instead of the waiting marks.
+        .onChange(of: outbox.syncGeneration) { _, _ in Task { await load() } }
         .navigationDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0) }
         .navigationDestination(isPresented: $openBilling) { BillingSchedulesView() }
         .sensoryFeedback(.success, trigger: completed)

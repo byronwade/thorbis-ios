@@ -878,7 +878,13 @@ struct InvoicePaymentCollectionSheet: View {
         _method = State(initialValue: model.pendingRequest?.method ?? (last == .check ? .check : .cash))
         // OF-09: without signal the sheet opens on cash, the way that still works.
         let opening = model.offlineCopy && (last == nil || last == .paymentLink) ? .cash : (last ?? .paymentLink)
-        _option = State(initialValue: model.pendingRequest == nil ? opening : .alreadyCollected)
+        // A locked cash or check retry opens on its own tender, so it can still go to the queue offline.
+        let locked: InvoiceCollectionOption = switch model.pendingRequest?.method {
+        case .cash: .cash
+        case .check: .check
+        default: .alreadyCollected
+        }
+        _option = State(initialValue: model.pendingRequest == nil ? opening : locked)
         _tapToPayController = StateObject(wrappedValue: TapToPayController(invoiceID: invoice.id))
     }
 

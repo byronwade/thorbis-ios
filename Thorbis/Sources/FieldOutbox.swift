@@ -393,10 +393,13 @@ final class FieldOutbox: ObservableObject {
         func waitsOnPhotos(_ entry: OutboxEntry) -> Bool {
             if case .complete = entry.action { photoJobs.contains(entry.jobID) } else { false }
         }
-        while let first = pending.first {
-            if waitsOnPhotos(first) { break }
+        // A job held for its photos keeps its later changes in order; other jobs keep syncing.
+        var heldJobs = Set<String>()
+        var queue: [OutboxEntry] { pending.filter { !heldJobs.contains($0.jobID) } }
+        while let first = queue.first {
+            if waitsOnPhotos(first) { heldJobs.insert(first.jobID); continue }
             if useCommandEndpoint && first.viaCommand {
-                let run = Array(pending.prefix { $0.viaCommand && !waitsOnPhotos($0) }.prefix(50))
+                let run = Array(queue.prefix { $0.viaCommand && !waitsOnPhotos($0) }.prefix(50))
                 guard let applied = await sendCommands(run, api: api) else { break }
                 sent += applied
             } else {
