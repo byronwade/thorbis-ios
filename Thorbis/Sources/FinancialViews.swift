@@ -70,9 +70,14 @@ struct EstimateDetailView: View {
     let id: String
     /// The job it was opened from; in-person approval stores the signature with that job.
     var jobID: String? = nil
+    /// Opened from the job's next step: hand it to the customer as soon as it loads (TF-05), and
+    /// go back to the job once they approve, where the invoice is the next step (TF-06).
+    var presentsOnOpen = false
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
+    @State private var autoPresented = false
     @State private var record: EstimateRecord?
     @State private var error: String?
     @State private var busy = false
@@ -82,7 +87,7 @@ struct EstimateDetailView: View {
     @State private var action = ""
     @State private var showToCustomer = false
     @State private var memberPricing: MemberPricing?
-    var body: some View {
+    private var scrollContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
@@ -169,21 +174,16 @@ struct EstimateDetailView: View {
             .padding(.top, 24)
             .padding(.bottom, 28)
         }
+    }
+
+    var body: some View {
+        scrollContent
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Estimate")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .safeAreaInset(edge: .bottom) {
-            if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
-                PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
-            } else if let record, record.status == "sent", session.can("estimate.approve", feature: "estimates"),
-                      (jobID != nil && (record.options ?? []).isEmpty) || session.can("estimate.send", feature: "estimates") {
-                // On site, the next step is the customer's yes: hand them the options to choose and sign.
-                // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
-                PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
-            }
-        }
+        .safeAreaInset(edge: .bottom) { estimateBar }
         .sensoryFeedback(.success, trigger: succeeded)
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
             Button(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }
@@ -196,21 +196,72 @@ struct EstimateDetailView: View {
                 }
             }
         }
-        .task { await load() }
+        .task { await loadAndMaybePresent() }
         .refreshable { await load() }
         .fullScreenCover(isPresented: $showToCustomer) {
-            if let record {
-                CustomerModeContainer(onUnlocked: {
-                    showToCustomer = false
-                    Task { await load() }
-                }) { handBack in
-                    CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
-                                                 onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
-                }
-                .environmentObject(api)
-            }
+            if let record { customerMode(record) }
         }
     }
+
+    private func customerMode(_ record: EstimateRecord) -> some View {
+        CustomerModeContainer(onUnlocked: { customerModeClosed() }) { handBack in
+            CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
+                                         onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
+        }
+        .environmentObject(api)
+    }
+
+    private func customerModeClosed() {
+        showToCustomer = false
+        Task {
+            await load()
+            // TF-06: approved from the job's next step, the job (and its invoice step) comes back.
+            if presentsOnOpen, record?.status == "approved" { dismiss() }
+        }
+    }
+    @ViewBuilder private var estimateBar: some View {
+        if let record, record.status == "draft", jobID != nil, TechJobFlow.canShow(record, can: estimateAbilities) {
+            // TF-05: on site, showing is sending. The draft is issued as it's handed over, no second step.
+            PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { Task { await handToCustomer() } }
+        } else if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
+            PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
+        } else if let record, record.status == "sent", canShowSent(record) {
+            // On site, the next step is the customer's yes: hand them the options to choose and sign.
+            // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
+            PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
+        }
+    }
+
+    private func canShowSent(_ record: EstimateRecord) -> Bool {
+        guard session.can("estimate.approve", feature: "estimates") else { return false }
+        let singleScopeOnJob = jobID != nil && (record.options ?? []).isEmpty
+        return singleScopeOnJob || session.can("estimate.send", feature: "estimates")
+    }
+
+    private func loadAndMaybePresent() async {
+        await load()
+        guard presentsOnOpen, !autoPresented, let record, TechJobFlow.canShow(record, can: estimateAbilities) else { return }
+        autoPresented = true
+        await handToCustomer()
+    }
+
+    private var estimateAbilities: TechJobAbilities {
+        TechJobAbilities(sendEstimate: session.can("estimate.send", feature: "estimates"),
+                         approveEstimate: session.can("estimate.approve", feature: "estimates"))
+    }
+
+    /// Issues a draft (the revision the customer signs is frozen first), then opens customer mode.
+    private func handToCustomer() async {
+        guard let current = record else { return }
+        if current.status == "draft" {
+            busy = true
+            defer { busy = false }
+            do { record = try await api.sendFieldEstimate(id, expectedRevisionNumber: current.currentRevisionNumber ?? 0) }
+            catch is CancellationError { return } catch { self.error = error.localizedDescription; return }
+        }
+        showToCustomer = true
+    }
+
     private func performAction() async {
         guard let current = record else { return }
         busy = true
@@ -302,9 +353,12 @@ struct InvoicesView: View {
 
 struct InvoiceDetailView: View {
     let id: String
+    /// Opened from the job's next step: once it's paid, go back to the job for wrap up (TF-09).
+    var returnsWhenPaid = false
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
     @State private var record: InvoiceRecord?
     @State private var error: String?
     @State private var busy = false
@@ -398,6 +452,7 @@ struct InvoiceDetailView: View {
                     model: paymentModel,
                     canCollect: session.can("invoice.payment.create", feature: "payments"),
                     canIssue: session.can("invoice.issue", feature: "invoicing"),
+                    issueTitle: issueCollects ? "Issue and collect payment" : "Issue invoice",
                     busy: busy,
                     onCollect: { showCollectPayment = true },
                     onIssue: { confirmIssue = true }
@@ -410,7 +465,7 @@ struct InvoiceDetailView: View {
         }
         .sensoryFeedback(.success, trigger: issued)
         .confirmationDialog("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue, titleVisibility: .visible) {
-            Button("Issue invoice") { Task { await issue() } }
+            Button(issueCollects ? "Issue and collect" : "Issue invoice") { Task { await issueThenCollect() } }
         }
         .sheet(isPresented: $showEditDraft) {
             if let record {
@@ -454,7 +509,7 @@ struct InvoiceDetailView: View {
                 .environmentObject(api)
             }
         }
-        .sheet(isPresented: $showCollectPayment) {
+        .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
                     .presentationDetents([.large])
@@ -471,8 +526,21 @@ struct InvoiceDetailView: View {
         }
         .refreshable { await load() }
     }
-    private func issue() async {
-        guard let current = record else { return }
+    /// TF-08: issuing and collecting are one step for the tech; payment opens right after.
+    private func issueThenCollect() async {
+        guard await issue(), issueCollects, paymentModel?.canRecordPayment == true else { return }
+        showCollectPayment = true
+    }
+
+    private func returnIfPaid() {
+        if returnsWhenPaid, paymentModel?.invoice?.status == "paid" { dismiss() }
+    }
+
+    private var issueCollects: Bool {
+        session.can("invoice.issue", feature: "invoicing") && session.can("invoice.payment.create", feature: "payments")
+    }
+    @discardableResult private func issue() async -> Bool {
+        guard let current = record else { return false }
         busy = true
         defer { busy = false }
         do {
@@ -483,8 +551,9 @@ struct InvoiceDetailView: View {
             self.issued += 1
             await paymentModel?.load()
             if let invoice = paymentModel?.invoice { record = invoice }
+            return true
         }
-        catch is CancellationError {} catch { self.error = error.localizedDescription }
+        catch is CancellationError { return false } catch { self.error = error.localizedDescription; return false }
     }
     private func load() async {
         if paymentModel == nil {

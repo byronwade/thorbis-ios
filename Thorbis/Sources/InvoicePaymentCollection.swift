@@ -364,6 +364,7 @@ struct InvoiceDetailFooter: View {
     @ObservedObject var model: InvoicePaymentCollectionModel
     let canCollect: Bool
     let canIssue: Bool
+    var issueTitle = "Issue invoice"
     let busy: Bool
     let onCollect: () -> Void
     let onIssue: () -> Void
@@ -374,7 +375,7 @@ struct InvoiceDetailFooter: View {
                 PrimaryButton(title: "Collect payment", busy: model.isRecording, action: onCollect)
                     .disabled(!model.canRecordPayment)
             } else if model.invoice?.status == "draft", canIssue {
-                PrimaryButton(title: "Issue invoice", busy: busy, action: onIssue)
+                PrimaryButton(title: issueTitle, busy: busy, action: onIssue)
             }
         }
         .padding(.horizontal, 20)
