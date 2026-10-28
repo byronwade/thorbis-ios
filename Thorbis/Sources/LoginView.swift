@@ -32,7 +32,7 @@ struct LoginView: View {
                     .padding(.top, 6)
 
                 label("Email").padding(.top, 32)
-                TextField("", text: $email, prompt: Text("you@company.com").foregroundStyle(Theme.muted))
+                TextField("you@company.com", text: $email)
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)

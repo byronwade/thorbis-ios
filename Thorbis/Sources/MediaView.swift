@@ -47,7 +47,7 @@ struct JobMediaView: View {
                 if let selectedData {
                     HStack(spacing: 12) {
                         Image(systemName: selectedMime == "application/pdf" ? "doc" : "photo")
-                            .frame(width: 36, height: 36).background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                            .frame(width: 36, height: 36).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(selectedFilename).font(Theme.font(14, weight: .medium)).lineLimit(1)
                             Text(ByteCountFormatter.string(fromByteCount: Int64(selectedData.count), countStyle: .file))
@@ -88,7 +88,7 @@ struct JobMediaView: View {
                     ForEach(waiting) { photo in
                         HStack(spacing: 12) {
                             Image(systemName: "clock.arrow.circlepath").foregroundStyle(Theme.warning)
-                                .frame(width: 32, height: 32).background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 8))
+                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(photo.tags.first.map { "\($0) photo" } ?? "Photo").font(Theme.font(15, weight: .medium))
                                 Text("Saved on this phone · \(photo.takenAt.formatted(date: .omitted, time: .shortened))")
@@ -144,7 +144,7 @@ struct JobMediaView: View {
                     Button { open(record) } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "doc").font(.system(size: 15)).foregroundStyle(Theme.muted)
-                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: 8))
+                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(record.originalFilename).font(Theme.font(15, weight: .medium)).lineLimit(1)
                                 Text(record.uploadState == "stored" ? "PDF" : record.uploadState.statusLabel)

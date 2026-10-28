@@ -48,7 +48,12 @@ struct ScheduleMapView: View {
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5)
-                if !loaded { ProgressView() }
+                if !loaded {
+                    Label("Finding today's stops…", systemImage: "mappin.and.ellipse")
+                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 14).frame(height: Theme.chipHeight)
+                        .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                }
             }
             .padding(.horizontal, Theme.gutter)
             .accessibilityLabel("Map of today's stops")

@@ -27,14 +27,20 @@ struct PaperTabletSchedule: View {
             NavigationStack {
                 Group {
                     if range == "Map" {
-                        ContentUnavailableView("Map unavailable", systemImage: "map", description: Text("Job list records do not include map coordinates. Select Today or Week to view your schedule."))
+                        // iPad gets the same route map as the phone, beside today's list.
+                        ScrollView {
+                            ScheduleMapView(jobs: jobs.filter { $0.status != "canceled" }).padding(.top, 16)
+                        }
+                        .background(Theme.background)
                     } else if let selectedJob {
                         JobDetailView(jobId: selectedJob.id, showsBack: false)
                             .id(selectedJob)
-                    } else if store.loading {
-                        ProgressView("Updating schedule…")
+                    } else if store.loading && store.jobs.isEmpty {
+                        SkeletonRows(count: 8, leading: false)
+                            .frame(maxHeight: .infinity, alignment: .top)
                     } else {
-                        ContentUnavailableView("No job selected", systemImage: "calendar", description: Text("Choose a scheduled job to view its details."))
+                        PaperEmptyState(symbol: "calendar", title: "Pick a job",
+                                        message: "Choose a job on the left to see its details, notes and invoice here.")
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -61,7 +67,7 @@ struct PaperTabletSchedule: View {
                     if session.can("job.create", feature: "jobs") {
                         Button { showNewJob = true } label: {
                             Image(systemName: "plus").font(.system(size: 15)).frame(width: 26, height: 26)
-                                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6))
+                                .background(Theme.fill, in: Circle())
                                 .frame(width: 44, height: 44).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityLabel("New job")
                     }
@@ -83,15 +89,15 @@ struct PaperTabletSchedule: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if let error = store.error { ErrorBanner(message: error) }
-                    if range == "Map" {
-                        Text("Select Today or Week to view scheduled jobs.")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(18)
-                    } else {
+                    Group {
                         ForEach(jobs) { job in scheduleRow(job) }
                         if jobs.isEmpty && !store.loading {
-                            ContentUnavailableView("No scheduled jobs", systemImage: "calendar", description: Text(range == "Week" ? "No active jobs this week." : "No active jobs today."))
+                            PaperEmptyState(symbol: "calendar", title: range == "Week" ? "Nothing booked this week" : "Nothing booked today",
+                                            message: "Booked jobs show here in time order.",
+                                            actionTitle: session.can("job.create", feature: "jobs") ? "New job" : nil,
+                                            action: session.can("job.create", feature: "jobs") ? { showNewJob = true } : nil)
                         }
-                        if store.loading { ProgressView("Updating…").padding(18) }
+                        if store.loading && jobs.isEmpty { SkeletonRows(count: 5, leading: false) }
                     }
                 }.padding(.horizontal, 8).padding(.bottom, 16)
             }

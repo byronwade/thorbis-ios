@@ -35,7 +35,7 @@ struct CustomerEquipmentSection: View {
                             .accessibilityLabel("Add equipment")
                         }
                     }
-                    if let error { Text(error).font(Theme.font(12)).foregroundStyle(Theme.destructive) }
+                    if let error { ListErrorRow(message: error) }
                     if shown.isEmpty {
                         Text("Add the units you service here so the next visit starts with model and serial.")
                             .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6)
@@ -228,7 +228,7 @@ struct CustomerMembershipSection: View {
             if available && (!active.isEmpty || (canEdit && !plans.isEmpty)) {
                 VStack(alignment: .leading, spacing: 0) {
                     PaperGroupHeader(title: "Membership", count: active.isEmpty ? nil : active.count)
-                    if let error { Text(error).font(Theme.font(12)).foregroundStyle(Theme.destructive) }
+                    if let error { ListErrorRow(message: error) }
                     ForEach(active) { membership in
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "star.circle").font(.system(size: 18)).foregroundStyle(Theme.brandText).frame(width: 24)

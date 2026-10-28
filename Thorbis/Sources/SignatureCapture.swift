@@ -54,7 +54,7 @@ struct SignatureCaptureSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 .accessibilityLabel("Signature pad")
-                if let error { Text(error).font(Theme.font(13)).foregroundStyle(Theme.destructive) }
+                if let error { ListErrorRow(message: error) }
                 Spacer(minLength: 0)
                 PrimaryButton(title: title, busy: busy) { Task { await sign() } }
                     .disabled(!canSubmit)
