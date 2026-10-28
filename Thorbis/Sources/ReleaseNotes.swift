@@ -13,6 +13,19 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-next-step",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "arrow.forward.circle", title: "One button runs the whole job",
+                      detail: "The button at the bottom of a job is always the next step, from On my way to Collect."),
+                .init(symbol: "person.crop.rectangle", title: "Show an estimate in one tap",
+                      detail: "Show to customer sends a new estimate and hands it over. No separate Send step."),
+                .init(symbol: "creditcard", title: "Issue and collect in one step",
+                      detail: "Issuing an invoice opens payment right away, and a paid job goes back to Wrap up."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
             id: "2026-10-28-whats-new",
             date: "2026-10-28",
             highlights: [
