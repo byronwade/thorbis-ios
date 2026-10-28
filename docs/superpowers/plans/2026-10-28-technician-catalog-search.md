@@ -194,6 +194,6 @@ Expected: all existing and new test targets pass. If the target simulator is una
 
 Run: `git diff --check` and inspect the Task 1–3 file diff. Confirm no edit touches customer add-on contracts, catalog photo fields, payment/refund/retry flows, invoice issuance, or unrelated Stage A behavior. Confirm the preview fixture is opt-in and uses the existing Price Book envelope only.
 
-- [ ] **Step 3: Request code review and stop before release actions**
+- [x] **Step 3: Request code review and stop before release actions**
 
 Request an independent review of this Stage B diff. Do not build/archive for TestFlight, change signing, upload, or add testers as part of this plan; these are separate release actions.
