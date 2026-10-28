@@ -181,7 +181,7 @@ struct ReportsView: View {
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(money(credit.1, currency: "USD")).moneyStyle(.row)
-                            Text(credit.2).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            Text("\(credit.2)").font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
                     }
                     .frame(minHeight: 44)
