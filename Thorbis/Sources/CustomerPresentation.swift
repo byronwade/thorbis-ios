@@ -852,10 +852,12 @@ struct CustomerInvoicePresentation: View {
     }
 
     private func loadFinancing() async {
-        guard financing, due > 0 else { return }
-        offer = await api.financingOffer(amounts: [due])
-        guard offer.available else { return }
-        if opensPayChoice { pay() }
+        guard financing else { return }
+        if due > 0 {
+            offer = await api.financingOffer(amounts: [due])
+            if offer.available, opensPayChoice { pay() }
+        }
+        // A paid invoice still says "Paid by Wisetack", so the history loads whatever is due.
         applications = (try? await api.refreshFinancingApplications(invoiceID: invoice.id)) ?? []
     }
 
@@ -869,8 +871,11 @@ struct CustomerInvoicePresentation: View {
             sent = application
         } catch is CancellationError {
         } catch {
-            // A new attempt after a refusal is a new request; the same key would replay it.
-            applicationKey = UUID().uuidString
+            // Only a definite refusal starts a new request. After a lost answer or an outage the
+            // same key comes back, so the server returns the application it may already have sent.
+            if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status) {
+                applicationKey = UUID().uuidString
+            }
             self.error = error.isConnectivityFailure ? "Sending the application needs a connection. Try again when you have signal." : error.localizedDescription
         }
     }
