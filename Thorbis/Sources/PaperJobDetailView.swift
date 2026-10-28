@@ -19,6 +19,7 @@ struct JobDetailView: View {
     @EnvironmentObject var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
+    @State private var showCustomerMode = false
     @State private var notes: [JobNoteRecord] = []
     @State private var note = ""
     @State private var reason = ""
@@ -94,6 +95,11 @@ struct JobDetailView: View {
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .sensoryFeedback(.success, trigger: committed)
+        .fullScreenCover(isPresented: $showCustomerMode) {
+            if let customerID = job?.customerId {
+                CustomerSelfEditView(customerID: customerID) { showCustomerMode = false }
+            }
+        }
         .sheet(isPresented: $showDeposit) {
             JobDepositSheet(jobID: jobId) { invoice in
                 selectedInvoiceID = invoice.id
@@ -193,6 +199,9 @@ struct JobDetailView: View {
                 }
                 .accessibilityLabel("Share job")
                 Menu {
+                    if session.can("customer.edit", feature: "core_crm") {
+                        Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
+                    }
                     Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
                     NavigationLink { JobCloseoutView(jobID: jobId) } label: { Label("Closeout", systemImage: "checkmark.seal") }
                     NavigationLink { JobFollowUpsView(jobID: jobId) } label: { Label("Follow-ups", systemImage: "list.bullet") }

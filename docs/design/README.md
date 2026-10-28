@@ -14,6 +14,7 @@ Source: [current Thorbis Mobile page in Paper](https://app.paper.design/file/01K
 ## Field flows (end to end)
 
 - **Estimates.** Built from the Price Book on a job (price-book provenance kept) and linked to the job (`POST /v1/jobs/{id}/estimates/{estimateId}/link`). The job's Estimates tab lists every linked estimate.
+- **Customer mode.** "Show to customer" on a customer or job hands the device over full screen (`CustomerModeContainer`): no tab bar, no staff menus, no swipe-down. The customer checks and fixes their name, phone, email, billing and service addresses, other contacts, best way to reach them and job texts, in 20 pt type with 56 pt commits. Leaving needs the technician's Face ID or passcode; the technician then reviews the changes and saves them through the normal audited customer, contact, location and text-consent routes, under their own name. Needs `customer.edit`.
 - **Payments.** Collect payment opens on the card payment link (`POST /v1/invoices/{id}/pay-link`). Tap to Pay is not offered until Apple's entitlement and a card-present terminal exist.
 - **Photos.** Camera capture with Before / After / Other filing (server tags `Before` / `After`). Photos are kept on disk until the server confirms them.
 - **Lifecycle.** List items and progress responses carry no `allowedTransitions`, so the app re-reads `GET /v1/jobs/{id}` after each step and for Schedule's Next up.

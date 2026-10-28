@@ -115,7 +115,7 @@ struct EstimateRevisionEditorView: View {
             }
             .sheet(item: $priceBookTarget) { target in
                 NavigationStack {
-                    PaperPriceBookPicker(api: api, currency: "USD") { item in
+                    PaperPriceBookPicker(api: api, currency: "USD", customerID: estimate.customerId) { item in
                         do {
                             try editor.addPriceBookItem(item, optionID: target.optionID)
                             error = nil
