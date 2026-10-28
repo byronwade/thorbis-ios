@@ -68,7 +68,8 @@ struct MediaThumbnail: View {
         }
         .clipped()
         .accessibilityHidden(true)
-        .task(id: record.id) {
+        // Keyed on upload state too: a photo first seen mid-upload loads once the server confirms it.
+        .task(id: "\(record.id)|\(record.uploadState)") {
             guard record.uploadState == "stored", MediaThumbnailCache.isImage(record) else { return }
             if let cached = MediaThumbnailCache.shared.image(for: record.id) { image = cached; return }
             let loaded = await MediaThumbnailCache.shared.load(record, api: api, pixelSize: 240 * scale)
