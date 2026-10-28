@@ -76,9 +76,7 @@ struct EstimateDetailView: View {
                 if let record {
                     commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased())", context: store.customerName(record.customerId), title: record.title,
                                       status: record.status, date: record.createdAt)
-                    Text("Line items")
-                        .font(Theme.font(17, weight: .medium))
-                        .padding(.top, 8)
+                    PaperGroupHeader(title: "Line items", count: record.lines.count).padding(.top, 4)
                     VStack(spacing: 0) {
                         ForEach(record.lines) { line in CommercialLineView(line: line) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
@@ -113,16 +111,16 @@ struct EstimateDetailView: View {
                             Text(option.description).font(Theme.font(13)).foregroundStyle(Theme.muted)
                             ForEach(option.lines) { line in CommercialLineView(line: line) }
                             HStack {
-                                Text("Option total").foregroundStyle(Theme.muted)
+                                Text("Option total").font(Theme.font(15, weight: .medium))
                                 Spacer()
-                                Text(money(option.totalAmount, currency: option.currency))
+                                Text(money(option.totalAmount, currency: option.currency)).font(Theme.monoFont(14, weight: .medium))
                             }
-                            .font(Theme.font(14, weight: .medium))
                             .padding(15)
                         }
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                     }
-                    Text("Actions").font(Theme.font(17, weight: .medium)).padding(.top, 8)
+                    PaperGroupHeader(title: "Actions").padding(.top, 4)
                     NavigationLink { CommercialDocumentView(path: "/v1/estimates/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
                         commercialAction("View PDF", icon: "doc.text")
                     }
@@ -305,12 +303,13 @@ struct InvoiceDetailView: View {
                         Button { showSignature = true } label: { commercialAction("Get customer signature", icon: "signature") }
                             .buttonStyle(.plain)
                     }
-                    Text("Line items").font(Theme.font(17, weight: .medium)).padding(.top, 8)
+                    PaperGroupHeader(title: "Line items", count: record.lines.count).padding(.top, 4)
                     VStack(spacing: 0) {
                         ForEach(record.lines) { line in CommercialLineView(line: line) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                     if let paymentModel {
                         InvoicePaymentsSection(
                             model: paymentModel,
@@ -325,7 +324,7 @@ struct InvoiceDetailView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Text("Actions").font(Theme.font(17, weight: .medium)).padding(.top, 8)
+                    PaperGroupHeader(title: "Actions").padding(.top, 4)
                     if record.status != "draft", record.status != "void" {
                         Button { showToCustomer = true } label: { commercialAction("Show to customer", icon: "person.crop.rectangle") }
                             .buttonStyle(.plain)
