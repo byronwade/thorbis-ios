@@ -57,7 +57,10 @@ struct PriceBookSearchIndex {
         entries = items.compactMap { item in
             guard item.archivedAt == nil, item.sellPrice.currency == currency else { return nil }
             let kindWords = item.kind.isEmpty ? [] : [item.kind, item.kind + "s"]
-            let words = Self.words(item.description) + Self.words(item.unit) + kindWords.map(Self.normalize)
+            let nameWords = Self.words(item.description)
+            // Neighbouring words joined, so "R410A" finds "R-410A" exactly instead of by a typo.
+            let joined = zip(nameWords, nameWords.dropFirst()).map { $0 + $1 }
+            let words = nameWords + joined + Self.words(item.unit) + kindWords.map(Self.normalize)
             return Entry(item: item, normalizedDescription: Self.normalize(item.description), words: words)
         }
     }
@@ -129,13 +132,15 @@ struct PriceBookSearchIndex {
 
     /// Numbers never take a typo or a contains match, and only the word still being typed may
     /// match a longer number as a prefix ("12" must not find "120" once the next word is typed).
+    /// A word with any digit in it is a model or size, so it never takes a typo ("R420A" is not
+    /// "R410A").
     private static func match(_ query: String, against word: String, typing: Bool) -> WordMatch? {
         if word == query { return .exact }
         let numeric = query.allSatisfy(\.isNumber)
         if numeric { return typing && word.hasPrefix(query) ? .prefix : nil }
         if word.hasPrefix(query) { return .prefix }
         if query.count >= 3, word.contains(query) { return .contains }
-        guard query.count >= 4 else { return nil }
+        guard query.count >= 4, !query.contains(where: \.isNumber) else { return nil }
         if abs(word.count - query.count) <= 1, editDistanceAtMostOne(query, word) { return .typo }
         // While typing, a typo inside the part typed so far still counts ("capicit" → "capacitor").
         if typing, word.count > query.count, editDistanceAtMostOne(query, String(word.prefix(query.count))) { return .typo }

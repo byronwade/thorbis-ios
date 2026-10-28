@@ -78,7 +78,8 @@ final class PriceBookSearchTests: XCTestCase {
     }
 
     func testPunctuationAndAccentsAreIgnored() {
-        XCTAssertEqual(search("r410a"), ["Refrigerant R-410A"], "one typo from the word 410a")
+        XCTAssertEqual(search("r410a"), ["Refrigerant R-410A"], "neighbouring words match joined")
+        XCTAssertTrue(search("r420a").isEmpty, "a model number never takes a typo")
         XCTAssertEqual(search("R 410A"), ["Refrigerant R-410A"])
         XCTAssertEqual(search("CONDÉNSER").first, "Condenser coil cleaning")
     }
