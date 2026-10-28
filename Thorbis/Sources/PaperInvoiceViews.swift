@@ -49,6 +49,7 @@ struct PaperJobInvoiceContent: View {
     let onInvoiceUpdated: (InvoiceRecord) -> Void
 
     @EnvironmentObject private var session: SessionController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var balance: PaperInvoiceBalance {
         PaperInvoiceBalance(invoice: displayedInvoice, balanceCents: paymentModel.outstandingCents)
@@ -93,7 +94,7 @@ struct PaperJobInvoiceContent: View {
                     .accessibilityLabel(balance.balanceCents.map { "Balance due \(money($0, currency: displayedInvoice.currency))" } ?? "Balance unavailable")
                     .accessibilityAddTraits(.updatesFrequently)
                     // MF-06: the balance rolls down when a payment lands.
-                    .animation(.snappy(duration: 0.3), value: balance.balanceCents)
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: balance.balanceCents)
                 Spacer(minLength: 4)
                 statusChip
             }

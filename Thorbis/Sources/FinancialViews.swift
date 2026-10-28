@@ -774,7 +774,7 @@ func money(_ cents: Int, currency: String) -> String {
 }
 
 /// The one line an office reads first on a document list: what's outstanding and how much.
-@ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
+@MainActor @ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
     let waiting = estimates.filter { $0.status == "sent" }
     let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
     // MF-03: the amount is a figure, the words label it.
@@ -785,7 +785,7 @@ func money(_ cents: Int, currency: String) -> String {
     }
 }
 
-@ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
+@MainActor @ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
     let unpaid = invoices.filter { $0.status == "issued" }
     let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
     if unpaid.isEmpty {
