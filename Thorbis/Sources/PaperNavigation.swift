@@ -538,7 +538,7 @@ struct RootView: View {
                         .accessibilityHidden(true)
                     Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .medium)).lineLimit(1)
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.down").font(.system(size: 10))
+                    Image(systemName: "chevron.down").font(.system(size: 12))
                 }.padding(.horizontal, 8).frame(minHeight: 44)
             }.padding(.bottom, 10)
             Button { search = true } label: {

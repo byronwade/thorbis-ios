@@ -456,7 +456,7 @@ struct CustomerDetailView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(smsConsentLabel)
-                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(Theme.foreground)
                     .frame(minHeight: 44)

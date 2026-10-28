@@ -611,7 +611,7 @@ struct CustomerContactSheet: View {
     private func roleChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                if selected { Image(systemName: "checkmark").font(.system(size: 11, weight: .medium)) }
+                if selected { Image(systemName: "checkmark").font(.system(size: 12, weight: .medium)) }
                 Text(title).font(Theme.font(13, weight: .medium))
             }
             .foregroundStyle(selected ? Theme.onInk : Theme.muted)

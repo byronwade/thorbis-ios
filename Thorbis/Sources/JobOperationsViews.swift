@@ -140,7 +140,7 @@ struct JobCloseoutView: View {
     private func checklistRow(done: Bool, title: String, detail: String?) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 18)).foregroundStyle(done ? Theme.success : Theme.muted)
+                .font(.system(size: 17)).foregroundStyle(done ? Theme.success : Theme.muted)
                 .accessibilityLabel(done ? "Done" : "Not done")
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(15, weight: done ? .regular : .medium))
@@ -325,7 +325,7 @@ struct JobScheduleView: View {
             Spacer(minLength: 0)
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .medium))
                     .frame(width: 30, height: 30)
                     .background(Theme.fill, in: Circle())
                     .frame(width: 44, height: 44)

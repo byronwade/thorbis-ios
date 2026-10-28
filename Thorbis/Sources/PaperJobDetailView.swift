@@ -690,7 +690,7 @@ struct JobDetailView: View {
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 22))
                         .overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.border))
                     Button { Task { await saveNote() } } label: {
-                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .medium)) } }
+                        Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .medium)) } }
                             .foregroundStyle(Theme.onInk).frame(width: 44, height: 44)
                             .background(Theme.ink.opacity(canSaveNote ? 1 : 0.35), in: Circle())
                     }

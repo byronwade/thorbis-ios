@@ -1066,7 +1066,7 @@ struct InvoicePaymentCollectionSheet: View {
     private var receiptRow: some View {
         HStack(spacing: 10) {
             Image(systemName: "envelope")
-                .font(.system(size: 14))
+                .font(.system(size: 15))
                 .foregroundStyle(Theme.muted)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
