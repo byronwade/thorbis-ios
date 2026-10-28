@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Native translation of Paper's Customers and Customer detail artboards.
 struct CustomersView: View {
@@ -6,6 +7,8 @@ struct CustomersView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
     @State private var showNew = false
+    @State private var newJobFor: Customer?
+    @Environment(\.openURL) private var openURL
     @State private var showSearch = false
     @State private var search = ""
     @State private var newName = ""
@@ -91,6 +94,7 @@ struct CustomersView: View {
         .sheet(isPresented: $showNew) {
             NewCustomerSheet { _ in Task { await loadCustomers() } }
         }
+        .sheet(item: $newJobFor) { customer in NewJobSheet(preselected: customer) }
     }
     private func customerRow(_ customer: CustomerRecord) -> some View {
         let open = store.jobs.first { $0.customerId == customer.id && !["completed", "canceled"].contains($0.status) }
@@ -108,9 +112,25 @@ struct CustomersView: View {
                 Spacer(minLength: 4)
                 if let open { StatusRing(status: open.status).accessibilityHidden(true) }
             }
-            .frame(minHeight: 52).contentShape(Rectangle())
+            .padding(.horizontal, 8)
+            .frame(minHeight: 56).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowPressStyle())
+        // MA-12: the common actions on long-press; each also exists on the customer.
+        .contextMenu {
+            if let phone = customer.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 {
+                if let call = URL(string: "tel:\(phone)") { Button("Call", systemImage: "phone") { openURL(call) } }
+                if let text = URL(string: "sms:\(phone)") { Button("Text", systemImage: "message") { openURL(text) } }
+            }
+            if let address = customer.address, !address.isEmpty, let maps = Directions.url(address: address, coordinates: nil) {
+                Button("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") { openURL(maps) }
+            }
+            if !customer.archived && session.can("job.create", feature: "jobs") {
+                Button("New job for \(customer.name)", systemImage: "plus") { newJobFor = listCustomer }
+            }
+            Button("Copy name", systemImage: "doc.on.doc") { UIPasteboard.general.string = customer.name }
+        }
+        .padding(.horizontal, -8)
     }
 
     private func rowDetail(jobCount: Int, open: Job?) -> String {

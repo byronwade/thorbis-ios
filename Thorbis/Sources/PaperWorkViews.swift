@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 func statusIcon(_ status: String) -> (String, Color) {
     switch status {
@@ -9,6 +10,30 @@ func statusIcon(_ status: String) -> (String, Color) {
     case "dispatched": ("circle.dashed", Theme.brandText)
     case "canceled": ("xmark.circle", Theme.muted)
     default: ("circle", Theme.muted)
+    }
+}
+
+/// How a job is shared in words: what, who and when, never an internal ID.
+enum JobShareText {
+    static func text(title: String, customer: String, scheduledFor: String?) -> String {
+        var parts = [title, customer]
+        if let date = JobFiltering.date(scheduledFor) {
+            parts.append(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+extension View {
+    /// design.thorbis.com MA-12: a job row's common actions on long-press. Each one also exists on
+    /// the job itself, so the gesture is a shortcut, never the only way.
+    func jobContextMenu(_ job: Job, customer: String) -> some View {
+        contextMenu {
+            Button("Copy job number", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.shortRef }
+            ShareLink(item: JobShareText.text(title: job.title, customer: customer, scheduledFor: job.scheduledFor)) {
+                Label("Share job", systemImage: "square.and.arrow.up")
+            }
+        }
     }
 }
 
@@ -70,7 +95,6 @@ struct ScheduleView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Schedule", subtitle: subtitle) { withAnimation { searchVisible.toggle() } }
                 OfflineBanner()
-                if !store.jobs.isEmpty && search.isEmpty { todaySummary }
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
@@ -106,7 +130,7 @@ struct ScheduleView: View {
         let day = Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
         let count = jobs.count
         return switch range {
-        case .today: "\(greeting) · \(day)"
+        case .today: "\(greeting) · \(day)\(count > 0 ? " · \(count) job\(count == 1 ? "" : "s")" : "")"
         case .week: "This week · \(count) job\(count == 1 ? "" : "s")"
         case .unscheduled: "\(count) job\(count == 1 ? "" : "s") need a time"
         }
@@ -117,31 +141,6 @@ struct ScheduleView: View {
         let part = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
         let first = session.user?.name?.split(separator: " ").first.map(String.init)
         return first.map { "\(part), \($0)" } ?? part
-    }
-
-    /// Today at a glance as chips (design.thorbis.com: a chip is a pill, a value stays a word; not a
-    /// dashboard of equal buttons). Each opens the place that answers it.
-    @ViewBuilder private var todaySummary: some View {
-        let today = JobFiltering.schedule(store.jobs, range: .today)
-        let underWay = PaperWorkGroups.inProgress(store.jobs)
-        let unscheduled = NeedsAttention.unscheduled(store.jobs)
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                Button { tab = "Today" } label: { Chip(text: "\(today.count) today", icon: "calendar") }.buttonStyle(.plain)
-                if let first = underWay.first {
-                    NavigationLink(value: first) {
-                        Chip(text: "\(underWay.count) under way", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface)
-                    }.buttonStyle(.plain)
-                }
-                if !unscheduled.isEmpty {
-                    Button { tab = "Unscheduled" } label: { Chip(text: "\(unscheduled.count) need a time", icon: "clock") }.buttonStyle(.plain)
-                }
-            }
-            .frame(minHeight: 44)
-            .padding(.horizontal, Theme.gutter)
-        }
-        .scrollIndicators(.hidden)
-        .padding(.top, -6)
     }
 
     @ViewBuilder private var dayContent: some View {
@@ -338,6 +337,7 @@ private struct ScheduleHero<Commit: View>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .jobContextMenu(job, customer: customer)
                 .accessibilityLabel("\(job.title), \(customer), \(job.status.statusLabel)")
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { chips }
@@ -403,10 +403,11 @@ private struct ScheduleCompactRow: View {
                 StatusRing(status: job.status)
             }
             .padding(.horizontal, Theme.gutter).padding(.vertical, 5)
-            .frame(minHeight: 50)
+            .frame(minHeight: 52)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowPressStyle())
+        .jobContextMenu(job, customer: customer)
     }
 }
 
@@ -420,7 +421,6 @@ struct JobsView: View {
     @State private var searchVisible = false
     @State private var showNew = false
     @Environment(\.dynamicTypeSize) private var typeSize
-    @ScaledMetric(relativeTo: .caption) private var refWidth: CGFloat = 66
 
     private var jobs: [Job] {
         let assigned = tab == "Assigned" ? (session.user?.id ?? "") : nil
@@ -471,6 +471,20 @@ struct JobsView: View {
         .sheet(isPresented: $showNew) { NewJobSheet() }
     }
 
+    /// Customer, then when (or the state when there is no time), then the job number.
+    private func detail(_ job: Job, customer: String) -> String {
+        var parts = [customer]
+        if let date = JobFiltering.date(job.scheduledFor), !["completed", "canceled"].contains(job.status) {
+            parts.append(Calendar.current.isDateInToday(date)
+                ? "Today \(date.formatted(date: .omitted, time: .shortened))"
+                : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+        } else {
+            parts.append(job.status.statusLabel)
+        }
+        parts.append(job.shortRef)
+        return parts.joined(separator: " · ")
+    }
+
     /// One "New job" entry point, on the first group shown, instead of a plus on every group.
     @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool = false) -> some View {
         if !jobs.isEmpty {
@@ -486,38 +500,37 @@ struct JobsView: View {
                     }
                 }
                 ForEach(jobs) { job in
+                    let customer = store.customerName(job.customerId)
                     NavigationLink(value: job) {
-                        HStack(spacing: 10) {
+                        // MA-11: what, then who and when, on two lines; same record, same row.
+                        HStack(spacing: 12) {
                             StatusRing(status: job.status)
-                            if typeSize.isAccessibilitySize {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                                    Text(job.title).font(Theme.font(15, weight: .medium))
-                                        .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
-                                }
-                            } else {
-                                Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                                    .frame(width: refWidth, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(job.title).font(Theme.font(15, weight: .medium))
                                     .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
-                                    .lineLimit(1)
+                                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                                Text(detail(job, customer: customer))
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                             }
                             Spacer(minLength: 0)
-                            if job.assignedToUserId != nil {
-                                let mine = job.assignedToUserId == session.user?.id
-                                Text(mine ? initials(session.user?.name ?? "Me") : "—")
-                                    .font(Theme.font(10, weight: .semibold))
-                                    .foregroundStyle(mine ? Theme.brandText : Theme.muted)
-                                    .frame(width: 24, height: 24)
-                                    .background(mine ? Theme.brandSurface : Theme.fill, in: Circle())
+                            if job.assignedToUserId != nil && job.assignedToUserId == session.user?.id {
+                                Text(initials(session.user?.name ?? "Me"))
+                                    .font(Theme.font(12, weight: .medium))
+                                    .foregroundStyle(Theme.brandText)
+                                    .frame(width: 26, height: 26)
+                                    .background(Theme.brandSurface, in: Circle())
                                     .dynamicTypeSize(...DynamicTypeSize.large)
-                                    .accessibilityLabel(mine ? "Assigned to you" : "Assigned")
+                                    .accessibilityLabel("Assigned to you")
                             }
                         }
-                        .frame(minHeight: 46)
+                        .padding(.horizontal, 8)
+                        .frame(minHeight: 56)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowPressStyle())
+                    .jobContextMenu(job, customer: customer)
+                    .padding(.horizontal, -8)
                 }
             }
         }

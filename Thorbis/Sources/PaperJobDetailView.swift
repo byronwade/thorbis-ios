@@ -217,7 +217,7 @@ struct JobDetailView: View {
     @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
         if let job {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                ShareLink(item: "\(job.title) · \(job.id)") {
+                ShareLink(item: JobShareText.text(title: job.title, customer: store.customerName(job.customerId), scheduledFor: job.scheduledFor)) {
                     Image(systemName: "square.and.arrow.up")
                 }
                 .accessibilityLabel("Share job")
