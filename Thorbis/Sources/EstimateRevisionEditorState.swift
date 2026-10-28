@@ -61,10 +61,14 @@ struct EstimateRevisionLineDraft: Identifiable, Equatable {
     var group: EstimateLineGroup
     /// The price book wording and price this line started from, for "Edited" and Reset (EB-10).
     var priceBookOriginal: PriceBookLineOriginal?
+    /// False only for a line loaded from the server until the catalog sorts it once; a group the
+    /// person picks is never overwritten by a later catalog refresh.
+    var groupSettled: Bool
 
     init(id: UUID = UUID(), originalLineID: String? = nil, description: String,
          quantity: String, unitPrice: String, source: FieldEstimateLineSourceInput? = nil,
-         group: EstimateLineGroup = .work, priceBookOriginal: PriceBookLineOriginal? = nil) {
+         group: EstimateLineGroup = .work, priceBookOriginal: PriceBookLineOriginal? = nil,
+         groupSettled: Bool = true) {
         self.id = id
         self.originalLineID = originalLineID
         self.description = description
@@ -73,6 +77,7 @@ struct EstimateRevisionLineDraft: Identifiable, Equatable {
         self.source = source
         self.group = group
         self.priceBookOriginal = priceBookOriginal
+        self.groupSettled = groupSettled
     }
 }
 
@@ -265,7 +270,8 @@ struct EstimateRevisionEditorState: Equatable {
             quantity: String(line.quantity),
             unitPrice: priceText(line.unitPrice.amount),
             source: source,
-            priceBookOriginal: original
+            priceBookOriginal: original,
+            groupSettled: false
         )
     }
 
