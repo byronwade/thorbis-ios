@@ -449,6 +449,7 @@ enum CompanyFact {
         case "email_sender_name": "Name on emails"
         case "email_sender_address": "Reply-to email"
         case "dba_names": "Also known as"
+        case "review_link": "Review link"
         default: fallback
         }
     }
@@ -468,6 +469,7 @@ enum CompanyFact {
         case "formation_date": "YYYY-MM-DD"
         case "entity_type": "LLC, S corp, sole proprietor…"
         case "formation_jurisdiction": "State where it was formed"
+        case "review_link": "https://g.page/r/…/review"
         default: ""
         }
     }
@@ -476,7 +478,7 @@ enum CompanyFact {
         switch key {
         case "primary_phone": .phonePad
         case "primary_email", "email_sender_address": .emailAddress
-        case "website": .URL
+        case "website", "review_link": .URL
         case "formation_date": .numbersAndPunctuation
         default: .default
         }
@@ -488,7 +490,7 @@ enum CompanyFact {
         case "business_address", "mailing_address": .fullStreetAddress
         case "primary_phone": .telephoneNumber
         case "primary_email", "email_sender_address": .emailAddress
-        case "website": .URL
+        case "website", "review_link": .URL
         default: nil
         }
     }
@@ -640,7 +642,7 @@ struct CompanyDetailsView: View {
             Section {
                 ForEach(shown, id: \.factKey) { row($0) }
             } header: { Text("What customers see") } footer: {
-                Text("Name on emails and Reply-to email are used when estimates and invoices are emailed.")
+                Text("Name on emails and Reply-to email are used when estimates and invoices are emailed. With a Review link, the appointment complete email asks happy customers for a review there.")
             }
             if !legal.isEmpty {
                 Section {

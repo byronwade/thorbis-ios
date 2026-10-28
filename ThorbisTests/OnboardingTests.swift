@@ -110,4 +110,11 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(CompanyFact.label("primary_phone", fallback: "Primary phone"), "Business phone")
         XCTAssertEqual(CompanyFeaturesView.label("job_sms_notices"), "Job SMS notices")
     }
+
+    func testReviewLinkTypesLikeAWebAddress() {
+        XCTAssertEqual(CompanyFact.label("review_link", fallback: "Review link"), "Review link")
+        XCTAssertEqual(CompanyFact.keyboard("review_link"), .URL)
+        XCTAssertEqual(CompanyFact.content("review_link"), .URL)
+        XCTAssertFalse(CompanyFact.multiline("review_link"))
+    }
 }

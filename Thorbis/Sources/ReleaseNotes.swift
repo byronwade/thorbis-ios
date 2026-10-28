@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-review-link",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "star", title: "Ask for a review after every job",
+                      detail: "Add your review link in Company details and the job complete email asks customers for a review."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-28-job-hours",
             date: "2026-10-28",
             highlights: [
