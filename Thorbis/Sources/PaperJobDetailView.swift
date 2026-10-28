@@ -48,6 +48,9 @@ struct JobDetailView: View {
     /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
     @State private var createdEstimateID: String?
     @State private var showWrapUp = false
+    /// A failed read is not "none": the next step waits rather than offer duplicate paperwork (TF-10).
+    @State private var estimatesFailed = false
+    @State private var invoicesFailed = false
     /// The customer's service locations; the first (or only) one is where the job is.
     @State private var locations: [ServiceLocationRecord] = []
     /// The primary contact's phone (else the customer's), for one-tap Call and Text.
@@ -584,8 +587,10 @@ struct JobDetailView: View {
             guard session.generation == generation else { return }
             jobEstimates = loaded
             estimatesLoaded = true
+            estimatesFailed = false
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
+            estimatesFailed = true
             if let origin = job.estimateId, let single = try? await api.fieldEstimate(origin) { jobEstimates = [single] }
             estimatesLoaded = true
             self.error = error.localizedDescription
@@ -831,8 +836,8 @@ struct JobDetailView: View {
             collectPayment: session.can("invoice.payment.create", feature: "payments"),
             completeJob: session.can("job.complete", feature: "jobs"))
         return TechJobFlow.nextStep(status: outbox.pendingStatus(for: job.id) ?? job.status, transitions: availableTransitions(job),
-                                    estimates: estimatesLoaded || !session.can("estimate.view", feature: "estimates") ? jobEstimates : nil,
-                                    invoices: invoicesLoaded ? invoices : nil, can: can)
+                                    estimates: (estimatesLoaded && !estimatesFailed) || !session.can("estimate.view", feature: "estimates") ? jobEstimates : nil,
+                                    invoices: invoicesLoaded && !invoicesFailed ? invoices : nil, can: can)
     }
 
     private func run(_ step: TechJobStep) {
@@ -915,14 +920,16 @@ struct JobDetailView: View {
             var mine = all.filter { $0.jobId == jobId }
             // Technicians' invoice list is empty by design; re-read the ones this phone has seen
             // for the job by id, which the server allows through the assigned job.
+            var missed = false
             if mine.isEmpty {
                 for id in JobInvoiceMemory.ids(jobId) {
-                    if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) }
+                    if let invoice = try? await api.fieldInvoice(id) { mine.append(invoice) } else { missed = true }
                 }
             }
             invoices = mine.sorted { $0.createdAt > $1.createdAt }
             mine.forEach { JobInvoiceMemory.remember($0.id, jobID: jobId) }
             invoicesLoaded = true
+            invoicesFailed = missed
             if let selectedInvoice {
                 selectedInvoiceID = selectedInvoice.id
                 await loadInvoicePayments(for: selectedInvoice)
@@ -931,6 +938,7 @@ struct JobDetailView: View {
             guard session.generation == generation else { return }
             self.error = error.localizedDescription
             invoicesLoaded = true
+            invoicesFailed = true
         }
     }
 

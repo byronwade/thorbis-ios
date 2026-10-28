@@ -100,7 +100,8 @@ enum TechJobFlow {
         if let draft = live.first(where: { $0.status == "draft" }) {
             return can.viewInvoice ? .reviewInvoice(id: draft.id) : nil
         }
-        if !live.isEmpty {
+        // A deposit or progress bill isn't the job's bill; only the completion invoice is.
+        if live.contains(where: { $0.origin == "job_completion" }) {
             // Billed and settled, or owed in a way this role can't collect: closeout records why.
             return status == "completed" || !can.completeJob ? nil : .wrapUp
         }
