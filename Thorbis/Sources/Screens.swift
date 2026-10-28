@@ -52,7 +52,7 @@ struct NewJobSheet: View {
                                 .tracking(-0.39)
                                 .textFieldStyle(.plain)
                                 .accessibilityLabel("Job title")
-                                .disabled(busy)
+                                .disabled(busy || savedJobID != nil)
                         }
                         .padding(.top, 8)
                         if draft.titleIsTooLong {
@@ -76,7 +76,7 @@ struct NewJobSheet: View {
                             .textFieldStyle(.plain)
                             .accessibilityLabel("Job description")
                             .padding(.top, 8)
-                            .disabled(busy)
+                            .disabled(busy || savedJobID != nil)
                         if draft.notesAreTooLong {
                             Text("Descriptions can be up to 10,000 characters.")
                                 .font(Theme.font(12))
@@ -93,7 +93,7 @@ struct NewJobSheet: View {
                                          symbol: "clock", set: when != nil)
                                 }
                                 .accessibilityLabel(when == nil ? "Choose a time" : "Time: \(when!.formatted())")
-                                .disabled(busy)
+                                .disabled(busy || timeSaved)
                                 techPicker
                             }
                         }
@@ -174,7 +174,8 @@ struct NewJobSheet: View {
             .frame(minHeight: 44)
         }
         .accessibilityLabel("Customer: \(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Choose a customer")")
-        .disabled(busy)
+        // Once the job exists its title, description and customer are fixed; edit them on the job.
+        .disabled(busy || savedJobID != nil)
     }
 
     private var techPicker: some View {
@@ -189,7 +190,7 @@ struct NewJobSheet: View {
             pill(tech?.displayName ?? "Tech", symbol: "person.badge.clock", set: tech != nil)
         }
         .accessibilityLabel("Technician: \(tech?.displayName ?? "none")")
-        .disabled(busy)
+        .disabled(busy || techSaved)
         .task { if people.isEmpty { people = (try? await api.fieldAssignees()) ?? [] } }
     }
 
