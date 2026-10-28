@@ -74,6 +74,7 @@ struct NewEstimateView: View {
                 EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
                                   prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
                                   finish: finishSearch)
+                    .disabled(busy)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
@@ -148,6 +149,7 @@ struct NewEstimateView: View {
     }
 
     private func add(_ item: PriceBookListItem) {
+        guard !busy else { return }
         withAnimation(EstimateLineGroupsEditor.spring) {
             guard lines.addPriceBookItem(item, to: addGroup) != nil else {
                 error = "An estimate can contain up to 500 line items."
@@ -159,6 +161,7 @@ struct NewEstimateView: View {
     }
 
     private func addCustom(_ text: String) {
+        guard !busy else { return }
         let group = addGroup ?? (kind == .material ? .material : .work)
         guard let id = lines.addCustomLine(text, to: group) else {
             error = "An estimate can contain up to 500 line items."

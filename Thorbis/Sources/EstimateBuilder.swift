@@ -123,6 +123,7 @@ extension Array where Element == EstimateRevisionLineDraft {
         guard id != target, let index = firstIndex(where: { $0.id == id }) else { return }
         var line = remove(at: index)
         line.group = group
+        line.groupSettled = true
         if let target, let targetIndex = firstIndex(where: { $0.id == target }), self[targetIndex].group == group {
             insert(line, at: targetIndex)
         } else {
@@ -142,13 +143,17 @@ extension Array where Element == EstimateRevisionLineDraft {
     }
 
     /// Lines loaded from the server don't carry their group yet; price book materials go to
-    /// Materials by the catalog's kind, everything else stays in Work.
+    /// Materials by the catalog's kind, everything else stays in Work. Each line is sorted once,
+    /// so a later catalog refresh never undoes a group or order the person chose.
     mutating func classifyGroups(kinds: [String: String]) {
-        for index in indices {
+        var changed = false
+        for index in indices where !self[index].groupSettled {
             guard case .priceBookSelection(let itemID, _) = self[index].source, let kind = kinds[itemID] else { continue }
             self[index].group = .forKind(kind)
+            self[index].groupSettled = true
+            changed = true
         }
-        normalizeGroups()
+        if changed { normalizeGroups() }
     }
 
     /// Stable: Work lines first, then Materials, each in its current order.
