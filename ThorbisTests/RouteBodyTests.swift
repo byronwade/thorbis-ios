@@ -87,4 +87,14 @@ final class RouteBodyTests: XCTestCase {
         XCTAssertTrue(second["policy"] is NSNull)
         XCTAssertEqual(second["expectedVersion"] as? Int, 3)
     }
+
+    func testInviteSendsEmailAndRoleAndReadsDelivery() async throws {
+        let reply = #"{"id":"inv_1","organizationId":"o","email":"hayley@example.invalid","role":"technician","status":"pending","inviterUserId":"u","createdAt":"2026-10-28T01:00:00Z","expiresAt":"2026-11-04T01:00:00Z","delivery":"sent"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(201, reply)]), baseURL: "https://app.thorbis.com")
+        let invitation = try await client.invite(email: "hayley@example.invalid", role: "technician")
+        XCTAssertEqual(invitation.delivery, "sent")
+        XCTAssertEqual(invitation.roleLabel, "Technician")
+        let body = try json(URLProtocolFixture.recorded.first?.body)
+        XCTAssertEqual(body as? [String: String], ["email": "hayley@example.invalid", "role": "technician"])
+    }
 }

@@ -48,7 +48,7 @@ struct CustomersView: View {
                 if recordsLoading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(sections, id: \.0) { letter, customers in
-                        PaperGroupHeader(title: letter, count: customers.count).padding(.top, 6)
+                        PaperGroupHeader(title: letter).padding(.top, 6)
                         ForEach(customers) { customer in
                             customerRow(customer)
                         }
@@ -99,14 +99,27 @@ struct CustomersView: View {
                 Avatar(name: customer.name, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(1)
-                    Text(customer.archived ? "Archived" : "\(jobCount) \(jobCount == 1 ? "job" : "jobs")").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    // The open job's state as a word next to the count (a mark alone was a guess).
+                    Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: open))
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                if let open { StatusRing(status: open.status) }
+                if let open { StatusRing(status: open.status).accessibilityHidden(true) }
             }
             .frame(minHeight: 52).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func rowDetail(jobCount: Int, open: Job?) -> String {
+        let count = "\(jobCount) \(jobCount == 1 ? "job" : "jobs")"
+        guard let open else { return count }
+        if let date = JobFiltering.date(open.scheduledFor), ["scheduled", "dispatched"].contains(open.status) {
+            let when = Calendar.current.isDateInToday(date) ? "today \(date.formatted(date: .omitted, time: .shortened))"
+                : date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+            return "\(count) · next \(when)"
+        }
+        return "\(count) · \(open.status.statusLabel.lowercased())"
     }
 
     private func create() async {

@@ -220,6 +220,7 @@ struct RootView: View {
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
             case "attention": primaryTab = .more; morePath.append(PaperRoute.attention)
+            case "estimate-detail": primaryTab = .more; morePath.append(PaperRoute.estimate(PaperPreview.estimate.id))
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
             case "notices": primaryTab = .more; morePath.append(PaperRoute.notices)

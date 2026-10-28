@@ -16,6 +16,7 @@ struct EstimatesView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) }
                 if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if !records.isEmpty { summaryLine(estimates: records) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
@@ -126,12 +127,6 @@ struct EstimateDetailView: View {
                     }
                     if let signature = record.approvalSignature { SignatureBadge(label: "Approved by", signature: signature) }
                     if record.status == "sent", session.can("estimate.approve", feature: "estimates") {
-                        if jobID != nil && (record.options ?? []).isEmpty {
-                            // In person: the customer signs on this phone and that approves it.
-                            Button("Customer approves and signs") { showSignature = true }
-                                .buttonStyle(CommercialSecondaryButtonStyle())
-                                .disabled(busy)
-                        }
                         Button(jobID != nil && (record.options ?? []).isEmpty ? "Approve without a signature" : "Approve estimate") { action = "Approve"; confirm = true }
                             .buttonStyle(CommercialSecondaryButtonStyle())
                             .disabled(busy)
@@ -164,6 +159,10 @@ struct EstimateDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
                 PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
+            } else if let record, record.status == "sent", jobID != nil, (record.options ?? []).isEmpty,
+                      session.can("estimate.approve", feature: "estimates") {
+                // On site, the next step is the customer's yes: keep it one tap away.
+                PaperActionBar(title: "Customer approves and signs", symbol: "signature", busy: busy) { showSignature = true }
             }
         }
         .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
@@ -231,6 +230,7 @@ struct InvoicesView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) }
                 if loading && records.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40) }
+                if !records.isEmpty { summaryLine(invoices: records) }
                 ForEach(paperDocumentGroups(records, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
@@ -787,4 +787,21 @@ struct NewEstimateView: View {
             dismiss()
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
+}
+
+/// The one line an office reads first on a document list: what's outstanding and how much.
+@ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
+    let waiting = estimates.filter { $0.status == "sent" }
+    let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
+    Text(waiting.isEmpty ? "Nothing waiting on customers" : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))")
+        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+        .padding(.bottom, 6)
+}
+
+@ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
+    let unpaid = invoices.filter { $0.status == "issued" }
+    let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
+    Text(unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD")) owed · \(unpaid.count) unpaid")
+        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+        .padding(.bottom, 6)
 }

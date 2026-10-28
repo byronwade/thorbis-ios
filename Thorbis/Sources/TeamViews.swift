@@ -98,6 +98,10 @@ struct TeamView: View {
     @State private var naming = false
     @State private var newRoleName = ""
     @State private var editingRoleID: String?
+    @State private var invitations: [TeamInvitation] = []
+    @State private var inviting = false
+    @State private var notice: String?
+    private var canInvite: Bool { session.can("organization.members.manage") }
     /// Changing someone's access needs both owner capabilities, the same pair the server checks.
     private var canManage: Bool {
         session.can("organization.permissions.manage") && session.can("organization.members.manage")
@@ -150,6 +154,28 @@ struct TeamView: View {
                     }
                 }
                 .padding(.horizontal, Theme.gutter)
+                if canInvite && !invitations.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        PaperGroupHeader(title: "Invited", count: invitations.count)
+                        ForEach(invitations) { invitation in
+                            HStack(spacing: 12) {
+                                Image(systemName: "envelope").foregroundStyle(Theme.markOlive).frame(width: 34)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(invitation.email).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                                    Text("\(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")")
+                                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                }
+                                Spacer(minLength: 8)
+                                Menu {
+                                    Button("Cancel invite", role: .destructive) { Task { await cancel(invitation) } }
+                                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+                                .accessibilityLabel("Invite actions")
+                            }
+                            .frame(minHeight: 56)
+                        }
+                    }
+                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                }
                 if canManage {
                     VStack(alignment: .leading, spacing: 0) {
                         PaperGroupHeader(title: "Roles", count: customRoles.count) {
@@ -168,9 +194,9 @@ struct TeamView: View {
                     .padding(.horizontal, Theme.gutter).padding(.top, 16)
                 }
                 if !loading && visible.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "person.2", title: search.isEmpty ? "No team members" : "No matches", message: "Invite people and change roles from Thorbis on the web.")
+                    PaperEmptyState(symbol: "person.2", title: search.isEmpty ? "No team members" : "No matches", message: "Invite people with the invite button above.")
                 }
-                Text(canManage ? "Tap a person to change their role or what they can do. Invite people from Thorbis on the web." : "Invite people and change roles from Thorbis on the web.")
+                Text(canManage ? "Tap a person to change their role or what they can do." : "Ask an owner to change roles.")
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity).padding(.top, 20)
             }
@@ -179,6 +205,29 @@ struct TeamView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if canInvite {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { inviting = true } label: { Image(systemName: "person.badge.plus") }.accessibilityLabel("Invite to team")
+                }
+            }
+        }
+        .sheet(isPresented: $inviting) {
+            InviteMemberSheet { sent in
+                notice = sent.delivery == "sent" ? "Invite sent to \(sent.email)." : "Invite created for \(sent.email). Email isn't set up yet, so share the link from the web."
+                await load()
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            if let notice {
+                Text(notice).font(Theme.font(13)).foregroundStyle(Theme.foreground)
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+                    .padding(.horizontal, Theme.gutter)
+                    .onTapGesture { self.notice = nil }
+            }
+        }
         .refreshable { await load() }
         .task { await load() }
         .sheet(item: $changing) { member in
@@ -208,6 +257,7 @@ struct TeamView: View {
             guard session.generation == generation else { return }
             members = loaded
             if canManage { customRoles = (try? await api.organizationRoles()) ?? customRoles }
+            if canInvite { invitations = (try? await api.pendingInvitations()) ?? invitations }
             error = nil
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
@@ -217,6 +267,13 @@ struct TeamView: View {
 }
 
 extension TeamView {
+    fileprivate func cancel(_ invitation: TeamInvitation) async {
+        do {
+            _ = try await api.cancelInvitation(invitation.id)
+            invitations.removeAll { $0.id == invitation.id }
+        } catch { self.error = error.localizedDescription }
+    }
+
     fileprivate func createRole() async {
         let trimmed = newRoleName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
