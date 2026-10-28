@@ -39,7 +39,8 @@ struct PaperHeader: View {
                 PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
                 Spacer(minLength: 0)
                 if let search {
-                    PaperCircleButton(symbol: "magnifyingglass", label: "Filter \(title.lowercased())", action: search)
+                    // Filters this list; the tab bar's search finds anything. Different glyphs, different jobs.
+                    PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: search)
                 }
                 // One way in: the menu button. The account lives at the bottom of the menu.
             }
@@ -175,13 +176,23 @@ struct PaperDetailRow<Value: View>: View {
     @ViewBuilder var value: Value
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).font(Theme.font(14)).foregroundStyle(Theme.muted).fixedSize()
-            Spacer(minLength: 8)
-            value.font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                .multilineTextAlignment(.trailing)
+        // A short value sits on the label's line; a long one (gate codes, notes) goes under it,
+        // left-aligned, instead of a ragged right-aligned paragraph.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted).fixedSize()
+                Spacer(minLength: 8)
+                value.font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                value.font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 8)
         }
-        .frame(minHeight: 42)
+        .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
     }
 }

@@ -514,7 +514,8 @@ struct JobsView: View {
                                     .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                             }
                             Spacer(minLength: 0)
-                            if job.assignedToUserId != nil && job.assignedToUserId == session.user?.id {
+                            // On Assigned every row is yours, so the badge would only repeat itself.
+                            if tab != "Assigned" && job.assignedToUserId != nil && job.assignedToUserId == session.user?.id {
                                 Text(initials(session.user?.name ?? "Me"))
                                     .font(Theme.font(12, weight: .medium))
                                     .foregroundStyle(Theme.brandText)

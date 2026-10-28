@@ -30,8 +30,10 @@ struct CustomersView: View {
     }
     private var activeJobs: Int { store.jobs.filter { !["completed", "canceled"].contains($0.status) }.count }
 
-    /// Paper 47: an alphabetical book, one letter per section.
+    /// Paper 47: an alphabetical book, one letter per section. Recent keeps its newest-first
+    /// order in one group; letters would re-sort it and break the point of the tab.
     private var sections: [(String, [CustomerRecord])] {
+        if scope == .recent { return items.isEmpty ? [] : [("Recently added", items)] }
         let grouped = Dictionary(grouping: items) { customer -> String in
             let letter = customer.name.trimmingCharacters(in: .whitespaces).prefix(1).uppercased()
             return letter.rangeOfCharacter(from: .letters) == nil ? "#" : letter
