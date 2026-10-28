@@ -859,6 +859,8 @@ struct JobDetailView: View {
             }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
+            RecentItems.shared.record(.job, id: loadedJob.id, title: loadedJob.title,
+                                      subtitle: "JOB-\(loadedJob.id.suffix(4).uppercased()) · \(store.customerName(loadedJob.customerId))")
             let loadedNotes = try await api.fieldNotes(jobId)
             guard session.generation == generation else { return }
             notes = loadedNotes

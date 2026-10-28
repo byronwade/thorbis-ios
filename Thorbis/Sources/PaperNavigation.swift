@@ -11,6 +11,7 @@ struct RootView: View {
     @State private var selectedTab = PrimaryTab.initial.rawValue
     /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
     @State private var customPaths: [String: NavigationPath] = [:]
+    @State private var drawerOpen = false
     @State private var path = NavigationPath()
     @State private var schedulePath = NavigationPath()
     @State private var jobsPath = NavigationPath()
@@ -159,7 +160,9 @@ struct RootView: View {
                 PaperGlobalSearch(embedded: true)
             }
         }
-        .environment(\.paperShowMenu, { Task { @MainActor in primaryTab = .more } })
+        // The avatar opens the side menu; settings are one more tap from there.
+        .environment(\.paperShowMenu, { Task { @MainActor in withAnimation(.easeOut(duration: 0.2)) { drawerOpen = true } } })
+        .overlay { sideMenu }
         .background(Theme.background)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
@@ -220,6 +223,10 @@ struct RootView: View {
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
             case "new-job": createJob = true
+            case "side-menu":
+                RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
+                RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
+                drawerOpen = true
             case "attention": primaryTab = .more; morePath.append(PaperRoute.attention)
             case "estimate-detail": primaryTab = .more; morePath.append(PaperRoute.estimate(PaperPreview.estimate.id))
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
@@ -258,6 +265,61 @@ struct RootView: View {
     }
 
     /// Tabs stay stable for every role; a tab the role cannot use says so (HIG-005).
+    /// D-021: the overlay is a mix (a dim fill), not a blur; the menu enters from its edge.
+    @ViewBuilder private var sideMenu: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                if drawerOpen {
+                    Color.black.opacity(0.45).ignoresSafeArea()
+                        .onTapGesture { closeDrawer() }
+                        .transition(.opacity)
+                        .accessibilityLabel("Close menu")
+                        .accessibilityAddTraits(.isButton)
+                    SideMenu(open: { item in closeDrawer(); open(item) },
+                             openRecent: { item in closeDrawer(); openRecent(item) },
+                             search: { closeDrawer(); selectedTab = PrimaryTab.search.rawValue },
+                             newJob: { closeDrawer(); createJob = true },
+                             settings: { closeDrawer(); primaryTab = .more },
+                             close: closeDrawer)
+                        .frame(width: min(geometry.size.width * 0.84, 340))
+                        .transition(.move(edge: .leading))
+                        .gesture(DragGesture().onEnded { if $0.translation.width < -60 { closeDrawer() } })
+                }
+            }
+        }
+    }
+
+    private func closeDrawer() { withAnimation(.easeOut(duration: 0.18)) { drawerOpen = false } }
+
+    /// A tab if it is one; otherwise More with that place pushed.
+    private func open(_ item: MenuItem) {
+        if layout.visibleTabs(session).contains(item) {
+            selectedTab = item.rawValue
+        } else if let route = item.route {
+            primaryTab = .more
+            morePath = NavigationPath()
+            morePath.append(route)
+        }
+    }
+
+    private func openRecent(_ item: RecentItems.Item) {
+        switch item.kind {
+        case .job:
+            store.requestedJobID = item.id
+        case .customer:
+            guard let customer = store.customers.first(where: { $0.id == item.id }) else { return }
+            if layout.visibleTabs(session).contains(.customers) {
+                primaryTab = .customers
+                customersPath = NavigationPath()
+                customersPath.append(customer)
+            } else {
+                primaryTab = .more
+                morePath = NavigationPath()
+                morePath.append(customer)
+            }
+        }
+    }
+
     /// Proxy so tab switches can still be written as `primaryTab = .jobs`.
     private var primaryTab: PrimaryTab {
         get { PrimaryTab(rawValue: selectedTab) ?? .more }

@@ -41,6 +41,7 @@ struct ThorbisApp: App {
             Task { await JobLiveActivity.endAll() }
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
+            Task { @MainActor in RecentItems.shared.clear() }
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
             if let actorID, let organizationID {

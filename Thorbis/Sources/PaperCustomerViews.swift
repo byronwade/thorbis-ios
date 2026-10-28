@@ -292,6 +292,7 @@ struct CustomerDetailView: View {
         }
         .task { await load() }
         .task { await loadSmsConsent() }
+        .onAppear { RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer") }
         .onChange(of: tab) { _, selectedTab in
             if selectedTab == "Activity" { Task { await loadActivity(reset: true) } }
         }
