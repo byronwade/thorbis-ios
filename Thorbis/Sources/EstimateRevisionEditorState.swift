@@ -57,15 +57,22 @@ struct EstimateRevisionLineDraft: Identifiable, Equatable {
     var quantity: String
     var unitPrice: String
     var source: FieldEstimateLineSourceInput?
+    /// Work or Materials in the builder (EB-09). Display only until the server stores it.
+    var group: EstimateLineGroup
+    /// The price book wording and price this line started from, for "Edited" and Reset (EB-10).
+    var priceBookOriginal: PriceBookLineOriginal?
 
     init(id: UUID = UUID(), originalLineID: String? = nil, description: String,
-         quantity: String, unitPrice: String, source: FieldEstimateLineSourceInput? = nil) {
+         quantity: String, unitPrice: String, source: FieldEstimateLineSourceInput? = nil,
+         group: EstimateLineGroup = .work, priceBookOriginal: PriceBookLineOriginal? = nil) {
         self.id = id
         self.originalLineID = originalLineID
         self.description = description
         self.quantity = quantity
         self.unitPrice = unitPrice
         self.source = source
+        self.group = group
+        self.priceBookOriginal = priceBookOriginal
     }
 }
 
@@ -173,21 +180,20 @@ struct EstimateRevisionEditorState: Equatable {
               item.sellPrice.currency == "USD", item.sellPrice.amount.magnitude <= 100_000_000 else {
             throw EstimateRevisionEditorError.invalidPriceBookSelection
         }
-        let line = EstimateRevisionLineDraft(
-            description: item.description,
-            quantity: "1",
-            unitPrice: Self.priceText(item.sellPrice.amount),
-            source: .priceBookSelection(itemID: item.id, revision: item.revision)
-        )
         if let optionID {
-            guard let index = options.firstIndex(where: { $0.id == optionID }), options[index].lines.count < 500 else {
+            guard let index = options.firstIndex(where: { $0.id == optionID }),
+                  options[index].lines.addPriceBookItem(item) != nil else {
                 throw EstimateRevisionEditorError.tooManyLines
             }
-            options[index].lines.append(line)
         } else {
-            guard lines.count < 500 else { throw EstimateRevisionEditorError.tooManyLines }
-            lines.append(line)
+            guard lines.addPriceBookItem(item) != nil else { throw EstimateRevisionEditorError.tooManyLines }
         }
+    }
+
+    /// Price book materials move to Materials once the catalog says which items they are (EB-09).
+    mutating func classify(kinds: [String: String]) {
+        lines.classifyGroups(kinds: kinds)
+        for index in options.indices { options[index].lines.classifyGroups(kinds: kinds) }
     }
 
     func makeRequest(optionsFeatureEnabled: Bool, canDiscount: Bool) throws -> FieldEstimateReviseRequest {
@@ -248,12 +254,18 @@ struct EstimateRevisionEditorState: Equatable {
         case let kind?:
             source = .unsupported(kind)
         }
+        var original: PriceBookLineOriginal?
+        if case .priceBookSelection = source, let description = line.source?.originalDescription,
+           let price = line.source?.originalUnitPrice, price.currency == "USD" {
+            original = PriceBookLineOriginal(description: description, unitPrice: priceText(price.amount))
+        }
         return EstimateRevisionLineDraft(
             originalLineID: line.id,
             description: line.description,
             quantity: String(line.quantity),
             unitPrice: priceText(line.unitPrice.amount),
-            source: source
+            source: source,
+            priceBookOriginal: original
         )
     }
 
@@ -310,7 +322,7 @@ struct EstimateRevisionEditorState: Equatable {
         }
     }
 
-    private static func parsePrice(_ text: String) -> Int? {
+    static func parsePrice(_ text: String) -> Int? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.range(of: #"^-?\d+(?:\.\d{1,2})?$"#, options: .regularExpression) != nil,
               let decimal = Decimal(string: value, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
@@ -321,7 +333,7 @@ struct EstimateRevisionEditorState: Equatable {
         return number.intValue
     }
 
-    private static func priceText(_ amount: Int) -> String {
+    static func priceText(_ amount: Int) -> String {
         let magnitude = amount.magnitude
         let cents = magnitude % 100
         return "\(amount < 0 ? "-" : "")\(magnitude / 100).\(cents < 10 ? "0" : "")\(cents)"
