@@ -112,19 +112,22 @@ extension Color {
     }
 }
 
+/// MA-10: a chip is a word on the neutral well. A status hue colours the glyph only, never the
+/// word or the pill, so state reads the same in light, dark and for colour-blind people.
 struct Chip: View {
     let text: String
     var icon: String? = nil
     var tint: Color = Theme.muted
+    /// Kept so call sites read the same; chips always sit on `Theme.fill`.
     var bg: Color = Theme.fill
     var body: some View {
         HStack(spacing: 5) {
-            if let icon { Image(systemName: icon).font(.system(size: 11, weight: .medium)) }
+            if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)).foregroundStyle(tint) }
             Text(text).font(Theme.font(12, weight: .medium)).lineLimit(1).fixedSize()
+                .foregroundStyle(tint == Theme.muted ? Theme.muted : Theme.foreground)
         }
-        .foregroundStyle(tint)
         .padding(.horizontal, 10).frame(minHeight: Theme.chipHeight)
-        .background(bg, in: Capsule())
+        .background(Theme.fill, in: Capsule())
     }
 }
 

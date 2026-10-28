@@ -225,7 +225,12 @@ struct ScheduleView: View {
         } else {
             return nil
         }
-        return ["en_route", "arrived", "in_progress"].first { allowed.contains($0) && !(status == "paused" && $0 == "in_progress") }
+        // Only ever forward: a job already in progress never offers "Mark arrived" again.
+        let order = ["scheduled": 0, "dispatched": 0, "en_route": 1, "arrived": 2, "in_progress": 3, "paused": 3]
+        let current = order[status] ?? 0
+        return ["en_route", "arrived", "in_progress"].first {
+            allowed.contains($0) && (order[$0] ?? 0) > current && !(status == "paused" && $0 == "in_progress")
+        }
     }
 
     @ViewBuilder private func commit(for job: Job) -> some View {

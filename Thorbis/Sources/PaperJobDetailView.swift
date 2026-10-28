@@ -328,40 +328,34 @@ struct JobDetailView: View {
         case "scheduled", "canceled": Theme.muted
         default: Theme.warning
         }
-        let surface: Color = switch job.status {
-        case "completed": Theme.successSurface
-        case "en_route", "dispatched": Theme.brandSurface
-        case "scheduled", "canceled": Theme.fill
-        default: Theme.warningSurface
-        }
         let transitions = availableTransitions(job)
         if transitions.isEmpty {
-            statusChip(job, tint: tint, surface: surface, showsMenu: false)
+            statusChip(job, tint: tint, showsMenu: false)
         } else {
             Menu {
                 ForEach(transitions, id: \.self) { target in
                     Button(transitionTitle(target)) { runTransition(target) }
                 }
             } label: {
-                statusChip(job, tint: tint, surface: surface, showsMenu: true)
+                statusChip(job, tint: tint, showsMenu: true)
             }
             .buttonStyle(.plain)
         }
     }
 
-    private func statusChip(_ job: JobRecord, tint: Color, surface: Color, showsMenu: Bool) -> some View {
+    private func statusChip(_ job: JobRecord, tint: Color, showsMenu: Bool) -> some View {
         let queued = outbox.pendingStatus(for: job.id)
         return HStack(spacing: 5) {
+            // MA-10: the hue rides on the glyph; the word and the pill stay neutral.
             Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(queued == nil ? tint : Theme.warning)
             Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
-                .font(Theme.font(12, weight: .medium))
-            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
+                .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
+            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted) }
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 9)
+        .padding(.horizontal, 10)
         .frame(height: Theme.chipHeight)
-        .background(surface, in: Capsule())
+        .background(Theme.fill, in: Capsule())
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .accessibilityLabel("Job status, \(job.status.statusLabel)")
