@@ -100,10 +100,13 @@ struct JobMediaView: View {
                         .accessibilityElement(children: .combine)
                     }
                 }
-                PaperGroupHeader(title: "Photos", count: photos.count)
-                if photos.isEmpty && !loading {
-                    Text("No photos on this job yet.").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                } else {
+                // One empty state for the whole tab instead of two empty sections.
+                if photos.isEmpty && documents.isEmpty && !loading {
+                    PaperEmptyState(symbol: "camera", title: "No photos yet",
+                                    message: canAdd ? "Take a before photo when you arrive. Photos and PDFs up to 8 MB." : "Photos and documents added to this job show here.")
+                }
+                if !photos.isEmpty { PaperGroupHeader(title: "Photos", count: photos.count) }
+                if !photos.isEmpty {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                         ForEach(photos) { record in
                             Button { open(record) } label: {
@@ -136,10 +139,7 @@ struct JobMediaView: View {
                         }
                     }
                 }
-                PaperGroupHeader(title: "Documents", count: documents.count).padding(.top, 6)
-                if documents.isEmpty && !loading {
-                    Text("No documents on this job yet.").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                }
+                if !documents.isEmpty { PaperGroupHeader(title: "Documents", count: documents.count).padding(.top, 6) }
                 ForEach(documents) { record in
                     Button { open(record) } label: {
                         HStack(spacing: 12) {
@@ -158,7 +158,7 @@ struct JobMediaView: View {
                     .buttonStyle(.plain)
                     .disabled(busy || preview.loading || record.uploadState != "stored")
                 }
-                if canAdd {
+                if canAdd && !(photos.isEmpty && documents.isEmpty) {
                     Text("Photos and PDFs up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
             }

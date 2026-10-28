@@ -506,8 +506,30 @@ struct PaperGlobalSearch: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if trimmed.isEmpty {
-                        PaperEmptyState(symbol: "magnifyingglass", title: "Search your workspace",
-                                        message: "Jobs, customers, estimates and invoices across the company.")
+                        // Before anything is typed, show what people most often come back to.
+                        let recent = store.jobs.filter { !["completed", "canceled"].contains($0.status) }
+                            .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }.prefix(6)
+                        if recent.isEmpty {
+                            PaperEmptyState(symbol: "magnifyingglass", title: "Search your workspace",
+                                            message: "Jobs, customers, estimates and invoices across the company.")
+                        } else {
+                            PaperGroupHeader(title: "Open jobs").padding(.top, 8)
+                            ForEach(Array(recent)) { job in
+                                NavigationLink(value: job) {
+                                    HStack(spacing: 12) {
+                                        StatusRing(status: job.status).accessibilityHidden(true)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                                            Text("\(job.shortRef) · \(store.customerName(job.customerId)) · \(job.status.statusLabel)")
+                                                .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                                        }
+                                        Spacer(minLength: 8)
+                                    }
+                                    .frame(minHeight: 52).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     } else if useServer {
                         ForEach(serverGroups, id: \.0) { type, results in
                             PaperGroupHeader(title: label(type), count: results.count).padding(.top, 8)
