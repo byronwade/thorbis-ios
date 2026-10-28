@@ -13,6 +13,14 @@ final class ReportDecodingTests: XCTestCase {
         XCTAssertEqual(days.backlog.unscheduledOpenJobs, 3)
     }
 
+    func testPaymentActivityReportKeepsRefundsSeparate() throws {
+        let json = #"{"freshness":"live","generatedAt":"2026-10-27T12:00:00.000Z","periodBasis":"utc-month","reportVersion":1,"months":[{"month":"2026-10","recorded":410500,"refunded":3200,"discounts":2250,"depositCredits":8000,"retainageWithheld":4500,"otherAdjustments":0}],"totals":{"recordedCount":61,"recorded":410500,"refundedCount":1,"refunded":3200,"discountCount":4,"discounts":2250,"depositCreditCount":3,"depositCredits":8000,"retainageWithheldCount":1,"retainageWithheld":4500,"otherAdjustmentCount":0,"otherAdjustments":0},"truncated":false}"#
+        let report = try JSONDecoder().decode(PaymentActivityReport.self, from: Data(json.utf8))
+        XCTAssertEqual(report.totals.recorded, 410_500)
+        XCTAssertEqual(report.totals.refunded, 3_200)
+        XCTAssertEqual(report.months.first?.retainageWithheld, 4_500)
+    }
+
     func testTeamMembersShowCustomRoleOrBuiltInRole() throws {
         let json = #"{"items":[{"member":{"memberId":"m1","userId":"u1","displayName":"Byron Wade","email":"b@x.co","isLegalOwner":true,"legalMembershipRoles":[{"id":"owner","label":"Owner"}]},"authority":{"kind":"legacy_fallback","currentAssignmentVersion":0,"reason":"never_assigned","roles":[{"id":"owner","label":"Owner"}]}},{"member":{"memberId":"m2","userId":"u2","displayName":"Maria Chen","email":"m@x.co","isLegalOwner":false,"legalMembershipRoles":[{"id":"office","label":"Office"}]},"authority":{"kind":"tenant_role","assignmentId":"a","currentAssignmentVersion":1,"assignedRoleRevision":1,"role":{"roleId":"r","currentRevision":2,"name":"Dispatcher","description":""}}}],"nextCursor":null}"#
         let page = try JSONDecoder().decode(Items<RoleMember>.self, from: Data(json.utf8))

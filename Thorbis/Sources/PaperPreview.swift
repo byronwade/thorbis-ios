@@ -229,11 +229,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                          ["id": "00000000-0000-4000-8000-000000009513", "position": 2, "description": "Start-up and balance", "scheduledAmount": ["amount": 150_000, "currency": "USD"]]],
                                "createdAt": "2026-10-01T12:00:00Z", "updatedAt": now]]]
         }
+        if path == "/v1/organization/merchant-readiness" {
+            return ["state": "action_required", "chargesReady": false, "payoutsReady": false, "actionRequired": true,
+                    "requirements": ["eventuallyDueCount": 1, "currentlyDueCount": 2, "pastDueCount": 0]] as [String: Any]
+        }
         if path == "/v1/reports/operations" {
             return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-month", "reportVersion": 1, "truncated": false,
                     "estimates": ["drafts": 4, "presented": 31, "approved": 18, "declined": 6, "conversionBps": 5806],
                     "jobs": ["booked": 86, "completed": 71, "canceled": 3, "open": 12],
                     "months": [["month": "2026-08", "booked": 74, "completed": 70], ["month": "2026-09", "booked": 81, "completed": 77], ["month": "2026-10", "booked": 86, "completed": 71]]] as [String: Any]
+        }
+        if path == "/v1/reports/payment-activity" {
+            return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-month", "reportVersion": 1, "truncated": false,
+                    "months": [["month": "2026-09", "recorded": 4_480_000, "refunded": 32_000, "discounts": 15_000, "depositCredits": 120_000, "retainageWithheld": 0, "otherAdjustments": 0],
+                               ["month": "2026-10", "recorded": 4_105_000, "refunded": 0, "discounts": 22_500, "depositCredits": 80_000, "retainageWithheld": 45_000, "otherAdjustments": 0]],
+                    "totals": ["recordedCount": 61, "recorded": 8_585_000, "refundedCount": 1, "refunded": 32_000, "discountCount": 4, "discounts": 37_500,
+                               "depositCreditCount": 3, "depositCredits": 200_000, "retainageWithheldCount": 1, "retainageWithheld": 45_000,
+                               "otherAdjustmentCount": 0, "otherAdjustments": 0]] as [String: Any]
         }
         if path == "/v1/reports/schedule" {
             return ["freshness": "live", "generatedAt": now, "periodBasis": "utc-day", "reportVersion": 1, "capacityModel": "booked-time-only", "truncated": false,
