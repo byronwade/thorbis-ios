@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-28-exact-model-numbers",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "number", title: "Part and model numbers match exactly",
+                      detail: "Searching R-410A never shows R-420A, and R410A without the dash still finds it."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-28-estimate-builder",
             date: "2026-10-28",
             highlights: [
