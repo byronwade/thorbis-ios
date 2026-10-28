@@ -236,7 +236,7 @@ struct InvoicePaymentsSection: View {
                 // Same header grammar as "Line items" and "Activity" above and below it.
                 HStack(spacing: 6) {
                     Text("Payments").font(Theme.font(13, weight: .medium))
-                    Text("\(model.payments.count)").font(Theme.monoFont(12))
+                    if !model.payments.isEmpty { Text("\(model.payments.count)").font(Theme.monoFont(12)) }
                 }
                 .foregroundStyle(Theme.muted)
                 .padding(.horizontal, 2)

@@ -118,9 +118,15 @@ struct EstimateDetailView: View {
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     ForEach(record.options ?? []) { option in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(option.title).font(Theme.font(17, weight: .medium))
-                            Text(option.description).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        VStack(alignment: .leading, spacing: 0) {
+                            // The title and note sit inside the card's 15pt inset, like the lines under them.
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(option.title).font(Theme.font(17, weight: .medium))
+                                if !option.description.isEmpty {
+                                    Text(option.description).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                }
+                            }
+                            .padding([.horizontal, .top], 15).padding(.bottom, 5)
                             ForEach(option.lines) { line in CommercialLineView(line: line, divider: line.id != option.lines.first?.id) }
                             HStack {
                                 Text("Option total").font(Theme.font(15, weight: .medium))
