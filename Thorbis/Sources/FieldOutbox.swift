@@ -102,6 +102,15 @@ final class FieldOutbox: ObservableObject {
     var pending: [OutboxEntry] { entries.filter { $0.state == .pending } }
     var needsReview: [OutboxEntry] { entries.filter { $0.state != .pending } }
 
+    /// design.thorbis.com MA-17: signing out deletes this phone's saved work, so the dialog says
+    /// what would be lost.
+    var signOutWarning: String {
+        let waiting = entries.count
+        return waiting == 0
+            ? "Jobs and customers saved on this phone are removed. You can sign back in at any time."
+            : "\(waiting) change\(waiting == 1 ? "" : "s") on this phone \(waiting == 1 ? "hasn't" : "haven't") synced yet. Signing out deletes \(waiting == 1 ? "it" : "them")."
+    }
+
     private let directory: URL
     private var identity: (actorID: String, organizationID: String)?
     private let deviceID: String

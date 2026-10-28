@@ -20,7 +20,7 @@ struct WorkspaceNoticesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Inbox").font(Theme.font(34, weight: .bold)).tracking(-0.68).accessibilityAddTraits(.isHeader)
+                    Text("Inbox").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
@@ -151,7 +151,7 @@ struct WorkspaceRevenueView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Money").font(Theme.font(34, weight: .bold)).tracking(-0.68).accessibilityAddTraits(.isHeader)
+                    Text("Money").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text("Revenue and receivables · live").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.bottom, 16)
@@ -320,7 +320,7 @@ struct WorkspacePriceBookView: View {
                                        description: Text("This account cannot view Price Book items."))
             } else {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Price book").font(Theme.font(34, weight: .bold)).tracking(-0.68).foregroundStyle(Theme.foreground)
+                    Text("Price book").font(Theme.font(30, weight: .medium)).tracking(-0.6).foregroundStyle(Theme.foreground)
                         .accessibilityAddTraits(.isHeader)
                     Text("\(items.count) item\(items.count == 1 ? "" : "s")\(nextCursor == nil ? "" : " loaded")")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)

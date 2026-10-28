@@ -71,7 +71,7 @@ struct ReportsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Reports").font(Theme.font(34, weight: .bold)).tracking(-0.68).accessibilityAddTraits(.isHeader)
+                    Text("Reports").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text("Live from the server · UTC periods").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)

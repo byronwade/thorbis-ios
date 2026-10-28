@@ -89,7 +89,7 @@ struct BillingSchedulesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Billing").font(Theme.font(34, weight: .bold)).tracking(-0.68).accessibilityAddTraits(.isHeader)
+                    Text("Billing").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text("Progress billing and deposits by job").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.bottom, 12)

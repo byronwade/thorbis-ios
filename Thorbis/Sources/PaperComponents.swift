@@ -21,8 +21,9 @@ struct ThorbisLogoLockup: View {
     }
 }
 
-/// Paper's tab-root header (primitives sheet: 34/700 large title, 15 muted subtitle,
-/// trailing 36pt circles). The title scrolls with its content; the tab bar stays put.
+/// The tab-root header (design.thorbis.com MA-05): a 44-tall top row with the menu button leading and
+/// at most one circle trailing, then the 30/500 large title and one muted subtitle line. The title
+/// scrolls with its content; the tab bar stays put.
 struct PaperHeader: View {
     let title: String
     var icon: String = ""
@@ -43,7 +44,7 @@ struct PaperHeader: View {
                 // One way in: the menu button. The account lives at the bottom of the menu.
             }
             Text(title)
-                .font(Theme.font(34, weight: .bold)).tracking(-0.68)
+                .font(Theme.font(30, weight: .medium)).tracking(-0.6)
                 .lineLimit(1).minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
             Text(subtitle)

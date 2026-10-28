@@ -21,8 +21,8 @@ struct LoginView: View {
                 ThorbisLogoLockup(markSize: 30, wordmarkSize: 19)
 
                 Text("Welcome back")
-                    .font(Theme.font(34, weight: .bold))
-                    .tracking(-0.68)
+                    .font(Theme.font(30, weight: .medium))
+                    .tracking(-0.6)
                     .foregroundStyle(Theme.foreground)
                     .padding(.top, 20)
                     .accessibilityAddTraits(.isHeader)

@@ -579,13 +579,6 @@ struct MoreView: View {
     @State private var showNewJob = false
     @State private var confirmSignOut = false
 
-    /// MA-17: signing out deletes this phone's saved work, so the dialog says what would be lost.
-    private var signOutMessage: String {
-        let waiting = outbox.pending.count + outbox.needsReview.count
-        return waiting == 0
-            ? "Jobs and customers saved on this phone are removed. You can sign back in at any time."
-            : "\(waiting) change\(waiting == 1 ? "" : "s") on this phone haven't synced yet. Signing out deletes \(waiting == 1 ? "it" : "them")."
-    }
 
     var body: some View {
         ScrollView {
@@ -655,7 +648,7 @@ struct MoreView: View {
         .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) { Task { await session.signOut() } }
         } message: {
-            Text(signOutMessage)
+            Text(outbox.signOutWarning)
         }
     }
 
@@ -684,7 +677,7 @@ struct MoreView: View {
                     PaperCircleButton(symbol: "square.and.pencil", label: "New job") { showNewJob = true }
                 }
             }
-            Text("More").font(Theme.font(34, weight: .bold)).tracking(-0.68).padding(.top, 10)
+            Text("More").font(Theme.font(30, weight: .medium)).tracking(-0.6).padding(.top, 10)
                 .accessibilityAddTraits(.isHeader)
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 4)
