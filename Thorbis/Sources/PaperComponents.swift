@@ -711,3 +711,11 @@ struct PaperDisclosure: View {
             .accessibilityHidden(true)
     }
 }
+
+extension PaperEmptyState {
+    /// No-results state for a search, in Paper type instead of the system's SF Pro view.
+    static func search(_ text: String) -> PaperEmptyState {
+        PaperEmptyState(symbol: "magnifyingglass", title: "No results for \u{201C}\(text)\u{201D}",
+                        message: "Check the spelling or try a different word.")
+    }
+}

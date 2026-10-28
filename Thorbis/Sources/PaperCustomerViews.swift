@@ -66,7 +66,7 @@ struct CustomersView: View {
                     if scope == .archived {
                         PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: search.isEmpty ? "Archived customers will appear here." : "Try a different search.")
                     } else if !search.isEmpty {
-                        ContentUnavailableView.search(text: search)
+                        PaperEmptyState.search(search)
                     } else {
                         PaperEmptyState(symbol: "person.2", title: "No customers yet", message: "Customers you add appear here, A to Z.",
                                         actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
