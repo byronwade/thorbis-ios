@@ -13,7 +13,7 @@ struct ThorbisLogoLockup: View {
                 .frame(width: markSize, height: markSize)
                 .accessibilityHidden(true)
             Text("Thorbis")
-                .font(Theme.font(wordmarkSize, weight: .semibold))
+                .font(Theme.font(wordmarkSize, weight: .medium))
                 .foregroundStyle(Theme.foreground)
         }
         .accessibilityElement(children: .ignore)
@@ -372,8 +372,8 @@ enum PaperChrome {
         }
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
-        appearance.titleTextAttributes = [.font: inter(17, .semibold)]
-        appearance.largeTitleTextAttributes = [.font: inter(34, .bold)]
+        appearance.titleTextAttributes = [.font: inter(17, .medium)]
+        appearance.largeTitleTextAttributes = [.font: inter(30, .medium)]
         let scrolled = UINavigationBarAppearance()
         scrolled.configureWithDefaultBackground()
         scrolled.titleTextAttributes = appearance.titleTextAttributes

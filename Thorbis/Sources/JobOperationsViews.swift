@@ -351,7 +351,7 @@ struct JobScheduleView: View {
                     Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
                         .rotationEffect(.degrees(showsCalendar ? 180 : 0))
                 }
-                .font(Theme.font(13, weight: showsCalendar ? .semibold : .medium))
+                .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(showsCalendar ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
@@ -396,7 +396,7 @@ struct JobScheduleView: View {
             }
         } label: {
             Text(title)
-                .font(Theme.font(13, weight: selected ? .semibold : .medium))
+                .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(selected ? Theme.brand : Theme.muted)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
@@ -426,7 +426,7 @@ struct JobScheduleView: View {
                     .foregroundStyle(selected ? Theme.brand : Theme.subtle)
                     .frame(width: 20, height: 20)
                 Text(label)
-                    .font(Theme.monoFont(15, weight: selected ? .semibold : .medium))
+                    .font(Theme.monoFont(15, weight: .medium))
                     .foregroundStyle(selected ? Theme.brand : Theme.foreground)
                 Spacer(minLength: 8)
                 Text("2 hr window")

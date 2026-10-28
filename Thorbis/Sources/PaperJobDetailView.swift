@@ -638,7 +638,7 @@ struct JobDetailView: View {
                 ForEach(["All", "Notes", "Status"], id: \.self) { filter in
                     Button { activityFilter = filter } label: {
                         Text(filter)
-                            .font(Theme.font(12, weight: activityFilter == filter ? .semibold : .medium))
+                            .font(Theme.font(12, weight: .medium))
                             .foregroundStyle(activityFilter == filter ? Theme.background : Theme.muted)
                             .padding(.horizontal, 12).frame(height: 28)
                             .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
