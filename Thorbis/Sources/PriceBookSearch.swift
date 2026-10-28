@@ -133,17 +133,16 @@ struct PriceBookSearchIndex {
         }
     }
 
-    /// Numbers never take a typo or a contains match, and only the word still being typed may
-    /// match a longer number as a prefix ("12" must not find "120" once the next word is typed).
-    /// A word with any digit in it is a model or size, so it never takes a typo ("R420A" is not
-    /// "R410A").
+    /// A word with any digit in it is a number, model or size ("12", "R410A", "10mm"): it never
+    /// takes a typo or a contains match, and only the word still being typed may match a longer
+    /// one as a prefix. So "R420A" never finds "R410A", "10mm" never finds "110mm", and "12"
+    /// stops finding "120" once the next word is typed.
     private static func match(_ query: String, against word: String, typing: Bool) -> WordMatch? {
         if word == query { return .exact }
-        let numeric = query.allSatisfy(\.isNumber)
-        if numeric { return typing && word.hasPrefix(query) ? .prefix : nil }
+        if query.contains(where: \.isNumber) { return typing && word.hasPrefix(query) ? .prefix : nil }
         if word.hasPrefix(query) { return .prefix }
         if query.count >= 3, word.contains(query) { return .contains }
-        guard query.count >= 4, !query.contains(where: \.isNumber) else { return nil }
+        guard query.count >= 4 else { return nil }
         if abs(word.count - query.count) <= 1, editDistanceAtMostOne(query, word) { return .typo }
         // While typing, a typo inside the part typed so far still counts ("capicit" → "capacitor").
         if typing, word.count > query.count, editDistanceAtMostOne(query, String(word.prefix(query.count))) { return .typo }
