@@ -275,6 +275,7 @@ final class SessionController: ObservableObject {
         await onWillUnbindDevice?()
         defaults.set(true, forKey: Self.explicitSignOutKey)
         snapshots.clear()
+        PriceBookCatalog.shared.clear()
         onSignedOut?()
         onVerifiedIdentity?(nil, nil)
         let requestGeneration = invalidate(next: .restoring)

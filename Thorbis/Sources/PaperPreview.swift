@@ -331,19 +331,34 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": [waiting]]
         case "/v1/query":
-            let priceBookID = "00000000-0000-4000-8000-000000009201"
+            // The first item keeps the id the preview estimate's price book line points at.
+            let catalog: [(String, String, String, Int)] = [
+                ("Replace capacitor", "each", "material", 12500),
+                ("Capacitor, 45/5 MFD dual run", "each", "material", 14500),
+                ("Capacitor, 35/5 MFD dual run", "each", "material", 13500),
+                ("Hard start kit with capacitor", "each", "material", 21000),
+                ("Diagnostic visit", "visit", "service", 8900),
+                ("Condenser coil cleaning", "each", "service", 12000),
+                ("Refrigerant R-410A", "lb", "material", 9500),
+                ("Licensed technician labor", "hour", "labor", 14000),
+                ("Contactor, 30 amp single pole", "each", "material", 6800),
+                ("Surge protector, installed", "each", "assembly", 39500),
+            ]
+            let items: [[String: Any]] = catalog.enumerated().map { offset, entry in
+                let id = String(format: "00000000-0000-4000-8000-%012d", 9201 + offset)
+                return ["id": id, "resourceId": "price_book_items", "label": entry.0,
+                        "subtitle": "\(entry.2.capitalized) · \(entry.1)",
+                        "fields": ["price_book_items.id": id,
+                                   "price_book_items.current_revision": 4,
+                                   "price_book_items.description": entry.0,
+                                   "price_book_items.unit": entry.1,
+                                   "price_book_items.sell_price_amount": entry.3,
+                                   "price_book_items.currency": "USD",
+                                   "price_book_items.tax_classification": "taxable",
+                                   "price_book_items.kind": entry.2]]
+            }
             return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
-                    "items": [["id": priceBookID, "resourceId": "price_book_items", "label": "Replace capacitor",
-                               "subtitle": "Material · each",
-                               "fields": ["price_book_items.id": priceBookID,
-                                          "price_book_items.current_revision": 4,
-                                          "price_book_items.description": "Replace capacitor",
-                                          "price_book_items.unit": "each",
-                                          "price_book_items.sell_price_amount": 12500,
-                                          "price_book_items.currency": "USD",
-                                          "price_book_items.tax_classification": "taxable",
-                                          "price_book_items.kind": "material"]]],
-                    "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
+                    "items": items, "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
         default: break
         }
         for job in jobs() {
