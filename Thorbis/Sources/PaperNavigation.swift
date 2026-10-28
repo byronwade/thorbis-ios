@@ -613,6 +613,7 @@ enum PaperRoute: Hashable {
     case closeout(jobID: String)
     case team
     case reports
+    case myWeek
     case assign(jobID: String)
     case billing
     case billingSchedule(String)
@@ -663,6 +664,7 @@ struct PaperRouteView: View {
         case .closeout(let jobID): JobCloseoutView(jobID: jobID)
         case .team: TeamView()
         case .reports: ReportsView()
+        case .myWeek: MyWeekView()
         case .assign(let jobID): JobAssignmentView(jobID: jobID)
         case .billing: BillingSchedulesView()
         case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)
