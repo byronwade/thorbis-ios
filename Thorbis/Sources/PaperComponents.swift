@@ -50,7 +50,7 @@ struct PaperHeader: View {
                         .dynamicTypeSize(...DynamicTypeSize.large)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Account and settings")
+                .accessibilityLabel("Menu")
             }
             Text(subtitle)
                 .font(Theme.font(15)).foregroundStyle(Theme.muted)

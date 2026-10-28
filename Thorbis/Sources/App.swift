@@ -41,6 +41,7 @@ struct ThorbisApp: App {
             Task { await JobLiveActivity.endAll() }
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
+            Task { @MainActor in RecentItems.shared.clear() }
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
             if let actorID, let organizationID {
@@ -51,6 +52,7 @@ struct ThorbisApp: App {
             store?.bindCache(actorID: actorID, organizationID: organizationID)
             PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
+            Task { @MainActor in RecentItems.shared.bind(actorID: actorID, organizationID: organizationID) }
         }
         PushNotifications.shared.start(api: api, store: store)
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
