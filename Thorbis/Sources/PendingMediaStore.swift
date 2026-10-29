@@ -39,6 +39,13 @@ final class PendingMediaStore: ObservableObject {
     }
     var captureContext: CaptureContext? { scope.map { CaptureContext(scope: $0, binding: binding) } }
 
+    /// Read-only proof that this opaque binding belongs to the requested verified owner.
+    func captureContext(matching requested: PendingMediaScope) -> CaptureContext? {
+        guard let origin = APIClient.normalizedOrigin(requested.origin),
+              scope == PendingMediaScope(actorID: requested.actorID, organizationID: requested.organizationID, origin: origin) else { return nil }
+        return captureContext
+    }
+
     private struct Envelope: Codable {
         let scope: PendingMediaScope
         let media: PendingMedia

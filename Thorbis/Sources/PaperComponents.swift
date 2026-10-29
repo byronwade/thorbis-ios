@@ -405,101 +405,65 @@ extension EnvironmentValues {
 
 /// Paper 73 / 74: offline, syncing and needs-review states. Queued is never shown as done.
 struct OfflineBanner: View {
+    @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var outbox: FieldOutbox
-    @State private var showReview = false
+    @EnvironmentObject private var media: PendingMediaStore
+    @Environment(\.savedWorkReviewReturnToRoot) private var returnToReview
+    @State private var reviewScope: SavedWorkScope?
 
+    private var scope: SavedWorkScope? { .capture(session: session, api: api, media: media, outbox: outbox) }
+    private var reviewIsCurrent: Bool { reviewScope?.isCurrent(session: session, api: api, media: media, outbox: outbox) ?? true }
+    private var snapshot: SavedWorkSnapshot? {
+        guard let scope else { return nil }
+        return .make(scope: scope, entries: outbox.entries, media: media.items, mediaErrors: media.errors,
+                     unverifiedMediaIDs: media.unverifiedIDs, uploadingMediaID: media.uploadingID,
+                     commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning)
+    }
     var body: some View {
         Group {
-            if !outbox.needsReview.isEmpty {
-                Button { showReview = true } label: {
-                    banner(symbol: "exclamationmark.triangle", tint: Theme.destructive, ground: Theme.destructiveSurface,
-                           text: "\(outbox.needsReview.count) change\(outbox.needsReview.count == 1 ? "" : "s") couldn't sync",
-                           trailing: "Review")
+            if let state = snapshot, state.hasPendingWork {
+                Button {
+                    if let returnToReview { returnToReview() }
+                    else { reviewScope = scope }
+                } label: {
+                    banner(symbol: state.attentionCount > 0 || state.hasListingWarning ? "exclamationmark.triangle" : (session.isOffline ? "wifi.slash" : "arrow.triangle.2.circlepath"),
+                           tint: state.attentionCount > 0 || state.hasListingWarning ? Theme.warning : Theme.muted,
+                           text: summary(state), trailing: state.totalCount == 0 ? String(localized: "Review") : (state.totalCount == 1 ? String(localized: "1 item") : String(localized: "\(state.totalCount) items")))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Review saved work")
+                .accessibilityValue(summary(state) + ", " + String(localized: "\(state.totalCount) items listed"))
+                .accessibilityIdentifier("saved-work-summary")
             } else if session.isOffline {
-                banner(symbol: "wifi.slash", tint: Theme.warning, ground: Theme.warningSurface,
-                       text: outbox.pending.isEmpty ? "Offline · showing \(store.cachedAt.map { "work saved " + $0.formatted(.relative(presentation: .named)) } ?? "your last copy")"
-                                                    : "Offline · changes save on this phone",
-                       trailing: outbox.pending.isEmpty ? nil : "\(outbox.pending.count) queued")
-            } else if outbox.syncing || !outbox.pending.isEmpty {
-                banner(symbol: "arrow.triangle.2.circlepath", tint: Theme.success, ground: Theme.successSurface,
-                       text: outbox.syncing ? "Back online · syncing changes" : "Waiting to sync",
-                       trailing: "\(outbox.pending.count) left")
+                banner(symbol: "wifi.slash", tint: Theme.warning,
+                       text: "Offline · showing \(store.cachedAt.map { "work saved " + $0.formatted(.relative(presentation: .named)) } ?? "your last copy")", trailing: nil)
             }
         }
         .padding(.horizontal, Theme.gutter).padding(.bottom, 10)
-        .sheet(isPresented: $showReview) { OutboxReviewSheet() }
+        .sheet(item: $reviewScope) { SavedWorkReviewView(scope: $0) }
+        .onChange(of: reviewIsCurrent) { _, valid in if !valid { reviewScope = nil } }
+        #if DEBUG
+        .task { await PaperPreview.activateSavedWorkScenario(session: session) }
+        #endif
     }
-
-    private func banner(symbol: String, tint: Color, ground: Color, text: String, trailing: String?) -> some View {
-        // Only the mark is tinted; the words stay body colour (design.thorbis.com).
+    private func summary(_ state: SavedWorkSnapshot) -> String {
+        if state.hasListingWarning { return String(localized: "Saved work needs checking") }
+        if state.attentionCount > 0 { return String(localized: "Saved work needs attention") }
+        if session.isOffline { return String(localized: "Offline · saved on this phone") }
+        return state.isSending ? String(localized: "Syncing saved work") : String(localized: "Saved on this phone")
+    }
+    private func banner(symbol: String, tint: Color, text: String, trailing: String?) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(tint)
-            Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(2)
+            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(tint).accessibilityHidden(true)
+            Text(text).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            if let trailing { Text(trailing).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted) }
+            if let trailing { Text(trailing).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// Changes the server refused, with its reason. Dismissing removes the local copy only.
-struct OutboxReviewSheet: View {
-    @EnvironmentObject private var outbox: FieldOutbox
-    @EnvironmentObject private var store: Store
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("These changes were made without signal and the server didn't accept them. Open the job to redo what's still needed.")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 12)
-                    ForEach(outbox.needsReview) { entry in
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.destructive).padding(.top, 2)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("\(entry.summary) · \(store.jobs.first { $0.id == entry.jobID }?.title ?? "Job")")
-                                    .font(Theme.font(15, weight: .medium))
-                                Text(reason(entry)).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                            }
-                            Spacer(minLength: 8)
-                            if case .rejected = entry.state {
-                                VStack(spacing: 0) {
-                                    Button("Retry") { outbox.retry(entry) }
-                                        .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
-                                    Button("Dismiss", role: .destructive) { outbox.dismiss(entry) }
-                                        .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    }
-                }
-                .padding(.horizontal, Theme.gutter)
-            }
-            .background(Theme.background)
-            .foregroundStyle(Theme.foreground)
-            .navigationTitle("Couldn't sync")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func reason(_ entry: OutboxEntry) -> String {
-        switch entry.state {
-        case .rejected(let reason): reason
-        case .held: "Waiting on an earlier change to this job that didn't sync."
-        case .pending: "Waiting to sync."
-        }
     }
 }
 

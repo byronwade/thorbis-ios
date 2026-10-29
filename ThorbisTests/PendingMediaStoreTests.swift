@@ -322,4 +322,24 @@ final class PendingMediaStoreTests: XCTestCase {
         XCTAssertNotNil(queue.cleanupWarning)
     }
 
+    func testNormalizedMatchingContextReturnsCurrentOpaqueBindingWithoutMutation() throws {
+        let queue = store(); queue.bind(scope)
+        let photo = media(); try queue.save(photo, data: Data("jpeg".utf8), context: try XCTUnwrap(queue.captureContext))
+        let original = queue.items
+        let matched = queue.captureContext(matching: .init(actorID: scope.actorID, organizationID: scope.organizationID, origin: "https://APP.THORBIS.COM/"))
+        XCTAssertEqual(matched, queue.captureContext); XCTAssertNotNil(matched)
+        XCTAssertEqual(queue.items, original); XCTAssertEqual(try queue.read(photo), Data("jpeg".utf8))
+    }
+    func testMatchingContextRejectsAnotherActorOrgOrOriginWithoutMutation() throws {
+        let queue = store(); queue.bind(scope)
+        let photo = media(); try queue.save(photo, data: Data("jpeg".utf8), context: try XCTUnwrap(queue.captureContext))
+        let original = queue.items
+        for requested in [PendingMediaScope(actorID: "other", organizationID: scope.organizationID, origin: scope.origin),
+                          PendingMediaScope(actorID: scope.actorID, organizationID: "other", origin: scope.origin),
+                          PendingMediaScope(actorID: scope.actorID, organizationID: scope.organizationID, origin: "http://localhost:9999")] {
+            XCTAssertNil(queue.captureContext(matching: requested))
+        }
+        XCTAssertEqual(queue.items, original); XCTAssertEqual(try queue.read(photo), Data("jpeg".utf8))
+    }
+
 }
