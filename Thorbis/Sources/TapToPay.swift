@@ -69,8 +69,8 @@ final class TapToPayController: ObservableObject {
     var busy: Bool { [.preparing, .waitingForCard, .processing, .recording].contains(phase) }
 
     /// Runs one charge for the invoice balance. `refresh` reloads the invoice's payments and
-    /// returns true once the webhook-settled payment shows up.
-    func charge(api: APIClient, refresh: @escaping @MainActor () async -> Bool) async {
+    /// returns true only once this intent's webhook-settled payment shows up.
+    func charge(api: APIClient, refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
         guard !busy else { return }
         guard Self.buildEnabled, Self.deviceSupported else {
             phase = .unavailable
@@ -90,7 +90,7 @@ final class TapToPayController: ObservableObject {
             _ = try await Terminal.shared.confirmPaymentIntent(collected)
             phase = .recording
             for attempt in 0..<20 {
-                if await refresh() { phase = .paid; return }
+                if await refresh(intent) { phase = .paid; return }
                 try await Task.sleep(nanoseconds: UInt64(min(1 + attempt, 4)) * 1_000_000_000)
             }
             // Money moved; Thorbis records it as soon as Stripe's confirmation arrives.

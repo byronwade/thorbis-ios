@@ -53,6 +53,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     private let intentStore: InvoicePaymentIntentStore
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
+    private var verifiedHistoryGeneration: UUID?
 
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
@@ -104,11 +105,33 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             historyComplete && paymentTotalCents == invoice?.amountPaid
     }
 
+    /// The server settles this attempt through its verified Stripe webhook. Neither another
+    /// receipt nor a zero invoice balance proves that this particular card was recorded.
+    func hasRecordedCardPresentPayment(_ intent: CardPresentIntent) -> Bool {
+        guard historyComplete, !isLoading, loadError == nil,
+              verifiedHistoryGeneration == api.requestGeneration, let invoice,
+              paymentTotalCents == invoice.amountPaid,
+              UUID(uuidString: intent.attemptId) != nil,
+              intent.amount.amount > 0, intent.amount.currency == invoice.currency else { return false }
+        // Compatibility with prepareInvoiceCardPresentIntent / recordSucceededAttempt:
+        // the deployed response omits its opaque key, but canonical history retains it.
+        // If the server changes this convention, stay pending rather than infer success.
+        let key = "tap:\(invoice.id):\(intent.attemptId)"
+        return payments.contains { payment in
+            payment.organizationId == invoice.organizationId && payment.invoiceId == invoice.id &&
+                payment.idempotencyKey == key && payment.method == "card" &&
+                payment.status == .recorded && payment.amount.amount == intent.amount.amount &&
+                payment.amount.currency == intent.amount.currency && (payment.refundedAmount ?? 0) == 0 &&
+                (payment.netAmount?.amount ?? payment.amount.amount) == intent.amount.amount
+        }
+    }
+
     func load() async {
         guard !isLoading else { return }
         let generation = api.requestGeneration
         isLoading = true
         historyComplete = false
+        verifiedHistoryGeneration = nil
         payments = []
         defer { isLoading = false }
         do {
@@ -128,6 +151,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                 throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
             }
             payments = loadedPayments
+            verifiedHistoryGeneration = generation
             historyComplete = true
             loadError = nil
             if acceptedPaymentID == nil, let request = pendingRequest,
@@ -1017,10 +1041,9 @@ struct InvoicePaymentCollectionSheet: View {
 
     private func charge() async {
         let tapToPay = tapToPayController
-        let before = model.payments.count
-        await tapToPay.charge(api: api) { [model] in
+        await tapToPay.charge(api: api) { [model] intent in
             await model.load()
-            return model.payments.count > before || model.outstandingCents == 0
+            return model.hasRecordedCardPresentPayment(intent)
         }
         if tapToPay.phase == .paid {
             InvoiceCollectionOption.lastUsed = nil

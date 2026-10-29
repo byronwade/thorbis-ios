@@ -38,7 +38,7 @@ final class TapToPayReadinessTests: XCTestCase {
         let controller = TapToPayController(invoiceID: "00000000-0000-4000-8000-00000000000a")
         var refreshed = false
 
-        await controller.charge(api: api) {
+        await controller.charge(api: api) { _ in
             refreshed = true
             return false
         }
