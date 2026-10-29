@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-29-activity-opens",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "arrow.up.right", title: "Open the record behind activity",
+                      detail: "Activity rows open the job, estimate, invoice, note, photo, contact, or location they name."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-draft-lines",
             date: "2026-10-29",
             highlights: [

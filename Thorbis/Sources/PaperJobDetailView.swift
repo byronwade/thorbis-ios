@@ -738,6 +738,7 @@ struct JobDetailView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(timeline(job)) { entry in
+                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
                             Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
@@ -764,6 +765,7 @@ struct JobDetailView: View {
                         .padding(.bottom, 16)
                     }
                     .accessibilityElement(children: .combine)
+                    }
                 }
             }
             if timeline(job).isEmpty {
@@ -800,6 +802,7 @@ struct JobDetailView: View {
         let body: String?
         let date: Date
         let symbol: String
+        let subject: ActivityFeedSubject
         var isNote: Bool { body != nil }
     }
 
@@ -809,14 +812,14 @@ struct JobDetailView: View {
             entries += outbox.pendingNotes(for: job.id).compactMap { entry in
                 guard case .note(let payload) = entry.action else { return nil }
                 let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
-                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath")
+                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath", subject: ActivityFeedSubject(kind: "note", jobID: job.id))
             }
             entries += notes.compactMap { record in
-                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble") }
+                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble", subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
             }
         }
         if activityFilter != "Notes" {
-            entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill") }
+            entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill", subject: ActivityFeedSubject(kind: "status", jobID: job.id)) }
         }
         return entries.sorted { $0.date > $1.date }
     }

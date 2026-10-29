@@ -16,3 +16,9 @@ Approved estimates stay on the change-order path. Issued, paid, and void invoice
 - There is no customer-wide media, notes, or documents route. The customer profile loads each job (`GET /v1/jobs/{id}/notes`, `GET /v1/jobs/{id}/media`) and groups the rows. Documents are media whose kind is not `photo`.
 - Customer history (`GET /v1/customers/{id}/history`) emits `contact`, `location`, `estimate`, `job`, `invoice`, and `payment`. It does not emit calls, messages, or photos. A payment entry has no invoice id, so it cannot open a payment or an invoice.
 - `GET /v1/invoices?customerId=` can come back empty for a technician who can still read invoices on an assigned job. The profile also reads `GET /v1/jobs/{id}/invoices` and keeps the customer list when that route answers 404 or 405. Estimates and invoices are skipped entirely when the person lacks `estimate.view` or `invoice.view`.
+
+## Activity
+
+- There is no call thread and no message thread. A call or message row opens the job, or the contact, only when that row already names one. A row that names neither stays closed.
+- Customer history payments do not include an invoice id, so those rows cannot open a payment or an invoice. A payment on an invoice's own activity does, because that screen already has both ids.
+- Customer history does not include photos, notes, calls, or messages. Job activity is notes and status changes. A photo opens only when a row already names the job and the file.
