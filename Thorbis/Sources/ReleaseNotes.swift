@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-29-photo-stage",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "tag", title: "Mark a photo before or after",
+                      detail: "Change a saved job photo to Before, After, or Other without taking it again."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-search-pages",
             date: "2026-10-29",
             highlights: [

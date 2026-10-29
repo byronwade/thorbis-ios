@@ -401,6 +401,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if path == "/v1/jobs/\(id)/notes" {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
+            if path == "/v1/jobs/\(id)/media", PaperPreview.screen == "job-media" {
+                return ["items": [[
+                    "id": "00000000-0000-4000-8000-000000009301", "organizationId": org, "jobId": id,
+                    "uploaderUserId": actor, "kind": "photo", "mime": "image/jpeg", "sizeBytes": 120_000,
+                    "originalFilename": "outdoor-unit.jpg", "contentHash": "preview", "storageKey": "preview/outdoor-unit.jpg",
+                    "uploadState": "stored", "tags": ["Before"], "caption": "Outdoor unit", "archived": false,
+                    "createdAt": now, "updatedAt": now
+                ]]]
+            }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
             if path == "/v1/jobs/\(id)/estimates" { return ["items": []] }
             if path == "/v1/jobs/\(id)/booking-call" {

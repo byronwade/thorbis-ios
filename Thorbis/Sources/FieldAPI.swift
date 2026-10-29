@@ -881,6 +881,31 @@ struct MediaAssetRecord: Codable, Identifiable, Hashable {
     let updatedAt: String
 }
 
+/// The stage a job photo is filed under. "Other" means it is neither Before nor After.
+enum MediaStage: Equatable {
+    case before
+    case after
+    case other
+}
+
+/// Before and After are exclusive. Any other tag on the photo stays, in the order the server sent it.
+enum MediaStageTags {
+    static func applying(_ stage: MediaStage, to tags: [String]) -> [String] {
+        var kept: [String] = []
+        for tag in tags {
+            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, trimmed != "Before", trimmed != "After", !kept.contains(trimmed) else { continue }
+            kept.append(trimmed)
+        }
+        switch stage {
+        case .before: kept.append("Before")
+        case .after: kept.append("After")
+        case .other: break
+        }
+        return kept
+    }
+}
+
 struct FieldMediaRegistrationRequest: Encodable {
     let clientAssetId: String
     let kind: String
@@ -1110,6 +1135,39 @@ extension APIClient {
     func confirmFieldMedia(_ mediaID: String) async throws -> MediaAssetRecord {
         try await send("POST", fieldPath("/v1/media", id: mediaID, suffix: "/confirm"), body: EmptyObject())
     }
+
+    /// Replace the tags on a stored photo (`POST /v1/media/{id}/tags`). A blank caption is omitted.
+    func tagFieldMedia(_ mediaID: String, tags: [String], caption: String? = nil) async throws -> MediaAssetRecord {
+        guard UUID(uuidString: mediaID) != nil else {
+            throw Problem(title: "Invalid media ID", status: nil, detail: mediaID)
+        }
+        var cleaned: [String] = []
+        for tag in tags {
+            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !cleaned.contains(trimmed) else { continue }
+            cleaned.append(trimmed)
+        }
+        guard cleaned.count <= 20 else {
+            throw Problem(title: "Too many photo tags", status: nil, detail: "Use at most 20 tags.")
+        }
+        let trimmedCaption = caption?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let captionToSend = (trimmedCaption?.isEmpty == false) ? trimmedCaption : nil
+        return try await send("POST", fieldPath("/v1/media", id: mediaID, suffix: "/tags"),
+                              body: FieldMediaTagsRequest(tags: cleaned, caption: captionToSend))
+    }
+}
+
+private struct FieldMediaTagsRequest: Encodable {
+    let tags: [String]
+    let caption: String?
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(tags, forKey: .tags)
+        try container.encodeIfPresent(caption, forKey: .caption)
+    }
+
+    private enum CodingKeys: String, CodingKey { case tags, caption }
 }
 
 private struct EmptyObject: Encodable {}
