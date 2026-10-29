@@ -24,6 +24,14 @@ final class ThorbisControlsTests: XCTestCase {
         XCTAssertNil(item.role)
     }
 
+    func testConfirmActionCarriesDestructiveRoleAndFires() {
+        var fired = false
+        let action = ThorbisConfirmAction("Remove", role: .destructive) { fired = true }
+        XCTAssertEqual(action.role, .destructive)
+        action.action()
+        XCTAssertTrue(fired)
+    }
+
     // MARK: DisplayOptions (drives the filter/display sheet)
 
     func testDisplayOptionsDefaults() {
