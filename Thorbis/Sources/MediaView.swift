@@ -8,12 +8,17 @@ struct JobMediaView: View {
     let jobID: String
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject var pendingMedia: PendingMediaStore
     @State private var records: [MediaAssetRecord] = []
     @State private var selection: PhotosPickerItem?
     @State private var selectedData: Data?
     @State private var selectedMime = "image/jpeg"
     @State private var selectedFilename = "photo.jpg"
     @State private var clientAssetID = UUID().uuidString
+    @State private var selectedCapturedAt = Date()
+    @State private var captureContext: PendingMediaStore.CaptureContext?
+    @State private var captureGeneration: UUID?
+    @State private var captureOrigin: String?
     @State private var loading = true
     /// Bumped by pull-to-refresh so thumbnails that failed to download try again.
     @State private var thumbnailAttempt = 0
@@ -27,7 +32,7 @@ struct JobMediaView: View {
     @State private var stage = "Before"
     @State private var filter = "All"
     /// Photos taken but not yet confirmed by the server; kept on disk until they are.
-    @State private var waiting: [PendingPhoto] = []
+    private var waiting: [PendingMedia] { pendingMedia.items.filter { $0.jobID == jobID } }
     private var visible: [MediaAssetRecord] { records.filter { !$0.archived } }
     private var allPhotos: [MediaAssetRecord] { visible.filter { $0.kind == "photo" } }
     private var photos: [MediaAssetRecord] {
@@ -44,7 +49,10 @@ struct JobMediaView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let error = error ?? preview.error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error = error ?? preview.error {
+                    ErrorBanner(message: error, retry: selectedData == nil ? nil : { enqueueSelection() })
+                        .padding(.horizontal, -Theme.gutter)
+                }
                 if loading || preview.loading { SkeletonRows(count: 2, inset: 0) }
                 if let selectedData {
                     HStack(spacing: 12) {
@@ -81,6 +89,10 @@ struct JobMediaView: View {
                         }
                     }
                 }
+                if let warning = pendingMedia.storageWarning { ErrorBanner(message: warning) }
+                if pendingMedia.legacyCount > 0 {
+                    ErrorBanner(message: "Older saved photos need recovery in their original workspace. They remain on this phone and will not upload automatically.")
+                }
                 if !waiting.isEmpty {
                     PaperGroupHeader(title: "Waiting to upload", count: waiting.count) {
                         Button("Retry") { Task { await retryWaiting() } }
@@ -89,21 +101,23 @@ struct JobMediaView: View {
                     }
                     ForEach(waiting) { photo in
                         HStack(spacing: 12) {
-                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(Theme.warning)
+                            Image(systemName: pendingMedia.errors[photo.id] != nil ? "exclamationmark.triangle" : photo.kind == "document" ? "doc" : "clock.arrow.circlepath").foregroundStyle(Theme.warning)
                                 .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(photo.tags.first.map { "\($0) photo" } ?? "Photo").font(Theme.font(15, weight: .medium))
-                                Text("Saved on this phone · \(photo.takenAt.formatted(date: .omitted, time: .shortened))")
+                                Text(photo.title).font(Theme.font(15, weight: .medium))
+                                Text(pendingMedia.errors[photo.id].map { "Needs attention · \($0)" } ?? (pendingMedia.uploadingID == photo.id ? "Uploading…" : "Saved on this phone · \(photo.capturedAt.formatted(date: .omitted, time: .shortened))"))
                                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
                             }
                             Spacer()
                         }
                         .frame(minHeight: 48)
                         .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("pending-media-\(photo.id)")
+                        .accessibilityValue(Text("Captured \(photo.capturedAt.formatted(date: .abbreviated, time: .shortened))"))
                     }
                 }
                 // One empty state for the whole tab instead of two empty sections.
-                if photos.isEmpty && documents.isEmpty && !loading {
+                if photos.isEmpty && documents.isEmpty && waiting.isEmpty && pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil && !loading {
                     PaperEmptyState(symbol: "camera", title: "No photos yet",
                                     message: canAdd ? "Take a before photo when you arrive. Photos and PDFs up to 8 MB." : "Photos and documents added to this job show here.")
                 }
@@ -223,7 +237,7 @@ struct JobMediaView: View {
                 do {
                     let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
                     try select(pdf, mime: "application/pdf", filename: "scan-\(stamp).pdf")
-                    Task { await upload() }
+                    enqueueSelection()
                 } catch { self.error = error.localizedDescription }
             }
             .ignoresSafeArea()
@@ -232,12 +246,17 @@ struct JobMediaView: View {
             CameraCapture { image in
                 showCamera = false
                 guard let image else { return }
-                Task { await uploadImage(image) }
+                uploadImage(image)
             }
             .ignoresSafeArea()
         }
         .task {
-            waiting = PendingPhotoStore.list(jobID: jobID)
+            if captureContext == nil {
+                captureContext = pendingMedia.captureContext
+                captureGeneration = api.requestGeneration
+                captureOrigin = api.normalizedOrigin
+            }
+            pendingMedia.reload()
             await load()
             if !waiting.isEmpty { await retryWaiting() }
         }
@@ -252,10 +271,11 @@ struct JobMediaView: View {
                     selection = nil
                     if let image = UIImage(data: data) {
                         busy = false
-                        await uploadImage(image)
+                        uploadImage(image)
                     } else {
                         let type = item.supportedContentTypes.first ?? .jpeg
                         try select(data, mime: type.preferredMIMEType ?? "image/jpeg", filename: "photo." + (type.preferredFilenameExtension ?? "jpg"))
+                        enqueueSelection()
                     }
                 } catch { self.error = error.localizedDescription }
             }
@@ -268,6 +288,7 @@ struct JobMediaView: View {
                 let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                 guard size <= 8 * 1024 * 1024 else { throw MediaSelectionError.tooLarge }
                 try select(Data(contentsOf: url), mime: "application/pdf", filename: url.lastPathComponent)
+                enqueueSelection()
             } catch { self.error = error.localizedDescription }
         }
         .sheet(isPresented: Binding(get: { preview.url != nil }, set: { if !$0 { preview.clear() } })) {
@@ -282,6 +303,7 @@ struct JobMediaView: View {
         selectedMime = mime
         selectedFilename = filename
         clientAssetID = UUID().uuidString
+        selectedCapturedAt = Date()
         error = nil
     }
     private func load() async {
@@ -290,58 +312,47 @@ struct JobMediaView: View {
         do { records = try await api.fieldMedia(jobID); error = nil }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
-    private func upload() async {
+    private func enqueueSelection() {
         guard let selectedData else { return }
-        busy = true
-        defer { busy = false }
+        guard canAdd, captureGeneration == api.requestGeneration, captureOrigin == api.normalizedOrigin,
+              let captureContext else {
+            error = "Your workspace changed. Return to the original job before adding media."
+            return
+        }
+        let media = PendingMedia(id: clientAssetID, jobID: jobID, filename: selectedFilename,
+            tags: selectedMime == "application/pdf" ? [] : stageTags, capturedAt: selectedCapturedAt,
+            kind: selectedMime == "application/pdf" ? "document" : "photo", mime: selectedMime)
         do {
-            _ = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: clientAssetID, kind: selectedMime == "application/pdf" ? "document" : "photo", mime: selectedMime, originalFilename: selectedFilename, data: selectedData, tags: selectedMime == "application/pdf" ? [] : stageTags)
+            try pendingMedia.save(media, data: selectedData, context: captureContext)
             self.selectedData = nil
             selection = nil
-            await load()
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+            error = nil
+            // The callback releases original camera/library images before awaiting networking.
+            Task { await retryWaiting() }
+        } catch { self.error = error.localizedDescription }
     }
     private var stageTags: [String] { stage == "Other" ? [] : [stage] }
 
-    /// Photos are written to disk first (JPEG, long edge at most 2560 pt, under the 8 MB
-    /// single-PUT limit), then uploaded. No signal leaves them waiting with the same
-    /// client asset ID, so a retry can never create a second copy.
-    private func uploadImage(_ image: UIImage) async {
+    /// Save original bounded JPEG bytes before the first network request.
+    private func uploadImage(_ image: UIImage) {
+        guard canAdd else { return }
         guard let data = Self.jpeg(image) else {
             error = MediaSelectionError.tooLarge.localizedDescription
             return
         }
-        let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
-        let photo = PendingPhoto(id: UUID().uuidString, jobID: jobID, filename: "\(stage.lowercased())-\(stamp).jpg",
-                                 tags: stageTags, takenAt: Date())
-        guard PendingPhotoStore.save(photo, data: data) else {
-            error = "This photo could not be saved on the phone."
-            return
-        }
-        waiting = PendingPhotoStore.list(jobID: jobID)
-        await send(photo)
-    }
-
-    private func send(_ photo: PendingPhoto) async {
-        guard let data = PendingPhotoStore.data(for: photo) else { return }
-        busy = true
-        defer { busy = false }
+        let capturedAt = Date()
+        let stamp = capturedAt.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
         do {
-            _ = try await MediaTransfer(api: api).upload(jobID: photo.jobID, clientAssetID: photo.id, kind: "photo", mime: "image/jpeg",
-                                                         originalFilename: photo.filename, data: data, tags: photo.tags)
-            PendingPhotoStore.remove(photo)
-            waiting = PendingPhotoStore.list(jobID: jobID)
-            error = nil
-            await load()
-        } catch is CancellationError {
-        } catch {
-            waiting = PendingPhotoStore.list(jobID: jobID)
-            self.error = error.isConnectivityFailure ? nil : error.localizedDescription
-        }
+            try select(data, mime: "image/jpeg", filename: "\(stage.lowercased())-\(stamp).jpg")
+            enqueueSelection()
+        } catch { self.error = error.localizedDescription }
     }
 
     private func retryWaiting() async {
-        for photo in PendingPhotoStore.list(jobID: jobID) { await send(photo) }
+        busy = true
+        defer { busy = false }
+        await pendingMedia.drain(api: api, jobID: jobID, canUpload: { session.can("job.edit", feature: "jobs") })
+        await load()
     }
 
     static func jpeg(_ image: UIImage) -> Data? {
@@ -415,65 +426,6 @@ struct CameraCapture: UIViewControllerRepresentable {
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onFinish(nil) }
     }
-}
-
-/// A photo taken on the job that the server has not confirmed yet.
-struct PendingPhoto: Codable, Identifiable, Equatable {
-    let id: String
-    let jobID: String
-    let filename: String
-    let tags: [String]
-    let takenAt: Date
-}
-
-/// Photos waiting to upload, on disk with file protection until first unlock.
-enum PendingPhotoStore {
-    private static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("PendingPhotos", isDirectory: true)
-    }
-
-    static func save(_ photo: PendingPhoto, data: Data) -> Bool {
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try data.write(to: directory.appendingPathComponent("\(photo.id).jpg"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            try JSONEncoder().encode(photo).write(to: directory.appendingPathComponent("\(photo.id).json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            return true
-        } catch { return false }
-    }
-
-    static func list(jobID: String? = nil) -> [PendingPhoto] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        return files.filter { $0.pathExtension == "json" }
-            .compactMap { try? JSONDecoder().decode(PendingPhoto.self, from: Data(contentsOf: $0)) }
-            .filter { jobID == nil || $0.jobID == jobID }
-            .sorted { $0.takenAt < $1.takenAt }
-    }
-
-    /// Reconnect: send every waiting photo, oldest first; stop at the first network failure.
-    @MainActor static func uploadAll(api: APIClient) async {
-        for photo in list() {
-            guard let data = data(for: photo) else { remove(photo); continue }
-            do {
-                _ = try await MediaTransfer(api: api).upload(jobID: photo.jobID, clientAssetID: photo.id, kind: "photo", mime: "image/jpeg",
-                                                             originalFilename: photo.filename, data: data, tags: photo.tags)
-                remove(photo)
-            } catch {
-                if error.isConnectivityFailure || error is CancellationError { return }
-            }
-        }
-    }
-
-    static func data(for photo: PendingPhoto) -> Data? {
-        try? Data(contentsOf: directory.appendingPathComponent("\(photo.id).jpg"))
-    }
-
-    static func remove(_ photo: PendingPhoto) {
-        try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(photo.id).jpg"))
-        try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(photo.id).json"))
-    }
-
-    static func clearAll() { try? FileManager.default.removeItem(at: directory) }
 }
 
 /// VisionKit's document camera: edge detection, perspective correction, multi-page.

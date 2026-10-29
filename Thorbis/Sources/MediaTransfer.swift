@@ -37,7 +37,8 @@ final class MediaTransfer {
     }
 
     func upload(jobID: String, clientAssetID: String, kind: String, mime: String,
-                originalFilename: String, data: Data, tags: [String] = []) async throws -> MediaAssetRecord {
+                originalFilename: String, data: Data, tags: [String] = [], capturedAt: Date? = nil,
+                expectedOrganizationID: String? = nil) async throws -> MediaAssetRecord {
         guard UUID(uuidString: clientAssetID) != nil else {
             throw Problem(title: "Invalid client asset ID", status: nil, detail: clientAssetID)
         }
@@ -50,12 +51,14 @@ final class MediaTransfer {
         let request = FieldMediaRegistrationRequest(clientAssetId: clientAssetID, kind: kind,
                                                     mime: mime, sizeBytes: data.count,
                                                     originalFilename: originalFilename, contentHash: hash,
-                                                    capturedAt: ISO8601DateFormatter().string(from: Date()),
+                                                    capturedAt: ISO8601DateFormatter().string(from: capturedAt ?? Date()),
                                                     tags: tags.isEmpty ? nil : tags)
         let registration = try await api.registerFieldMedia(jobID, request: request)
         try verify(generation)
         guard registration.asset.contentHash == hash, registration.asset.sizeBytes == data.count,
-              registration.asset.mime == mime else {
+              registration.asset.mime == mime, registration.asset.kind == kind,
+              registration.asset.jobId == jobID, UUID(uuidString: registration.asset.id) != nil,
+              expectedOrganizationID.map({ registration.asset.organizationId == $0 }) ?? true else {
             throw Problem(title: "Client asset ID collision", status: nil,
                           detail: "The existing media record belongs to different bytes.")
         }
@@ -96,6 +99,14 @@ final class MediaTransfer {
         }
         let confirmed = try await api.confirmFieldMedia(registration.asset.id)
         try verify(generation)
+        guard confirmed.id == registration.asset.id, confirmed.jobId == jobID,
+              confirmed.organizationId == registration.asset.organizationId,
+              expectedOrganizationID.map({ confirmed.organizationId == $0 }) ?? true,
+              confirmed.kind == kind, confirmed.mime == mime, confirmed.contentHash == hash,
+              confirmed.sizeBytes == data.count, confirmed.uploadState == "stored" else {
+            throw Problem(title: "Media not confirmed", status: nil,
+                          detail: "The server has not confirmed this exact media. The saved copy remains on this phone.")
+        }
         return confirmed
     }
 

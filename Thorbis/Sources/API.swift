@@ -72,6 +72,7 @@ final class APIClient: ObservableObject {
 
     @Published var baseURL: String {
         didSet {
+            if baseURL != oldValue { invalidateRequests() }
             #if DEBUG
             if Self.validatedOrigin(baseURL) != nil {
                 UserDefaults.standard.set(baseURL, forKey: "thorbis.apiBaseURL")
@@ -129,6 +130,16 @@ final class APIClient: ObservableObject {
         #endif
         return nil
     }
+
+    /// Canonical origin identity, using the same trust rules as every API request.
+    static func normalizedOrigin(_ raw: String) -> String? {
+        guard var origin = validatedOrigin(raw) else { return nil }
+        origin.host = origin.host?.lowercased()
+        origin.path = ""
+        return origin.string
+    }
+
+    var normalizedOrigin: String? { Self.normalizedOrigin(baseURL) }
 
     var isLoopback: Bool {
         #if DEBUG

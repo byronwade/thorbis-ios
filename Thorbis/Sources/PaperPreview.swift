@@ -156,6 +156,35 @@ enum PaperPreview {
         api.auth = .none
         return api
     }
+    /// Synthetic pending-media journey. The dedicated preview directory never uses
+    /// Application Support or customer captures, and fixture transport rejects writes.
+    @MainActor static func mediaStore() -> PendingMediaStore {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ThorbisPreviewMedia", isDirectory: true)
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--paper-preview-reset-media") { try? FileManager.default.removeItem(at: root) }
+        let store = PendingMediaStore(directory: root)
+        if args.contains("--paper-preview-seed-media") {
+            store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
+            let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 612, height: 792)).pdfData { context in
+                context.beginPage()
+                ("Synthetic field scan" as NSString).draw(at: CGPoint(x: 30, y: 30), withAttributes: [.font: UIFont.systemFont(ofSize: 18)])
+            }
+            for (id, job, filename) in [
+                ("00000000-0000-4000-8000-000000009701", jobID, "Field scan.pdf"),
+                ("00000000-0000-4000-8000-000000009702", "00000000-0000-4000-8000-000000002215", "Other job scan.pdf")
+            ] {
+                let media = PendingMedia(id: id, jobID: job, filename: filename, tags: [],
+                    capturedAt: Date(timeIntervalSince1970: 1_700_000_000), kind: "document", mime: "application/pdf")
+                do {
+                    guard let context = store.captureContext else { assertionFailure("Synthetic media context unavailable"); return store }
+                    try store.save(media, data: pdf, context: context)
+                }
+                catch { assertionFailure("Synthetic media fixture could not be saved: \(error)") }
+            }
+        }
+        return store
+    }
+
     static func defaults() -> UserDefaults {
         UserDefaults(suiteName: "thorbis.paper-preview.\(UUID().uuidString)")!
     }

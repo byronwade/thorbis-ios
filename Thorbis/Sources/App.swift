@@ -10,6 +10,7 @@ struct ThorbisApp: App {
     @StateObject private var session: SessionController
     @StateObject private var inboxBoard: InboxLocalDrafts
     @StateObject private var connectivity = ConnectivityMonitor()
+    @StateObject private var pendingMedia: PendingMediaStore
     @StateObject private var outbox: FieldOutbox
     @StateObject private var menuLayout = MenuLayout()
     @StateObject private var whatsNew: WhatsNew
@@ -29,22 +30,27 @@ struct ThorbisApp: App {
         #else
         let outbox = FieldOutbox()
         #endif
+        #if DEBUG
+        let pendingMedia = PaperPreview.enabled ? PaperPreview.mediaStore() : PendingMediaStore.shared
+        #else
+        let pendingMedia = PendingMediaStore.shared
+        #endif
         let store = Store { [weak session] api in
             guard let session else { throw CancellationError() }
             return try await Store.fetchAuthorized(api: api, session: session)
         }
-        session.onInvalidate = { [weak store] in store?.invalidate() }
-        session.onSignedOut = { [weak store, weak outbox] in
+        session.onInvalidate = { [weak store, weak pendingMedia] in store?.invalidate(); pendingMedia?.bind(nil) }
+        session.onSignedOut = { [weak store, weak outbox, weak pendingMedia] in
             store?.cache.clearAll()
             outbox?.clearAll()
-            PendingPhotoStore.clearAll()
+            pendingMedia?.clearAll()
             JobDetailCache.clearAll()
             Task { await JobLiveActivity.endAll() }
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
             Task { @MainActor in RecentItems.shared.clear() }
         }
-        session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
+        session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox, weak pendingMedia, weak api] actorID, organizationID in
             if let actorID, let organizationID {
                 inboxBoard?.bind(actorID: actorID, organizationID: organizationID)
             } else {
@@ -53,6 +59,9 @@ struct ThorbisApp: App {
             store?.bindCache(actorID: actorID, organizationID: organizationID)
             PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
+            if let actorID, let organizationID, let origin = api?.normalizedOrigin {
+                pendingMedia?.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: origin))
+            } else { pendingMedia?.bind(nil) }
             Task { @MainActor in RecentItems.shared.bind(actorID: actorID, organizationID: organizationID) }
         }
         PushNotifications.shared.start(api: api, store: store)
@@ -69,6 +78,7 @@ struct ThorbisApp: App {
         _session = StateObject(wrappedValue: session)
         _inboxBoard = StateObject(wrappedValue: inboxBoard)
         _outbox = StateObject(wrappedValue: outbox)
+        _pendingMedia = StateObject(wrappedValue: pendingMedia)
         #if DEBUG
         _publicEstimateToken = State(initialValue: PaperPreview.enabled && PaperPreview.screen == "public-estimate" ? "preview-estimate" : nil)
         #else
@@ -120,6 +130,7 @@ struct ThorbisApp: App {
             .environmentObject(inboxBoard)
             .environmentObject(connectivity)
             .environmentObject(outbox)
+            .environmentObject(pendingMedia)
             .environmentObject(menuLayout)
             .environmentObject(whatsNew)
             .font(Theme.font(15))
@@ -182,7 +193,7 @@ extension ThorbisApp {
         if !outbox.pending.isEmpty {
             await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
         }
-        await PendingPhotoStore.uploadAll(api: api)
+        await pendingMedia.drain(api: api, canUpload: { session.can("job.edit", feature: "jobs") })
         await store.refresh(api)
     }
 }

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var pendingMedia: PendingMediaStore
     @State private var confirmSignOut = false
     @Environment(\.dismiss) private var dismiss
     @State private var showWorkspaces = false
@@ -79,7 +80,7 @@ struct SettingsView: View {
             .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }
             } message: {
-                Text(outbox.signOutWarning)
+                Text(pendingMedia.signOutWarning(outboxWarning: outbox.signOutWarning))
             }
             .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
         }
