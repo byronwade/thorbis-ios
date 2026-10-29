@@ -43,7 +43,8 @@ The unit snapshot differs from final worker snapshot only in MediaView and its U
 test; final native journey rebuilt those. Root verified all11final worker hashes,
 then added release notes and compiled/tested the latest app in the57-run.
 [Frozen Swift sources](../../design/evidence/durable-job-media/source-sha256.json).
-Independent review and signed release qualification follow; no upload claim yet.
+Initial independent review and its fix pass are recorded below; signed release
+qualification follows. No upload claim yet.
 
 ## Decisions and limits
 
@@ -59,9 +60,57 @@ counts and cleanup were checked separately and pass. Physical lock/unlock protec
 camera/scan capture, VoiceOver interaction, large text/iPad and production-network
 upload are not certified here. Files use the native protection API; no hardware claim.
 
-Legacy/uncommitted files remain preserved with recovery warnings and loss counts,
-without guessed ownership, automatic upload or preview. Cost: older pending work
-requires explicit recovery in later work. This is foreground8MiB single-PUT media,
+Legacy photos now have the explicit verified-destination recovery described below.
+Unknown/unreadable files remain preserved without guessed ownership, automatic
+upload or preview. This is foreground8MiB single-PUT media,
 not background/multipart support or private bank-check evidence. Native manual card
 entry is BYR-1584; Tap remains gated pending distribution qualification. Parent
 BYR-416, customer catalog offers and the overall continuous goal remain incomplete.
+
+## Review fix round 1
+
+Initial review returned0Critical,3Important,1Minor. Root regraded lost cleanup
+warning Important because failed promised deletion must be visible. All four were
+reproduced with completed native REDs before fixes. Valid legacy photos now have
+a reachable recovery flow rather than a preservation-only deferral, consistent
+with the user's feature-retention requirement.
+
+Transfer receives the current binding/generation/capability guard and checks it
+before each register/PUT/confirm mutation. Gated revocation tests prove no second
+or third request after known permission loss. Known integrity failures persist in
+protected markers; restored rows remain unverified until read validation without
+bulk payload reads. Cleanup failure has a separate generic LoginView notice that
+survives nil-identity bind/reload. It lasts for the store lifetime, not a persisted
+new-process audit warning.
+
+Legacy recovery fetches the exact current canonical job online and verifies its
+ID/organization before offering only matching-job metadata. The user confirms
+adoption to the named current job/workspace; original ownership remains unknown.
+A second fresh lookup and scope checks precede adoption. Exact bytes/ID/date are
+committed and verified in the scoped queue, then a protected recovery receipt
+permits idempotent cleanup of either partial legacy-source ordering. Unknown files,
+stale/foreign authority and collisions keep source copies. Recovery does not itself
+upload or automatically preview images; normal guarded Retry remains available.
+
+Online proof has its own RED: default URLRequest caching could reuse a response.
+Only recovery opts into reloadIgnoringLocalCacheData plus Cache-Control:no-cache;
+ordinary endpoint/trust/credential behavior remains unchanged.
+
+Completed overlapping scoped runs qualify65distinct media/API/native cases:
+64passed,1unchanged simulator-only protection skip,0remaining failures.
+[Focused44-run](../../design/evidence/durable-job-media/fix1-focused.json),
+[final33-run](../../design/evidence/durable-job-media/fix1-final.json).
+After those API changes, root's payment/WhatsNew regressions passed57/57 with no
+failures/skips; [results](../../design/evidence/durable-job-media/post-review-regressions.json).
+One aborted overlapping build and a zero-case individual UI selector are explicitly
+excluded, not counted as qualification. Final runs used outside-derived bundles.
+The final release-note recovery wording was manually checked against existing copy
+bounds afterward; its ID/date/count remain unchanged and Release will compile it.
+
+Root verified all12worker source hashes and visually inspected the recovery
+[destination](../../design/evidence/durable-job-media/recovery-destination.png),
+[confirmation](../../design/evidence/durable-job-media/recovery-confirmation.png),
+[recovered row](../../design/evidence/durable-job-media/recovered-photo.png),
+[cleanup notice](../../design/evidence/durable-job-media/cleanup-notice.png) and
+queued PDF. All are isolated synthetic previews. Scoped re-review against7214abc
+is the next gate; archive/upload remain pending.

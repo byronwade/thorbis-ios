@@ -202,8 +202,10 @@ final class APIClient: ObservableObject {
         return all
     }
 
-    func send<T: Decodable>(_ method: String, _ path: String, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
-        try await send(method, path, body: Optional<String>.none, queryItems: queryItems, cursor: cursor, authed: authed)
+    func send<T: Decodable>(_ method: String, _ path: String, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, requireFresh: Bool = false) async throws -> T {
+        let response = try await sendData(method, path, body: Optional<String>.none, queryItems: queryItems,
+                                          cursor: cursor, authed: authed, requireFresh: requireFresh)
+        return try decodeResponse(response)
     }
 
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
@@ -262,7 +264,7 @@ final class APIClient: ObservableObject {
         let contentType: String?
     }
 
-    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true) async throws -> DataResponse {
+    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false) async throws -> DataResponse {
         let generation = requestGeneration
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
@@ -275,7 +277,8 @@ final class APIClient: ObservableObject {
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: url, cachePolicy: requireFresh ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
+        if requireFresh { req.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
         req.httpMethod = method
         req.httpShouldHandleCookies = handleCookies
         req.setValue(accept, forHTTPHeaderField: "accept")

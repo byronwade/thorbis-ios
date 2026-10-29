@@ -68,6 +68,8 @@ final class PendingMediaStoreTests: XCTestCase {
         XCTAssertThrowsError(try queue.read(photo)); XCTAssertNotNil(queue.errors[photo.id])
         try FileManager.default.removeItem(at: payload)
         XCTAssertThrowsError(try queue.read(photo)); XCTAssertEqual(queue.items, [photo]); XCTAssertEqual(queue.totalPendingCount, 1)
+        let relaunched = store(); relaunched.bind(scope)
+        XCTAssertNotNil(relaunched.errors[photo.id]); XCTAssertEqual(relaunched.items, [photo])
     }
 
     func testFailedCommitDoesNotPublishSavedItemOrEraseExistingQueue() throws {
@@ -250,6 +252,7 @@ final class PendingMediaStoreTests: XCTestCase {
         allowed = false
         gate.release(); await task.value
         XCTAssertEqual(queue.items, [scan]); XCTAssertEqual(try queue.read(scan), Data("hello".utf8))
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "Revoked authority must not confirm")
     }
 
     func testAmbiguousConfirmationAndRetryPreserveBytesAndClientID() async throws {
@@ -268,4 +271,55 @@ final class PendingMediaStoreTests: XCTestCase {
         let second = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(registrations[1].body)) as? NSDictionary)
         XCTAssertEqual(first, second)
     }
+    func testRevocationWhileRegisteringNeverStartsPUT() async throws {
+        let queue = store(); queue.bind(scope)
+        let photo = media(); try queue.save(photo, data: Data("hello".utf8), context: try XCTUnwrap(queue.captureContext))
+        let gate = URLProtocolFixture.Gate()
+        let network = URLProtocolFixture.session([.init(201, registration(photo), gate: gate), .init(200, "{}"), .init(200, asset(photo))])
+        let api = APIClient(session: network, baseURL: scope.origin)
+        var allowed = true
+        let task = Task { await queue.drain(api: api, canUpload: { allowed }, storageSession: network) }
+        try await waitForRequests(1); allowed = false; gate.release(); await task.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(try queue.read(photo), Data("hello".utf8))
+    }
+
+    func testKnownIntegrityFailureSurvivesRebindingAndRelaunchWithoutUploadAuthority() async throws {
+        let queue = store(); queue.bind(scope)
+        let photo = media(); try queue.save(photo, data: Data("hello".utf8), context: try XCTUnwrap(queue.captureContext))
+        let payload = try XCTUnwrap(files("payload").first)
+        try Data("wrong".utf8).write(to: payload)
+        XCTAssertThrowsError(try queue.read(photo)); XCTAssertNotNil(queue.errors[photo.id])
+        queue.bind(.init(actorID: "actor-b", organizationID: scope.organizationID, origin: scope.origin))
+        XCTAssertNil(queue.errors[photo.id], "Integrity state must not leak into another actor's scope")
+        queue.bind(scope)
+        XCTAssertNotNil(queue.errors[photo.id], "Known corruption cannot become saved again")
+        let relaunched = store(); relaunched.bind(scope)
+        let network = URLProtocolFixture.session([])
+        await relaunched.drain(api: APIClient(session: network, baseURL: scope.origin), canUpload: { false }, storageSession: network)
+        XCTAssertNotNil(relaunched.errors[photo.id]); XCTAssertEqual(relaunched.items, [photo])
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
+    func testRestoredUnverifiedBytesNeverClaimSavedBeforeValidation() throws {
+        let queue = store(); queue.bind(scope)
+        let scan = media(document: true); try queue.save(scan, data: Data("hello".utf8), context: try XCTUnwrap(queue.captureContext))
+        let payload = try XCTUnwrap(files("payload").first)
+        try Data("wrong".utf8).write(to: payload)
+        let relaunched = store(); relaunched.bind(scope)
+        XCTAssertTrue(relaunched.unverifiedIDs.contains(scan.id))
+        XCTAssertThrowsError(try relaunched.read(scan)); XCTAssertNotNil(relaunched.errors[scan.id])
+    }
+
+    func testCleanupFailureRemainsVisibleAfterUnbind() throws {
+        let queue = store(); queue.bind(scope)
+        try queue.save(media(), data: Data([1]), context: try XCTUnwrap(queue.captureContext))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path) }
+        queue.clearAll()
+        XCTAssertNotNil(queue.cleanupWarning, "Real filesystem removal must fail while the parent is read-only")
+        queue.bind(nil); queue.reload()
+        XCTAssertNotNil(queue.cleanupWarning)
+    }
+
 }

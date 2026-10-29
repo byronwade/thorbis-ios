@@ -980,7 +980,7 @@ extension APIClient {
     }
 
     func fieldJobs() async throws -> [JobRecord] { try await allFieldPages("/v1/jobs") }
-    func fieldJob(_ id: String) async throws -> JobRecord { try await send("GET", fieldPath("/v1/jobs", id: id)) }
+    func fieldJob(_ id: String, requireFresh: Bool = false) async throws -> JobRecord { try await send("GET", fieldPath("/v1/jobs", id: id), requireFresh: requireFresh) }
     func createFieldJob(_ request: FieldJobCreate) async throws -> JobRecord {
         try await send("POST", "/v1/jobs", body: request)
     }

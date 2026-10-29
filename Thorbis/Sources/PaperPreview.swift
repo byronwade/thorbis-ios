@@ -182,6 +182,30 @@ enum PaperPreview {
                 catch { assertionFailure("Synthetic media fixture could not be saved: \(error)") }
             }
         }
+        if args.contains("--paper-preview-seed-legacy") {
+            do {
+                let folder = root.appendingPathComponent("PendingPhotos")
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let jpeg = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { context in
+                    UIColor.gray.setFill(); context.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
+                }.jpegData(compressionQuality: 0.8)!
+                for (id, job) in [("00000000-0000-4000-8000-000000009703", jobID), ("00000000-0000-4000-8000-000000009704", "00000000-0000-4000-8000-000000002215")] {
+                    let metadata = try JSONSerialization.data(withJSONObject: ["id": id, "jobID": job, "filename": "before-original.jpg", "tags": ["Before"], "takenAt": Date(timeIntervalSince1970: 1_700_000_000).timeIntervalSinceReferenceDate])
+                    try metadata.write(to: folder.appendingPathComponent("\(id).json"))
+                    try jpeg.write(to: folder.appendingPathComponent("\(id).jpg"))
+                }
+            } catch { assertionFailure("Synthetic legacy fixture failed: \(error)") }
+        }
+        if args.contains("--paper-preview-media-cleanup-failure") {
+            do {
+                store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
+                let item = PendingMedia(id: UUID().uuidString, jobID: jobID, filename: "synthetic.jpg", tags: [], capturedAt: Date(), kind: "photo", mime: "image/jpeg")
+                if let context = store.captureContext { try store.save(item, data: Data([1]), context: context) }
+                try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+                store.clearAll(); store.bind(nil)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            } catch { assertionFailure("Synthetic cleanup fixture failed: \(error)") }
+        }
         return store
     }
 
@@ -341,7 +365,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             payload = ["status": 404, "title": "Preview fixture unavailable", "detail": "This request is not part of the design preview. No request was sent to a server."]
         }
         do {
-            let body = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            let body = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .fragmentsAllowed])
             let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json", "X-Thorbis-Design-Preview": "sample-data"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: body)
@@ -558,6 +582,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         switch path {
         case "/api/auth/get-session":
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-cleanup-failure") { return NSNull() }
             return ["user": ["id": actor, "name": "Ramon Marlowe", "email": "preview@example.invalid"], "session": ["userId": actor, "activeOrganizationId": org, "expiresAt": expiry]]
         case "/api/auth/organization/list": return [["id": org, "name": "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":

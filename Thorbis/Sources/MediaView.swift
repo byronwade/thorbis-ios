@@ -28,6 +28,7 @@ struct JobMediaView: View {
     @State private var importDocument = false
     @State private var showCamera = false
     @State private var showScanner = false
+    @State private var showLegacyRecovery = false
     /// Paper 21C: the stage a new photo is filed under (server tags "Before" / "After").
     @State private var stage = "Before"
     @State private var filter = "All"
@@ -91,13 +92,16 @@ struct JobMediaView: View {
                 }
                 if let warning = pendingMedia.storageWarning { ErrorBanner(message: warning) }
                 if pendingMedia.legacyCount > 0 {
-                    ErrorBanner(message: "Older saved photos need recovery in their original workspace. They remain on this phone and will not upload automatically.")
+                    ErrorBanner(message: "Older photos remain on this phone. Check this job before choosing which photos to recover.")
+                    Button("Recover older photos") { showLegacyRecovery = true }
+                        .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                        .frame(minHeight: 44).disabled(!canAdd || busy)
                 }
                 if !waiting.isEmpty {
                     PaperGroupHeader(title: "Waiting to upload", count: waiting.count) {
                         Button("Retry") { Task { await retryWaiting() } }
                             .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                            .frame(minHeight: 44).disabled(busy)
+                            .frame(minHeight: 44).disabled(busy || !canAdd)
                     }
                     ForEach(waiting) { photo in
                         HStack(spacing: 12) {
@@ -105,7 +109,7 @@ struct JobMediaView: View {
                                 .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(photo.title).font(Theme.font(15, weight: .medium))
-                                Text(pendingMedia.errors[photo.id].map { "Needs attention · \($0)" } ?? (pendingMedia.uploadingID == photo.id ? "Uploading…" : "Saved on this phone · \(photo.capturedAt.formatted(date: .omitted, time: .shortened))"))
+                                Text(pendingMedia.errors[photo.id].map { "Needs attention · \($0)" } ?? (pendingMedia.uploadingID == photo.id ? "Uploading…" : pendingMedia.unverifiedIDs.contains(photo.id) ? "Saved copy not yet verified" : "Saved on this phone · \(photo.capturedAt.formatted(date: .omitted, time: .shortened))"))
                                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
                             }
                             Spacer()
@@ -229,6 +233,9 @@ struct JobMediaView: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
                 .background(Theme.background)
             }
+        }
+        .sheet(isPresented: $showLegacyRecovery) {
+            LegacyMediaRecoveryView(jobID: jobID, workspaceName: session.activeOrganization?.name ?? "Current workspace")
         }
         .fullScreenCover(isPresented: $showScanner) {
             DocumentScanner { pdf in

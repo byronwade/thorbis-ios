@@ -20,8 +20,8 @@ enum ReleaseNotes {
                       detail: "Scanned job documents and photos stay on this phone until their upload is confirmed."),
                 .init(symbol: "photo.on.rectangle", title: "Keep saved work in its workspace",
                       detail: "Switch workspaces without mixing waiting files, and see which uploads need attention."),
-                .init(symbol: "arrow.triangle.2.circlepath", title: "Retry the same saved file",
-                      detail: "Retries keep the original file and capture time. Signing out warns about unsent photos and documents."),
+                .init(symbol: "arrow.clockwise", title: "Recover older saved photos",
+                      detail: "Review older photos for this job, confirm the destination, then retry their upload."),
             ],
             fixes: 4
         ),

@@ -24,6 +24,8 @@ struct PendingMedia: Codable, Identifiable, Hashable, Sendable {
 @MainActor
 final class PendingMediaStore: ObservableObject {
     static let shared = PendingMediaStore()
+    @Published private(set) var unverifiedIDs: Set<String> = []
+    @Published private(set) var cleanupWarning: String?
     @Published private(set) var items: [PendingMedia] = []
     @Published private(set) var errors: [String: String] = [:]
     @Published private(set) var storageWarning: String?
@@ -44,13 +46,15 @@ final class PendingMediaStore: ObservableObject {
         let hash: String
     }
     private enum StorageError: LocalizedError {
-        case unbound, invalid, unreadable, existing
+        case unbound, invalid, unreadable, existing, recoveryUnavailable, recoveryConflict
         var errorDescription: String? {
             switch self {
             case .unbound: "Open the original workspace before saving or retrying this media."
             case .invalid: "This media could not be saved. Choose a supported nonempty file up to 8 MB."
             case .unreadable: "This phone cannot read the saved media. Keep it here and retry after unlocking the phone."
             case .existing: "This media is already saved. Retry its existing upload."
+            case .recoveryUnavailable: "This destination is no longer verified. Reopen recovery from the current job and try again."
+            case .recoveryConflict: "A different saved item uses this photo ID. Both copies remain on this phone and need review."
             }
         }
     }
@@ -59,6 +63,7 @@ final class PendingMediaStore: ObservableObject {
     private var scope: PendingMediaScope?
     private var binding = UUID()
     private var draining = false
+    private var validated: Set<PendingMedia> = []
 
     init(directory: URL? = nil) {
         let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -72,7 +77,7 @@ final class PendingMediaStore: ObservableObject {
                   let origin = APIClient.normalizedOrigin(value.origin) else { return nil }
             return PendingMediaScope(actorID: value.actorID, organizationID: value.organizationID, origin: origin)
         }
-        if scope != normalized { binding = UUID(); errors = [:] }
+        if scope != normalized { binding = UUID(); errors = [:]; validated = [] }
         scope = normalized
         reload()
     }
@@ -120,6 +125,7 @@ final class PendingMediaStore: ObservableObject {
             let envelope = Envelope(scope: scope, media: media, size: data.count, hash: Self.hash(data))
             try JSONEncoder().encode(envelope).write(to: metadata, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]); try protect(metadata)
             try FileManager.default.moveItem(at: staging, to: destination)
+            validated.insert(media)
             reload()
         } catch {
             try? FileManager.default.removeItem(at: staging)
@@ -138,16 +144,24 @@ final class PendingMediaStore: ObservableObject {
             guard size == envelope.size else { throw StorageError.unreadable }
             let data = try Data(contentsOf: payload)
             guard Self.hash(data) == envelope.hash else { throw StorageError.unreadable }
+            validated.insert(media); unverifiedIDs.remove(media.id)
+            try? FileManager.default.removeItem(at: path.appendingPathComponent("integrity-failed"))
+            if errors[media.id] == StorageError.unreadable.localizedDescription { errors[media.id] = nil }
             return data
         } catch {
+            validated.remove(media); unverifiedIDs.insert(media.id)
             errors[media.id] = StorageError.unreadable.localizedDescription
+            if let failure = try? unit(media, scope: scope).appendingPathComponent("integrity-failed") {
+                try? Data([1]).write(to: failure, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                try? protect(failure)
+            }
             throw StorageError.unreadable
         }
     }
 
     func reload() {
         storageWarning = nil
-        items = []
+        items = []; unverifiedIDs = []
         if let scope {
             do {
                 let folder = try scopeDirectory(scope)
@@ -162,6 +176,11 @@ final class PendingMediaStore: ObservableObject {
                             guard envelope.scope == scope, envelope.media.id == path.lastPathComponent,
                                   UUID(uuidString: envelope.media.id) != nil else { throw StorageError.unreadable }
                             items.append(envelope.media)
+                            if !validated.contains(envelope.media) { unverifiedIDs.insert(envelope.media.id) }
+                            if FileManager.default.fileExists(atPath: path.appendingPathComponent("integrity-failed").path) {
+                                errors[envelope.media.id] = StorageError.unreadable.localizedDescription
+                                validated.remove(envelope.media); unverifiedIDs.insert(envelope.media.id)
+                            }
                             // A metadata-only listing never loads every photograph to render rows.
                             let payload = path.appendingPathComponent("payload")
                             if !FileManager.default.fileExists(atPath: payload.path) { errors[envelope.media.id] = StorageError.unreadable.localizedDescription }
@@ -200,13 +219,14 @@ final class PendingMediaStore: ObservableObject {
     }
 
     func clearAll() {
-        binding = UUID(); scope = nil; items = []; errors = [:]
-        do {
-            for folder in [directory, legacyDirectory] where FileManager.default.fileExists(atPath: folder.path) {
-                try FileManager.default.removeItem(at: folder)
-            }
-            storageWarning = nil
-        } catch { storageWarning = "Some saved media could not be removed from this phone." }
+        binding = UUID(); scope = nil; items = []; errors = [:]; validated = []; unverifiedIDs = []
+        var failed = false
+        for folder in [directory, legacyDirectory] where FileManager.default.fileExists(atPath: folder.path) {
+            do { try FileManager.default.removeItem(at: folder) }
+            catch { failed = true }
+        }
+        cleanupWarning = failed ? "Some saved media could not be removed from this phone. Sign in and try signing out again to retry cleanup." : nil
+        storageWarning = nil
         recount()
     }
 
@@ -227,7 +247,7 @@ final class PendingMediaStore: ObservableObject {
                 let data = try read(item)
                 _ = try await MediaTransfer(api: api, storageSession: storageSession).upload(jobID: item.jobID, clientAssetID: item.id,
                     kind: item.kind, mime: item.mime, originalFilename: item.filename, data: data, tags: item.tags,
-                    capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID)
+                    capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID, currentAuthority: current)
                 guard current() else { return }
                 try FileManager.default.removeItem(at: unit(item, scope: owner))
                 errors[item.id] = nil
@@ -238,5 +258,126 @@ final class PendingMediaStore: ObservableObject {
                 if error is CancellationError || error.isConnectivityFailure { return }
             }
         }
+    }
+    struct LegacyCandidate: Identifiable, Equatable {
+        let media: PendingMedia
+        var id: String { media.id }
+    }
+    struct LegacyDestination {
+        let job: JobRecord
+        let candidates: [LegacyCandidate]
+        fileprivate let context: CaptureContext
+        fileprivate let generation: UUID
+    }
+    private struct LegacyRecord: Codable {
+        let id: String
+        let jobID: String
+        let filename: String
+        let tags: [String]
+        let takenAt: Date
+        var media: PendingMedia { PendingMedia(id: id, jobID: jobID, filename: filename, tags: tags, capturedAt: takenAt, kind: "photo", mime: "image/jpeg") }
+    }
+    private struct RecoveryReceipt: Codable {
+        let media: PendingMedia
+        let hash: String
+    }
+    private func legacyURL(_ id: String, extension ext: String) throws -> URL {
+        guard UUID(uuidString: id) != nil else { throw StorageError.invalid }
+        return legacyDirectory.appendingPathComponent(id).appendingPathExtension(ext)
+    }
+    private func legacyRecord(_ id: String) throws -> LegacyRecord {
+        let url = try legacyURL(id, extension: "json")
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard (1...64 * 1024).contains(size) else { throw StorageError.unreadable }
+        let record = try JSONDecoder().decode(LegacyRecord.self, from: Data(contentsOf: url))
+        guard record.id == id, UUID(uuidString: record.jobID) != nil, record.takenAt.timeIntervalSince1970.isFinite else { throw StorageError.unreadable }
+        return record
+    }
+    private func checkRecovery(_ context: CaptureContext, generation: UUID, api: APIClient, canUpload: @MainActor () -> Bool) throws {
+        try Task.checkCancellation()
+        guard captureContext == context, api.requestGeneration == generation,
+              api.normalizedOrigin == context.scope.origin, canUpload() else { throw StorageError.recoveryUnavailable }
+    }
+    private func verifyRecoveryJob(_ job: JobRecord, id: String, context: CaptureContext) throws {
+        guard job.id == id, job.organizationId == context.scope.organizationID else { throw StorageError.recoveryUnavailable }
+    }
+
+    /// Discover metadata only after online proof of the current destination. The
+    /// original account/origin remains unknown and is never reconstructed here.
+    func prepareLegacyRecovery(api: APIClient, jobID: String, canUpload: @MainActor () -> Bool) async throws -> LegacyDestination {
+        guard let context = captureContext else { throw StorageError.recoveryUnavailable }
+        let generation = api.requestGeneration
+        try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
+        let job = try await api.fieldJob(jobID, requireFresh: true)
+        try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
+        try verifyRecoveryJob(job, id: jobID, context: context)
+        var candidates: [String: LegacyCandidate] = [:]
+        if FileManager.default.fileExists(atPath: legacyDirectory.path) {
+            for file in try FileManager.default.contentsOfDirectory(at: legacyDirectory, includingPropertiesForKeys: nil) where file.pathExtension == "json" {
+                guard let record = try? legacyRecord(file.deletingPathExtension().lastPathComponent), record.jobID == job.id else { continue }
+                candidates[record.id] = LegacyCandidate(media: record.media)
+            }
+            // An interrupted cleanup may leave only JPEG bytes. A scoped receipt
+            // can identify that already adopted copy without guessing an owner.
+            for item in items where item.jobID == job.id {
+                let receiptURL = try unit(item, scope: context.scope).appendingPathComponent("recovery.json")
+                guard let receiptData = try? Data(contentsOf: receiptURL),
+                      let receipt = try? JSONDecoder().decode(RecoveryReceipt.self, from: receiptData), receipt.media == item,
+                      FileManager.default.fileExists(atPath: try legacyURL(item.id, extension: "jpg").path) else { continue }
+                candidates[item.id] = LegacyCandidate(media: item)
+            }
+        }
+        try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
+        return LegacyDestination(job: job, candidates: candidates.values.sorted { $0.id < $1.id }, context: context, generation: generation)
+    }
+
+    /// The caller confirms one named destination and one item. First commit and
+    /// verify its scoped bytes, then write a durable recovery receipt, then remove
+    /// legacy sources. Every interruption retains a complete verified copy.
+    func recoverLegacy(_ candidate: LegacyCandidate, destination: LegacyDestination, api: APIClient, canUpload: @MainActor () -> Bool) async throws {
+        let context = destination.context, generation = destination.generation
+        try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
+        guard destination.candidates.contains(candidate), candidate.media.jobID == destination.job.id else { throw StorageError.invalid }
+        let currentJob = try await api.fieldJob(destination.job.id, requireFresh: true)
+        try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
+        try verifyRecoveryJob(currentJob, id: destination.job.id, context: context)
+        let metadata = try legacyURL(candidate.id, extension: "json")
+        let payload = try legacyURL(candidate.id, extension: "jpg")
+        let path = try unit(candidate.media, scope: context.scope)
+        let receiptURL = path.appendingPathComponent("recovery.json")
+        let receipt = (try? Data(contentsOf: receiptURL)).flatMap { try? JSONDecoder().decode(RecoveryReceipt.self, from: $0) }
+        let hasMetadata = FileManager.default.fileExists(atPath: metadata.path)
+        let hasPayload = FileManager.default.fileExists(atPath: payload.path)
+        if hasMetadata { guard try legacyRecord(candidate.id).media == candidate.media else { throw StorageError.unreadable } }
+        let legacyBytes: Data?
+        if hasPayload {
+            let size = try payload.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard (1...8 * 1024 * 1024).contains(size) else { throw StorageError.unreadable }
+            legacyBytes = try Data(contentsOf: payload)
+        } else { legacyBytes = nil }
+        if !hasMetadata || !hasPayload {
+            guard let receipt, receipt.media == candidate.media else { throw StorageError.unreadable }
+        }
+        try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
+        if !FileManager.default.fileExists(atPath: path.path) {
+            guard let legacyBytes, hasMetadata else { throw StorageError.unreadable }
+            try save(candidate.media, data: legacyBytes, context: context)
+        }
+        reload()
+        let committed = try read(candidate.media)
+        if let legacyBytes { guard committed == legacyBytes else { throw StorageError.recoveryConflict } }
+        if let receipt { guard receipt.media == candidate.media, receipt.hash == Self.hash(committed) else { throw StorageError.recoveryConflict } }
+        try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
+        let proof = RecoveryReceipt(media: candidate.media, hash: Self.hash(committed))
+        try JSONEncoder().encode(proof).write(to: receiptURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try protect(receiptURL)
+        // Verify durable intent and bytes before touching either older source.
+        let storedProof = try JSONDecoder().decode(RecoveryReceipt.self, from: Data(contentsOf: receiptURL))
+        guard storedProof.media == candidate.media, storedProof.hash == Self.hash(try read(candidate.media)) else { throw StorageError.unreadable }
+        for file in [payload, metadata] where FileManager.default.fileExists(atPath: file.path) {
+            try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
+            try FileManager.default.removeItem(at: file)
+        }
+        reload()
     }
 }

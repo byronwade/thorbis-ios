@@ -25,9 +25,17 @@ binding, API generation and job-edit capability. Serialize manual/reconnect drai
 Never accept a scope inferred from a stored file, latest login or job UUID alone.
 
 Legacy unscoped PendingPhotos files remain preserved, excluded from automatic
-upload/preview. Display a truthful recovery notice and include them in sign-out
-loss counts. Their absent ownership cannot safely be reconstructed; do not assign
-them to the next person who signs in. Recovery remains explicit follow-up work.
+upload/preview. Include them in sign-out loss counts. Their original actor/origin
+cannot be reconstructed. Provide explicit recovery for valid older photos of the
+current job: first fetch the canonical JobRecord online under current authority,
+verify its exact ID/organization against captured scope/generation, then allow the
+user to review only matching-job entries and explicitly confirm recovery into that
+named job/workspace. Do not call the destination the original owner. The user is
+authorizing adoption into a verified destination; no silent assignment occurs.
+Retain ID, bytes and capture date. Delete an older copy only after its exact new
+scoped unit is committed and verified; interruption/duplicate recovery must not
+lose work or create another operation. Refuse stale/foreign/unauthorized recovery.
+Unreadable or unidentifiable legacy files stay preserved with truthful warnings.
 
 ## Durable storage and state
 
@@ -39,7 +47,9 @@ another item or existing queue. Namespace paths with a deterministic digest of t
 scope; do not concatenate arbitrary identity strings into paths.
 
 Unreadable, missing or corrupt bytes must retain metadata and actionable error
-state. Do not silently remove them or falsely say their bytes are safely saved.
+state across scope rebinding/relaunch, even without upload capability. Recovered
+items whose integrity is not yet validated must not say their bytes are safely
+saved. Do not bulk-read every payload merely to render metadata lists.
 Unreadable/corrupt metadata must not be interpreted as an empty queue; preserve it
 and report a storage/recovery warning. Do not retain full payloads in published
 lists or read all images to render the queue.
@@ -47,7 +57,9 @@ lists or read all images to render the queue.
 Only a matching stored server asset permits deletion: verify registered/confirmed
 asset identity, exact job and expected organization, kind, content hash, MIME and
 size, with uploadState=stored. A rejected PUT, ambiguous confirmation, cancellation
-or context switch keeps the local copy. Replays retain ID, bytes, hash and capture
+or context switch keeps the local copy. Current authority must also be checked
+before register/PUT/confirm, including capability changes without API generation
+change. Replays retain ID, bytes, hash and capture
 date. Preserve the existing no-redirect, no-cookie storage-session protections.
 
 ## Presentation and release
@@ -60,6 +72,8 @@ verified cached identity/capabilities already supported by SessionController.
 Explicit sign-out follows existing deletion policy only after its warning includes
 pending photos/documents across scopes and legacy items, as it already does for
 other-workspace outbox entries.
+If sign-out cleanup fails, preserve a separate warning through nil-identity
+callbacks and show it on the signed-out screen; do not silently promise deletion.
 
 Use isolated synthetic files and intercepted network requests. No actual customer
 media uploads or check images. Run important persistence/identity/transfer/sign-out
