@@ -135,7 +135,7 @@ struct ThorbisConfirmCard: View {
                     Button { onChoose(action) } label: {
                         Text(action.title).font(Theme.font(17, weight: .medium))
                             .frame(maxWidth: .infinity).frame(height: 50)
-                            .foregroundStyle(action.role == .destructive ? Theme.onInk : Theme.onInk)
+                            .foregroundStyle(Theme.onInk)
                             .background(action.role == .destructive ? Theme.destructive : Theme.ink,
                                         in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
