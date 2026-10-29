@@ -78,12 +78,12 @@ private struct CustomerReviewPaper: Decodable {
 
 @MainActor
 extension APIClient {
-    func customerIssuedEstimateRevision(for expected: EstimateRecord) async throws -> CustomerIssuedEstimateRevision {
+    func customerIssuedEstimateRevision(for expected: EstimateRecord, currentAuthority: @escaping @MainActor () -> Bool = { true }) async throws -> CustomerIssuedEstimateRevision {
         let generation = requestGeneration
-        try checkCustomerReviewRequest(generation)
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard let number = expected.currentRevisionNumber, number > 0 else { throw customerReviewUnavailable() }
         let current = try await fieldEstimate(expected.id)
-        try checkCustomerReviewRequest(generation)
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard current.id == expected.id, current.organizationId == expected.organizationId,
               current.customerId == expected.customerId, current.locationId == expected.locationId,
               current.status == "sent", current.currentRevisionNumber == number
@@ -91,21 +91,21 @@ extension APIClient {
 
         let path = try financialPath("/v1/estimates", id: expected.id, suffix: "/revisions/\(number)")
         let revision: CustomerIssuedEstimateRevision = try await send("GET", path)
-        try checkCustomerReviewRequest(generation)
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         try revision.validate(for: expected)
         return revision
     }
 
     /// The customer reviewed this immutable revision before this paper/token chain begins.
-    func openInPersonEstimateApproval(_ revision: CustomerIssuedEstimateRevision) async throws -> (token: String, action: PublicEstimateAction) {
+    func openInPersonEstimateApproval(_ revision: CustomerIssuedEstimateRevision, currentAuthority: @escaping @MainActor () -> Bool = { true }) async throws -> (token: String, action: PublicEstimateAction) {
         struct Empty: Encodable {}
         struct Mint: Encodable { let revisionNumber: Int; let contentHash: String }
         struct Link: Decodable { let token: String }
         let generation = requestGeneration
-        try checkCustomerReviewRequest(generation)
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard revision.status == "issued" else { throw customerReviewUnavailable() }
         let paper: CustomerReviewPaper = try await send("POST", financialPath("/v1/estimates", id: revision.estimateId, suffix: "/commercial-documents"), body: Empty())
-        try checkCustomerReviewRequest(generation)
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard paper.source.type == "estimate", paper.source.id == revision.estimateId,
               paper.snapshot.content.revision.number == revision.revisionNumber,
               paper.contentHash.count >= 15
@@ -113,15 +113,15 @@ extension APIClient {
 
         let link: Link = try await send("POST", financialPath("/v1/estimates", id: revision.estimateId, suffix: "/action-tokens"),
                                         body: Mint(revisionNumber: revision.revisionNumber, contentHash: paper.contentHash))
-        try checkCustomerReviewRequest(generation)
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         let action = try await publicDocumentAction(token: link.token)
-        try checkCustomerReviewRequest(generation)
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         try revision.validate(action: action, paperHash: paper.contentHash)
         return (link.token, action)
     }
 
-    private func checkCustomerReviewRequest(_ generation: UUID) throws {
+    private func checkCustomerReviewRequest(_ generation: UUID, currentAuthority: @MainActor () -> Bool) throws {
         try Task.checkCancellation()
-        guard generation == requestGeneration else { throw CancellationError() }
+        guard generation == requestGeneration, currentAuthority() else { throw CancellationError() }
     }
 }

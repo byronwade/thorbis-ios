@@ -67,6 +67,28 @@ final class CustomerEstimateReviewTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
     }
 
+    func testLiveViewRevocationAfterAggregateStopsImmutableRevisionRead() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let api = client([.init(200, try json(aggregate), gate: gate), .init(200, try json(revision))])
+        var authorized = true
+        let task = Task { try await api.customerIssuedEstimateRevision(for: localEstimate(), currentAuthority: { authorized }) }
+        try await waitForRequests(1); authorized = false; gate.release()
+        await rejects { _ = try await task.value }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+    func testLiveApprovalRevocationBetweenPaperTokenAndPublicReadStopsNextRequest() async throws {
+        for gatedIndex in 0...2 {
+            let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+            var responses = [URLProtocolFixture.Reply(200, try json(paper)), .init(200, #"{"token":"customer-token"}"#), .init(200, try json(action))]
+            responses[gatedIndex] = .init(200, gatedIndex == 0 ? try json(paper) : gatedIndex == 1 ? #"{"token":"customer-token"}"# : try json(action), gate: gate)
+            let api = client(responses), review = try decodedRevision()
+            var authorized = true
+            let task = Task { try await api.openInPersonEstimateApproval(review, currentAuthority: { authorized }) }
+            try await waitForRequests(gatedIndex + 1); authorized = false; gate.release()
+            await rejects { _ = try await task.value }
+            XCTAssertEqual(URLProtocolFixture.recorded.count, gatedIndex + 1)
+        }
+    }
     func testMatchingPaperAndActionReturnTheExactSigningIdentity() async throws {
         let review = try decodedRevision()
         let api = client([.init(200, try json(paper)), .init(200, #"{"token":"customer-token"}"#), .init(200, try json(action))])

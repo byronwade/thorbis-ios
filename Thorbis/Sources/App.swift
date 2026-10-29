@@ -15,6 +15,7 @@ struct ThorbisApp: App {
     @StateObject private var menuLayout = MenuLayout()
     @StateObject private var whatsNew: WhatsNew
     @State private var publicEstimateToken: String?
+    @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
 
     init() {
         #if DEBUG
@@ -109,6 +110,7 @@ struct ThorbisApp: App {
 
     var body: some Scene {
         WindowGroup {
+            ZStack {
             Group {
                 #if DEBUG
                 if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
@@ -122,8 +124,15 @@ struct ThorbisApp: App {
                 appContent
                 #endif
             }
+            }
+            .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil }, set: { _ in })) {
+                if let model = estimateHandoff.active {
+                    JobEstimateProtectedOwner(model: model, presenter: estimateHandoff)
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.background)
+            .environmentObject(estimateHandoff)
             .environmentObject(api)
             .environmentObject(store)
             .environmentObject(session)

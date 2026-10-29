@@ -24,6 +24,7 @@ enum PaperPreview {
               ["onboard-signup", "onboard-company", "onboard-details", "onboard-setup"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
+    static var isJobEstimateHandoff: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-handoff") }
     static var isJobDocumentsPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents") }
     static var isJobDocumentsMoneyPreview: Bool {
         isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents-money")
@@ -38,6 +39,7 @@ enum PaperPreview {
               ["approved", "denied"].contains(args[index + 1]) else { return nil }
         let approved = args[index + 1] == "approved"
         return { _ in
+            if isJobEstimateHandoff { return approved && JobEstimateHandoffPreview.shared.authenticate() }
             if approved, args.contains("--paper-preview-job-invoice-foreign-after-auth") {
                 PaperPreviewProtocol.markOwnerAuthenticated()
             }
@@ -296,6 +298,11 @@ enum PaperPreview {
     static func defaults() -> UserDefaults {
         UserDefaults(suiteName: "thorbis.paper-preview.\(UUID().uuidString)")!
     }
+    static func handoffStorageTransport() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PaperPreviewProtocol.self]
+        return URLSession(configuration: configuration)
+    }
     static func transport() -> URLSession {
         PaperPreviewProtocol.resetScenario()
         let configuration = URLSessionConfiguration.ephemeral
@@ -307,7 +314,7 @@ enum PaperPreview {
         return URLSession(configuration: configuration)
     }
     @MainActor static var banner: some View {
-        Text("DESIGN PREVIEW · SAMPLE DATA · READ ONLY")
+        Text(isJobEstimateHandoff ? "LOCAL TEST · SAMPLE APPROVALS ONLY" : "DESIGN PREVIEW · SAMPLE DATA · READ ONLY")
             .font(.system(size: 9, weight: .semibold)).tracking(0.4)
             .foregroundStyle(Color.orange).frame(maxWidth: .infinity).padding(.vertical, 3)
             .background(Color.black)
@@ -440,6 +447,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     private static let scenario = Scenario()
     static func resetScenario() {
+        if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
         scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
@@ -471,6 +479,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if PaperPreview.isJobEstimateHandoff, let response = JobEstimateHandoffPreview.shared.response(request) {
+            if let error = response.error { client?.urlProtocol(self, didFailWithError: error); return }
+            guard let url = request.url, let http = HTTPURLResponse(url: url, statusCode: response.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type":"application/json"]) else { return }
+            client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
+            if let body = try? JSONSerialization.data(withJSONObject: response.payload, options: [.sortedKeys, .fragmentsAllowed]) { client?.urlProtocol(self, didLoad: body) }
+            client?.urlProtocolDidFinishLoading(self); return
+        }
         if PaperPreview.isSavedWorkPreview, !["GET", "HEAD"].contains(request.httpMethod ?? "GET") {
             Self.scenario.lock.withLock { Self.scenario.savedWorkMutationCount += 1 }
         }
