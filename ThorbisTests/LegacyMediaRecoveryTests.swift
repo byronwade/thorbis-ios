@@ -157,4 +157,108 @@ final class LegacyMediaRecoveryTests: XCTestCase {
             XCTAssertEqual(try relaunched.read(candidate.media), Data("hello".utf8))
         }
     }
+    private func storedAsset() -> String {
+        return #"{"id":"22222222-2222-4222-8222-222222222222","organizationId":"44444444-4444-4444-8444-444444444444","jobId":"11111111-1111-4111-8111-111111111111","uploaderUserId":"actor-a","kind":"photo","mime":"image/jpeg","sizeBytes":5,"originalFilename":"before-original.jpg","contentHash":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","storageKey":"tenant/jobs/work.jpg","uploadState":"stored","tags":["Before"],"archived":false,"createdAt":"2026-10-26T00:00:00Z","updatedAt":"2026-10-26T00:00:00Z"}"#
+    }
+
+    private func transferReplies() -> [URLProtocolFixture.Reply] {
+        let asset = storedAsset()
+        let pending = asset.replacingOccurrences(of: "\"stored\"", with: "\"pending\"")
+        let registration = #"{"asset":\#(pending),"uploadTarget":{"url":"https://storage.example/upload","method":"PUT","expiresAt":"2030-12-31T00:00:00Z","headers":{}}}"#
+        return [.init(201, registration), .init(200, "{}"), .init(200, asset)]
+    }
+
+    func testConfirmedUploadFinishesInterruptedLegacyCleanupBeforeRemovingProof() async throws {
+        for remaining in ["json", "jpg"] {
+            try seed()
+            let (queue, api) = setup([.init(200, jobBody()), .init(200, jobBody())])
+            let destination = try await queue.prepareLegacyRecovery(api: api, jobID: job, canUpload: { true })
+            try await queue.recoverLegacy(try XCTUnwrap(destination.candidates.first), destination: destination, api: api, canUpload: { true })
+            try (remaining == "json" ? metadata() : Data("hello".utf8)).write(to: legacy.appendingPathComponent("\(id).\(remaining)"))
+            let relaunched = PendingMediaStore(directory: root); relaunched.bind(scope)
+            let network = URLProtocolFixture.session(transferReplies())
+            await relaunched.drain(api: APIClient(session: network, baseURL: scope.origin), canUpload: { true }, storageSession: network)
+            XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+            XCTAssertTrue(relaunched.items.isEmpty)
+            let afterUpload = PendingMediaStore(directory: root); afterUpload.bind(scope)
+            XCTAssertEqual(afterUpload.legacyCount, 0, "Confirmed upload must not orphan the \(remaining) remnant")
+            XCTAssertEqual(afterUpload.totalPendingCount, 0)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.appendingPathComponent("\(id).\(remaining)").path))
+            try? FileManager.default.removeItem(at: legacy)
+        }
+    }
+
+    func testChangedLegacyRemnantRetainsBothOriginalAndScopedRecoveryProof() async throws {
+        try seed()
+        let (queue, api) = setup([.init(200, jobBody()), .init(200, jobBody())])
+        let destination = try await queue.prepareLegacyRecovery(api: api, jobID: job, canUpload: { true })
+        let candidate = try XCTUnwrap(destination.candidates.first)
+        try await queue.recoverLegacy(candidate, destination: destination, api: api, canUpload: { true })
+        try Data("different".utf8).write(to: legacy.appendingPathComponent("\(id).jpg"))
+        let network = URLProtocolFixture.session(transferReplies())
+        await queue.drain(api: APIClient(session: network, baseURL: scope.origin), canUpload: { true }, storageSession: network)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertEqual(queue.items.map(\.id), [id])
+        XCTAssertEqual(try queue.read(candidate.media), Data("hello".utf8))
+        XCTAssertNotNil(queue.errors[id])
+        XCTAssertEqual(try Data(contentsOf: legacy.appendingPathComponent("\(id).jpg")), Data("different".utf8))
+        let relaunched = PendingMediaStore(directory: root); relaunched.bind(scope)
+        XCTAssertEqual(relaunched.items.map(\.id), [id]); XCTAssertEqual(relaunched.legacyCount, 1)
+    }
+
+    func testInaccessibleLegacyParentRetainsProofUntilStoredReplayCanFinishCleanup() async throws {
+        try seed()
+        let (queue, api) = setup([.init(200, jobBody()), .init(200, jobBody())])
+        let destination = try await queue.prepareLegacyRecovery(api: api, jobID: job, canUpload: { true })
+        let candidate = try XCTUnwrap(destination.candidates.first)
+        try await queue.recoverLegacy(candidate, destination: destination, api: api, canUpload: { true })
+        let originalMetadata = try metadata()
+        try originalMetadata.write(to: legacy.appendingPathComponent("\(id).json"))
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: legacy.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: legacy.path) }
+        let network = URLProtocolFixture.session(transferReplies())
+        await queue.drain(api: APIClient(session: network, baseURL: scope.origin), canUpload: { true }, storageSession: network)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertEqual(queue.items.map(\.id), [id]); XCTAssertNotNil(queue.errors[id])
+        if !queue.items.isEmpty { XCTAssertEqual(try queue.read(candidate.media), Data("hello".utf8)) }
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: legacy.path)
+        let relaunched = PendingMediaStore(directory: root); relaunched.bind(scope)
+        XCTAssertEqual(relaunched.items.map(\.id), [id]); XCTAssertEqual(relaunched.legacyCount, 1)
+        XCTAssertEqual(try Data(contentsOf: legacy.appendingPathComponent("\(id).json")), originalMetadata)
+        let stored = #"{"asset":\#(storedAsset())}"#
+        let retry = URLProtocolFixture.session([.init(200, stored)])
+        await relaunched.drain(api: APIClient(session: retry, baseURL: scope.origin), canUpload: { true }, storageSession: retry)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "Stored replay must not PUT or confirm again")
+        if let request = URLProtocolFixture.recorded.first, let body = request.body {
+            XCTAssertEqual(request.method, "POST")
+            let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(sent["clientAssetId"] as? String, "33333333-3333-4333-8333-333333333333")
+            XCTAssertEqual(sent["capturedAt"] as? String, "2023-11-14T22:13:20Z")
+        }
+        XCTAssertTrue(relaunched.items.isEmpty); XCTAssertEqual(relaunched.legacyCount, 0)
+        XCTAssertEqual(relaunched.totalPendingCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.appendingPathComponent("\(id).json").path))
+    }
+
+    func testLegacyParentChangedToFileIsNotTreatedAsMissing() async throws {
+        try seed()
+        let (queue, api) = setup([.init(200, jobBody()), .init(200, jobBody())])
+        let destination = try await queue.prepareLegacyRecovery(api: api, jobID: job, canUpload: { true })
+        let candidate = try XCTUnwrap(destination.candidates.first)
+        try await queue.recoverLegacy(candidate, destination: destination, api: api, canUpload: { true })
+        let originalMetadata = try metadata()
+        try originalMetadata.write(to: legacy.appendingPathComponent("\(id).json"))
+        let retained = root.appendingPathComponent("retained-originals")
+        try FileManager.default.moveItem(at: legacy, to: retained)
+        try Data("unexpected parent file".utf8).write(to: legacy)
+        let network = URLProtocolFixture.session(transferReplies())
+        await queue.drain(api: APIClient(session: network, baseURL: scope.origin), canUpload: { true }, storageSession: network)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertEqual(queue.items.map(\.id), [id]); XCTAssertNotNil(queue.errors[id])
+        if !queue.items.isEmpty { XCTAssertEqual(try queue.read(candidate.media), Data("hello".utf8)) }
+        XCTAssertEqual(try Data(contentsOf: legacy), Data("unexpected parent file".utf8))
+        XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("\(id).json")), originalMetadata)
+    }
+
 }

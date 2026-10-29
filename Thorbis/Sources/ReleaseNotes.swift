@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-29-photo-recovery-cleanup",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "arrow.clockwise", title: "Finish older photo recovery",
+                      detail: "Completed uploads clean up matching older files without leaving an unnecessary recovery warning."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-durable-job-media",
             date: "2026-10-29",
             highlights: [

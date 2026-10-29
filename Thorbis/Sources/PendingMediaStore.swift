@@ -249,6 +249,8 @@ final class PendingMediaStore: ObservableObject {
                     kind: item.kind, mime: item.mime, originalFilename: item.filename, data: data, tags: item.tags,
                     capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID, currentAuthority: current)
                 guard current() else { return }
+                try finishRecoveredSources(item, data: data, owner: owner, current: current)
+                guard current() else { return }
                 try FileManager.default.removeItem(at: unit(item, scope: owner))
                 errors[item.id] = nil
                 reload()
@@ -280,6 +282,45 @@ final class PendingMediaStore: ObservableObject {
     private struct RecoveryReceipt: Codable {
         let media: PendingMedia
         let hash: String
+    }
+    /// Keep adoption proof until every matching older source has been reconciled.
+    /// A changed or inaccessible source retains the scoped copy and its receipt.
+    private func finishRecoveredSources(_ item: PendingMedia, data: Data, owner: PendingMediaScope, current: () -> Bool) throws {
+        let receiptURL = try unit(item, scope: owner).appendingPathComponent("recovery.json")
+        guard try recoveryFileExists(receiptURL) else { return }
+        let receipt = try JSONDecoder().decode(RecoveryReceipt.self, from: Data(contentsOf: receiptURL))
+        guard receipt.media == item, receipt.hash == Self.hash(data) else { throw StorageError.recoveryConflict }
+        let metadata = try legacyURL(item.id, extension: "json")
+        let payload = try legacyURL(item.id, extension: "jpg")
+        let sources = try [payload, metadata].filter { try recoveryFileExists($0) }
+        if sources.contains(metadata) {
+            guard try legacyRecord(item.id).media == item else { throw StorageError.recoveryConflict }
+        }
+        if sources.contains(payload) {
+            let size = try payload.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard (1...8 * 1024 * 1024).contains(size), try Data(contentsOf: payload) == data else { throw StorageError.recoveryConflict }
+        }
+        for file in sources {
+            guard current() else { throw CancellationError() }
+            try FileManager.default.removeItem(at: file)
+        }
+    }
+    private func recoveryFileExists(_ url: URL) throws -> Bool {
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            return true
+        } catch {
+            let failure = error as NSError
+            let underlying = failure.userInfo[NSUnderlyingErrorKey] as? NSError
+            let cause = underlying ?? failure
+            if cause.domain == NSPOSIXErrorDomain {
+                if cause.code == Int(POSIXErrorCode.ENOENT.rawValue) { return false }
+                throw error
+            }
+            if underlying == nil, failure.domain == NSCocoaErrorDomain,
+               [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains(failure.code) { return false }
+            throw error
+        }
     }
     private func legacyURL(_ id: String, extension ext: String) throws -> URL {
         guard UUID(uuidString: id) != nil else { throw StorageError.invalid }
