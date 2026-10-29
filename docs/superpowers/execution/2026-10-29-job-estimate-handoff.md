@@ -1,6 +1,6 @@
 # Job estimate handoff — implementation and review
 
-Runtime source: `3f5d70e8b580c00ab150a8d4759abea48895a06b`, draft [PR83](https://github.com/byronwade/thorbis-ios/pull/83), stacked on82. [Design](../specs/2026-10-29-job-estimate-handoff-design.md), [plan](../plans/2026-10-29-job-estimate-handoff.md), [full execution evidence](../../design/evidence/job-estimate-handoff/execution.md). TestFlight79 distribution is tracked separately; archive success is not tester availability.
+Runtime source: `3f5d70e8b580c00ab150a8d4759abea48895a06b`, draft [PR83](https://github.com/byronwade/thorbis-ios/pull/83), stacked on82. [Design](../specs/2026-10-29-job-estimate-handoff-design.md), [plan](../plans/2026-10-29-job-estimate-handoff.md), [full execution evidence](../../design/evidence/job-estimate-handoff/execution.md). [TestFlight79](../../release/build-79.md) is processed, assigned to Internal Testers (2), with test notes Saved.
 
 The technician presents every verified estimate for the current job from one primary action; Add estimate and individual actions remain reachable. Customers independently select estimates, review exact terms/discounts and sign each within one protected handoff. Already-approved estimates stay visible; drafts never auto-send. Existing invoice/payment/document routes remain.
 

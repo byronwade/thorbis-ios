@@ -3,7 +3,17 @@
   "runtimeSource": "3f5d70e8b580c00ab150a8d4759abea48895a06b",
   "archive": "succeeded",
   "upload": "succeeded",
-  "testFlight": "dashboard verification pending",
+  "testFlight": "processed and assigned to Internal Testers",
   "signedAudit": "passed",
-  "uploadTime": "2026-10-29 10:42:46 EDT"
+  "uploadTime": "2026-10-29 10:42:46 EDT",
+  "buildID": "f407caaf-69ee-469f-b416-2d341599c165",
+  "buildURL": "https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/f407caaf-69ee-469f-b416-2d341599c165",
+  "internalTesters": 2,
+  "whatToTest": "Saved",
+  "verifiedAt": "2026-10-29T14:59:07.325998+00:00",
+  "confirmationSHA256": "efd5ec51349fa363ee15ad6eeef62e02c9635b06ab6b06c4c5fabb72f13c672f",
+  "appleUploadWarnings": [
+    "90683: NSBluetoothAlwaysUsageDescription missing",
+    "90683: NSLocationWhenInUseUsageDescription missing"
+  ]
 }

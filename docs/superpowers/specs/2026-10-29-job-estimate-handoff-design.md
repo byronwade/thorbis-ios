@@ -1,6 +1,6 @@
 # Job estimate handoff design
 
-Status: implemented and natively qualified on `3f5d70e`; TestFlight build79 archive/upload pending.
+Status: implemented and natively qualified on `3f5d70e`; delivered in [TestFlight79](../../release/build-79.md).
 Base: c42444c2b1f5667290f64c6988206c56100f8bfb, branch codex/job-estimate-handoff.
 
 ## Outcome
