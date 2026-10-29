@@ -980,6 +980,10 @@ extension APIClient {
     }
 
     func fieldJobs() async throws -> [JobRecord] { try await allFieldPages("/v1/jobs") }
+    func fieldJobs(customerID: String) async throws -> [JobRecord] {
+        guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
+        return try await allFieldPages("/v1/jobs", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
+    }
     func fieldJob(_ id: String) async throws -> JobRecord { try await send("GET", fieldPath("/v1/jobs", id: id)) }
     func createFieldJob(_ request: FieldJobCreate) async throws -> JobRecord {
         try await send("POST", "/v1/jobs", body: request)
@@ -1062,6 +1066,10 @@ extension APIClient {
     }
 
     func fieldEstimates() async throws -> [EstimateRecord] { try await allFieldPages("/v1/estimates") }
+    func fieldEstimates(customerID: String) async throws -> [EstimateRecord] {
+        guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
+        return try await allFieldPages("/v1/estimates", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
+    }
     func fieldEstimate(_ id: String) async throws -> EstimateRecord { try await send("GET", fieldPath("/v1/estimates", id: id)) }
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
@@ -1077,6 +1085,10 @@ extension APIClient {
     }
 
     func fieldInvoices() async throws -> [InvoiceRecord] { try await allFieldPages("/v1/invoices") }
+    func fieldInvoices(customerID: String) async throws -> [InvoiceRecord] {
+        guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
+        return try await allFieldPages("/v1/invoices", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
+    }
     func fieldInvoice(_ id: String) async throws -> InvoiceRecord { try await send("GET", fieldPath("/v1/invoices", id: id)) }
     /// A job's invoices, drafts included (`GET /v1/jobs/{id}/invoices`). Unlike the invoice list this
     /// answers for a technician through the assigned job, so a fresh device still sees the job's paper.
