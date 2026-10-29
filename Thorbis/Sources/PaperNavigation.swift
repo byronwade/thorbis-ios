@@ -121,7 +121,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $previewInvoiceDetail) {
             NavigationStack {
-                InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID)
+                InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations()
             }
         }
         .sheet(isPresented: $previewEstimateRevision) {
@@ -314,7 +314,9 @@ struct RootView: View {
             NavigationStack { InvoiceLineEditorView(invoice: PaperPreview.invoice) { _ in } }
                 .presentationDetents([.large])
         }
-        .sheet(isPresented: $previewInvoiceDetail) { NavigationStack { InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID) } }
+        .sheet(isPresented: $previewInvoiceDetail) {
+            NavigationStack { InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations() }
+        }
         .sheet(isPresented: $previewEstimateRevision) {
             EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
                 .environmentObject(api).environmentObject(session).environmentObject(store)

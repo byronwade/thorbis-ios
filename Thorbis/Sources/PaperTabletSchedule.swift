@@ -47,6 +47,7 @@ struct PaperTabletSchedule: View {
                 .background(Theme.background)
                 .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
                 .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+                .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
