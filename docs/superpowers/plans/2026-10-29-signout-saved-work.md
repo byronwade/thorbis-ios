@@ -4,7 +4,7 @@ Status: **blocked; no runtime fix implemented or qualified**. Do not release the
 
 ## Observed failure
 
-`SessionController.signOut()` awaits `onWillUnbindDevice` and then calls `onSignedOut` to delete the outbox and media. A note or photo saved while that await is in progress was not in the confirmation the user accepted, yet is deleted. The uncommitted `SessionControllerTests.testSignOutDoesNotEraseNewSavedWorkWhileDeviceUnbindIsAwaiting` reproduces both losses using real temporary files. `/private/tmp/thorbis-signout-race-red.log` records four expected assertions; it is intentionally failing.
+`SessionController.signOut()` awaits `onWillUnbindDevice` and then calls `onSignedOut` to delete the outbox and media. A note or photo saved while that await is in progress was not in the confirmation the user accepted, yet is deleted. `SessionControllerTests.testSignOutDoesNotEraseNewSavedWorkWhileDeviceUnbindIsAwaiting` reproduces both losses using real temporary files. `/private/tmp/thorbis-signout-race-red.log` records four expected assertions; the test is intentionally failing in this draft branch.
 
 ## Required behavior
 
