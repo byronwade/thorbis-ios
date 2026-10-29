@@ -189,11 +189,8 @@ private struct InboxLocalComposerView: View {
         NavigationStack {
             Form {
                 Section("Message") {
-                    Picker("Channel", selection: $composer.channel) {
-                        ForEach(InboxLocalMessage.Channel.allCases, id: \.self) { channel in
-                            Text(channel.rawValue).tag(channel)
-                        }
-                    }
+                    ThorbisSelect(options: InboxLocalMessage.Channel.allCases.map { ($0, $0.rawValue) },
+                                  selection: $composer.channel, label: "Channel")
                     TextField(composer.channel == .sms ? "Phone number" : "Email address", text: $composer.recipient)
                         .textInputAutocapitalization(.never)
                     if composer.channel == .email { TextField("Subject", text: $composer.subject) }

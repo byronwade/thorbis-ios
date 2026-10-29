@@ -99,7 +99,9 @@ struct EstimateRevisionEditorView: View {
                     PriceBookResultsList(
                         catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
                             query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                        quantityInCurrentDraft: { targetLines.quantity(ofPriceBookItem: $0) },
+                        quantityInCurrentDraft: { id in
+                            (target.group.map { targetLines.lines(in: $0) } ?? targetLines).quantity(ofPriceBookItem: id)
+                        },
                         secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom,
                         retry: { Task { await refreshCatalog(force: true) } }
                     )
@@ -164,6 +166,9 @@ struct EstimateRevisionEditorView: View {
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
                     }
+                    if searching {
+                        PaperActionBar(title: reviewTitle, symbol: "list.bullet", busy: busy) { finishSearch() }
+                    }
                 }
                 .background(Theme.background)
             }
@@ -172,7 +177,7 @@ struct EstimateRevisionEditorView: View {
                     if let removed {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
                     }
-                    if focus != .search {
+                    if !searching {
                         if editor.options.isEmpty { EstimateBuilderTotal(total: editor.lines.subtotal()) }
                         PaperActionBar(title: saveTitle, symbol: "doc.badge.plus", busy: busy, disabled: !canSave) {
                             Task { await save() }
@@ -302,6 +307,11 @@ struct EstimateRevisionEditorView: View {
         let verb = editingDraft ? "Save draft" : "Save revised draft"
         guard editor.options.isEmpty, let total = editor.lines.subtotal() else { return verb }
         return "\(verb) · \(money(total, currency: "USD"))"
+    }
+
+    private var reviewTitle: String {
+        let count = editor.lines.count + editor.options.reduce(0) { $0 + $1.lines.count }
+        return "Review estimate · \(count) \(count == 1 ? "item" : "items")"
     }
 
     private func refreshCatalog(force: Bool = false) async {

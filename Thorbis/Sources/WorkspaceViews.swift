@@ -518,9 +518,8 @@ private struct WorkspacePriceBookDetailView: View {
                 PriceBookItemEditor(api: api, existing: detail) { Task { await load() } }
             }
         }
-        .confirmationDialog("Remove this item from the price book?", isPresented: $confirmArchive, titleVisibility: .visible) {
-            Button("Remove", role: .destructive) { Task { await archive() } }
-        }
+        .thorbisConfirm("Remove this item from the price book?", isPresented: $confirmArchive,
+                        actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await archive() } }])
         .task { await load() }
     }
 
@@ -566,13 +565,10 @@ struct PriceBookItemEditor: View {
                     TextField("Unit (each, hour, foot…)", text: $content.unit)
                 }
                 Section {
-                    Picker("Kind", selection: $content.kind) {
-                        ForEach(PriceBookContent.kinds, id: \.self) { Text($0.capitalized).tag($0) }
-                    }
-                    Picker("Tax", selection: $content.taxClassification) {
-                        Text("Taxable").tag("taxable")
-                        Text("Not taxable").tag("non_taxable")
-                    }
+                    ThorbisSelect(options: PriceBookContent.kinds.map { ($0, $0.capitalized) },
+                                  selection: $content.kind, label: "Kind")
+                    ThorbisSelect(options: [("taxable", "Taxable"), ("non_taxable", "Not taxable")],
+                                  selection: $content.taxClassification, label: "Tax")
                 }
                 if let error { Section { ListErrorRow(message: error) } }
             }
