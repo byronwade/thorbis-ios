@@ -90,6 +90,23 @@ final class FieldAPITests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.path, "/v1/jobs/\(jobID)")
     }
 
+    func testJobActivityReadsJobAndNotesWithoutUsingCachedResponses() async throws {
+        let job = #"{"id":"00000000-0000-4000-8000-000000000001","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","title":"Repair","status":"scheduled","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, job), .init(200, #"{"items":[]}"#)]), baseURL: "https://app.thorbis.com")
+
+        let loadedJob = try await client.fieldJob(jobID, requireFresh: true)
+        let loadedNotes = try await client.fieldNotes(jobID, requireFresh: true)
+
+        XCTAssertEqual(loadedJob.id, jobID)
+        XCTAssertTrue(loadedNotes.isEmpty)
+        let requests = URLProtocolFixture.recorded
+        XCTAssertEqual(requests.map { $0.url?.path }, ["/v1/jobs/\(jobID)", "/v1/jobs/\(jobID)/notes"])
+        for request in requests {
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+            XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+        }
+    }
+
     func testFieldJobListPaginatesAndRefusesRepeatedCursor() async throws {
         let first = #"{"items":[{"id":"00000000-0000-4000-8000-000000000001","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","title":"First","status":"scheduled","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}],"nextCursor":"same"}"#
         let second = #"{"items":[],"nextCursor":"same"}"#

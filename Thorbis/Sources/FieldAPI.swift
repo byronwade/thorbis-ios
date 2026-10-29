@@ -1071,8 +1071,8 @@ extension APIClient {
         return try fieldPath("\(customerPath)/locations", id: locationID)
     }
 
-    func fieldNotes(_ jobID: String) async throws -> [JobNoteRecord] {
-        let page: FieldPage<JobNoteRecord> = try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/notes"))
+    func fieldNotes(_ jobID: String, requireFresh: Bool = false) async throws -> [JobNoteRecord] {
+        let page: FieldPage<JobNoteRecord> = try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/notes"), requireFresh: requireFresh)
         return page.items
     }
 

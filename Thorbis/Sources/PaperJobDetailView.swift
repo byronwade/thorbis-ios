@@ -780,12 +780,12 @@ struct JobDetailView: View {
         activityRequestedScope = scope
         activityError = nil
         do {
-            let verified = try await api.fieldJob(jobId)
+            let verified = try await api.fieldJob(jobId, requireFresh: true)
             guard activityRequest == request, jobActivityScope == scope, !Task.isCancelled else { return }
             guard verified.id == jobId, verified.organizationId == scope.organizationID else {
                 throw Problem(title: "Activity unavailable", status: nil, detail: "The job could not be verified.")
             }
-            let loadedNotes = try await api.fieldNotes(jobId)
+            let loadedNotes = try await api.fieldNotes(jobId, requireFresh: true)
             guard activityRequest == request, jobActivityScope == scope, !Task.isCancelled else { return }
             guard loadedNotes.allSatisfy({ $0.jobId == jobId && $0.organizationId == scope.organizationID }) else {
                 throw Problem(title: "Activity unavailable", status: nil, detail: "Some notes could not be verified.")
