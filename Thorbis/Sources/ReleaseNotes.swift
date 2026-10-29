@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-10-29-menu-room",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Search sits at the top of the menu",
+                      detail: "Search has its own row under the company, and the account opens Settings with room to tap."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-28-job-hours",
             date: "2026-10-28",
             highlights: [
