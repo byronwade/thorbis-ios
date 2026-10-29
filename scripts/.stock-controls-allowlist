@@ -1,16 +1,12 @@
 # Files still using stock SwiftUI controls, pending migration to the design system.
 # Shrink this list in each sweep PR; when empty, the guard is absolute.
 # (Updated: PR1 — design system landed; sweep migrates these next.)
-Thorbis/Sources/InvoicePaymentCollection.swift
 Thorbis/Sources/JobOperationsViews.swift
 Thorbis/Sources/Screens.swift
 Thorbis/Sources/PaperJobDetailView.swift
 Thorbis/Sources/SettingsView.swift
-Thorbis/Sources/PaperComponents.swift
 Thorbis/Sources/MemberAccess.swift
 Thorbis/Sources/MediaView.swift
-Thorbis/Sources/InvoiceLineEditorView.swift
-Thorbis/Sources/FinancialViews.swift
 Thorbis/Sources/TeamViews.swift
 Thorbis/Sources/Onboarding.swift
 Thorbis/Sources/NewEstimateView.swift

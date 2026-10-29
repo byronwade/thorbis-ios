@@ -1,5 +1,24 @@
 import SwiftUI
 
+extension DynamicTypeSize {
+    /// A rough multiplier for fitted-height sheets so they grow (and don't clip) at large text.
+    /// Biased to over-estimate — extra height is harmless dim space; too little clips rows.
+    var sheetHeightScale: CGFloat {
+        switch self {
+        case .xSmall, .small, .medium, .large: 1.0
+        case .xLarge: 1.1
+        case .xxLarge: 1.2
+        case .xxxLarge: 1.35
+        case .accessibility1: 1.6
+        case .accessibility2: 1.9
+        case .accessibility3: 2.2
+        case .accessibility4: 2.5
+        case .accessibility5: 2.8
+        @unknown default: 1.35
+        }
+    }
+}
+
 // MARK: - Model
 
 /// One row in a `ThorbisMenu`.
@@ -60,12 +79,21 @@ struct ThorbisMenu<Label: View>: View {
     @State private var model = ThorbisMenuModel()
 
     var body: some View {
+        Group {
+            if let accessibilityLabel {
+                button.accessibilityLabel(accessibilityLabel)
+            } else {
+                button
+            }
+        }
+        .sheet(isPresented: $model.isPresented) {
+            ThorbisMenuCard(items: items, title: title) { model.select($0) }
+        }
+    }
+
+    private var button: some View {
         Button { model.isPresented = true } label: { label() }
             .buttonStyle(PressStyle())
-            .accessibilityLabel(accessibilityLabel ?? "")
-            .sheet(isPresented: $model.isPresented) {
-                ThorbisMenuCard(items: items, title: title) { model.select($0) }
-            }
     }
 }
 
@@ -80,7 +108,9 @@ struct ThorbisMenuCard: View {
     private var estimatedHeight: CGFloat {
         let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? 50 : 62) }
         let header: CGFloat = title == nil ? 0 : 32
-        return rows + header + 40 // card padding + bottom inset
+        // Bias up with Dynamic Type so a fitted-height sheet never clips at large text; over-
+        // estimating only leaves dim space above the bottom-anchored card.
+        return (rows + header + 40) * dynamicTypeSize.sheetHeightScale
     }
 
     private var detents: Set<PresentationDetent> {

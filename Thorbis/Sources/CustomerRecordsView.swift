@@ -5,9 +5,15 @@ import UIKit
 /// each list still grouped under the job it came from.
 struct CustomerRecordsView: View {
     let compilation: CustomerJobCompilation
+    let customerID: String
     var retryMedia: () async -> Void = {}
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var openedLegacy: LegacyCustomerPhoto?
+
+    /// The record a Records-tab activity row opens. A payment with no invoice id stays closed.
+    static func activityDestination(_ entry: CustomerHistoryEntry, customerID: String) -> ActivityDestination? {
+        ActivityDestinationMapping.customerHistory(entry, customerID: customerID)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -195,15 +201,17 @@ struct CustomerRecordsView: View {
             ForEach(compilation.activity, id: \.jobID) { group in
                 jobHeading(group.title, jobID: group.jobID, count: group.count)
                 ForEach(group.items) { entry in
-                    Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
+                        Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                    }
                 }
             }
             if !compilation.accountActivity.isEmpty {
                 Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
                 ForEach(compilation.accountActivity) { entry in
-                    Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
+                        Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                    }
                 }
             }
         }

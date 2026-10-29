@@ -2,6 +2,14 @@ import XCTest
 
 @MainActor
 final class EstimateCatalogReviewUITests: XCTestCase {
+    func testCustomerMenuKeepsItsVisibleAccessibilityLabelWithoutOverride() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate"]
+        app.launch()
+        let customer = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Danielle Marlowe")).firstMatch
+        XCTAssertTrue(customer.waitForExistence(timeout: 30), "The customer menu must retain its visible label for accessibility")
+    }
+
     func testNewEstimateCanReviewAddedItemsWithoutSavingFromSearch() {
         continueAfterFailure = false
         let app = XCUIApplication()

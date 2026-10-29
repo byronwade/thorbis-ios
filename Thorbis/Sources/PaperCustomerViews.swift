@@ -709,7 +709,7 @@ struct CustomerDetailView: View {
                 if visible == nil && visibleError == nil {
                     SkeletonRows(count: 4, inset: 0)
                 } else if let visible {
-                    CustomerRecordsView(compilation: visible) { await loadRecords() }
+                    CustomerRecordsView(compilation: visible, customerID: customer.id) { await loadRecords() }
                         .accessibilityIdentifier("customer-records")
                 }
             }

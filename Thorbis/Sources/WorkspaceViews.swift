@@ -457,7 +457,7 @@ struct WorkspacePriceBookView: View {
             items = page.items
             nextCursor = page.nextCursor
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { self.error = PriceBookLoadError.message(for: error) }
     }
 
     private func loadMore() async {
@@ -472,7 +472,7 @@ struct WorkspacePriceBookView: View {
             items.append(contentsOf: page.items)
             nextCursor = page.nextCursor
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { self.error = PriceBookLoadError.message(for: error) }
     }
 }
 
