@@ -116,6 +116,7 @@ struct ThorbisConfirmCard: View {
     let actions: [ThorbisConfirmAction]
     let onChoose: (ThorbisConfirmAction) -> Void
     let onCancel: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(spacing: 14) {
@@ -134,7 +135,8 @@ struct ThorbisConfirmCard: View {
                 ForEach(actions) { action in
                     Button { onChoose(action) } label: {
                         Text(action.title).font(Theme.font(17, weight: .medium))
-                            .frame(maxWidth: .infinity).frame(height: 50)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity).frame(minHeight: 50).padding(.vertical, 6)
                             .foregroundStyle(Theme.onInk)
                             .background(action.role == .destructive ? Theme.destructive : Theme.ink,
                                         in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
@@ -143,7 +145,7 @@ struct ThorbisConfirmCard: View {
                 }
                 Button(action: onCancel) {
                     Text("Cancel").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity).frame(height: 50)
+                        .frame(maxWidth: .infinity).frame(minHeight: 50)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 }
                 .buttonStyle(PressStyle())
@@ -157,7 +159,9 @@ struct ThorbisConfirmCard: View {
         .frame(maxWidth: 460)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, 10)
-        .presentationDetents([.height(estimatedHeight)])
+        // Fitted height, biased up for Dynamic Type; `.large` is the escape hatch so a long
+        // title/message at an AX size can't clip the buttons.
+        .presentationDetents([.height(estimatedHeight), .large])
         .presentationBackground(.clear)
         .presentationDragIndicator(.hidden)
     }
@@ -165,7 +169,7 @@ struct ThorbisConfirmCard: View {
     private var estimatedHeight: CGFloat {
         let header: CGFloat = message == nil ? 52 : 86
         let buttons = CGFloat(actions.count + 1) * 58
-        return header + buttons + 44
+        return (header + buttons + 44) * typeSize.sheetHeightScale
     }
 }
 
