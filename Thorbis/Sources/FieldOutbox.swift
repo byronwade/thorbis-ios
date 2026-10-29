@@ -2,6 +2,40 @@ import Foundation
 import Darwin
 import CryptoKit
 
+@MainActor
+final class SavedWorkMutationGate {
+    /// In-process invalidation only. This is not a filesystem lock or permission
+    /// to delete; an external inventory proof and coordinated commit are required.
+    static let shared = SavedWorkMutationGate()
+    private var revision = UUID()
+    private var reviews: [UUID: UUID] = [:]
+    private var checking = false
+    private var rejectedMutation = false
+    func beginReview() -> UUID {
+        let token = UUID()
+        reviews[token] = revision
+        return token
+    }
+    @discardableResult
+    func recordMutation() -> Bool {
+        revision = UUID(); reviews.removeAll()
+        guard !checking else { rejectedMutation = true; return false }
+        return true
+    }
+    func cancelReview(_ token: UUID) { reviews[token] = nil }
+    func performIfCurrent(_ token: UUID, _ operation: () -> Void) -> Bool {
+        guard !checking else { rejectedMutation = true; return false }
+        guard let expected = reviews.removeValue(forKey: token), expected == revision else { return false }
+        checking = true
+        rejectedMutation = false
+        operation()
+        checking = false
+        let succeeded = !rejectedMutation
+        _ = recordMutation()
+        return succeeded
+    }
+}
+
 enum SavedWorkInventory {
     enum Failure: Error { case inaccessible, changed, unsupported }
     private struct Observation {
@@ -299,6 +333,7 @@ final class FieldOutbox: ObservableObject {
     }
 
     private let directory: URL
+    private let mutationGate: SavedWorkMutationGate
     private var identity: (actorID: String, organizationID: String)?
     /// Do not replace an existing queue that could not be read or decoded.
     private var queueReadable = false
@@ -320,9 +355,10 @@ final class FieldOutbox: ObservableObject {
     /// Arrived) only offers steps the server has actually allowed from that status.
     private(set) var learnedTransitions: [String: [String]] = [:]
 
-    init(directory: URL? = nil, defaults: UserDefaults = .standard) {
+    init(directory: URL? = nil, defaults: UserDefaults = .standard, mutationGate: SavedWorkMutationGate = .shared) {
         let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         self.directory = base.appendingPathComponent("Outbox", isDirectory: true)
+        self.mutationGate = mutationGate
         self.defaults = defaults
         learnedTransitions = (defaults.dictionary(forKey: "thorbis.learned-transitions") as? [String: [String]]) ?? [:]
         if let saved = defaults.string(forKey: "thorbis.device-id"), UUID(uuidString: saved) != nil {
@@ -363,6 +399,9 @@ final class FieldOutbox: ObservableObject {
 
     /// Bound to the verified actor and workspace; another identity never sees these changes.
     func bind(actorID: String?, organizationID: String?) {
+        if let actorID, let organizationID,
+           identity?.actorID == actorID, identity?.organizationID == organizationID, queueReadable { return }
+        guard mutationGate.recordMutation() else { return }
         guard let actorID, let organizationID else {
             binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
             identity = nil
@@ -370,7 +409,6 @@ final class FieldOutbox: ObservableObject {
             queueReadable = false
             return
         }
-        guard identity?.actorID != actorID || identity?.organizationID != organizationID || !queueReadable else { return }
         binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = (actorID, organizationID)
         entries = []
@@ -380,6 +418,7 @@ final class FieldOutbox: ObservableObject {
 
     /// Sign-out: unsent changes for this phone are deleted with the session.
     func clearAll() {
+        guard mutationGate.recordMutation() else { return }
         binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = nil
         entries = []
@@ -388,6 +427,7 @@ final class FieldOutbox: ObservableObject {
     }
 
     private func write(_ entries: [OutboxEntry]) throws {
+        guard mutationGate.recordMutation() else { throw CocoaError(.fileWriteNoPermission) }
         guard let file, queueReadable else { throw CocoaError(.fileWriteUnknown) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(entries).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -417,6 +457,7 @@ final class FieldOutbox: ObservableObject {
 
     @discardableResult
     func enqueue(_ action: OutboxEntry.Action, policyVersion: Int) -> OutboxEntry? {
+        guard mutationGate.recordMutation() else { return nil }
         guard let identity else { return nil }
         if !queueReadable { restoreQueueIfReadable() }
         let entry = OutboxEntry(id: UUID().uuidString.lowercased(), deviceId: deviceID, actorId: identity.actorID,
@@ -445,6 +486,7 @@ final class FieldOutbox: ObservableObject {
 
     /// Drops a refused change; the job's held changes go back in the queue.
     func dismiss(_ entry: OutboxEntry) {
+        guard mutationGate.recordMutation() else { return }
         entries.removeAll { $0.id == entry.id }
         release(jobID: entry.jobID)
         persist()
@@ -452,6 +494,7 @@ final class FieldOutbox: ObservableObject {
 
     /// Sends a refused change again, with the job's held changes after it.
     func retry(_ entry: OutboxEntry) {
+        guard mutationGate.recordMutation() else { return }
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         entries[index].state = .pending
         release(jobID: entry.jobID)
@@ -553,6 +596,7 @@ final class FieldOutbox: ObservableObject {
                 guard current() else { return sent }
                 for outcome in result.outcomes {
                     guard current() else { return sent }
+                    guard mutationGate.recordMutation() else { return sent }
                     if outcome.status == "applied" || outcome.status == "duplicate" {
                         entries.removeAll { $0.id == outcome.commandId }
                         sent += 1
@@ -603,6 +647,7 @@ final class FieldOutbox: ObservableObject {
                     _ = try await api.addFieldNote(payload.jobId, body: payload.body)
                 }
                 guard current() else { return sent }
+                guard mutationGate.recordMutation() else { return sent }
                 entries.removeAll { $0.id == entry.id }
                 sent += 1
                 persist()
@@ -614,6 +659,7 @@ final class FieldOutbox: ObservableObject {
                 if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status), status != 401, status != 429 {
                     let applied = status == 409 ? await alreadyApplied(entry, api: api, current: current) : false
                     guard current() else { return sent }
+                    guard mutationGate.recordMutation() else { return sent }
                     if applied {
                         entries.removeAll { $0.id == entry.id }
                         sent += 1
@@ -635,6 +681,7 @@ final class FieldOutbox: ObservableObject {
 
     /// A refused change holds every later change to the same job for review.
     private func reject(_ id: String, reason: String) {
+        guard mutationGate.recordMutation() else { return }
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index].state = .rejected(reason)
         let jobID = entries[index].jobID

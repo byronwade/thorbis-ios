@@ -351,6 +351,23 @@ final class FieldOutboxTests: XCTestCase {
         XCTFail("Expected intercepted request count \(count)")
     }
 
+    func testDelayedCommandCompletionInvalidatesSavedWorkReview() async throws {
+        let reviewGate = SavedWorkMutationGate()
+        let box = FieldOutbox(directory: directory, defaults: UserDefaults(suiteName: "outbox.\(UUID().uuidString)")!, mutationGate: reviewGate)
+        box.bind(actorID: actor, organizationID: org)
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Saved")), policyVersion: 1))
+        let networkGate = URLProtocolFixture.Gate()
+        let reply = #"{"outcomes":[{"commandId":"\#(note.id)","status":"applied"}]}"#
+        let client = api([.init(200, reply, gate: networkGate)])
+        let pendingDrain = Task { await box.drain(api: client, useCommandEndpoint: true) }
+        try await waitForRequests(1)
+        let review = reviewGate.beginReview()
+        networkGate.release()
+        await pendingDrain.value
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertFalse(reviewGate.performIfCurrent(review) {})
+    }
+
     func testRevocationDuringCommandBatchStopsLaterDelivery() async throws {
         let box = outbox()
         for index in 0..<51 { box.enqueue(.note(.init(jobId: jobA, body: "Note \(index)")), policyVersion: 1) }

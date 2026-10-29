@@ -190,6 +190,24 @@ final class PendingMediaStoreTests: XCTestCase {
         XCTFail("Expected intercepted request count \(count)")
     }
 
+    func testDelayedMediaCompletionInvalidatesSavedWorkReview() async throws {
+        let reviewGate = SavedWorkMutationGate()
+        let queue = PendingMediaStore(directory: root, mutationGate: reviewGate)
+        queue.bind(scope)
+        let scan = media(document: true)
+        try queue.save(scan, data: Data("hello".utf8), context: try XCTUnwrap(queue.captureContext))
+        let networkGate = URLProtocolFixture.Gate()
+        let network = URLProtocolFixture.session([.init(201, registration(scan)), .init(200, "{}", gate: networkGate), .init(200, asset(scan))])
+        let api = APIClient(session: network, baseURL: scope.origin)
+        let pendingDrain = Task { await queue.drain(api: api, canUpload: { true }, storageSession: network) }
+        try await waitForRequests(2)
+        let review = reviewGate.beginReview()
+        networkGate.release()
+        await pendingDrain.value
+        XCTAssertTrue(queue.items.isEmpty)
+        XCTAssertFalse(reviewGate.performIfCurrent(review) {})
+    }
+
     func testConcurrentDrainsSendOneStableOperationAndOnlyStoredConfirmationDeletes() async throws {
         let queue = store(); queue.bind(scope)
         let scan = media(document: true); try queue.save(scan, data: Data("hello".utf8), context: try XCTUnwrap(queue.captureContext))

@@ -472,6 +472,125 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertEqual(try? media.read(photo), Data("image".utf8))
     }
 
+    func testQueueMutationInvalidatesSavedWorkReviewWithoutClearingNote() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("saved-work-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = SavedWorkMutationGate()
+        let outbox = FieldOutbox(directory: root, defaults: isolatedDefaults(), mutationGate: gate)
+        outbox.bind(actorID: actor, organizationID: first)
+        let review = gate.beginReview()
+        let note = try XCTUnwrap(outbox.enqueue(.note(.init(jobId: first, body: "Keep")), policyVersion: 1))
+        XCTAssertFalse(gate.performIfCurrent(review) { outbox.clearAll() })
+        XCTAssertEqual(outbox.entries.map(\.id), [note.id])
+    }
+
+    func testMediaMutationInvalidatesSavedWorkReviewWithoutClearingPhoto() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("saved-work-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = SavedWorkMutationGate()
+        let media = PendingMediaStore(directory: root, mutationGate: gate)
+        media.bind(PendingMediaScope(actorID: actor, organizationID: first, origin: "https://app.thorbis.com"))
+        let review = gate.beginReview()
+        let photo = PendingMedia(id: UUID().uuidString, jobID: first, filename: "before.jpg", tags: [],
+                                 capturedAt: Date(), kind: "photo", mime: "image/jpeg")
+        try media.save(photo, data: Data("image".utf8), context: try XCTUnwrap(media.captureContext))
+        XCTAssertFalse(gate.performIfCurrent(review) { media.clearAll() })
+        XCTAssertEqual(try? media.read(photo), Data("image".utf8))
+    }
+
+    func testCancellingSavedWorkReviewRejectsItsTicketAndAllowsNewWork() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("saved-work-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = SavedWorkMutationGate()
+        let outbox = FieldOutbox(directory: root, defaults: isolatedDefaults(), mutationGate: gate)
+        outbox.bind(actorID: actor, organizationID: first)
+        let review = gate.beginReview()
+        gate.cancelReview(review)
+        XCTAssertFalse(gate.performIfCurrent(review) { outbox.clearAll() })
+        XCTAssertNotNil(outbox.enqueue(.note(.init(jobId: first, body: "Still working")), policyVersion: 1))
+    }
+
+    func testSameCountQueueReplacementInvalidatesReview() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("saved-work-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = SavedWorkMutationGate()
+        let outbox = FieldOutbox(directory: root, defaults: isolatedDefaults(), mutationGate: gate)
+        outbox.bind(actorID: actor, organizationID: first)
+        let previous = try XCTUnwrap(outbox.enqueue(.note(.init(jobId: first, body: "Previous")), policyVersion: 1))
+        let review = gate.beginReview()
+        let replacement = try XCTUnwrap(outbox.enqueue(.note(.init(jobId: first, body: "Replacement")), policyVersion: 1))
+        outbox.dismiss(previous)
+        XCTAssertEqual(outbox.entries.count, 1)
+        XCTAssertFalse(gate.performIfCurrent(review) { outbox.clearAll() })
+        XCTAssertEqual(outbox.entries.map(\.id), [replacement.id])
+    }
+
+    func testCurrentReviewCanCommitOnlyOnce() throws {
+        let gate = SavedWorkMutationGate()
+        let review = gate.beginReview()
+        var calls = 0
+        XCTAssertTrue(gate.performIfCurrent(review) { calls += 1 })
+        XCTAssertFalse(gate.performIfCurrent(review) { calls += 1 })
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testRedundantOutboxBindingDoesNotInvalidateReview() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("saved-work-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = SavedWorkMutationGate()
+        let outbox = FieldOutbox(directory: root, defaults: isolatedDefaults(), mutationGate: gate)
+        outbox.bind(actorID: actor, organizationID: first)
+        let review = gate.beginReview()
+        outbox.bind(actorID: actor, organizationID: first)
+        XCTAssertTrue(gate.performIfCurrent(review) {})
+    }
+
+    func testReentrantQueueAdmissionCannotPassReviewOrEraseExistingWork() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("saved-work-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = SavedWorkMutationGate()
+        let outbox = FieldOutbox(directory: root, defaults: isolatedDefaults(), mutationGate: gate)
+        outbox.bind(actorID: actor, organizationID: first)
+        let saved = try XCTUnwrap(outbox.enqueue(.note(.init(jobId: first, body: "Keep")), policyVersion: 1))
+        let review = gate.beginReview()
+        var accepted: OutboxEntry?
+        XCTAssertFalse(gate.performIfCurrent(review) {
+            accepted = outbox.enqueue(.note(.init(jobId: first, body: "New")), policyVersion: 1)
+        })
+        XCTAssertNil(accepted)
+        XCTAssertEqual(outbox.entries.map(\.id), [saved.id])
+    }
+
+    func testReentrantClearCannotClaimReviewSuccessOrEraseWork() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("saved-work-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = SavedWorkMutationGate()
+        let outbox = FieldOutbox(directory: root, defaults: isolatedDefaults(), mutationGate: gate)
+        outbox.bind(actorID: actor, organizationID: first)
+        let saved = try XCTUnwrap(outbox.enqueue(.note(.init(jobId: first, body: "Keep")), policyVersion: 1))
+        let review = gate.beginReview()
+        XCTAssertFalse(gate.performIfCurrent(review) { outbox.clearAll() })
+        XCTAssertEqual(outbox.entries.map(\.id), [saved.id])
+    }
+
+    func testReentrantMediaAdmissionCannotPassReview() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("saved-work-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = SavedWorkMutationGate()
+        let media = PendingMediaStore(directory: root, mutationGate: gate)
+        media.bind(PendingMediaScope(actorID: actor, organizationID: first, origin: "https://app.thorbis.com"))
+        let context = try XCTUnwrap(media.captureContext)
+        let photo = PendingMedia(id: UUID().uuidString, jobID: first, filename: "before.jpg", tags: [],
+                                 capturedAt: Date(), kind: "photo", mime: "image/jpeg")
+        let review = gate.beginReview()
+        var saved = false
+        XCTAssertFalse(gate.performIfCurrent(review) {
+            do { try media.save(photo, data: Data("image".utf8), context: context); saved = true } catch { }
+        })
+        XCTAssertFalse(saved)
+        XCTAssertTrue(media.items.isEmpty)
+    }
+
     func testSavedWorkInventoryDetectsSameSizeReplacementAndNestedLegacyFiles() async throws {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("saved-work-inventory-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
