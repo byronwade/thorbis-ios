@@ -1,0 +1,5 @@
+2026-10-29 01:04:26.843 xcodebuild[9114:23302414] Progress 89%: Uploaded package is processing.
+2026-10-29 01:04:26.846 xcodebuild[9114:23302414] Progress 89%: Upload succeeded.
+warning: exportArchive Upload Symbols Failed. The archive did not include a dSYM for the StripeTerminal.framework with the UUIDs [6B66F53A-307E-3AD8-AC4E-A2E5AF652AE9]. Ensure that the archive's dSYM folder includes a DWARF file for StripeTerminal.framework with the expected UUIDs.
+Uploaded Thorbis
+** EXPORT SUCCEEDED **

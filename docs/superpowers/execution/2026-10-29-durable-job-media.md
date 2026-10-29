@@ -123,3 +123,13 @@ The media bytes have already been confirmed stored by the server; this is a
 cleanup-proof retention issue, not lost media. Reconcile remaining legacy files
 before removing the scoped receipt, or retain the proof independently. This edge
 does not block build77. See the [review record](../../design/evidence/durable-job-media/review.md).
+
+
+## Signed release milestone
+
+Build 1.0 (77) archived and uploaded successfully on October 29 at 1:04 a.m. EDT.
+Apple processing completed; Internal Testers (2) is assigned and exact testing
+notes show Saved. Signed app/widget version, team/bundle, 177 Swift fingerprints,
+23 excluded preview controls and disabled Tap policy passed. No production media
+or provider charge was used. See the [build 77 record](../../release/build-77.md)
+for dashboard, transport and signed-artifact proof. The overall goal remains active.
