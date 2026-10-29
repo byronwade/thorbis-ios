@@ -162,6 +162,14 @@ struct EstimateDetailView: View {
                             .buttonStyle(CommercialSecondaryButtonStyle())
                             .disabled(busy)
                     }
+                    if record.status == "draft",
+                       session.can("estimate.create", feature: "estimates") {
+                        Button { showRevisionEditor = true } label: {
+                            commercialAction("Edit lines", icon: "square.and.pencil")
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(busy)
+                    }
                     if (record.status == "sent" || record.status == "declined"),
                        session.can("estimate.create", feature: "estimates") {
                         Button { showRevisionEditor = true } label: {

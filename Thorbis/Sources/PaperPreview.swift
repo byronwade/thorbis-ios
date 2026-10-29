@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "side-menu", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "side-menu", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -112,6 +112,13 @@ enum PaperPreview {
     static var estimate: EstimateRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002218","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","createdByUserId":"00000000-0000-4000-8000-000000000001","status":"sent","currentRevisionNumber":2,"title":"AC repair and compressor replacement","lines":[{"id":"00000000-0000-4000-8000-000000009211","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}},{"id":"00000000-0000-4000-8000-000000009212","description":"Replace compressor","quantity":1,"unitPrice":{"amount":85000,"currency":"USD"},"source":{"kind":"price_book","priceBookItemId":"00000000-0000-4000-8000-000000009201","priceBookRevision":4,"originalDescription":"Replace compressor","originalUnitPrice":{"amount":85000,"currency":"USD"},"addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z","overriddenFields":[]}}],"options":[{"id":"00000000-0000-4000-8000-000000009213","title":"Full system replacement","description":"Includes new compressor and efficiency inspection","lines":[{"id":"00000000-0000-4000-8000-000000009214","description":"System replacement","quantity":1,"unitPrice":{"amount":225000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}}],"totalAmount":225000,"currency":"USD"}],"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z","sentAt":"2026-07-20T12:00:00Z"}"#
         return try! JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
+    }
+    /// Never-issued draft of the sample estimate, so the editor can be screenshotted before it is sent.
+    static var draftEstimate: EstimateRecord {
+        EstimateRecord(id: estimate.id, organizationId: estimate.organizationId, customerId: estimate.customerId,
+                       createdByUserId: estimate.createdByUserId, locationId: estimate.locationId, status: "draft",
+                       currentRevisionNumber: nil, title: estimate.title, lines: estimate.lines, options: estimate.options,
+                       createdAt: estimate.createdAt, updatedAt: estimate.updatedAt, sentAt: nil, approvedAt: nil, declinedAt: nil)
     }
     /// Good / better / best for the customer presentation screenshots.
     static var optionsEstimate: EstimateRecord {
@@ -644,7 +651,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                "estimateId": PaperPreview.estimate.id, "linkedAt": now]]]
         }
         if path == "/v1/estimates/\(PaperPreview.estimate.id)" {
-            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate))
+            let record = PaperPreview.screen == "estimate-draft-detail" ? PaperPreview.draftEstimate : PaperPreview.estimate
+            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(record))
         }
         if path == "/v1/estimates/\(PaperPreview.estimate.id)/revisions/2" {
             return reviewRevision(PaperPreview.estimate)
@@ -734,7 +742,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
         }
         if path == "/v1/invoices" && PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
-        if path == "/v1/invoices" { return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]] }
+        if path == "/v1/invoices" {
+            let item = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice)) as? [String: Any]
+            return ["items": matchingCustomer(item.map { [$0] } ?? [], queryItems: queryItems)]
+        }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
         }
@@ -778,7 +789,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
-        case "/v1/jobs": return ["items": jobs().map { $0.filter { $0.key != "allowedTransitions" } }]
+        case "/v1/jobs":
+            let items = jobs().map { $0.filter { $0.key != "allowedTransitions" } }
+            return ["items": matchingCustomer(items, queryItems: queryItems)]
         case "/v1/customers": return ["items": customers()]
         case "/v1/membership-plans":
             return ["items": [["id": "00000000-0000-4000-8000-000000006301", "organizationId": PaperPreview.organizationID, "name": "Comfort Club",
@@ -789,7 +802,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             // Sent ten days ago, so it shows under Needs attention.
             var waiting = (jsonObject(PaperPreview.estimate) as? [String: Any]) ?? [:]
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
-            return ["items": [waiting]]
+            return ["items": matchingCustomer([waiting], queryItems: queryItems)]
         case "/v1/query":
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
                ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages"),
@@ -845,6 +858,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
+            if path == "/v1/jobs/\(id)/estimates" { return ["items": []] }
             if path == "/v1/jobs/\(id)/booking-call" {
                 return ["call": [
                     "id": "00000000-0000-4000-8000-000000009601", "status": "completed", "direction": "inbound",
@@ -947,6 +961,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         return object
     }
 
+    /// List routes ignore unknown query keys. A customerId query keeps that customer's rows,
+    /// matching the field list the records tab calls.
+    private static func matchingCustomer(_ items: [[String: Any]], queryItems: [URLQueryItem]) -> [[String: Any]] {
+        guard let id = queryItems.first(where: { $0.name == "customerId" })?.value
+        else { return items }
+        return items.filter { ($0["customerId"] as? String) == id }
+    }
     private static func jsonObject<T: Encodable>(_ value: T) -> Any? {
         (try? JSONEncoder().encode(value)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
     }

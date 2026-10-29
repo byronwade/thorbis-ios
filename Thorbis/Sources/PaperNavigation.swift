@@ -121,11 +121,11 @@ struct RootView: View {
         }
         .sheet(isPresented: $previewInvoiceDetail) {
             NavigationStack {
-                InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID)
+                InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations()
             }
         }
         .sheet(isPresented: $previewEstimateRevision) {
-            EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
+            EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate : PaperPreview.estimate) { _ in }
                 .environmentObject(api)
                 .environmentObject(session)
                 .environmentObject(store)
@@ -143,7 +143,7 @@ struct RootView: View {
                     previewInvoiceDetail = true
                     return
                 }
-                if PaperPreview.screen == "estimate-revision" {
+                if PaperPreview.screen == "estimate-revision" || PaperPreview.screen == "estimate-draft" {
                     previewEstimateRevision = true
                     return
                 }
@@ -153,7 +153,7 @@ struct RootView: View {
                 case "customers": tab = .customers
                 case "menu", "more": settings = true
                 case "job", "job-invoice": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
-                case "customer", "customer-activity": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
+                case "customer", "customer-activity", "customer-records": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
                 default: break
                 }
             }
@@ -174,7 +174,25 @@ struct RootView: View {
     /// its width (parallax), the card dims to 40% and rounds to 24 with progress, and release settles
     /// on a critically damped spring from the finger's projected end. Transform and opacity only, so
     /// nothing re-lays out mid-gesture. With Reduce Motion nothing slides: the menu fades in over the app.
-    private func phoneNavigation() -> some View {
+    @ViewBuilder private func phoneNavigation() -> some View {
+        #if DEBUG
+        if PaperPreview.enabled, PaperPreview.screen == "ipad-sidebar" {
+            // Screenshot-only: this phone is narrower than the 1000pt sidebar breakpoint.
+            // The column is the same 244pt sidebar the regular-width layout uses.
+            sidebar
+                .frame(maxHeight: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface.ignoresSafeArea())
+                .task { await store.refresh(api) }
+        } else {
+            phoneDrawer()
+        }
+        #else
+        phoneDrawer()
+        #endif
+    }
+
+    private func phoneDrawer() -> some View {
         GeometryReader { geometry in
             let width = min(geometry.size.width * 0.82, 330)
             let base: CGFloat = drawerOpen ? width : 0
@@ -296,9 +314,11 @@ struct RootView: View {
             NavigationStack { InvoiceLineEditorView(invoice: PaperPreview.invoice) { _ in } }
                 .presentationDetents([.large])
         }
-        .sheet(isPresented: $previewInvoiceDetail) { NavigationStack { InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID) } }
+        .sheet(isPresented: $previewInvoiceDetail) {
+            NavigationStack { InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations() }
+        }
         .sheet(isPresented: $previewEstimateRevision) {
-            EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
+            EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate : PaperPreview.estimate) { _ in }
                 .environmentObject(api).environmentObject(session).environmentObject(store)
         }
         .sheet(isPresented: $previewNewCustomer) { NewCustomerSheet() }
@@ -328,7 +348,7 @@ struct RootView: View {
             }
             if PaperPreview.screen == "invoice-editor" { previewInvoiceEditor = true; return }
             if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
-            if PaperPreview.screen == "estimate-revision" { previewEstimateRevision = true; return }
+            if PaperPreview.screen == "estimate-revision" || PaperPreview.screen == "estimate-draft" { previewEstimateRevision = true; return }
             switch PaperPreview.screen {
             case "jobs": primaryTab = .jobs
             case "my-day", "schedule": primaryTab = .schedule
@@ -352,7 +372,7 @@ struct RootView: View {
                 RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
                 drawerOpen = true
             case "attention": primaryTab = .more; morePath.append(PaperRoute.attention)
-            case "estimate-detail": primaryTab = .more; morePath.append(PaperRoute.estimate(PaperPreview.estimate.id))
+            case "estimate-detail", "estimate-draft-detail": primaryTab = .more; morePath.append(PaperRoute.estimate(PaperPreview.estimate.id))
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
             case "notices": primaryTab = .more; morePath.append(PaperRoute.notices)
@@ -371,7 +391,7 @@ struct RootView: View {
                     if PaperPreview.screen == "job-assign" { jobsPath.append(PaperRoute.assign(jobID: job.id)) }
                     if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
                 }
-            case "customer", "customer-activity":
+            case "customer", "customer-activity", "customer-records":
                 if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
                     primaryTab = .customers
                     customersPath.append(customer)
@@ -557,11 +577,7 @@ struct RootView: View {
                     Image(systemName: "chevron.down").font(.system(size: 12))
                 }.padding(.horizontal, 8).frame(minHeight: 44)
             }.padding(.bottom, 10)
-            Button { search = true } label: {
-                HStack(spacing: 8) { Image(systemName: "magnifyingglass"); Text("Search"); Spacer() }
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.horizontal, 10)
-                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            }.padding(.bottom, 12)
+            SidebarSearchButton { search = true }.padding(.bottom, 12)
             if session.can("job.view", feature: "jobs") {
                 sidebarRow("Schedule", icon: "calendar", target: .schedule, count: JobFiltering.schedule(store.jobs, range: .today).count)
                 sidebarRow("Jobs", icon: "briefcase", target: .jobs, count: store.jobs.count)
@@ -571,14 +587,8 @@ struct RootView: View {
             if session.can("pricebook.view", feature: "price_book") { menuRow("Price book", icon: "book.closed") { priceBook = true } }
             menuRow("Workspace tools", icon: "slider.horizontal.3") { settings = true }
             Spacer()
-            Button { settings = true } label: {
-                HStack(spacing: 9) {
-                    Avatar(name: session.user?.name ?? "", size: 26)
-                    Text(session.user?.name ?? "Account").font(Theme.font(15)).lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: "gearshape").font(.system(size: 15)).foregroundStyle(Theme.muted)
-                }.padding(.horizontal, 8).frame(minHeight: 44)
-            }
+            SidebarAccountButton(name: session.user?.name ?? "") { settings = true }
+                .padding(.top, 12)
         }.padding(.vertical, 14).padding(.horizontal, 10).frame(width: 244)
             .foregroundStyle(Theme.foreground).buttonStyle(.plain)
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
@@ -627,6 +637,10 @@ enum PaperRoute: Hashable {
     case businessSetup
     case companyDetails
     case job(String)
+    case media(jobID: String, assetID: String)
+    case note(jobID: String, noteID: String)
+    case contact(customerID: String, contactID: String)
+    case location(customerID: String, locationID: String)
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -677,6 +691,10 @@ struct PaperRouteView: View {
         case .businessSetup: BusinessSetupView()
         case .companyDetails: CompanyDetailsView()
         case .job(let id): JobDetailView(jobId: id)
+        case .media(let jobID, let assetID): JobMediaDetailView(jobID: jobID, assetID: assetID)
+        case .note(let jobID, let noteID): JobNoteDetailView(jobID: jobID, noteID: noteID)
+        case .contact(let customerID, let contactID): CustomerContactDetailView(customerID: customerID, contactID: contactID)
+        case .location(let customerID, let locationID): ServiceLocationDetailView(customerID: customerID, locationID: locationID)
         case .local(let section):
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
