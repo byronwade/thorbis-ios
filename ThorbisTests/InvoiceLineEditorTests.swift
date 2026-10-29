@@ -136,6 +136,18 @@ final class InvoiceLineEditorTests: XCTestCase {
         XCTAssertFalse(saved.lines.contains { $0.description == "Replace capacitor" })
     }
 
+    func testCatalogQuantityCountsRetainedLinesAndANewSelection() throws {
+        let source = #"{"kind":"price_book","priceBookItemId":"11111111-1111-4111-8111-111111111111","priceBookRevision":3,"originalDescription":"Capacitor","originalUnit":"each","originalUnitPrice":{"amount":12500,"currency":"USD"},"originalTaxClassification":"taxable","originalItemKind":"material","addedByUserId":"00000000-0000-4000-8000-000000000004","capturedAt":"2026-10-26T12:00:00Z","overriddenFields":[]}"#
+        let line = #"{"id":"00000000-0000-4000-8000-00000000000b","description":"Capacitor","quantity":2,"unitPrice":{"amount":12500,"currency":"USD"},"source":\#(source)}"#
+        var state = InvoiceLineEditorState(invoice: try makeInvoice(line))
+
+        XCTAssertEqual(state.catalogQuantity(for: capacitor().id), 2)
+        XCTAssertNil(state.catalogQuantity(for: "22222222-2222-4222-8222-222222222222"))
+
+        try state.addPriceBookItem(capacitor())
+        XCTAssertEqual(state.catalogQuantity(for: capacitor().id), 3)
+    }
+
     func testIssuedPaidAndVoidInvoicesRefusePriceBookEdits() throws {
         let item = capacitor()
         for status in ["issued", "paid", "void"] {

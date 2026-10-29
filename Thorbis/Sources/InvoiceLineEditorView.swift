@@ -43,23 +43,27 @@ struct InvoiceLineEditorView: View {
 
     var body: some View {
         ScrollView {
+            if let error {
+                ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12)
+            }
+            if staleRevision {
+                Button { confirmReload = true } label: {
+                    Label("Review latest invoice", systemImage: "arrow.clockwise")
+                        .font(Theme.font(14, weight: .medium))
+                        .foregroundStyle(Theme.brandText)
+                }
+                .accessibilityHint("Reloads the current server version and discards these unsaved edits")
+                .padding(.horizontal, 20)
+            }
             if searching {
                 PriceBookResultsList(
                     catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
                     quantityOnEstimate: priceBookQuantity, addItem: addCatalogItem, addCustom: addCustomLine,
                     retry: { Task { await refreshCatalog(force: true) } }
                 )
+                .disabled(busy)
             } else {
             VStack(alignment: .leading, spacing: 18) {
-                if let error { ErrorBanner(message: error) }
-                if staleRevision {
-                    Button { confirmReload = true } label: {
-                        Label("Review latest invoice", systemImage: "arrow.clockwise")
-                            .font(Theme.font(14, weight: .medium))
-                            .foregroundStyle(Theme.brandText)
-                    }
-                    .accessibilityHint("Reloads the current server version and discards these unsaved edits")
-                }
                 if editor.invoice.status != "draft" {
                     ErrorBanner(message: "This invoice is now \(editor.invoice.status.statusLabel.lowercased()); its line items are final.")
                 }
@@ -237,27 +241,17 @@ struct InvoiceLineEditorView: View {
                         next.quantity = stored
                     }
                 }
-                if let cents = InvoiceLineEditorState.priceCents(proposed.unitPrice) {
-                    try? editor.setUnitPrice(proposed.id, cents: cents)
-                    if let stored = editor.lines.first(where: { $0.id == proposed.id })?.unitPrice {
-                        next.unitPrice = stored
-                    }
-                }
                 line.wrappedValue = next
             }
         )
     }
 
     private func priceBookQuantity(_ itemID: String) -> Int? {
-        let matches = editor.lines.filter { line in
-            if case .priceBookSelection(let id, _) = line.source { return id == itemID }
-            return false
-        }
-        guard !matches.isEmpty else { return nil }
-        return matches.reduce(0) { $0 + (Int($1.quantity) ?? 0) }
+        editor.catalogQuantity(for: itemID)
     }
 
     private func addCatalogItem(_ item: PriceBookListItem) {
+        guard !busy else { return }
         do {
             try editor.addPriceBookItem(item)
             error = nil
@@ -268,6 +262,7 @@ struct InvoiceLineEditorView: View {
     }
 
     private func addCustomLine(_ text: String) {
+        guard !busy else { return }
         let before = editor.lines.count
         editor.addManualLine()
         guard editor.lines.count > before, let index = editor.lines.indices.last else {
@@ -324,6 +319,7 @@ struct InvoiceLineEditorView: View {
         busy = true
         defer { busy = false }
         do {
+            commitPrices()
             let request = try editor.makeRequest()
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
             onSaved(updated)
@@ -332,6 +328,14 @@ struct InvoiceLineEditorView: View {
         } catch {
             self.error = error.localizedDescription
             staleRevision = (error as? Problem)?.status == 409
+        }
+    }
+
+    /// Canonicalize a finished price at save time. Live keystrokes keep the raw text.
+    private func commitPrices() {
+        for line in editor.lines {
+            guard let cents = InvoiceLineEditorState.priceCents(line.unitPrice) else { continue }
+            try? editor.setUnitPrice(line.id, cents: cents)
         }
     }
 
@@ -362,6 +366,7 @@ struct InvoiceLineEditorView: View {
         busy = true
         defer { busy = false }
         do {
+            commitPrices()
             var current = editor.invoice
             if editor.hasChanges {
                 current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())

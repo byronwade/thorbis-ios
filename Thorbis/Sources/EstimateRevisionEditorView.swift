@@ -80,6 +80,21 @@ struct EstimateRevisionEditorView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
+                if let error {
+                    ErrorBanner(message: error)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                }
+                if staleRevision {
+                    Button { confirmReload = true } label: {
+                        Label("Review latest estimate", systemImage: "arrow.clockwise")
+                            .font(Theme.font(14, weight: .medium))
+                            .foregroundStyle(Theme.brandText)
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityHint("Loads the current server version and replaces these edits")
+                    .padding(.horizontal, 20)
+                }
                 if searching {
                     PriceBookResultsList(
                         catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
@@ -87,18 +102,9 @@ struct EstimateRevisionEditorView: View {
                         addItem: add, addCustom: addCustom,
                         retry: { Task { await refreshCatalog(force: true) } }
                     )
+                    .disabled(busy)
                 } else {
                 VStack(alignment: .leading, spacing: 18) {
-                    if let error { ErrorBanner(message: error) }
-                    if staleRevision {
-                        Button { confirmReload = true } label: {
-                            Label("Review latest estimate", systemImage: "arrow.clockwise")
-                                .font(Theme.font(14, weight: .medium))
-                                .foregroundStyle(Theme.brandText)
-                                .frame(minHeight: 44)
-                        }
-                        .accessibilityHint("Loads the current server version and replaces these edits")
-                    }
                     if !editor.canRevise {
                         ErrorBanner(message: "This estimate cannot be revised from its current status.")
                     } else if !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) <= 0 {
@@ -271,9 +277,6 @@ struct EstimateRevisionEditorView: View {
                     if let quantity = Int(quantityText), (1...100_000).contains(quantity), String(quantity) == quantityText {
                         try? editor.setQuantity(line.id, quantity)
                     }
-                    if let cents = EstimateRevisionEditorState.parsePrice(line.unitPrice) {
-                        try? editor.setUnitPrice(line.id, cents: cents)
-                    }
                 }
             }
         )
@@ -369,6 +372,14 @@ struct EstimateRevisionEditorView: View {
         }
     }
 
+    /// Canonicalize a finished price at save time. Live keystrokes keep the raw text.
+    private func commitPrices() {
+        for line in editor.lines {
+            guard let cents = EstimateRevisionEditorState.parsePrice(line.unitPrice) else { continue }
+            try? editor.setUnitPrice(line.id, cents: cents)
+        }
+    }
+
     private func save() async {
         guard canRevise else {
             error = "You no longer have permission to revise this estimate."
@@ -377,6 +388,7 @@ struct EstimateRevisionEditorView: View {
         busy = true
         defer { busy = false }
         do {
+            commitPrices()
             let revised = try await api.reviseFieldEstimate(
                 editor.estimate.id,
                 request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount)

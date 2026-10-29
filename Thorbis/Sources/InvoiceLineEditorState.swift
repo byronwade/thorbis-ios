@@ -195,6 +195,22 @@ struct InvoiceLineEditorState: Equatable {
         lines[index].unitPrice = Self.priceText(cents)
     }
 
+    /// Quantity already on the invoice for one price book item, including lines loaded from the server.
+    func catalogQuantity(for itemID: String) -> Int? {
+        let matches = lines.filter { line in
+            switch line.source {
+            case .priceBookSelection(let id, _):
+                return id == itemID
+            case .retainedPriceBook(let source):
+                return source.priceBookItemId == itemID
+            default:
+                return false
+            }
+        }
+        guard !matches.isEmpty else { return nil }
+        return matches.reduce(0) { $0 + (Int($1.quantity) ?? 0) }
+    }
+
     mutating func addPriceBookItem(_ item: PriceBookListItem) throws {
         try requireDraft()
         guard item.archivedAt == nil else { throw InvoiceLineEditorError.archivedPriceBookItem }
