@@ -180,6 +180,20 @@ extension View {
                                onCancel: { isPresented.wrappedValue = false })
         }
     }
+
+    /// Present a confirm sheet bound to an optional item, in place of
+    /// `.confirmationDialog(..., presenting:)`. The sheet shows while `item` is non-nil and clears
+    /// it on dismiss (so a swipe-away reads as Cancel).
+    func thorbisConfirm<Item: Identifiable>(item: Binding<Item?>,
+                                            title: @escaping (Item) -> String,
+                                            message: ((Item) -> String)? = nil,
+                                            actions: @escaping (Item) -> [ThorbisConfirmAction]) -> some View {
+        sheet(item: item) { value in
+            ThorbisConfirmCard(title: title(value), message: message?(value), actions: actions(value),
+                               onChoose: { action in item.wrappedValue = nil; action.action() },
+                               onCancel: { item.wrappedValue = nil })
+        }
+    }
 }
 
 #if DEBUG
