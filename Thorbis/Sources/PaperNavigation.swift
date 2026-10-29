@@ -125,7 +125,7 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $previewEstimateRevision) {
-            EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
+            EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate : PaperPreview.estimate) { _ in }
                 .environmentObject(api)
                 .environmentObject(session)
                 .environmentObject(store)
@@ -143,7 +143,7 @@ struct RootView: View {
                     previewInvoiceDetail = true
                     return
                 }
-                if PaperPreview.screen == "estimate-revision" {
+                if PaperPreview.screen == "estimate-revision" || PaperPreview.screen == "estimate-draft" {
                     previewEstimateRevision = true
                     return
                 }
@@ -316,7 +316,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $previewInvoiceDetail) { NavigationStack { InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID) } }
         .sheet(isPresented: $previewEstimateRevision) {
-            EstimateRevisionEditorView(estimate: PaperPreview.estimate) { _ in }
+            EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate : PaperPreview.estimate) { _ in }
                 .environmentObject(api).environmentObject(session).environmentObject(store)
         }
         .sheet(isPresented: $previewNewCustomer) { NewCustomerSheet() }
@@ -346,7 +346,7 @@ struct RootView: View {
             }
             if PaperPreview.screen == "invoice-editor" { previewInvoiceEditor = true; return }
             if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
-            if PaperPreview.screen == "estimate-revision" { previewEstimateRevision = true; return }
+            if PaperPreview.screen == "estimate-revision" || PaperPreview.screen == "estimate-draft" { previewEstimateRevision = true; return }
             switch PaperPreview.screen {
             case "jobs": primaryTab = .jobs
             case "my-day", "schedule": primaryTab = .schedule
@@ -370,7 +370,7 @@ struct RootView: View {
                 RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
                 drawerOpen = true
             case "attention": primaryTab = .more; morePath.append(PaperRoute.attention)
-            case "estimate-detail": primaryTab = .more; morePath.append(PaperRoute.estimate(PaperPreview.estimate.id))
+            case "estimate-detail", "estimate-draft-detail": primaryTab = .more; morePath.append(PaperRoute.estimate(PaperPreview.estimate.id))
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
             case "notices": primaryTab = .more; morePath.append(PaperRoute.notices)

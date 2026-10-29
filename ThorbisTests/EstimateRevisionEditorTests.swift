@@ -164,4 +164,70 @@ final class EstimateRevisionEditorTests: XCTestCase {
             XCTAssertEqual($0 as? EstimateRevisionEditorError, .duplicateOptionID)
         }
     }
+
+    func testDraftEstimateAddsAdjustsAndRemovesAPriceBookLineInOneSession() throws {
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate(status: "draft", revision: nil))
+        XCTAssertTrue(state.canRevise)
+        let before = state.lines.count
+        let item = PriceBookListItem(
+            id: "11111111-1111-4111-8111-111111111111", description: "Replace capacitor",
+            unit: "each", kind: "material", taxClassification: "taxable",
+            sellPrice: .init(amount: 12500, currency: "USD"), revision: 7, archivedAt: nil
+        )
+
+        try state.addPriceBookItem(item)
+        let added = try XCTUnwrap(state.lines.last)
+        try state.setQuantity(added.id, 4)
+        try state.setUnitPrice(added.id, cents: 9900)
+
+        let edited = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)
+        XCTAssertEqual(edited.expectedRevisionNumber, 0)
+        XCTAssertEqual(edited.lines.last?.description, "Replace capacitor")
+        XCTAssertEqual(edited.lines.last?.quantity, 4)
+        XCTAssertEqual(edited.lines.last?.unitPrice.amount, 9900)
+
+        try state.removeLine(id: added.id)
+        let saved = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)
+        XCTAssertEqual(saved.expectedRevisionNumber, 0)
+        XCTAssertEqual(saved.lines.count, before)
+        XCTAssertFalse(saved.lines.contains { $0.description == "Replace capacitor" })
+    }
+
+    func testDraftEstimateKeepsAnExistingRevisionNumber() throws {
+        let state = EstimateRevisionEditorState(estimate: try makeEstimate(status: "draft", revision: 5))
+        let request = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)
+        XCTAssertEqual(request.expectedRevisionNumber, 5)
+    }
+
+    func testApprovedEstimateRefusesPriceBookEdits() throws {
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate(status: "approved"))
+        XCTAssertFalse(state.canRevise)
+        let item = PriceBookListItem(
+            id: "11111111-1111-4111-8111-111111111111", description: "Replace capacitor",
+            unit: "each", kind: "material", taxClassification: "taxable",
+            sellPrice: .init(amount: 12500, currency: "USD"), revision: 7, archivedAt: nil
+        )
+        let lineID = try XCTUnwrap(state.lines.first?.id)
+        let quantity = state.lines[0].quantity
+        let price = state.lines[0].unitPrice
+
+        XCTAssertThrowsError(try state.addPriceBookItem(item)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .unsupportedStatus)
+        }
+        XCTAssertThrowsError(try state.setQuantity(lineID, 4)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .unsupportedStatus)
+        }
+        XCTAssertThrowsError(try state.setUnitPrice(lineID, cents: 9900)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .unsupportedStatus)
+        }
+        XCTAssertThrowsError(try state.removeLine(id: lineID)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .unsupportedStatus)
+        }
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .unsupportedStatus)
+        }
+        XCTAssertEqual(state.lines.count, 1)
+        XCTAssertEqual(state.lines[0].quantity, quantity)
+        XCTAssertEqual(state.lines[0].unitPrice, price)
+    }
 }
