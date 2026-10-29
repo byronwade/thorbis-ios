@@ -13,16 +13,18 @@ struct ThorbisMenuItem: Identifiable {
     var icon: String? = nil
     var tint: Color? = nil
     var isSelected: Bool = false
+    var isDisabled: Bool = false
     var role: ButtonRole? = nil
     var action: () -> Void
 
     init(_ title: String, icon: String? = nil, subtitle: String? = nil, tint: Color? = nil,
-         isSelected: Bool = false, role: ButtonRole? = nil, action: @escaping () -> Void) {
+         isSelected: Bool = false, isDisabled: Bool = false, role: ButtonRole? = nil, action: @escaping () -> Void) {
         self.title = title
         self.icon = icon
         self.subtitle = subtitle
         self.tint = tint
         self.isSelected = isSelected
+        self.isDisabled = isDisabled
         self.role = role
         self.action = action
     }
@@ -90,6 +92,8 @@ struct ThorbisMenuCard: View {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 Button { onSelect(item) } label: { row(item) }
                     .buttonStyle(RowPressStyle())
+                    .disabled(item.isDisabled)
+                    .opacity(item.isDisabled ? 0.4 : 1)
                 if index < items.count - 1 {
                     Divider().overlay(Theme.border)
                         .padding(.leading, item.icon == nil ? 14 : 44)

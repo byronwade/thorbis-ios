@@ -221,12 +221,10 @@ struct CustomerDetailView: View {
     @State private var showNewJob = false
     @State private var contactSheet: CustomerContactSheetItem?
     @State private var contactToRemove: CustomerContactRecord?
-    @State private var showRemoveContactConfirmation = false
     @State private var isMutatingContact = false
     @State private var contactMutationError: String?
     @State private var locationSheet: CustomerLocationSheet?
     @State private var locationToRemove: ServiceLocationRecord?
-    @State private var showRemoveLocationConfirmation = false
     @State private var isRemovingLocation = false
     @State private var locationError: String?
     @State private var tab = "Overview"
@@ -305,13 +303,11 @@ struct CustomerDetailView: View {
         .toolbar {
             if canEdit {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
-                        Button("Add contact", systemImage: "person.badge.plus") { contactSheet = .add }
-                            .disabled(!contactsLoaded)
-                        Button("Add location", systemImage: "mappin.and.ellipse") { locationSheet = .add }
-                    } label: { Image(systemName: "ellipsis") }
-                    .accessibilityLabel("Customer actions")
+                    ThorbisMenu(items: [
+                        ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCustomerMode = true },
+                        ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add },
+                        ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add },
+                    ], accessibilityLabel: "Customer actions") { Image(systemName: "ellipsis") }
                 }
             }
         }
@@ -373,32 +369,22 @@ struct CustomerDetailView: View {
                 locationError = nil
             }
         }
-        .confirmationDialog(
-            "Remove service location?",
-            isPresented: $showRemoveLocationConfirmation,
-            titleVisibility: .visible,
-            presenting: locationToRemove
-        ) { location in
-            Button("Remove \(location.label)", role: .destructive) {
+        .thorbisConfirm(item: $locationToRemove,
+                        title: { _ in "Remove service location?" },
+                        message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
+                        actions: { location in
+            [ThorbisConfirmAction("Remove \(location.label)", role: .destructive) {
                 Task { await removeLocation(location) }
-            }
-            Button("Cancel", role: .cancel) { locationToRemove = nil }
-        } message: { location in
-            Text("This removes the location from \(record?.name ?? customer.name).")
-        }
-        .confirmationDialog(
-            "Remove customer contact?",
-            isPresented: $showRemoveContactConfirmation,
-            titleVisibility: .visible,
-            presenting: contactToRemove
-        ) { contact in
-            Button("Remove \(contact.name)", role: .destructive) {
+            }]
+        })
+        .thorbisConfirm(item: $contactToRemove,
+                        title: { _ in "Remove customer contact?" },
+                        message: { contact in "This removes \(contact.name) from \(record?.name ?? customer.name)." },
+                        actions: { contact in
+            [ThorbisConfirmAction("Remove \(contact.name)", role: .destructive) {
                 Task { await removeContact(contact) }
-            }
-            Button("Cancel", role: .cancel) { contactToRemove = nil }
-        } message: { contact in
-            Text("This removes \(contact.name) from \(record?.name ?? customer.name).")
-        }
+            }]
+        })
     }
     @ViewBuilder private var metadataChips: some View {
         if record?.archived == true { Chip(text: "Archived", icon: "archivebox") }
@@ -451,19 +437,38 @@ struct CustomerDetailView: View {
         }
     }
 
+    private func contactMenuItems(_ contact: CustomerContactRecord) -> [ThorbisMenuItem] {
+        var items = [ThorbisMenuItem("Edit contact", icon: "pencil") { contactSheet = .edit(contact) }]
+        if !contact.primary {
+            items.append(ThorbisMenuItem("Make primary", icon: "star", isDisabled: isMutatingContact) {
+                Task { await makeContactPrimary(contact) }
+            })
+        }
+        items.append(ThorbisMenuItem("Remove contact", icon: "trash", isDisabled: isMutatingContact, role: .destructive) {
+            contactToRemove = contact
+        })
+        return items
+    }
+
+    private func locationMenuItems(_ location: ServiceLocationRecord) -> [ThorbisMenuItem] {
+        [ThorbisMenuItem("Edit location", icon: "pencil") { locationSheet = .edit(location) },
+         ThorbisMenuItem("Remove location", icon: "trash", role: .destructive) { locationToRemove = location }]
+    }
+
     /// Job texts: what the customer told staff about text messages for their jobs.
     private var smsConsentRow: some View {
-        HStack {
+        // Captured so dismissing the confirm (which clears smsConsentChoice) can't blank the choice
+        // before the action reads it.
+        let pendingGrant = smsConsentChoice
+        return HStack {
             Text("Job texts").foregroundStyle(Theme.muted)
             Spacer()
             let granted = smsConsent?.decision == "grant"
             if canEdit {
-                Menu {
-                    Button("Customer agreed to job texts", systemImage: "checkmark.message") { smsConsentChoice = true }
-                        .disabled(granted)
-                    Button("Customer asked to stop texts", systemImage: "nosign") { smsConsentChoice = false }
-                        .disabled(smsConsent?.decision == "revoke")
-                } label: {
+                ThorbisMenu(items: [
+                    ThorbisMenuItem("Customer agreed to job texts", icon: "checkmark.message", isDisabled: granted) { smsConsentChoice = true },
+                    ThorbisMenuItem("Customer asked to stop texts", icon: "nosign", isDisabled: smsConsent?.decision == "revoke") { smsConsentChoice = false },
+                ]) {
                     HStack(spacing: 4) {
                         Text(smsConsentLabel)
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium))
@@ -477,16 +482,12 @@ struct CustomerDetailView: View {
         }
         .font(Theme.font(15))
         .frame(minHeight: 44)
-        .confirmationDialog(smsConsentChoice == true ? "Record that the customer agreed to job texts?" : "Record that the customer asked to stop job texts?",
-                            isPresented: Binding(get: { smsConsentChoice != nil }, set: { if !$0 { smsConsentChoice = nil } }),
-                            titleVisibility: .visible) {
-            Button(smsConsentChoice == true ? "Customer agreed" : "Customer asked to stop") {
-                if let grant = smsConsentChoice { Task { await recordSmsConsent(grant) } }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Only record what the customer told you themselves.")
-        }
+        .thorbisConfirm(pendingGrant == true ? "Record that the customer agreed to job texts?" : "Record that the customer asked to stop job texts?",
+                        message: "Only record what the customer told you themselves.",
+                        isPresented: Binding(get: { smsConsentChoice != nil }, set: { if !$0 { smsConsentChoice = nil } }),
+                        actions: [ThorbisConfirmAction(pendingGrant == true ? "Customer agreed" : "Customer asked to stop") {
+            if let grant = pendingGrant { Task { await recordSmsConsent(grant) } }
+        }])
         .overlay(alignment: .bottomTrailing) {
             if let smsConsentError { Text(smsConsentError).font(Theme.font(12)).foregroundStyle(Theme.destructive).offset(y: 14) }
         }
@@ -540,20 +541,10 @@ struct CustomerDetailView: View {
                     if let phone = contact.phone { CustomerContactIcon(value: phone, isPhone: true) }
                     if let email = contact.email { CustomerContactIcon(value: email, isPhone: false) }
                     if canEdit {
-                        Menu {
-                            Button("Edit contact", systemImage: "pencil") { contactSheet = .edit(contact) }
-                            if !contact.primary {
-                                Button("Make primary", systemImage: "star") { Task { await makeContactPrimary(contact) } }
-                                    .disabled(isMutatingContact)
-                            }
-                            Button("Remove contact", systemImage: "trash", role: .destructive) {
-                                contactToRemove = contact
-                                showRemoveContactConfirmation = true
-                            }.disabled(isMutatingContact)
-                        } label: {
+                        ThorbisMenu(items: contactMenuItems(contact),
+                                    accessibilityLabel: "Contact actions for \(contact.name)") {
                             Image(systemName: "ellipsis").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
                         }
-                        .accessibilityLabel("Contact actions for \(contact.name)")
                         .disabled(isMutatingContact)
                     }
                 }.frame(minHeight: 48)
@@ -577,19 +568,13 @@ struct CustomerDetailView: View {
                         Spacer(minLength: 4)
                         Text(location.kind.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         if canEdit {
-                            Menu {
-                                Button("Edit location", systemImage: "pencil") { locationSheet = .edit(location) }
-                                Button("Remove location", systemImage: "trash", role: .destructive) {
-                                    locationToRemove = location
-                                    showRemoveLocationConfirmation = true
-                                }
-                            } label: {
+                            ThorbisMenu(items: locationMenuItems(location),
+                                        accessibilityLabel: "Options for \(location.label)") {
                                 Image(systemName: "ellipsis")
                                     .frame(width: 30, height: 30)
                                     .frame(width: 44, height: 44)
                                     .contentShape(Rectangle())
                             }
-                            .accessibilityLabel("Options for \(location.label)")
                         }
                     }
                     AddressLink(address: location.address, coordinates: location.coordinates).font(Theme.font(13))
