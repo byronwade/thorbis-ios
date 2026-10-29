@@ -112,5 +112,14 @@ Root verified all12worker source hashes and visually inspected the recovery
 [confirmation](../../design/evidence/durable-job-media/recovery-confirmation.png),
 [recovered row](../../design/evidence/durable-job-media/recovered-photo.png),
 [cleanup notice](../../design/evidence/durable-job-media/cleanup-notice.png) and
-queued PDF. All are isolated synthetic previews. Scoped re-review against7214abc
-is the next gate; archive/upload remain pending.
+queued PDF. All are isolated synthetic previews. Independent scoped re-review of
+7214abc→0ffd577 cleared all four original findings, with no new Critical or
+Important findings. Signed archive/upload qualification is now underway.
+
+One Minor follow-up remains: interrupted legacy cleanup can leave only a legacy
+JSON file after recovery succeeds. If normal upload then deletes the scoped unit
+and its recovery receipt, that JSON remnant can retain a stale recovery warning.
+The media bytes have already been confirmed stored by the server; this is a
+cleanup-proof retention issue, not lost media. Reconcile remaining legacy files
+before removing the scoped receipt, or retain the proof independently. This edge
+does not block build77. See the [review record](../../design/evidence/durable-job-media/review.md).
