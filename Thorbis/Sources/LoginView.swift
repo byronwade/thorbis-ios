@@ -4,6 +4,7 @@ import SwiftUI
 struct LoginView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var pendingMedia: PendingMediaStore
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var email = ""
     @State private var password = ""
@@ -33,6 +34,11 @@ struct LoginView: View {
                     .foregroundStyle(Theme.muted)
                     .padding(.top, 6)
 
+                if let warning = pendingMedia.cleanupWarning {
+                    ErrorBanner(message: warning).padding(.top, 16)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("login-media-cleanup-warning")
+                }
                 label("Email").padding(.top, 32)
                 TextField("Work email", text: $email)
                     .textContentType(.username)

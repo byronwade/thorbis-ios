@@ -13,6 +13,19 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-29-durable-job-media",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "doc.viewfinder", title: "Keep scans when you're offline",
+                      detail: "Scanned job documents and photos stay on this phone until their upload is confirmed."),
+                .init(symbol: "photo.on.rectangle", title: "Keep saved work in its workspace",
+                      detail: "Switch workspaces without mixing waiting files, and see which uploads need attention."),
+                .init(symbol: "arrow.clockwise", title: "Recover older saved photos",
+                      detail: "Review older photos for this job, confirm the destination, then retry their upload."),
+            ],
+            fixes: 4
+        ),
+        ReleaseNote(
             id: "2026-10-28-job-document-book",
             date: "2026-10-28",
             highlights: [
