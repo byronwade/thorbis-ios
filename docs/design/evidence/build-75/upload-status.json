@@ -4,10 +4,16 @@
   "sourceCommit": "2ed5e92a41f76c0b366b98383b3a838720fcd603",
   "uploadedAt": "2026-10-28T20:04:00-04:00",
   "xcodeExport": "succeeded",
-  "lastDashboardStatus": "Processing",
-  "processedAvailabilityVerified": false,
-  "testerAssignmentVerified": false,
-  "testingNotesSaved": false,
-  "dashboardVerification": "Awaiting browser sign-in after session expired",
-  "expectedGroup": "Internal Testers"
+  "lastDashboardStatus": "Ready to Submit",
+  "processedAvailabilityVerified": true,
+  "testerAssignmentVerified": true,
+  "testingNotesSaved": true,
+  "dashboardVerification": "Processed build 75 is assigned to Internal Testers (2); What to Test shows Saved.",
+  "expectedGroup": "Internal Testers",
+  "buildId": "dd858d53-fdf2-4da1-9c77-623772969ae8",
+  "verifiedAt": "2026-10-29T00:32:17.012373+00:00",
+  "groupId": "32e003bb-3a52-47c2-b84c-2e7cd7459b01",
+  "testerCount": 2,
+  "dashboardUrl": "https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/dd858d53-fdf2-4da1-9c77-623772969ae8",
+  "confirmationSha256": "4cf34aa1284b8c8dc8e99c3a368ae39d1d13e66697a5c95b3e5a2d8b492891c3"
 }

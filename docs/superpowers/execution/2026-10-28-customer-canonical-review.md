@@ -75,3 +75,16 @@ retained for release evidence and ongoing work.
 - Final: Ruling: approved aggregate confirmation remains read-only and is not claimed canonical accepted-scope detail; acceptance projection is follow-on work — cost if wrong: approved option detail/amount remains incomplete until that projection is integrated.
 - Final: Ruling: unchanged backend protocol source proof is sufficient for this native read/binding batch, without claiming new database/concurrency qualification — cost if wrong: a backend defect requires server correction; C1/C2 still need full R3 database gates.
 - Final: Ruling: full scheme, archive signing and processed tester availability remain separate mandatory gates — cost if wrong: no next-build availability claim is made before actual delivery.
+
+
+## TestFlight delivery verified
+
+After the owner completed Apple passkey sign-in, build1.0(75) was visibly processed
+and assigned to Internal Testers (2). Saved What to Test contains the exact
+prepared review/option/back/retry/disabled-Tap instructions. Build ID
+`dd858d53-fdf2-4da1-9c77-623772969ae8`; verified dashboard and unchanged-pixel PNG
+are recorded in `docs/design/evidence/build-75/upload-status.json` and
+`testflight-confirmation.png`. No new group, invitation or external review was
+created. The dashboard's Ready to Submit label concerns external beta review;
+the existing internal tester assignment is confirmed. C1-C3 and the full ongoing
+goal remain active.

@@ -2,9 +2,11 @@
 
 Xcode uploaded build75 successfully on2026-10-28 at20:04EDT and reported
 EXPORT SUCCEEDED. Apple Build Uploads subsequently showed Processing.
-The dashboard session then expired; processed availability, tester assignment
-and saved testing notes still require a fresh browser sign-in. They are not
-inferred from upload success.
+After browser sign-in, Apple processing and tester availability were verified.
+Build75 is assigned to Internal Testers (2) and What to Test shows Saved.
+Build ID: dd858d53-fdf2-4da1-9c77-623772969ae8.
+[Open build75](https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/dd858d53-fdf2-4da1-9c77-623772969ae8).
+[Saved dashboard proof](../design/evidence/build-75/testflight-confirmation.png).
 
 Source: 2ed5e92a41f76c0b366b98383b3a838720fcd603. Draft
 [PR #77](https://github.com/byronwade/thorbis-ios/pull/77) is stacked on #76.
