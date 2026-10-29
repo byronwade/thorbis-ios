@@ -21,6 +21,7 @@ struct JobDetailView: View {
     @State private var job: JobRecord?
     @State private var showCustomerMode = false
     @State private var showCommercialDocuments = false
+    @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
     @State private var customerPaymentInvoiceID: String?
     @State private var documentInvoiceID: String?
     @State private var notes: [JobNoteRecord] = []
@@ -244,8 +245,12 @@ struct JobDetailView: View {
                                busy: busy || creatingInvoice) {
                     run(step)
                 }
-            } else if selectedTab == "Estimates", canBuildEstimate {
-                PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
+            } else if selectedTab == "Estimates" {
+                if !jobEstimates.isEmpty {
+                    PaperActionBar(title: "Present estimates", symbol: "person.crop.rectangle", action: presentEstimates)
+                } else if canBuildEstimate {
+                    PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
+                }
             } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
                       session.can("invoice.view", feature: "invoicing") {
                 // A draft is reviewed (lines) and issued on its own screen, then collected here.
@@ -610,7 +615,13 @@ struct JobDetailView: View {
             if !session.can("estimate.view", feature: "estimates") {
                 PaperEmptyState(symbol: "doc.text", title: "Estimates unavailable", message: "Your role cannot view estimates.")
             } else {
-                PaperGroupHeader(title: "Estimates", count: jobEstimates.count + (estimateRead?.unavailableIDs.count ?? 0))
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    PaperGroupHeader(title: "Estimates", count: jobEstimates.count + (estimateRead?.unavailableIDs.count ?? 0))
+                    if canBuildEstimate {
+                        Button(action: buildEstimate) { Label("Add estimate", systemImage: "plus").font(Theme.font(15, weight: .medium)).frame(minHeight: 44) }
+                            .accessibilityLabel("Add estimate")
+                    }
+                }
                 if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true) {
                     DisclosureGroup {
                         VStack(alignment: .leading, spacing: 12) {
@@ -906,6 +917,22 @@ struct JobDetailView: View {
                                     estimatesComplete: estimateRead?.isComplete == true)
     }
 
+    private func presentEstimates() {
+        guard let job, scope(for: job) != nil, session.can("estimate.view", feature: "estimates") else { return }
+        let model = JobEstimateHandoffModel(job: job, customerName: store.customerName(job.customerId), documents: documents, api: api, session: session)
+        let originalScope = model.scope, actorID = session.user?.id
+        let generation = session.generation, apiGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        estimateHandoffPresenter.present(model) { [weak api, weak session, weak documents] in
+            guard let api, let session, let documents else { return }
+            let current: @MainActor () -> Bool = {
+                session.user?.id == actorID && session.activeOrganization?.id == originalScope.organizationID &&
+                session.generation == generation && api.requestGeneration == apiGeneration && api.normalizedOrigin == origin &&
+                session.can("job.view", feature: "jobs") && session.can("estimate.view", feature: "estimates")
+            }
+            _ = await documents.loadEstimates(scope: originalScope, api: api, isCurrent: current)
+        }
+    }
+
     private func buildEstimate() {
         guard canBuildEstimate, let job, scope(for: job) != nil else { return }
         showNewEstimate = true
@@ -915,6 +942,7 @@ struct JobDetailView: View {
         switch step {
         case .transition(let target): runTransition(target)
         case .buildEstimate: buildEstimate()
+        case .presentEstimates: presentEstimates()
         case .showEstimate(let id): openEstimate = OpenedEstimate(id: id, present: true)
         case .createInvoice:
             Task {

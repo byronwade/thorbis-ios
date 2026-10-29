@@ -22,6 +22,30 @@ final class MediaTransferTests: XCTestCase {
         #"{"asset":\#(pendingAsset),"uploadTarget":{"url":"\#(url)","method":"\#(method)","expiresAt":"\#(expiresAt)","headers":{"content-type":"image/jpeg","x-amz-checksum-sha256":"\#(helloChecksumHeader)","x-custom":"preserve"}}}"#
     }
 
+    func testWrappedStorageTransportAndServerFailureCanRecoverWithoutChangingLegacyErrors() async throws {
+        for reply in [URLProtocolFixture.offline, URLProtocolFixture.Reply(503, "{}")] {
+            let session = URLProtocolFixture.session([.init(201, registration()), reply])
+            let transfer = MediaTransfer(api: APIClient(session: session, baseURL: "https://app.thorbis.com"), storageSession: session)
+            do {
+                _ = try await transfer.upload(jobID: jobID, clientAssetID: clientAssetID, kind: "photo", mime: "image/jpeg", originalFilename: "work.jpg", data: Data("hello".utf8))
+                XCTFail("Failed storage must never confirm")
+            } catch {
+                let problem = try XCTUnwrap(error as? Problem)
+                XCTAssertEqual(problem.title, "Storage upload failed", "Legacy thrown type/text stays unchanged")
+                XCTAssertTrue(MediaTransfer.isRetryableStorageUploadFailure(error))
+                XCTAssertTrue(customerEstimatePreparationCanRetry(error))
+            }
+            XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        }
+    }
+    func testStorageRecoveryExcludesRefusalUnsafeTargetsCollisionAndCancellation() {
+        let failures: [Error] = [CancellationError(), Problem(title: "Unsafe storage URL", status: nil, detail: nil),
+            Problem(title: "Client asset ID collision", status: nil, detail: nil), Problem(title: "Media not confirmed", status: nil, detail: nil)] + [400,401,403,409,422,429].map { Problem(title: "Storage upload failed", status: $0, detail: nil) }
+        for error in failures {
+            XCTAssertFalse(MediaTransfer.isRetryableStorageUploadFailure(error))
+            XCTAssertFalse(customerEstimatePreparationCanRetry(error))
+        }
+    }
     func testSinglePUTPreservesTargetHeadersAndConfirmsMatchingSHA256() async throws {
         let session = URLProtocolFixture.session([
             .init(201, registration()), .init(200, "{}"), .init(200, storedAsset),

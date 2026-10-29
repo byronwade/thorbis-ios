@@ -126,11 +126,15 @@ source evidence; verify platform/API/version claims before relying on them.
 ## Customer documents, money and evidence
 
 22. **Hand over only the current job.** Customer mode exposes every verified
-    estimate and invoice for that job, with swipe convenience plus explicit
-    navigation and an overview. Show each invoice's own dated payments/refunds,
-    original discount/credit descriptions, total, paid amount and remaining
-    balance. Keep separate documents and complete package choices distinct;
-    do not imply their totals are automatically one bill.
+    estimate and invoice for that job, with all-document overviews, explicit
+    navigation and swipe convenience. Let the customer select and approve
+    multiple independent estimates in one continuous handoff. Keep already
+    approved estimates visible without approving them again; retain each
+    document's required review, signature and consent. Complete package choices
+    within one estimate retain their own selection rules. Show each invoice's
+    own dated payments/refunds, original discount/credit descriptions, total,
+    paid amount and remaining balance. Keep separate documents and complete
+    package choices distinct; do not imply their totals are automatically one bill.
 23. **Keep customer decisions explicit.** Show exactly what is being accepted and
     the full price before consent/signing. Use current issued revision/hash and
     canonical server quote/acceptance where required. Choosing an option or extra

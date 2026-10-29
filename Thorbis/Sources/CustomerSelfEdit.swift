@@ -322,9 +322,46 @@ struct CustomerCommitButton: View {
 /// device back") needs the technician's Face ID or passcode before `onUnlocked` runs.
 ///
 /// Present it with `.fullScreenCover`. `content` gets a `handBack` action for its own Done button.
+private struct CustomerModeUnlockKey: EnvironmentKey {
+    static let defaultValue: (@MainActor () async -> Void)? = nil
+}
+extension EnvironmentValues {
+    var customerModeUnlock: (@MainActor () async -> Void)? {
+        get { self[CustomerModeUnlockKey.self] }
+        set { self[CustomerModeUnlockKey.self] = newValue }
+    }
+}
+/// A pushed customer destination requests the container's existing authentication boundary.
+struct CustomerModeOwnerUnlockButton: View {
+    @Environment(\.customerModeUnlock) private var unlock
+    @State private var busy = false
+    var body: some View {
+        Button {
+            guard !busy, let unlock else { return }
+            busy = true
+            Task { await unlock(); busy = false }
+        } label: {
+            HStack(spacing: 8) { Image(systemName: "lock"); Text("Hand back") }
+                .font(Theme.font(17, weight: .medium)).frame(minHeight: CustomerModeStyle.target)
+        }
+        .accessibilityLabel("Hand back to the technician")
+        .accessibilityHint("Technician authentication is required to leave customer mode.")
+        .accessibilityIdentifier("customer-mode-owner-exit")
+        .disabled(busy || unlock == nil)
+    }
+}
+
 struct CustomerModeContainer<Content: View>: View {
     let onUnlocked: () -> Void
     @ViewBuilder let content: (_ handBack: @escaping () -> Void) -> Content
+    private let ownerControlTitle: String?
+    private let authenticateOwner: @MainActor () async -> Bool
+    init(onUnlocked: @escaping () -> Void, ownerControlTitle: String? = nil,
+         authenticateOwner: @escaping @MainActor () async -> Bool = { await StaffUnlock.unlock() },
+         @ViewBuilder content: @escaping (_ handBack: @escaping () -> Void) -> Content) {
+        self.onUnlocked = onUnlocked; self.ownerControlTitle = ownerControlTitle
+        self.authenticateOwner = authenticateOwner; self.content = content
+    }
     @State private var handingBack = false
     @State private var unlocking = false
 
@@ -336,24 +373,38 @@ struct CustomerModeContainer<Content: View>: View {
             .background(Theme.background.ignoresSafeArea())
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { Task { await unlock() } } label: {
-                        Image(systemName: "lock").font(.system(size: 20))
-                            .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target).contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("Technician: unlock to leave customer mode")
-                    .disabled(unlocking)
-                }
+            .toolbar { ownerToolbar }
+        }
+        .environment(\.customerModeUnlock, { await unlock() })
+
+        #if DEBUG
+        .overlay {
+            if PaperPreview.isJobEstimateHandoff {
+                JobEstimateHandoffReceiptMetadata().frame(width: 0, height: 0).allowsHitTesting(false)
             }
         }
-        #if DEBUG
         .safeAreaInset(edge: .top, spacing: 0) {
-            if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
+            if PaperPreview.isJobEstimateHandoff && !ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-hide-controls") { JobEstimateHandoffPreviewControls() }
+            else if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
         }
         #endif
         .interactiveDismissDisabled()
         .persistentSystemOverlays(.hidden)
+    }
+
+    @ToolbarContentBuilder private var ownerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { Task { await unlock() } } label: {
+                Group {
+                    if let ownerControlTitle { HStack(spacing: 8) { Image(systemName: "lock"); Text(ownerControlTitle) }.font(Theme.font(17, weight: .medium)) }
+                    else { Image(systemName: "lock").font(.system(size: 20)) }
+                }.frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
+            }
+            .accessibilityLabel(ownerControlTitle == nil ? "Technician: unlock to leave customer mode" : "Hand back to the technician")
+            .accessibilityHint("Technician authentication is required to leave customer mode.")
+            .accessibilityIdentifier(ownerControlTitle == nil ? "lock" : "customer-mode-owner-exit")
+            .disabled(unlocking)
+        }
     }
 
     private var handBackScreen: some View {
@@ -378,9 +429,10 @@ struct CustomerModeContainer<Content: View>: View {
     }
 
     private func unlock() async {
+        guard !unlocking else { return }
         unlocking = true
         defer { unlocking = false }
-        if await StaffUnlock.unlock() { onUnlocked() }
+        if await authenticateOwner() { onUnlocked() }
     }
 }
 

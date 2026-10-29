@@ -8,6 +8,12 @@ struct MediaDownloadTarget: Sendable {
 
 @MainActor
 final class MediaTransfer {
+    static let storageUploadFailureTitle = "Storage upload failed"
+    static func isRetryableStorageUploadFailure(_ error: Error) -> Bool {
+        guard let problem = error as? Problem, problem.title == storageUploadFailureTitle else { return false }
+        guard let status = problem.status else { return true }
+        return (500...599).contains(status)
+    }
     private static let maxSinglePUTBytes = 8 * 1024 * 1024
     private static let maxPreviewBytes = 50 * 1024 * 1024
 
@@ -95,12 +101,12 @@ final class MediaTransfer {
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch {
-            throw Problem(title: "Storage upload failed", status: nil, detail: error.localizedDescription)
+            throw Problem(title: Self.storageUploadFailureTitle, status: nil, detail: error.localizedDescription)
         }
         try verify(generation)
         guard currentAuthority() else { throw CancellationError() }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw Problem(title: "Storage upload failed",
+            throw Problem(title: Self.storageUploadFailureTitle,
                           status: (response as? HTTPURLResponse)?.statusCode, detail: nil)
         }
         guard currentAuthority() else { throw CancellationError() }

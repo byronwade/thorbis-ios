@@ -228,6 +228,7 @@ private struct CustomerEstimateBookPage: View {
             }
             if fresh, estimate.status == "sent", issued != nil, !loading, moneyVerified {
                 CustomerPresentationCommit(title: "Review and sign", enabled: true, busy: false, type: type, action: review)
+                    .accessibilityIdentifier("customer-book-review-sign")
                     .padding(Theme.gutter)
             } else if !fresh {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)

@@ -13,9 +13,10 @@ final class CustomerDocumentBookUITests: XCTestCase {
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10))
         estimate.tap()
-        let review = app.buttons["Review and sign"]
+        let review = app.buttons["customer-book-review-sign"]
         XCTAssertTrue(review.waitForExistence(timeout: 10))
-        review.tap()
+        thorbisStableButton(app, "customer-book-review-sign").tap()
+        XCTAssertTrue(app.scrollViews["customer-estimate-presentation-00000000-0000-4000-8000-000000002218"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Approve and sign")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
         XCTAssertTrue(app.buttons["Not today"].exists)
