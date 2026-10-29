@@ -1,6 +1,14 @@
 # API gaps
 
-The iOS app only shows records the Thorbis API returns. Missing routes are listed here instead of filled with invented data.
+The iOS app only shows records the Thorbis API returns. A missing route is listed here, and a rejected request is shown as the server's error.
+
+## Draft estimate lines
+
+There is no separate route that replaces the lines of a draft estimate. `POST /v1/estimates` creates a draft. `POST /v1/estimates/{id}/revise` is the route the app uses to save line changes on a draft, a sent estimate, or a declined estimate. A never-issued draft sends `expectedRevisionNumber` 0. A draft that already has `currentRevisionNumber` sends that number. The revise response is the updated draft. If the server rejects a draft, the editor shows that error and does not treat the save as successful.
+
+`docs/superpowers/plans/2026-10-27-estimate-revision-options.md` still describes revise as sent or declined only, and says an existing draft cannot be changed through that endpoint. This repository has no newer draft-update route. The editor still submits the revise request, which is the only write the API client has for line changes, and it leaves the form open with the server's error when that request is rejected.
+
+Approved estimates stay on the change-order path. Issued, paid, and void invoices do not accept line edits. Draft invoice lines still save through `POST /v2/invoices/{id}/lines`.
 
 ## Customer records compiled from jobs
 

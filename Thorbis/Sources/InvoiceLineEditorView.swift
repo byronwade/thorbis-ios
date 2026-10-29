@@ -16,6 +16,12 @@ struct InvoiceLineEditorView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var staleRevision = false
+    @ObservedObject private var catalog = PriceBookCatalog.shared
+    @State private var query = ""
+    @State private var kind = PriceBookKindFilter.all
+    @FocusState private var focus: EstimateBuilderFocus?
+
+    private var searching: Bool { canEdit && (focus == .search || !query.isEmpty) }
 
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
@@ -37,16 +43,27 @@ struct InvoiceLineEditorView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                if let error { ErrorBanner(message: error) }
-                if staleRevision {
-                    Button { confirmReload = true } label: {
-                        Label("Review latest invoice", systemImage: "arrow.clockwise")
-                            .font(Theme.font(14, weight: .medium))
-                            .foregroundStyle(Theme.brandText)
-                    }
-                    .accessibilityHint("Reloads the current server version and discards these unsaved edits")
+            if let error {
+                ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12)
+            }
+            if staleRevision {
+                Button { confirmReload = true } label: {
+                    Label("Review latest invoice", systemImage: "arrow.clockwise")
+                        .font(Theme.font(14, weight: .medium))
+                        .foregroundStyle(Theme.brandText)
                 }
+                .accessibilityHint("Reloads the current server version and discards these unsaved edits")
+                .padding(.horizontal, 20)
+            }
+            if searching {
+                PriceBookResultsList(
+                    catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
+                    quantityOnEstimate: priceBookQuantity, addItem: addCatalogItem, addCustom: addCustomLine,
+                    retry: { Task { await refreshCatalog(force: true) } }
+                )
+                .disabled(busy)
+            } else {
+            VStack(alignment: .leading, spacing: 18) {
                 if editor.invoice.status != "draft" {
                     ErrorBanner(message: "This invoice is now \(editor.invoice.status.statusLabel.lowercased()); its line items are final.")
                 }
@@ -83,12 +100,19 @@ struct InvoiceLineEditorView: View {
                     VStack(spacing: 0) {
                         ForEach($editor.lines) { $line in
                             EditableInvoiceLineRow(
-                                line: $line,
+                                line: committedLine($line),
                                 canMoveUp: editor.lines.first?.id != line.id,
                                 canMoveDown: editor.lines.last?.id != line.id,
                                 moveUp: { moveLine(line.id, offset: -1) },
                                 moveDown: { moveLine(line.id, offset: 1) },
-                                remove: { editor.removeLine(id: line.id) }
+                                remove: {
+                                    do {
+                                        try editor.removeLine(id: line.id)
+                                        error = nil
+                                    } catch {
+                                        self.error = error.localizedDescription
+                                    }
+                                }
                             )
                             .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
                             if line.id != editor.lines.last?.id {
@@ -133,6 +157,7 @@ struct InvoiceLineEditorView: View {
             .padding(.bottom, 24)
             .frame(maxWidth: 640)
             .frame(maxWidth: .infinity)
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
@@ -145,6 +170,14 @@ struct InvoiceLineEditorView: View {
             }
         }
         .keyboardDoneButton()
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if canEdit && !editor.hasUnsupportedLineSources {
+                EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
+                                  prompt: "Search price book or type a line", finish: finishSearch)
+                    .disabled(busy)
+            }
+        }
+        .task { await refreshCatalog() }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
@@ -195,6 +228,62 @@ struct InvoiceLineEditorView: View {
         }
     }
 
+    private func committedLine(_ line: Binding<InvoiceLineDraft>) -> Binding<InvoiceLineDraft> {
+        Binding(
+            get: { line.wrappedValue },
+            set: { proposed in
+                guard editor.invoice.status == "draft" else { return }
+                var next = proposed
+                let quantityText = proposed.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let quantity = Int(quantityText), (1...100_000).contains(quantity), String(quantity) == quantityText {
+                    try? editor.setQuantity(proposed.id, quantity)
+                    if let stored = editor.lines.first(where: { $0.id == proposed.id })?.quantity {
+                        next.quantity = stored
+                    }
+                }
+                line.wrappedValue = next
+            }
+        )
+    }
+
+    private func priceBookQuantity(_ itemID: String) -> Int? {
+        editor.catalogQuantity(for: itemID)
+    }
+
+    private func addCatalogItem(_ item: PriceBookListItem) {
+        guard !busy else { return }
+        do {
+            try editor.addPriceBookItem(item)
+            error = nil
+            catalog.recordUse(item.id)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func addCustomLine(_ text: String) {
+        guard !busy else { return }
+        let before = editor.lines.count
+        editor.addManualLine()
+        guard editor.lines.count > before, let index = editor.lines.indices.last else {
+            error = InvoiceLineEditorError.tooManyLines.localizedDescription
+            return
+        }
+        editor.lines[index].description = text
+        finishSearch()
+    }
+
+    private func finishSearch() {
+        query = ""
+        kind = .all
+        focus = nil
+    }
+
+    private func refreshCatalog(force: Bool = false) async {
+        guard canUsePriceBook else { return }
+        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
+    }
+
     private var invoiceEditorHeading: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("INV-\(invoice.id.suffix(4).uppercased())")
@@ -230,6 +319,7 @@ struct InvoiceLineEditorView: View {
         busy = true
         defer { busy = false }
         do {
+            commitPrices()
             let request = try editor.makeRequest()
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
             onSaved(updated)
@@ -238,6 +328,14 @@ struct InvoiceLineEditorView: View {
         } catch {
             self.error = error.localizedDescription
             staleRevision = (error as? Problem)?.status == 409
+        }
+    }
+
+    /// Canonicalize a finished price at save time. Live keystrokes keep the raw text.
+    private func commitPrices() {
+        for line in editor.lines {
+            guard let cents = InvoiceLineEditorState.priceCents(line.unitPrice) else { continue }
+            try? editor.setUnitPrice(line.id, cents: cents)
         }
     }
 
@@ -268,6 +366,7 @@ struct InvoiceLineEditorView: View {
         busy = true
         defer { busy = false }
         do {
+            commitPrices()
             var current = editor.invoice
             if editor.hasChanges {
                 current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())

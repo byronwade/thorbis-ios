@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-10-29-draft-lines",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "book.closed", title: "Edit draft lines in the price book",
+                      detail: "Search the price book on a draft estimate or invoice, then change the quantity, price, or remove the line."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-customer-records",
             date: "2026-10-29",
             highlights: [
