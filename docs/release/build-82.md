@@ -1,6 +1,8 @@
 # TestFlight 1.0 (82)
 
-Uploaded October 29, 2026 at 3:00 p.m. EDT. Xcode reported upload succeeded and the package began processing. Apple processing and tester availability have not yet been verified.
+Uploaded October 29, 2026 at 3:00 p.m. EDT. Xcode reported upload succeeded and the package began processing. Apple processing is complete; the Internal Testers group (2 testers) has access, and What to Test is saved. This does not establish physical installation or external beta review.
+
+[Open build 82](https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/38eb5334-eaa7-4ac7-bd0c-297d4578ac89).
 
 Runtime source: `c5fca56d3a35b00201be284c2865349b20c34bae`. Job estimates lead with their titles and prices, show status and reference beneath, and put the estimate list before the secondary totals disclosure. The existing multi-estimate customer handoff remains available. The release also includes the previously merged app changes.
 
