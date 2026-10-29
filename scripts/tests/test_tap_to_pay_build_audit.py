@@ -1,4 +1,9 @@
 import importlib.util
+import plistlib
+import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -55,6 +60,53 @@ class TapBuildAuditTests(unittest.TestCase):
         signed["get-task-allow"] = True
         profile["Entitlements"]["get-task-allow"] = True
         self.assertTrue(audit.validate_binding(info, signed, profile, distribution=True))
+
+
+class SDKPurposeArtifactAuditTests(unittest.TestCase):
+    """Exercise the real CLI on actual ad-hoc signed app-bundle fixtures."""
+    def audit_bundle(self, purposes):
+        with tempfile.TemporaryDirectory(prefix="thorbis-purpose-audit-") as directory:
+            app = Path(directory) / "PurposeFixture.app"
+            app.mkdir()
+            shutil.copyfile("/usr/bin/true", app / "PurposeFixture")
+            (app / "PurposeFixture").chmod(0o755)
+            info = {"CFBundleIdentifier": "com.thorbis.purpose-fixture",
+                    "CFBundleExecutable": "PurposeFixture", "CFBundlePackageType": "APPL",
+                    "CFBundleVersion": "1", "ThorbisTapToPayEnabled": False, **purposes}
+            with (app / "Info.plist").open("wb") as target:
+                plistlib.dump(info, target)
+            subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(app)],
+                           capture_output=True, check=True)
+            return subprocess.run([sys.executable, str(module_path), str(app)],
+                                  capture_output=True, text=True, check=False)
+
+    def valid_purposes(self):
+        return {"NSBluetoothAlwaysUsageDescription": "Connect to supported payment readers.",
+                "NSLocationWhenInUseUsageDescription": "Show position on the schedule map."}
+
+    def test_disabled_reader_build_still_refuses_each_missing_sdk_purpose(self):
+        for key in self.valid_purposes():
+            with self.subTest(key=key):
+                values = self.valid_purposes()
+                del values[key]
+                result = self.audit_bundle(values)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(key, result.stderr)
+
+    def test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes(self):
+        for key in self.valid_purposes():
+            for value in ["", " \n\t", True]:
+                with self.subTest(key=key, value=value):
+                    values = self.valid_purposes()
+                    values[key] = value
+                    result = self.audit_bundle(values)
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(key, result.stderr)
+
+    def test_valid_purposes_keep_disabled_reader_entitlement_and_profile_skip(self):
+        result = self.audit_bundle(self.valid_purposes())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("disabled in this build", result.stdout)
 
 
 if __name__ == "__main__":
