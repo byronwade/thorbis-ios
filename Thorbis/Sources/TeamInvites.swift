@@ -79,9 +79,7 @@ struct InviteMemberSheet: View {
                         .focused($emailFocused)
                         .submitLabel(.send)
                         .onSubmit { if valid { Task { await send() } } }
-                    Picker("Role", selection: $role) {
-                        ForEach(roles, id: \.id) { Text($0.label).tag($0.id) }
-                    }
+                    ThorbisSelect(options: roles.map { ($0.id, $0.label) }, selection: $role, label: "Role")
                 } footer: {
                     Text("They get an email to join and choose a password. Invites expire after 7 days.")
                 }

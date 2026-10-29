@@ -14,4 +14,54 @@ final class ServerSearchTests: XCTestCase {
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         XCTAssertEqual(items.first { $0.name == "q" }?.value, "water heat")
     }
+
+    func testSearchFollowsTheNextCursorAndIncludesEveryPage() async throws {
+        let first = #"{"items":[{"sourceId":"jobs","resultType":"job","entityId":"job-1","title":"First"}],"nextCursor":"page-2","completeness":"complete"}"#
+        let second = #"{"items":[{"sourceId":"invoices","resultType":"invoice","entityId":"inv-2","title":"Second"}],"nextCursor":null,"completeness":"complete"}"#
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, first), .init(200, second),
+        ]), baseURL: "https://app.thorbis.com")
+
+        let page = try await api.search("water heat")
+
+        XCTAssertEqual(page.items.map(\.entityId), ["job-1", "inv-2"])
+        XCTAssertEqual(page.items.map(\.resultType), ["job", "invoice"])
+        XCTAssertNil(page.nextCursor)
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.absoluteString }, [
+            "https://app.thorbis.com/v1/search?q=water%20heat&limit=25",
+            "https://app.thorbis.com/v1/search?q=water%20heat&limit=25&cursor=page-2",
+        ])
+    }
+
+    func testSearchRejectsARepeatedCursor() async {
+        let body = #"{"items":[{"sourceId":"jobs","resultType":"job","entityId":"job-1","title":"First"}],"nextCursor":"same"}"#
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, body), .init(200, body),
+        ]), baseURL: "https://app.thorbis.com")
+
+        do {
+            _ = try await api.search("pump")
+            XCTFail("Expected cursor loop rejection")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Pagination cursor loop")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+    }
+
+    func testSearchRejectsAnEmptyCursor() async {
+        let body = #"{"items":[{"sourceId":"jobs","resultType":"job","entityId":"job-1","title":"First"}],"nextCursor":""}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, body)]), baseURL: "https://app.thorbis.com")
+
+        do {
+            _ = try await api.search("pump")
+            XCTFail("Expected cursor loop rejection")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Pagination cursor loop")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
 }
