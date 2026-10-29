@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// A job change made without signal. It is saved to disk before it is ever sent, so a
 /// killed app or a dropped connection resends the same `commandId`, which the server
@@ -105,7 +106,11 @@ final class FieldOutbox: ObservableObject {
     /// design.thorbis.com MA-17: signing out deletes this phone's saved work, so the dialog says
     /// what would be lost.
     var signOutWarning: String {
-        let waiting = entries.count + otherWorkspaceEntryCount
+        let inventory = savedWorkInventory
+        if inventory.unreadable {
+            return "Some saved work could not be read. Signing out deletes it from this phone, including any unsynced changes."
+        }
+        let waiting = entries.count + inventory.otherCount
         return waiting == 0
             ? "Jobs and customers saved on this phone are removed. You can sign back in at any time."
             : "\(waiting) change\(waiting == 1 ? "" : "s") on this phone \(waiting == 1 ? "hasn't" : "haven't") synced yet. Signing out deletes \(waiting == 1 ? "it" : "them")."
@@ -113,6 +118,8 @@ final class FieldOutbox: ObservableObject {
 
     private let directory: URL
     private var identity: (actorID: String, organizationID: String)?
+    /// Do not replace an existing queue that could not be read or decoded.
+    private var queueReadable = false
     private var binding = UUID()
     private var activeDrain: UUID?
     /// Opaque read-only proof of the current verified queue binding.
@@ -152,14 +159,24 @@ final class FieldOutbox: ObservableObject {
 
     /// Changes queued in other workspaces on this phone; `clearAll()` deletes those too, so the
     /// sign-out warning has to count them.
-    private var otherWorkspaceEntryCount: Int {
+    private var savedWorkInventory: (otherCount: Int, unreadable: Bool) {
         let current = file?.lastPathComponent
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        return files
-            .filter { $0.pathExtension == "json" && $0.lastPathComponent != current }
-            .compactMap { try? Data(contentsOf: $0) }
-            .compactMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) }
-            .reduce(0) { $0 + $1.count }
+        let files: [URL]
+        do {
+            files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            return (0, false)
+        } catch { return (0, true) }
+        var count = 0
+        var unreadable = identity != nil && !queueReadable
+        for item in files {
+            guard item.pathExtension == "json" else { unreadable = true; continue }
+            do {
+                let saved = try JSONDecoder().decode([OutboxEntry].self, from: Data(contentsOf: item))
+                if item.lastPathComponent != current { count += saved.count }
+            } catch { unreadable = true }
+        }
+        return (count, unreadable)
     }
 
     /// Bound to the verified actor and workspace; another identity never sees these changes.
@@ -168,12 +185,15 @@ final class FieldOutbox: ObservableObject {
             binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
             identity = nil
             entries = []
+            queueReadable = false
             return
         }
-        guard identity?.actorID != actorID || identity?.organizationID != organizationID else { return }
+        guard identity?.actorID != actorID || identity?.organizationID != organizationID || !queueReadable else { return }
         binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = (actorID, organizationID)
-        entries = file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) } ?? []
+        entries = []
+        queueReadable = false
+        restoreQueueIfReadable()
     }
 
     /// Sign-out: unsent changes for this phone are deleted with the session.
@@ -181,26 +201,55 @@ final class FieldOutbox: ObservableObject {
         binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = nil
         entries = []
+        queueReadable = false
         try? FileManager.default.removeItem(at: directory)
     }
 
-    private func persist() {
-        guard let file else { return }
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try JSONEncoder().encode(entries).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        } catch {}
+    private func write(_ entries: [OutboxEntry]) throws {
+        guard let file, queueReadable else { throw CocoaError(.fileWriteUnknown) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(entries).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    private func persist() { try? write(entries) }
+
+    /// Only a proven absent file is an empty queue. Every other read or ownership
+    /// failure preserves the file and blocks writes until a later successful retry.
+    private func restoreQueueIfReadable() {
+        guard let identity, let file else { return }
+        if let data = try? Data(contentsOf: file),
+           let saved = try? JSONDecoder().decode([OutboxEntry].self, from: data),
+           saved.allSatisfy({ $0.actorId == identity.actorID && $0.organizationId == identity.organizationID }) {
+            entries = saved
+            queueReadable = true
+            return
+        }
+        var info = stat()
+        let result = lstat(file.path, &info)
+        let failure = errno
+        if result == -1 && failure == ENOENT {
+            entries = []
+            queueReadable = true
+        }
     }
 
     @discardableResult
     func enqueue(_ action: OutboxEntry.Action, policyVersion: Int) -> OutboxEntry? {
         guard let identity else { return nil }
+        if !queueReadable { restoreQueueIfReadable() }
         let entry = OutboxEntry(id: UUID().uuidString.lowercased(), deviceId: deviceID, actorId: identity.actorID,
                                 organizationId: identity.organizationID, policyVersion: policyVersion,
                                 createdAt: Date(), action: action)
-        entries.append(entry)
-        persist()
+        let updated = entries + [entry]
+        do { try write(updated) } catch { return nil }
+        entries = updated
         return entry
+    }
+
+    @discardableResult
+    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, matching context: CaptureContext) -> OutboxEntry? {
+        guard captureContext(matchingActorID: context.actorID, organizationID: context.organizationID) == context else { return nil }
+        return enqueue(action, policyVersion: policyVersion)
     }
 
     func learn(_ job: JobRecord) {

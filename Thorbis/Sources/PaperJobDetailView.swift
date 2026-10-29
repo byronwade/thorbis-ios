@@ -31,6 +31,7 @@ struct JobDetailView: View {
     @State private var showPause = false
     @State private var busy = false
     @State private var error: String?
+    @State private var noteSaveError: String?
     @State private var selectedTab = "Overview"
     @StateObject private var documents = JobDocumentCollections()
     @State private var documentGeneration: UUID?
@@ -878,6 +879,9 @@ struct JobDetailView: View {
                     .disabled(!canSaveNote || busy)
                     .accessibilityLabel("Save note")
                 }
+                if let noteSaveError {
+                    Text(noteSaveError).font(Theme.font(14)).foregroundStyle(Theme.destructive)
+                }
             }
         }
     }
@@ -1293,13 +1297,24 @@ struct JobDetailView: View {
         }
     }
     @discardableResult private func progress(_ request: FieldProgressRequest) async -> Bool {
+        guard let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let context = outbox.captureContext(matchingActorID: actor, organizationID: organization) else { return false }
+        let generation = session.generation, authority = session.authorityRevision
+        let requestGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        func current() -> Bool {
+            session.generation == generation && session.authorityRevision == authority && session.user?.id == actor &&
+            session.activeOrganization?.id == organization && api.requestGeneration == requestGeneration &&
+            api.normalizedOrigin == origin && outbox.captureContext(matchingActorID: actor, organizationID: organization) == context
+        }
         if session.isOffline || outbox.pendingStatus(for: jobId) != nil {
-            return queue(request)
+            return queue(request, context: context)
         }
         busy = true
         defer { busy = false }
         do {
-            job = try await api.progressFieldJob(jobId, request: request)
+            let updated = try await api.progressFieldJob(jobId, request: request)
+            guard current() else { return false }
+            job = updated
             committed += 1
             // The progress response carries no allowedTransitions; re-read the job so the
             // next step (Mark arrived, Start work, ...) appears without a manual refresh.
@@ -1308,19 +1323,23 @@ struct JobDetailView: View {
             error = nil
             return true
         } catch is CancellationError { return false } catch {
-            if error.isConnectivityFailure { return queue(request) }
+            guard current() else { return false }
+            if error.isConnectivityFailure { return queue(request, context: context) }
             self.error = error.localizedDescription
             return false
         }
     }
 
     /// No signal: the step is saved on the phone and sent in order later; the header says so.
-    private func queue(_ request: FieldProgressRequest) -> Bool {
+    private func queue(_ request: FieldProgressRequest, context: FieldOutbox.CaptureContext) -> Bool {
         guard let payload = OutboxEntry.ProgressPayload(jobID: jobId, request: request) else {
             error = "Pausing a job needs a connection."
             return false
         }
-        outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
+        guard outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0, matching: context) != nil else {
+            error = "Couldn’t save this change on this phone. Try again."
+            return false
+        }
         committed += 1
         error = nil
         if !session.isOffline { Task { await syncQueued() } }
@@ -1333,28 +1352,51 @@ struct JobDetailView: View {
         await store.refresh(api)
     }
     private func saveNote() async {
-        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let original = note
+        let trimmed = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let context = outbox.captureContext(matchingActorID: actor, organizationID: organization) else {
+            noteSaveError = "Couldn’t save this note. Check your workspace and try again."
+            return
+        }
+        let generation = session.generation, authority = session.authorityRevision
+        let requestGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        func current() -> Bool {
+            session.generation == generation && session.authorityRevision == authority && session.user?.id == actor &&
+            session.activeOrganization?.id == organization && api.requestGeneration == requestGeneration &&
+            api.normalizedOrigin == origin && outbox.captureContext(matchingActorID: actor, organizationID: organization) == context
+        }
         if session.isOffline {
-            outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
-            note = ""
+            queueNote(trimmed, original: original, context: context)
             return
         }
         busy = true
         defer { busy = false }
         do {
-            let saved = try await api.addFieldNote(jobId, body: note.trimmingCharacters(in: .whitespacesAndNewlines))
+            let saved = try await api.addFieldNote(jobId, body: trimmed)
+            guard current() else { return }
             notes.append(saved)
-            note = ""
+            if note == original { note = "" }
+            noteSaveError = nil
             error = nil
             if selectedTab == "Activity" { await loadVerifiedActivity() }
         } catch is CancellationError {} catch {
+            guard current() else { return }
             if error.isConnectivityFailure {
-                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
-                note = ""
+                queueNote(trimmed, original: original, context: context)
             } else {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func queueNote(_ body: String, original: String, context: FieldOutbox.CaptureContext) {
+        guard outbox.enqueue(.note(.init(jobId: jobId, body: body)), policyVersion: session.policyVersion ?? 0, matching: context) != nil else {
+            noteSaveError = "Couldn’t save this note on this phone. Try again."
+            return
+        }
+        if note == original { note = "" }
+        noteSaveError = nil
     }
 }
 
