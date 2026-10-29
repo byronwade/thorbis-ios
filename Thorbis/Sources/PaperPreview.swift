@@ -161,6 +161,9 @@ enum PaperPreview {
         return PreviewRefundIntentStore.shared
     }
     @MainActor static func api() -> APIClient {
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-many") {
+            UserDefaults.standard.removeObject(forKey: "priceBookUsage.\(organizationID)")
+        }
         let api = APIClient(session: transport(), baseURL: "https://app.thorbis.com")
         // Override any launch-environment dev identity; restore must use fixture authority.
         api.auth = .none
@@ -817,6 +820,24 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": matchingCustomer([waiting], queryItems: queryItems)]
         case "/v1/query":
+            if PaperPreview.enabled, ["invoice-editor", "new-estimate"].contains(PaperPreview.screen),
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-many"),
+               queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
+                let cursor = "00000000-0000-4000-8000-000000009988"
+                let later = queryItems.first(where: { $0.name == "cursor" })?.value == cursor
+                let numbers = later ? Array(51...73) : Array(1...50)
+                let items: [[String: Any]] = numbers.map { number in
+                    let id = String(format: "00000000-0000-4000-8000-%012d", 9700 + number)
+                    let title = String(format: "Plumbing catalog service %03d", number)
+                    return ["id": id, "resourceId": "price_book_items", "label": title, "subtitle": "Service · flat",
+                            "fields": ["price_book_items.id": id, "price_book_items.current_revision": 4,
+                                       "price_book_items.description": title, "price_book_items.unit": "flat",
+                                       "price_book_items.sell_price_amount": 24500, "price_book_items.currency": "USD",
+                                       "price_book_items.tax_classification": "taxable", "price_book_items.kind": "service"]]
+                }
+                return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
+                        "items": items, "nextCursor": later ? NSNull() : cursor, "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
+            }
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
                ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages"),
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {

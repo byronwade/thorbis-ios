@@ -285,12 +285,20 @@ struct PriceBookResultsList: View {
     let addCustomLine: ((String) -> Void)?
     let retry: () -> Void
 
+    @State private var pageOffset = 0
+    @State private var usageSnapshot: [String: PriceBookUsage] = [:]
+    @State private var rankingTime = Date()
+
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         let current = catalog.context == context
-        let results = canUsePriceBook && current ? catalog.index.search(query, kind: kind, usage: catalog.usage) : []
-        let recent = canUsePriceBook && current && trimmedQuery.isEmpty ? catalog.index.recent(kind: kind, usage: catalog.usage) : []
+        let recent = canUsePriceBook && current && trimmedQuery.isEmpty ? catalog.index.recent(kind: kind, usage: usageSnapshot, now: rankingTime) : []
+        let page = canUsePriceBook && current
+            ? catalog.index.page(query, kind: kind, usage: usageSnapshot, now: rankingTime,
+                                 excludingIDs: Set(recent.map(\.id)), limit: PriceBookSearchIndex.resultLimit, offset: pageOffset)
+            : PriceBookSearchPage(results: [], total: 0, offset: 0)
+        let remaining = max(0, page.total - page.offset - page.results.count)
         VStack(alignment: .leading, spacing: 0) {
             if canUsePriceBook, !current || catalog.items.isEmpty {
                 if !current || catalog.loading {
@@ -312,16 +320,6 @@ struct PriceBookResultsList: View {
                 ForEach(recent) { item in row(PriceBookSearchResult(item: item, highlights: [])) }
                 header("Price book")
             }
-            ForEach(results.filter { result in !recent.contains { $0.id == result.id } }, content: row)
-            if canUsePriceBook, current, !catalog.loading, catalog.error == nil,
-               results.isEmpty, recent.isEmpty, addCustomLine == nil {
-                ContentUnavailableView(
-                    catalog.items.isEmpty ? "No active Price Book items" : "No matching items",
-                    systemImage: "book.closed",
-                    description: Text(catalog.items.isEmpty
-                        ? "Add items to your Price Book to use them here."
-                        : "Try another search or choose a different category."))
-            }
             if !trimmedQuery.isEmpty, let addCustomLine {
                 Button { addCustomLine(trimmedQuery) } label: {
                     HStack(spacing: 12) {
@@ -335,18 +333,68 @@ struct PriceBookResultsList: View {
                     .padding(.horizontal, Theme.gutter).frame(minHeight: 56).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("price-book-add-custom")
             }
-            if canUsePriceBook, trimmedQuery.isEmpty, catalog.index.count > PriceBookSearchIndex.resultLimit {
-                Text("Type to search all \(catalog.index.count) items")
+            if page.total > PriceBookSearchIndex.resultLimit, !page.results.isEmpty {
+                Text("Items \(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, Theme.gutter).padding(.vertical, 14)
-            } else if !canUsePriceBook, addCustomLine != nil {
+                    .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
+                    .accessibilityIdentifier("price-book-page-range")
+            }
+            if page.offset > 0 {
+                Button("Previous items") {
+                    pageOffset = max(0, page.offset - PriceBookSearchIndex.resultLimit)
+                }
+                .font(Theme.font(15, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                .padding(.horizontal, Theme.gutter)
+                .accessibilityIdentifier("price-book-previous")
+            }
+            if remaining > 0 {
+                Button {
+                    pageOffset = page.offset + PriceBookSearchIndex.resultLimit
+                } label: {
+                    HStack {
+                        Text("Next items")
+                        Spacer()
+                        Text("\(remaining) remaining").foregroundStyle(Theme.muted)
+                    }
+                    .font(Theme.font(15, weight: .medium))
+                    .padding(.horizontal, Theme.gutter).frame(minHeight: 56).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("price-book-show-more")
+            }
+            ForEach(page.results, content: row)
+            if canUsePriceBook, current, !catalog.loading, catalog.error == nil,
+               page.results.isEmpty, recent.isEmpty, addCustomLine == nil {
+                ContentUnavailableView(
+                    catalog.items.isEmpty ? "No active Price Book items" : "No matching items",
+                    systemImage: "book.closed",
+                    description: Text(catalog.items.isEmpty
+                        ? "Add items to your Price Book to use them here."
+                        : "Try another search or choose a different category."))
+            }
+            if !canUsePriceBook, addCustomLine != nil {
                 Text("Type a line and add it. This account can't use the price book.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, Theme.gutter).padding(.vertical, 14)
             }
         }
         .padding(.bottom, 24)
+        .onAppear { resetPage() }
+        .onChange(of: query) { _, _ in resetPage() }
+        .onChange(of: kind) { _, _ in resetPage() }
+        .onChange(of: context) { _, _ in resetPage() }
+        .onChange(of: catalog.context) { _, newContext in
+            if newContext == context { resetPage() }
+        }
+    }
+
+    private func resetPage() {
+        pageOffset = 0
+        usageSnapshot = catalog.usage
+        rankingTime = Date()
     }
 
     private func header(_ title: String) -> some View {

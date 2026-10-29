@@ -115,6 +115,51 @@ final class PriceBookSearchTests: XCTestCase {
         XCTAssertEqual(usage.frecency(now: now), 2, accuracy: 0.0001)
     }
 
+    func testMoreThanFiftyMatchingItemsRemainSearchable() {
+        let items = (1...73).map { item($0, String(format: "Valve %03d", $0)) }
+        let index = PriceBookSearchIndex(items: items)
+        XCTAssertEqual(index.search("valve").count, 73)
+        XCTAssertEqual(index.search("valve").last?.item.description, "Valve 073")
+        XCTAssertEqual(index.search("").count, 73)
+    }
+
+    func testVisiblePageExcludesRecentBeforeLimitingAndCountsMatchingCategory() {
+        let services = (1...73).map { item($0, String(format: "Valve %03d", $0), kind: "service") }
+        let material = item(99, "Valve material")
+        let index = PriceBookSearchIndex(items: services + [material])
+        let recentID = services[0].id
+        let first = index.page("valve", kind: .service, excludingIDs: [recentID], limit: 50)
+        XCTAssertEqual(first.total, 72)
+        XCTAssertEqual(first.results.count, 50)
+        XCTAssertEqual(first.results.first?.item.description, "Valve 002")
+        XCTAssertEqual(first.results.last?.item.description, "Valve 051")
+        let next = index.page("valve", kind: .service, excludingIDs: [recentID], limit: 50, offset: 50)
+        XCTAssertEqual(next.results.count, 22)
+        XCTAssertEqual(next.results.first?.item.description, "Valve 052")
+        XCTAssertEqual(next.results.last?.item.description, "Valve 073")
+        XCTAssertEqual(Set((first.results + next.results).map(\.id)).count, 72)
+        let clamped = index.page("valve", kind: .service, excludingIDs: [recentID], limit: 50, offset: 500)
+        XCTAssertEqual(clamped.offset, 50)
+        XCTAssertEqual(index.page("valve", kind: .material, limit: 50).total, 1)
+        XCTAssertEqual(index.page("unknown", limit: 50).total, 0)
+    }
+
+    func testLargeLoadedCatalogCanReachItsLastMatch() {
+        let items = (1...10_000).map { item($0, String(format: "Valve %05d", $0)) }
+        let index = PriceBookSearchIndex(items: items)
+        let start = Date()
+        let first = index.page("valve", limit: 50)
+        let middle = index.page("valve", limit: 50, offset: 500)
+        let last = index.page("valve", limit: 50, offset: 9_950)
+        let elapsed = Date().timeIntervalSince(start)
+        print("Price book 10,000-item search across three expansions: \(elapsed) seconds")
+        XCTAssertEqual(first.total, 10_000)
+        XCTAssertEqual(first.results.count, 50)
+        XCTAssertEqual(middle.results.count, 50)
+        XCTAssertEqual(last.results.count, 50)
+        XCTAssertEqual(last.results.last?.item.description, "Valve 10000")
+    }
+
     func testUsageStoreCountsPerOrganization() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "PriceBookSearchTests"))
         defaults.removePersistentDomain(forName: "PriceBookSearchTests")
