@@ -74,6 +74,8 @@ struct ThorbisMenuCard: View {
     let items: [ThorbisMenuItem]
     var title: String? = nil
     let onSelect: (ThorbisMenuItem) -> Void
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var estimatedHeight: CGFloat {
         let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? 50 : 62) }
@@ -81,22 +83,30 @@ struct ThorbisMenuCard: View {
         return rows + header + 40 // card padding + bottom inset
     }
 
+    private var detents: Set<PresentationDetent> {
+        if verticalSizeClass == .compact { return [.large] }
+        return estimatedHeight <= 420 && !dynamicTypeSize.isAccessibilitySize
+            ? [.height(estimatedHeight)] : [.medium, .large]
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            if let title {
-                Text(title)
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 2)
-            }
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                Button { onSelect(item) } label: { row(item) }
-                    .buttonStyle(RowPressStyle())
-                    .disabled(item.isDisabled)
-                    .opacity(item.isDisabled ? 0.4 : 1)
-                if index < items.count - 1 {
-                    Divider().overlay(Theme.border)
-                        .padding(.leading, item.icon == nil ? 14 : 44)
+        ScrollView {
+            VStack(spacing: 0) {
+                if let title {
+                    Text(title)
+                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 2)
+                }
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    Button { onSelect(item) } label: { row(item) }
+                        .buttonStyle(RowPressStyle())
+                        .disabled(item.isDisabled)
+                        .opacity(item.isDisabled ? 0.4 : 1)
+                    if index < items.count - 1 {
+                        Divider().overlay(Theme.border)
+                            .padding(.leading, item.icon == nil ? 14 : 44)
+                    }
                 }
             }
         }
@@ -108,7 +118,7 @@ struct ThorbisMenuCard: View {
         .frame(maxWidth: 460)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, 10)
-        .presentationDetents([.height(estimatedHeight)])
+        .presentationDetents(detents)
         .presentationBackground(.clear)
         .presentationDragIndicator(.hidden)
     }

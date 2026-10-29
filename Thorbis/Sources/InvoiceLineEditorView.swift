@@ -8,6 +8,7 @@ struct InvoiceLineEditorView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var editor: InvoiceLineEditorState
     @State private var showPriceBook = false
     @State private var confirmReload = false
@@ -208,26 +209,7 @@ struct InvoiceLineEditorView: View {
         .safeAreaInset(edge: .bottom) {
             // The search Done action returns to invoice review and its commit actions.
             // Keeping a second action bar above the keyboard obscures quick-edit fields.
-            if !searching {
-            HStack(spacing: 10) {
-                if canIssue {
-                    Button("Save draft") { Task { await save() } }
-                        .font(Theme.font(17, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                        .frame(width: 132, height: Theme.commitHeight)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                        .buttonStyle(PressStyle())
-                        .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
-                    PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
-                        .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
-                } else {
-                    PrimaryButton(title: "Save draft", busy: busy) { Task { await save() } }
-                        .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
-                }
-            }
-            .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
-            .background(Theme.chrome)
-            }
+            if !searching { invoiceCommitActions }
         }
         .confirmationDialog("Issue invoice?", isPresented: $confirmIssue, titleVisibility: .visible) {
             Button("Issue invoice", role: .destructive) { Task { await issue() } }
@@ -253,6 +235,37 @@ struct InvoiceLineEditorView: View {
         } message: {
             Text("The invoice changed on the server. Reloading replaces this form with the latest saved lines.")
         }
+    }
+
+    private var invoiceCommitActions: some View {
+        let accessible = dynamicTypeSize.isAccessibilitySize
+        let layout = accessible ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
+            if canIssue {
+                Button { Task { await save() } } label: {
+                    Text("Save draft")
+                    .font(Theme.font(17, weight: .medium))
+                    .foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, accessible ? 16 : 0)
+                    .padding(.vertical, accessible ? 12 : 0)
+                    .frame(width: accessible ? nil : 132, height: accessible ? nil : Theme.commitHeight)
+                    .frame(maxWidth: accessible ? .infinity : nil, minHeight: Theme.commitHeight)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+                }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
+                PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
+                    .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
+            } else {
+                PrimaryButton(title: "Save draft", busy: busy) { Task { await save() } }
+                    .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
+        .background(Theme.chrome)
     }
 
     private var priceBookOverrideReasonField: some View {
@@ -490,6 +503,7 @@ struct InvoiceLineEditorView: View {
 }
 
 private struct EditableInvoiceLineRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var line: InvoiceLineDraft
     let canMoveUp: Bool
     let canMoveDown: Bool
@@ -508,6 +522,19 @@ private struct EditableInvoiceLineRow: View {
                 LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
                                 moveUp: moveUp, moveDown: moveDown, remove: remove)
             }
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 14) {
+                    accessibleNumberField("Quantity", placeholder: "1", text: $line.quantity)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("invoice-line-quantity-\(line.id)")
+                    if let unit = line.unitLabel, !unit.isEmpty {
+                        Text("Unit: \(unit)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    accessibleNumberField("Unit price in dollars", placeholder: "0.00", text: $line.unitPrice,
+                                          prefix: "$", decimal: true)
+                }
+            } else {
             HStack(spacing: 8) {
                 Text("Qty").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 LineNumberField(label: "Quantity", placeholder: "1", text: $line.quantity)
@@ -519,6 +546,7 @@ private struct EditableInvoiceLineRow: View {
                 Spacer(minLength: 8)
                 LineNumberField(label: "Unit price in dollars", placeholder: "0.00", text: $line.unitPrice,
                                 prefix: "$", decimal: true, width: 128)
+            }
             }
             if case .priceBookSelection = line.source {
                 Text("Price Book selection · server verifies the revision")
@@ -533,6 +561,26 @@ private struct EditableInvoiceLineRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
     }
+
+    private func accessibleNumberField(_ label: String, placeholder: String, text: Binding<String>,
+                                       prefix: String? = nil, decimal: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let prefix { Text(prefix).foregroundStyle(Theme.muted) }
+                TextField(placeholder, text: text, axis: .vertical)
+                    .keyboardType(decimal ? .decimalPad : .numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel(label)
+            }
+            .font(Theme.monoFont(15, weight: .medium))
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        }
+    }
+
 }
 
 struct PaperPriceBookPicker: View {

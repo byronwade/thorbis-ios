@@ -946,6 +946,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["decision": "grant", "version": "00000000-0000-4000-8000-000000006001", "recordedAt": "2026-10-20T15:00:00Z"]
             }
             if path == "/v1/customers/\(id)/locations" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-many-locations") ||
+                    ProcessInfo.processInfo.arguments.contains("--paper-preview-few-locations") {
+                    let count = ProcessInfo.processInfo.arguments.contains("--paper-preview-few-locations") ? 3 : 18
+                    let locations: [[String: Any]] = (1...count).map { index in
+                        ["id": String(format: "00000000-0000-4000-8000-%012d", 7100 + index),
+                         "organizationId": org, "customerId": id, "label": "Location \(index)",
+                         "kind": "service", "address": "\(index) Test Street", "createdAt": now, "updatedAt": now]
+                    }
+                    return ["items": locations]
+                }
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
                                     "label": "Home", "kind": "service", "address": address,
                                     "notes": "Sample location for design preview",
