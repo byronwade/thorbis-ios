@@ -24,6 +24,12 @@ enum PaperPreview {
         return args[index + 1]
     }
     static var isJobDocumentsPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents") }
+    static var isJobDocumentsMoneyPreview: Bool {
+        isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents-money")
+    }
+    static var isJobEstimateRecoveryPreview: Bool {
+        isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-recovery")
+    }
     /// Deterministic OS-boundary responses for the isolated, read-only design preview only.
     static var ownerAuthentication: (@MainActor (String) async -> Bool)? {
         let args = ProcessInfo.processInfo.arguments
@@ -38,9 +44,14 @@ enum PaperPreview {
         }
     }
     static var jobDocumentEstimates: [EstimateRecord] {
-        [changed(estimate, ["title": "Main drain repair", "options": NSNull()]),
-         changed(estimate, ["id": "00000000-0000-4000-8000-000000002238", "title": "Water heater add-ons", "status": "draft", "options": NSNull()]),
-         changed(estimate, ["id": "00000000-0000-4000-8000-000000002239", "title": "Other job estimate", "options": NSNull()])]
+        var draft = changed(estimate, ["id": "00000000-0000-4000-8000-000000002238", "title": "Water heater add-ons", "status": "draft", "options": NSNull()])
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-invalid-money") {
+            let invalid = FieldLine(id: "00000000-0000-4000-8000-000000009299", description: "Unverifiable sample amount", quantity: 2,
+                                    unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)
+            draft = changed(draft, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([invalid]))])
+        }
+        return [changed(estimate, ["title": "Main drain repair", "options": NSNull()]), draft,
+                changed(estimate, ["id": "00000000-0000-4000-8000-000000002239", "title": "Other job estimate", "options": NSNull()])]
     }
     static var jobDocumentInvoices: [InvoiceRecord] {
         var primary = issuedInvoice
@@ -48,12 +59,30 @@ enum PaperPreview {
             primary.customerAuthorization = .init(id: "00000000-0000-4000-8000-000000009501", signerName: "Preview customer",
                 signedAt: "2026-10-27T12:00:00Z", imageMediaId: "00000000-0000-4000-8000-000000009502", linesRevision: primary.linesRevision)
         }
+        let original = primary
+        if isJobDocumentsMoneyPreview {
+            let discount = FieldLine(id: "00000000-0000-4000-8000-000000009104", description: "Member discount", quantity: 1,
+                                     unitPrice: FieldMoney(amount: -4_000, currency: "USD"), source: nil)
+            primary = changed(primary, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines + [discount])),
+                                        "amountPaid": 15_000])
+        }
         let equalBalances = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances")
         return [primary,
-         changed(primary, ["id": "00000000-0000-4000-8000-000000002240", "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
+         changed(original, ["id": "00000000-0000-4000-8000-000000002240", "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
                            "amountPaid": equalBalances ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
                            "paidAt": equalBalances ? NSNull() : "2026-10-27T12:05:00Z"]),
          changed(issuedInvoice, ["id": "00000000-0000-4000-8000-000000002241", "jobId": "00000000-0000-4000-8000-000000002215"])]
+    }
+    static var jobDocumentMoneyPayments: [FieldPaymentRecord] {
+        let card = changed(refundPayment, ["id": "00000000-0000-4000-8000-000000002250", "invoiceId": issuedInvoice.id,
+            "amount": ["amount": 15_000, "currency": "USD"], "status": "recorded",
+            "idempotencyKey": "paper-preview-job-card", "recordedAt": "2026-10-27T12:00:00Z",
+            "refundedAmount": 5_000, "netAmount": ["amount": 10_000, "currency": "USD"], "refundedAt": "2026-10-28T12:00:00Z"])
+        let cash = changed(refundPayment, ["id": "00000000-0000-4000-8000-000000002251", "invoiceId": issuedInvoice.id,
+            "amount": ["amount": 5_000, "currency": "USD"], "method": "cash", "status": "recorded",
+            "idempotencyKey": "paper-preview-job-cash", "recordedAt": "2026-10-28T13:00:00Z",
+            "netAmount": ["amount": 5_000, "currency": "USD"]])
+        return [card, cash]
     }
     private static func changed<T: Codable>(_ value: T, _ fields: [String: Any]) -> T {
         var object = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as! [String: Any]
@@ -198,20 +227,37 @@ private final class PreviewRefundIntentStore: PaymentRefundIntentStoring {
     }
 }
 
+struct PaperPreviewConnectionMenu: View {
+    var body: some View {
+        Menu("Sample connection") {
+            Button("Make sample estimate unavailable") { PaperPreviewProtocol.makeSampleEstimateUnavailable() }
+            Button("Restore sample connection") { PaperPreviewProtocol.restoreReviewConnection() }
+        }
+        .font(.system(size: 17, weight: .medium))
+        .foregroundStyle(Color.orange)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(Color.black)
+    }
+}
+
 final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private final class Scenario: @unchecked Sendable {
         let lock = NSLock()
         var invoiceReads = 0
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
+        var estimateUnavailable = false
     }
     private static let scenario = Scenario()
     static func resetScenario() {
-        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false }
+        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false }
     }
     static func markOwnerAuthenticated() { scenario.lock.withLock { scenario.ownerAuthenticated = true } }
+    static func makeSampleEstimateUnavailable() {
+        scenario.lock.withLock { scenario.estimateUnavailable = true }
+    }
     static func restoreReviewConnection() {
-        scenario.lock.withLock { scenario.reviewConnectionRestored = true }
+        scenario.lock.withLock { scenario.reviewConnectionRestored = true; scenario.estimateUnavailable = false }
     }
     private static func legacyInvoiceRead(_ path: String) -> Bool {
         guard PaperPreview.isJobDocumentsPreview,
@@ -245,6 +291,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ !Self.scenario.reviewConnectionRestored }) {
             status = 503
             payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
+        } else if PaperPreview.isJobEstimateRecoveryPreview,
+                  url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
+                  Self.scenario.lock.withLock({ Self.scenario.estimateUnavailable }) {
+            status = 503
+            payload = ["status": 503, "title": "Sample estimate connection unavailable"]
         } else if Self.legacyInvoiceRead(url.path) {
             status = 404
             payload = ["status": 404, "title": "Preview legacy job invoice route"]
@@ -320,6 +371,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     object["jobId"] = "00000000-0000-4000-8000-000000002215"
                 }
                 return object
+            }
+            if PaperPreview.isJobDocumentsMoneyPreview, path == "/v1/invoices/\(invoices[0].id)/payments" {
+                return ["items": PaperPreview.jobDocumentMoneyPayments.map { jsonObject($0)! }]
             }
             if path == "/v1/invoices/\(invoices[1].id)/payments" {
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances") { return ["items": []] }

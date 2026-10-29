@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "build": "76",
+  "sourceCommit": "956a22f5c9615bf5dde502757c2861c81634e8cd",
+  "uploadedAt": "2026-10-28T22:58:24-04:00",
+  "xcodeExport": "succeeded",
+  "lastDashboardStatus": "Ready to Submit",
+  "processedAvailabilityVerified": true,
+  "testerAssignmentVerified": true,
+  "testingNotesSaved": true,
+  "expectedGroup": "Internal Testers",
+  "archive": "/private/tmp/thorbis-76.lxkhtd68/Thorbis.xcarchive",
+  "dashboardVerification": "Processed build 76 is assigned to Internal Testers (2); What to Test shows Saved.",
+  "buildId": "75334d12-cbd3-43ba-b8b4-a28eb9d92bc8",
+  "verifiedAt": "2026-10-29T03:07:45.442296+00:00",
+  "groupId": "32e003bb-3a52-47c2-b84c-2e7cd7459b01",
+  "testerCount": 2,
+  "dashboardUrl": "https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/75334d12-cbd3-43ba-b8b4-a28eb9d92bc8",
+  "confirmationSha256": "d6c5caad2180093df348aee5376c8b09be8f591d4e1b55860037ac6cc0c23c51"
+}

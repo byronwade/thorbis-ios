@@ -81,6 +81,24 @@ final class JobDocumentsUITests: XCTestCase {
         invoice.tap()
         XCTAssertTrue(app.navigationBars["INV-2209"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Technician: unlock to leave customer mode"].exists)
+        let previous = app.buttons["Previous document"]
+        let choose = app.buttons["Choose a job document"]
+        let next = app.buttons["Next document"]
+        for control in [previous, choose, next] {
+            XCTAssertTrue(control.exists)
+            XCTAssertGreaterThanOrEqual(control.frame.width, 56)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 56)
+            XCTAssertGreaterThanOrEqual(control.frame.minX, 0)
+            XCTAssertLessThanOrEqual(control.frame.maxX, app.frame.width)
+        }
+        XCTAssertTrue(previous.frame.intersection(choose.frame).isEmpty)
+        XCTAssertTrue(next.frame.intersection(choose.frame).isEmpty)
+        XCTAssertLessThanOrEqual(previous.frame.height, 80, "Paging should reflow instead of wrapping a word into pieces")
+        XCTAssertLessThanOrEqual(app.staticTexts["customer-document-position"].frame.height, 75)
+        let description = app.staticTexts.matching(NSPredicate(format: "label == %@", "Compressor diagnostic")).firstMatch
+        XCTAssertTrue(description.exists)
+        XCTAssertGreaterThanOrEqual(description.frame.width, min(app.frame.width, 760) * 0.6,
+                                    "Large descriptions need a readable column instead of squeezing beside a fixed price")
         capture(app, "Accessible customer invoice")
     }
 

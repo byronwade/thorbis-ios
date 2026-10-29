@@ -147,6 +147,23 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(read.preferredInvoice(id: id(53))?.id, id(53))
     }
 
+    func testDiscountedOwedInvoiceRemainsPreferredOverNewerPaidDeposit() async throws {
+        var discounted = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(invoice(50).utf8)) as? [String: Any])
+        var lines = try XCTUnwrap(discounted["lines"] as? [[String: Any]])
+        lines.append(["id": id(901), "description": "Customer discount", "quantity": 1,
+                      "unitPrice": ["amount": -1500, "currency": "USD"]])
+        discounted["lines"] = lines
+        let discountedBody = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: discounted), encoding: .utf8))
+        let deposit = invoice(52, status: "paid", paid: 10000)
+            .replacingOccurrences(of: "2026-10-01", with: "2026-10-02")
+        let client = api([.init(200, page([deposit, discountedBody]))])
+        let result = await JobDocumentsLoader.invoices(scope: scope(), api: client, knownIDs: [], retaining: nil, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertTrue(read.isComplete)
+        XCTAssertEqual(read.preferredInvoice(id: nil)?.id, id(50))
+        XCTAssertEqual(read.preferredInvoice(id: id(52))?.id, id(50))
+    }
+
     func testWorkspaceChangeDuringCachedFallbackCannotPublish() async throws {
         let gate = URLProtocolFixture.Gate()
         let client = api([.init(405, problem(405)), .init(200, page([])), .init(200, invoice(50), gate: gate)])
@@ -249,6 +266,20 @@ final class JobCommercialDocumentsTests: XCTestCase {
                                          .init(status: "sent", currency: "EUR", cents: 5000),
                                          .init(status: "sent", currency: "USD", cents: 4000)])
         XCTAssertEqual(summary.optionCount, 1)
+    }
+
+    func testFixedEstimateSummaryIncludesDiscountInItsStatusCurrencyTotal() throws {
+        let original = try pricedEstimate(status: "sent", cents: 10000)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        var lines = try XCTUnwrap(object["lines"] as? [[String: Any]])
+        lines.append(["id": id(901), "description": "Customer discount", "quantity": 1,
+                      "unitPrice": ["amount": -1500, "currency": "USD"]])
+        object["lines"] = lines
+        let discounted = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: object))
+        let other = try pricedEstimate(status: "sent", cents: 1000)
+        let summary = try XCTUnwrap(JobEstimateSummary(records: [discounted, other], complete: true))
+        XCTAssertEqual(summary.amounts, [.init(status: "sent", currency: "USD", cents: 9500)])
+        XCTAssertEqual(summary.optionCount, 0)
     }
 
     func testEstimateSummaryNeverPublishesIncompleteInvalidOrOverflowTotals() throws {

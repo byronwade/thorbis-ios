@@ -12,6 +12,26 @@ canonical API (`services/api`, OpenAPI in `services/api/openapi.json`). No busin
   only `createDevHeaderIdentityResolver` accepts.
 - Not built by Thorbis CI; build locally with Xcode.
 
+## App-wide golden rules — required for every change
+
+Read [docs/design/ios-golden-rules.md](docs/design/ios-golden-rules.md) and follow
+[docs/design/ios-implementation-process.md](docs/design/ios-implementation-process.md)
+before changing any iOS feature, screen, shared component or workflow. The complete
+user-supplied field-management guidelines are preserved at
+[docs/design/references/ios-field-management-guidelines-source.md](docs/design/references/ios-field-management-guidelines-source.md).
+Apply this context to work already in progress as well as future work.
+
+- Thorbis owns operational hierarchy, Paper owns referenced layouts, Apple owns
+  native system behavior, and Linear supplies interaction grammar. Reuse shared
+  components; keep the app clean and consistent without removing features.
+- Place/problem first, one obvious next action, native navigation, progressive
+  disclosure, accessible text/targets and truthful saved/offline/pending states.
+- Preserve canonical tenant/capability/job/document/revision/idempotency authority.
+  Customer mode shows only its job, with clear prices, discounts and payments.
+- Treat research examples and unverified platform claims as guidance, not shipped
+  behavior or new API contracts. Never imply a feature or release is ready without
+  matching evidence. Keep remaining gaps and unfinished work explicit.
+
 ## What's new notes (every update)
 
 People see a What's new sheet once after each update (design.thorbis.com MA-19..MA-22). The notes

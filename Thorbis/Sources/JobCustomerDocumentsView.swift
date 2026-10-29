@@ -2,7 +2,7 @@ import SwiftUI
 
 private enum CustomerJobPaper: Hashable {
     case estimate(EstimateRecord)
-    case invoice(InvoiceRecord)
+    case invoice(InvoiceRecord, signing: Bool)
 }
 
 /// Lives inside one CustomerModeContainer: browsing never exposes technician controls.
@@ -23,6 +23,7 @@ struct JobCustomerDocumentsView: View {
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     @State private var paper: CustomerJobPaper?
+    @State private var book: CustomerJobDocumentID?
     @State private var openingID: String?
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var error: String?
@@ -42,7 +43,7 @@ struct JobCustomerDocumentsView: View {
                                 .accessibilityAddTraits(.isHeader)
                             Text(jobTitle).font(Theme.font(20)).fixedSize(horizontal: false, vertical: true)
                             Text("JOB-\(scope.jobID.suffix(4).uppercased()) · \(customerName)")
-                                .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .font(Theme.font(17)).foregroundStyle(Theme.muted)
                         }
                         if let error { ErrorBanner(message: error) { await refresh() } }
                         if estimates?.isComplete == false || invoices?.isComplete == false {
@@ -66,24 +67,48 @@ struct JobCustomerDocumentsView: View {
             CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: handBack)
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.background)
         }
-        .navigationDestination(item: $paper) { destination in
-            destinationView(destination)
-                .disabled(unlocking)
-                .navigationTitle(reference(destination))
+        .navigationDestination(item: $book) { initial in
+            CustomerJobDocumentBook(scope: scope,
+                estimates: canViewEstimates && estimates?.scope == scope ? estimates?.records ?? [] : [],
+                invoices: canViewInvoices && invoices?.scope == scope ? invoices?.records ?? [] : [],
+                freshEstimates: estimates?.scope == scope ? estimates?.freshIDs ?? [] : [],
+                freshInvoices: invoices?.scope == scope ? invoices?.freshIDs ?? [] : [],
+                unavailableEstimates: canViewEstimates && estimates?.scope == scope ? estimates?.unavailableIDs ?? [] : [],
+                initial: initial, actionError: error, refresh: refresh,
+                reviewEstimate: { id in Task { await openEstimate(id, decision: true) } },
+                signInvoice: { id in Task { await openInvoice(id, decision: true, sign: true) } },
+                payInvoice: { id in Task { await openInvoice(id, payment: true) } },
+                canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
+                canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
+                .disabled(unlocking || openingID != nil)
+                .navigationDestination(item: $paper) { destination in
+                    destinationView(destination)
+                        .disabled(unlocking)
+                        .navigationTitle(reference(destination))
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button { Task { await unlock() } } label: {
+                                    Image(systemName: "lock").font(.system(size: 20))
+                                        .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("Technician: unlock to leave customer mode")
+                                .disabled(unlocking)
+                            }
+                        }
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { Task { await unlock() } } label: {
                             Image(systemName: "lock").font(.system(size: 20))
                                 .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target)
-                                .contentShape(Rectangle())
-                        }
-                        .accessibilityLabel("Technician: unlock to leave customer mode")
-                        .disabled(unlocking)
+                        }.accessibilityLabel("Technician: unlock to leave customer mode")
                     }
                 }
         }
         .task(id: session.generation) {
             paper = nil
+            book = nil
             paymentModel = nil
             await refresh()
         }
@@ -139,17 +164,17 @@ struct JobCustomerDocumentsView: View {
             } else {
                 CustomerJobReadOnlyPaper(estimate: estimate, handBack: handBack)
             }
-        case .invoice(let invoice):
+        case .invoice(let invoice, let signing):
             if ["issued", "paid"].contains(invoice.status) {
                 CustomerInvoicePresentation(invoice: invoice, customerName: customerName,
                     canSign: session.can("invoice.edit", feature: "invoicing"),
                     onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments")
-                        ? { Task { await pay(invoice.id) } } : nil,
+                        ? { Task { await pay(invoice.id) } } : nil, initiallySigning: signing,
                     onSigned: { updated in
                         guard scope.contains(updated), updated.id == invoice.id else { return }
                         documents.replaceInvoice(updated)
                         paymentModel?.acceptInvoiceMutationResponse(updated)
-                        paper = .invoice(updated)
+                        paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
                     }, onDone: handBack)
             } else {
@@ -161,7 +186,7 @@ struct JobCustomerDocumentsView: View {
     private func reference(_ destination: CustomerJobPaper) -> String {
         switch destination {
         case .estimate(let estimate): "EST-\(estimate.id.suffix(4).uppercased())"
-        case .invoice(let invoice): "INV-\(invoice.id.suffix(4).uppercased())"
+        case .invoice(let invoice, _): "INV-\(invoice.id.suffix(4).uppercased())"
         }
     }
 
@@ -185,7 +210,7 @@ struct JobCustomerDocumentsView: View {
         }
     }
 
-    private func openEstimate(_ id: String) async {
+    private func openEstimate(_ id: String, decision: Bool = false) async {
         guard openingID == nil, currentWorkspace, canViewEstimates else { return }
         openingID = id
         defer { openingID = nil }
@@ -198,10 +223,11 @@ struct JobCustomerDocumentsView: View {
             error = "This estimate couldn't be refreshed. Please try again."
             return
         }
-        paper = .estimate(estimate)
+        if decision { paper = .estimate(estimate) }
+        else { book = .estimate(id) }
     }
 
-    private func openInvoice(_ id: String) async {
+    private func openInvoice(_ id: String, decision: Bool = false, sign: Bool = false, payment: Bool = false) async {
         guard openingID == nil, currentWorkspace, canViewInvoices else { return }
         openingID = id
         defer { openingID = nil }
@@ -221,7 +247,13 @@ struct JobCustomerDocumentsView: View {
                 }
                 documents.replaceInvoice(latest)
                 paymentModel = model
-                paper = .invoice(latest)
+                if payment { await pay(id) }
+                else if decision {
+                    guard CustomerDocumentAmounts(lines: latest.lines, currency: latest.currency, amountPaid: latest.amountPaid) != nil else {
+                        throw Problem(title: "These invoice amounts couldn't be verified. Refresh before continuing.", status: nil, detail: nil)
+                    }
+                    paper = .invoice(latest, signing: sign)
+                } else { book = .invoice(id) }
             } else {
                 paymentModel = nil
                 throw Problem(title: model.loadError ?? "This invoice couldn't be refreshed", status: nil, detail: nil)
@@ -239,6 +271,8 @@ struct JobCustomerDocumentsView: View {
         let unlocked = await authenticateOwner("Unlock to take payment")
         if unlocked, session.generation == generation, currentWorkspace {
             requestPayment(invoiceID)
+        } else if session.generation == generation, currentWorkspace {
+            error = "Your technician needs to unlock before taking payment."
         }
     }
 
