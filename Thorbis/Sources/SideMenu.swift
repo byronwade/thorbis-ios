@@ -108,6 +108,8 @@ struct SideMenu: View {
                             // and a pull downward brings it in.
                             .frame(minHeight: geometry.size.height, alignment: .top)
                     }
+                    // Identity scrolling only resolves ids inside a scroll-target layout.
+                    .scrollTargetLayout()
                     .padding(.horizontal, 8)
                 }
                 .scrollPosition($scroll, anchor: .top)
