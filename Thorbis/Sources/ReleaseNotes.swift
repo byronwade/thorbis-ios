@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-10-29-customer-records",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "rectangle.stack", title: "A customer's jobs in one place",
+                      detail: "See every job's photos, notes, documents, estimates, invoices, and activity together, still grouped by job."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-menu-room",
             date: "2026-10-29",
             highlights: [

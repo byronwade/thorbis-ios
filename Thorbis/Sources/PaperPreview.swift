@@ -13,7 +13,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "side-menu", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "side-menu", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -157,7 +157,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
-        } else if url.scheme == "https", url.host == "app.thorbis.com", let fixture = Self.fixture(path: url.path) {
+        } else if url.scheme == "https", url.host == "app.thorbis.com", let fixture = Self.fixture(path: url.path, query: url.query) {
             status = 200
             payload = fixture
         } else {
@@ -174,7 +174,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     override func stopLoading() {}
 
-    private static func fixture(path: String) -> Any? {
+    private static func fixture(path: String, query: String? = nil) -> Any? {
         let actor = PaperPreview.actorID
         let org = PaperPreview.organizationID
         let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400))
@@ -297,7 +297,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "receivable": ["openInvoices": 9, "balance": 733_000, "overdueInvoices": 2, "overdueBalance": 620_000]] as [String: Any]
         }
         if path == "/v1/invoices" && PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
-        if path == "/v1/invoices" { return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]] }
+        if path == "/v1/invoices" {
+            let item = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice)) as? [String: Any]
+            return ["items": matchingCustomer(item.map { [$0] } ?? [], query: query)]
+        }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
         }
@@ -339,7 +342,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
-        case "/v1/jobs": return ["items": jobs().map { $0.filter { $0.key != "allowedTransitions" } }]
+        case "/v1/jobs":
+            let items = jobs().map { $0.filter { $0.key != "allowedTransitions" } }
+            return ["items": matchingCustomer(items, query: query)]
         case "/v1/customers": return ["items": customers()]
         case "/v1/membership-plans":
             return ["items": [["id": "00000000-0000-4000-8000-000000006301", "organizationId": PaperPreview.organizationID, "name": "Comfort Club",
@@ -350,7 +355,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             // Sent ten days ago, so it shows under Needs attention.
             var waiting = (jsonObject(PaperPreview.estimate) as? [String: Any]) ?? [:]
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
-            return ["items": [waiting]]
+            return ["items": matchingCustomer([waiting], query: query)]
         case "/v1/query":
             // The first item keeps the id the preview estimate's price book line points at.
             let catalog: [(String, String, String, Int)] = [
@@ -389,6 +394,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
+            if path == "/v1/jobs/\(id)/estimates" { return ["items": []] }
             if path == "/v1/jobs/\(id)/booking-call" {
                 return ["call": [
                     "id": "00000000-0000-4000-8000-000000009601", "status": "completed", "direction": "inbound",
@@ -477,6 +483,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    /// List routes ignore unknown query keys. A customerId query keeps that customer's rows,
+    /// matching the field list the records tab calls.
+    private static func matchingCustomer(_ items: [[String: Any]], query: String?) -> [[String: Any]] {
+        guard let query,
+              let id = URLComponents(string: "https://app.thorbis.com/?\(query)")?.queryItems?.first(where: { $0.name == "customerId" })?.value
+        else { return items }
+        return items.filter { ($0["customerId"] as? String) == id }
     }
     private static func jsonObject<T: Encodable>(_ value: T) -> Any? {
         (try? JSONEncoder().encode(value)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
