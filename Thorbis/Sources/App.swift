@@ -9,6 +9,7 @@ struct ThorbisApp: App {
     @StateObject private var store: Store
     @StateObject private var session: SessionController
     @StateObject private var inboxBoard: InboxLocalDrafts
+    @StateObject private var capturedWork = CapturedWorkCoordinator()
     @StateObject private var connectivity = ConnectivityMonitor()
     @StateObject private var pendingMedia: PendingMediaStore
     @StateObject private var outbox: FieldOutbox
@@ -137,6 +138,7 @@ struct ThorbisApp: App {
             .environmentObject(store)
             .environmentObject(session)
             .environmentObject(inboxBoard)
+            .environmentObject(capturedWork)
             .environmentObject(connectivity)
             .environmentObject(outbox)
             .environmentObject(pendingMedia)
