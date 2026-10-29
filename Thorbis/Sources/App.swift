@@ -26,7 +26,7 @@ struct ThorbisApp: App {
         #endif
         let inboxBoard = InboxLocalDrafts()
         #if DEBUG
-        let outbox = PaperPreview.enabled ? FieldOutbox(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), defaults: PaperPreview.defaults()) : FieldOutbox()
+        let outbox = PaperPreview.enabled ? PaperPreview.outbox() : FieldOutbox()
         #else
         let outbox = FieldOutbox()
         #endif

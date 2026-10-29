@@ -1,6 +1,7 @@
 #if DEBUG
 import Foundation
 import SwiftUI
+import CryptoKit
 
 /// Screenshot fixtures only. This entire file is absent from Release builds.
 /// Transport captures every request, including unsupported hosts; it never forwards.
@@ -158,11 +159,94 @@ enum PaperPreview {
     }
     /// Synthetic pending-media journey. The dedicated preview directory never uses
     /// Application Support or customer captures, and fixture transport rejects writes.
-    @MainActor static func mediaStore() -> PendingMediaStore {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ThorbisPreviewMedia", isDirectory: true)
+    static var savedWorkSessionID: String? {
         let args = ProcessInfo.processInfo.arguments
-        if args.contains("--paper-preview-reset-media") { try? FileManager.default.removeItem(at: root) }
+        guard enabled, let index = args.firstIndex(of: "--paper-preview-saved-work-session"), args.indices.contains(index + 1),
+              let id = UUID(uuidString: args[index + 1]) else { return nil }
+        return id.uuidString.lowercased()
+    }
+    static var isSavedWorkPreview: Bool { savedWorkSessionID != nil }
+    static let savedWorkUncachedJobID = "00000000-0000-4000-8000-000000009951"
+    @MainActor private static var savedWorkDidReset = false
+    static let savedWorkDeadline = Date().addingTimeInterval(12)
+    static var showSavedWorkControls: Bool { isSavedWorkPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-controls") }
+    @MainActor static func activateSavedWorkScenario(session: SessionController) async {
+        guard isSavedWorkPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-offline"),
+              PaperPreviewProtocol.beginSavedWorkOffline() else { return }
+        await session.revalidate()
+    }
+    @MainActor private static func savedWorkRoot() -> URL? {
+        guard let id = savedWorkSessionID else { return nil }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ThorbisSavedWorkPreview", isDirectory: true).appendingPathComponent(id, isDirectory: true)
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-reset-saved-work"), !savedWorkDidReset {
+            try? FileManager.default.removeItem(at: root)
+            savedWorkDidReset = true
+        }
+        return root
+    }
+    @MainActor static func savedWorkFileHashes() throws -> [String: String] {
+        guard let root = savedWorkRoot(), let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else { return [:] }
+        var hashes: [String: String] = [:]
+        for case let file as URL in files where try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+            let relative = String(file.path.dropFirst(root.path.count + 1))
+            hashes[relative] = SHA256.hash(data: try Data(contentsOf: file)).map { String(format: "%02x", $0) }.joined()
+        }
+        return hashes
+    }
+    @MainActor static func outbox() -> FieldOutbox {
+        guard let root = savedWorkRoot() else {
+            return FieldOutbox(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), defaults: defaults())
+        }
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-seed-saved-work") {
+            do {
+                let folder = root.appendingPathComponent("Outbox", isDirectory: true)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let entries = [
+                    OutboxEntry(id: "00000000-0000-4000-8000-000000009711", deviceId: "00000000-0000-4000-8000-000000009700", actorId: actorID, organizationId: organizationID,
+                        policyVersion: 1, createdAt: Date(timeIntervalSince1970: 1_700_000_000), action: .progress(.init(jobId: jobID, to: "arrived")), state: .rejected("This sample visit changed while the phone was offline.")),
+                    OutboxEntry(id: "00000000-0000-4000-8000-000000009712", deviceId: "00000000-0000-4000-8000-000000009700", actorId: actorID, organizationId: organizationID,
+                        policyVersion: 1, createdAt: Date(timeIntervalSince1970: 1_700_000_060), action: .note(.init(jobId: jobID, body: "Synthetic private note body")), state: .held)
+                ]
+                try JSONEncoder().encode(entries).write(to: folder.appendingPathComponent("\(actorID)_\(organizationID).json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            } catch { assertionFailure("Synthetic saved-work commands failed: \(error)") }
+        }
+        let box = FieldOutbox(directory: root, defaults: defaults()); box.bind(actorID: actorID, organizationID: organizationID)
+        return box
+    }
+
+    @MainActor static func mediaStore() -> PendingMediaStore {
+        let root = savedWorkRoot() ?? FileManager.default.temporaryDirectory.appendingPathComponent("ThorbisPreviewMedia", isDirectory: true)
+        let args = ProcessInfo.processInfo.arguments
+        if !isSavedWorkPreview, args.contains("--paper-preview-reset-media") { try? FileManager.default.removeItem(at: root) }
         let store = PendingMediaStore(directory: root)
+        if isSavedWorkPreview {
+            store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
+            if args.contains("--paper-preview-seed-saved-work") {
+                let photo = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { context in
+                    UIColor.gray.setFill(); context.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
+                }.jpegData(compressionQuality: 0.8)!
+                let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 612, height: 792)).pdfData { context in
+                    context.beginPage(); ("Synthetic saved-work scan" as NSString).draw(at: CGPoint(x: 30, y: 30), withAttributes: [.font: UIFont.systemFont(ofSize: 18)])
+                }
+                let samples: [(String, String, String, String, String, Data)] = [
+                    ("00000000-0000-4000-8000-000000009701", jobID, "before.jpg", "photo", "image/jpeg", photo),
+                    ("00000000-0000-4000-8000-000000009702", savedWorkUncachedJobID, "Field scan.pdf", "document", "application/pdf", pdf)
+                ]
+                do {
+                    guard let context = store.captureContext else { return store }
+                    for (id, job, name, kind, mime, data) in samples {
+                        try store.save(.init(id: id, jobID: job, filename: name, tags: kind == "photo" ? ["Before"] : [],
+                            capturedAt: Date(timeIntervalSince1970: 1_700_000_120), kind: kind, mime: mime), data: data, context: context)
+                    }
+                    store.bind(.init(actorID: "00000000-0000-4000-8000-000000000099", organizationID: organizationID, origin: "https://app.thorbis.com"))
+                    if let foreign = store.captureContext {
+                        try store.save(.init(id: "00000000-0000-4000-8000-000000009799", jobID: jobID, filename: "Foreign actor scan.pdf", tags: [],
+                            capturedAt: Date(timeIntervalSince1970: 1_700_000_120), kind: "document", mime: "application/pdf"), data: pdf, context: foreign)
+                    }
+                    store.bind(.init(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
+                } catch { assertionFailure("Synthetic saved-work media failed: \(error)") }
+            }
+        }
         if args.contains("--paper-preview-seed-media") {
             store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
             let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 612, height: 792)).pdfData { context in
@@ -293,6 +377,55 @@ struct PaperPreviewConnectionMenu: View {
     }
 }
 
+/// Explicit sample-only server/network stimuli; all traffic remains intercepted.
+struct SavedWorkPreviewControls: View {
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var media: PendingMediaStore
+    @State private var revocationProof: String?
+    var body: some View {
+        DisclosureGroup("Sample controls") {
+            Button("Revoke sample editing shortly") {
+                let scope = SavedWorkScope.capture(session: session, api: api, media: media, outbox: outbox)
+                let actor = session.user?.id, organization = session.activeOrganization?.id
+                let before = try? PaperPreview.savedWorkFileHashes()
+                let mutations = PaperPreviewProtocol.savedWorkMutationCount
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled else { return }
+                    PaperPreviewProtocol.revokeSavedWorkEditing()
+                    await session.revalidate()
+                    let proof: [String: Any] = [
+                        "filesBefore": before ?? [:], "filesAfter": (try? PaperPreview.savedWorkFileHashes()) ?? [:],
+                        "mutationsBefore": mutations, "mutationsAfter": PaperPreviewProtocol.savedWorkMutationCount,
+                        "sameActor": session.user?.id == actor, "sameWorkspace": session.activeOrganization?.id == organization,
+                        "viewScopeStillCurrent": scope?.isCurrent(session: session, api: api, media: media, outbox: outbox) == true,
+                        "canEdit": scope?.canEdit(session: session, api: api, media: media, outbox: outbox) == true
+                    ]
+                    revocationProof = (try? JSONSerialization.data(withJSONObject: proof, options: [.sortedKeys])).flatMap { String(data: $0, encoding: .utf8) }
+                }
+            }.frame(minHeight: 44)
+            if let revocationProof {
+                Text("Sample revocation evidence").accessibilityIdentifier("saved-work-edit-revocation-proof").accessibilityValue(revocationProof)
+            }
+            Button("Rebind sample commands") {
+                outbox.bind(actorID: "00000000-0000-4000-8000-000000000099", organizationID: PaperPreview.organizationID)
+                outbox.bind(actorID: PaperPreview.actorID, organizationID: PaperPreview.organizationID)
+            }.frame(minHeight: 44)
+            Button("Retire sample requests") { api.invalidateRequests() }.frame(minHeight: 44)
+            Button("Switch sample workspace shortly") {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled else { return }
+                    PaperPreviewProtocol.switchSavedWorkWorkspace()
+                    await session.revalidate()
+                }
+            }.frame(minHeight: 44)
+        }.font(Theme.font(13))
+    }
+}
+
 final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private final class Scenario: @unchecked Sendable {
         let lock = NSLock()
@@ -300,10 +433,25 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
+        var savedWorkOffline = false
+        var savedWorkWorkspaceChanged = false
+        var savedWorkEditingRevoked = false
+        var savedWorkMutationCount = 0
     }
     private static let scenario = Scenario()
     static func resetScenario() {
-        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false }
+        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.savedWorkMutationCount = 0 }
+    }
+    static func beginSavedWorkOffline() -> Bool {
+        scenario.lock.withLock {
+            guard !scenario.savedWorkOffline else { return false }
+            scenario.savedWorkOffline = true; return true
+        }
+    }
+    static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
+    static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
+    static func switchSavedWorkWorkspace() {
+        scenario.lock.withLock { scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = true }
     }
     static func markOwnerAuthenticated() { scenario.lock.withLock { scenario.ownerAuthenticated = true } }
     static func makeSampleEstimateUnavailable() {
@@ -323,7 +471,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        if Self.simulateNoSignal {
+        if PaperPreview.isSavedWorkPreview, !["GET", "HEAD"].contains(request.httpMethod ?? "GET") {
+            Self.scenario.lock.withLock { Self.scenario.savedWorkMutationCount += 1 }
+        }
+        if Self.simulateNoSignal || Self.scenario.lock.withLock({ Self.scenario.savedWorkOffline }) {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
             return
         }
@@ -376,9 +527,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
 
     private static func fixture(path: String, queryItems: [URLQueryItem] = []) -> Any? {
         let actor = PaperPreview.actorID
-        let org = PaperPreview.organizationID
-        let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(86_400))
+        let changedWorkspace = PaperPreview.isSavedWorkPreview && scenario.lock.withLock { scenario.savedWorkWorkspaceChanged }
+        let org = changedWorkspace ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID
+        let expiry = ISO8601DateFormatter().string(from: PaperPreview.isSavedWorkPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-expiry") ? PaperPreview.savedWorkDeadline : Date().addingTimeInterval(86_400))
         let now = ISO8601DateFormatter().string(from: Date())
+        if changedWorkspace, path == "/v1/jobs" || path == "/v1/customers" { return ["items": []] }
+        if PaperPreview.isSavedWorkPreview, path == "/v1/jobs/\(PaperPreview.savedWorkUncachedJobID)" {
+            return ["id": PaperPreview.savedWorkUncachedJobID, "organizationId": org, "customerId": PaperPreview.customerID,
+                    "title": "Uncached drain visit", "status": "dispatched", "createdAt": now, "updatedAt": now, "allowedTransitions": ["en_route"]]
+        }
         if PaperPreview.screen.hasPrefix("present-estimate") {
             let record = PaperPreview.optionsEstimate
             if path == "/v1/estimates/\(record.id)" { return jsonObject(record) }
@@ -584,9 +741,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/get-session":
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-cleanup-failure") { return NSNull() }
             return ["user": ["id": actor, "name": "Ramon Marlowe", "email": "preview@example.invalid"], "session": ["userId": actor, "activeOrganizationId": org, "expiresAt": expiry]]
-        case "/api/auth/organization/list": return [["id": org, "name": "Wade’s Plumbing · Preview"]]
+        case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }

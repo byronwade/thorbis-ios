@@ -13,6 +13,15 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-29-saved-work-review",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "arrow.triangle.2.circlepath", title: "Review saved work in one place",
+                      detail: "See waiting changes, photos and scans by job, then open the job or retry from one review."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
             id: "2026-10-29-photo-recovery-cleanup",
             date: "2026-10-29",
             highlights: [

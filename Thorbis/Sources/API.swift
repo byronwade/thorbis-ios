@@ -84,7 +84,7 @@ final class APIClient: ObservableObject {
     @Published var displayName = ""
 
     private let session: URLSession
-    private(set) var requestGeneration = UUID()
+    @Published private(set) var requestGeneration = UUID()
     var onUnauthorized: (() -> Void)?
 
     func invalidateRequests() { requestGeneration = UUID() }
