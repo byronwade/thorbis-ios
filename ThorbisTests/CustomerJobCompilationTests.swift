@@ -226,6 +226,45 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertNotEqual(CustomerRecordLabel.invoice(record), CustomerRecordLabel.invoice(sameStatus))
     }
 
+    func testRecordsActivityOpensTheNamedRecordAndLeavesAPaymentClosed() async throws {
+        var replies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0, estimatesA: 1, estimatesB: 0, invoicesA: 1, invoicesB: 0, historyA: 0, historyB: 0)
+        let estimateID = uid(7_000)
+        let invoiceID = uid(9_000)
+        let paymentID = uid(90)
+        replies[13] = page([
+            ["occurredAt": "2026-08-01T12:00:00Z", "kind": "job", "subjectId": jobA, "summary": "Booked"],
+            ["occurredAt": "2026-08-02T12:00:00Z", "kind": "estimate", "subjectId": estimateID, "summary": "Sent"],
+            ["occurredAt": "2026-08-03T12:00:00Z", "kind": "invoice", "subjectId": invoiceID, "summary": "Issued"],
+            ["occurredAt": "2026-08-04T12:00:00Z", "kind": "payment", "subjectId": paymentID, "summary": "Paid"],
+            ["occurredAt": "2026-08-05T12:00:00Z", "kind": "contact", "subjectId": uid(50), "summary": "Added a contact"],
+            ["occurredAt": "2026-08-06T12:00:00Z", "kind": "location", "subjectId": uid(51), "summary": "Added a place"],
+        ])
+        let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, api: client)
+
+        let grouped = compiled.activity.flatMap(\.items)
+        XCTAssertEqual(grouped.map(\.kind).sorted(), ["estimate", "invoice", "job"])
+        XCTAssertEqual(compiled.accountActivity.map(\.kind), ["payment", "contact", "location"])
+        for entry in grouped + compiled.accountActivity {
+            XCTAssertEqual(
+                CustomerRecordsView.activityDestination(entry, customerID: customer),
+                ActivityDestinationMapping.customerHistory(entry, customerID: customer)
+            )
+        }
+        XCTAssertEqual(destination(in: grouped, kind: "job"), .job(jobA))
+        XCTAssertEqual(destination(in: grouped, kind: "estimate"), .estimate(estimateID))
+        XCTAssertEqual(destination(in: grouped, kind: "invoice"), .invoice(invoiceID))
+        XCTAssertNil(destination(in: compiled.accountActivity, kind: "payment"))
+        XCTAssertEqual(destination(in: compiled.accountActivity, kind: "contact"), .contact(customerID: customer, contactID: uid(50)))
+        XCTAssertEqual(destination(in: compiled.accountActivity, kind: "location"), .location(customerID: customer, locationID: uid(51)))
+    }
+
+    private func destination(in entries: [CustomerHistoryEntry], kind: String) -> ActivityDestination? {
+        let entry = try? XCTUnwrap(entries.first { $0.kind == kind })
+        return entry.flatMap { CustomerRecordsView.activityDestination($0, customerID: customer) }
+    }
+
     private func assertGrouped<Item>(_ groups: [CustomerJobGroup<Item>], counts: (Int, Int)) {
         XCTAssertEqual(groups.map(\.jobID), [jobA, jobB])
         XCTAssertEqual(groups.map(\.title), ["Water heater", "AC not cooling"])
