@@ -13,6 +13,17 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-29-customer-job-history",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "photo.on.rectangle", title: "See customer photos by job",
+                      detail: "Browse photos from each job together on the customer profile."),
+                .init(symbol: "map", title: "Choose a customer location",
+                      detail: "Pick the right location for directions instead of assuming a job site."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
             id: "2026-10-29-catalog-editing",
             date: "2026-10-29",
             highlights: [
@@ -31,6 +42,22 @@ enum ReleaseNotes {
                       detail: "See the work, price and status first, with totals and actions close at hand."),
             ],
             fixes: 0
+        ),
+        ReleaseNote(
+            id: "2026-10-29-price-book-loads",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "book.closed", title: "Price book loads your prices",
+                      detail: "The price book opens with your items. If it cannot, it says so in plain words."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-records-activity",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "chevron.right", title: "Open activity on the customer file",
+                      detail: "Activity on the Records tab opens the job, estimate, invoice, contact, or location it names."),
+            ]
         ),
         ReleaseNote(
             id: "2026-10-29-photo-stage",

@@ -35,6 +35,37 @@ final class InvoicePaymentUITests: XCTestCase {
         capture(app, "Card collected elsewhere")
     }
 
+    func testLargestTextBankConfirmationKeepsActionsReachable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-payment",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let menu = app.buttons["received-payment-methods"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 15))
+        for _ in 0..<5 where !menu.isHittable { app.swipeUp() }
+        XCTAssertTrue(menu.isHittable)
+        menu.tap()
+        let bank = app.buttons["Bank transfer (ACH) received"]
+        XCTAssertTrue(bank.waitForExistence(timeout: 10))
+        XCTAssertTrue(bank.isHittable)
+        bank.tap()
+        let record = button("Record $340.00 bank transfer received", in: app)
+        XCTAssertTrue(record.waitForExistence(timeout: 10))
+        for _ in 0..<5 where !record.isHittable { app.swipeUp() }
+        XCTAssertTrue(record.isHittable)
+        record.tap()
+        XCTAssertTrue(app.staticTexts["Confirm bank transfer received"].waitForExistence(timeout: 10))
+        let cancel = app.buttons["Cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        XCTAssertTrue(cancel.isHittable)
+        let confirm = button("Record $340.00 bank transfer received", in: app)
+        XCTAssertTrue(confirm.exists)
+        XCTAssertTrue(confirm.isHittable)
+        capture(app, "Accessible bank transfer confirmation")
+        cancel.tap()
+    }
+
     func testReadyLinkShowsScannableCheckoutAndDoneReturnsToInvoice() {
         continueAfterFailure = false
         let app = linkPreview()

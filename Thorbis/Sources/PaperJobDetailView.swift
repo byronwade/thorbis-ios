@@ -58,8 +58,9 @@ struct JobDetailView: View {
     /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
     @State private var createdEstimateID: String?
     @State private var showWrapUp = false
-    /// The customer's service locations; the first (or only) one is where the job is.
+    /// The customer’s locations are account records, not verified job-site associations.
     @State private var locations: [ServiceLocationRecord] = []
+    @State private var locationsContext: String?
     /// The primary contact's phone (else the customer's), for one-tap Call and Text.
     @State private var customerPhone: String?
     /// JS-06: every contact on the account, and the account for its preferred channel.
@@ -67,6 +68,8 @@ struct JobDetailView: View {
     @State private var customerRecord: CustomerRecord?
     @State private var contactsLoaded = false
     @State private var contactsFailed = false
+    @State private var contactsContext: String?
+    @State private var customerAuthorityID: String?
     /// JS-09/JS-10: this visit in counts, and the customer's other visits. Nil until read.
     @State private var followUps: [FieldFollowUpRecord]?
     @State private var mediaCount: Int?
@@ -80,7 +83,9 @@ struct JobDetailView: View {
 
     private var liveActivityKey: String {
         guard let job else { return "" }
-        return [job.id, job.status, outbox.pendingStatus(for: job.id) ?? "", locations.first?.address ?? ""].joined(separator: "|")
+        return [job.id, job.status, outbox.pendingStatus(for: job.id) ?? "",
+                session.generation.uuidString, session.authorityRevision.uuidString,
+                String(session.can("job.view", feature: "jobs"))].joined(separator: "|")
     }
 
     var body: some View {
@@ -201,7 +206,18 @@ struct JobDetailView: View {
                 }
             }
         }
-        .task(id: session.generation) {
+        .task(id: customerAuthorityToken) {
+            if customerAuthorityID != customerAuthorityToken {
+                customerAuthorityID = customerAuthorityToken
+                locations = []
+                locationsContext = nil
+                contacts = []
+                contactsContext = nil
+                customerRecord = nil
+                customerPhone = nil
+                contactsLoaded = false
+                contactsFailed = false
+            }
             if documentGeneration != session.generation {
                 documentGeneration = session.generation
                 documents.reset()
@@ -224,11 +240,27 @@ struct JobDetailView: View {
         .task(id: liveActivityKey) {
             guard let job else { return }
             let pending = outbox.pendingStatus(for: job.id)
+            let generation = session.generation
+            let authority = session.authorityRevision
             await JobLiveActivity.sync(job: job, status: pending ?? job.status, waitingToSync: pending != nil,
-                                       customer: store.customerName(job.customerId), address: locations.first?.address)
+                                       customer: store.customerName(job.customerId), address: nil) {
+                session.generation == generation && session.authorityRevision == authority &&
+                session.activeOrganization?.id == job.organizationId &&
+                session.can("job.view", feature: "jobs")
+            }
         }
         // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
         .onAppear { if job != nil { Task { await load() } } }
+        .onChange(of: session.can("customer.view", feature: "core_crm")) { _, _ in
+            locations = []
+            locationsContext = nil
+            contacts = []
+            contactsContext = nil
+            customerRecord = nil
+            customerPhone = nil
+            contactsLoaded = false
+            contactsFailed = false
+        }
         .onChange(of: selectedTab) { previous, tab in
             if tab == "Invoice" { Task { await loadInvoices() } }
             // Photos added on the Photos tab show in the Overview count straight away (JS-09).
@@ -449,11 +481,49 @@ struct JobDetailView: View {
         .padding(.bottom, 10)
     }
 
-    /// Everything a tech reaches for on arrival, without leaving the job: call, text, drive.
+    private var customerAuthorityToken: String {
+        let allowed = session.can("customer.view", feature: "core_crm")
+        return "\(session.generation.uuidString)|\(session.authorityRevision.uuidString)|\(session.policyVersion.map(String.init) ?? "unavailable")|\(allowed)"
+    }
+
+    private func customerContext(_ job: JobRecord) -> String? {
+        guard let organizationID = session.activeOrganization?.id, let policyVersion = session.policyVersion,
+              organizationID == job.organizationId,
+              session.can("customer.view", feature: "core_crm") else { return nil }
+        return JobLocationPolicy.context(generation: session.generation, authorityRevision: session.authorityRevision, policyVersion: policyVersion, canView: true,
+                                         organizationID: organizationID, customerID: job.customerId)
+    }
+
+    private var customerLocations: [ServiceLocationRecord] {
+        guard let job, let context = customerContext(job), locationsContext == context else { return [] }
+        return JobLocationPolicy.accountLocations(locations, customerID: job.customerId, organizationID: job.organizationId)
+    }
+
+    /// Directions always require choosing an account location; no job site is inferred.
     private var quickActions: some View {
-        PaperQuickActions(phone: customerPhone,
-                          directions: locations.first.flatMap { Directions.url(address: $0.address, coordinates: $0.coordinates) })
-            .padding(.top, 8)
+        VStack(alignment: .leading, spacing: 8) {
+            PaperQuickActions(phone: job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil })
+            if !customerLocations.isEmpty {
+                Menu {
+                    ForEach(customerLocations) { place in
+                        Button {
+                            if let url = JobLocationPolicy.directions(for: place.id, in: customerLocations) { openURL(url) }
+                        } label: {
+                            Text(place.label)
+                            Text("\(place.kind == "billing" ? "Billing" : "Service") · \(place.address)")
+                        }
+                    }
+                } label: {
+                    Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond")
+                        .font(Theme.font(15, weight: .medium))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityHint("Choose a customer location")
+            }
+        }
+        .padding(.top, 8)
     }
 
     @ViewBuilder
@@ -549,15 +619,33 @@ struct JobDetailView: View {
             // JS-05: only when the platform recorded the call that booked this job.
             if let bookingCall { JobBookingCallSection(call: bookingCall) }
             if session.can("customer.view", feature: "core_crm") {
-                JobContactsSection(people: JobContacts.people(contacts: contacts, customer: customerRecord),
-                                   preference: JobContacts.preference(customerRecord),
-                                   loaded: contactsLoaded, failed: contactsFailed) { await loadContacts(job) }
+                let current = customerContext(job) != nil && customerContext(job) == contactsContext
+                JobContactsSection(people: JobContacts.people(contacts: current ? contacts : [], customer: current ? customerRecord : nil),
+                                   preference: JobContacts.preference(current ? customerRecord : nil),
+                                   loaded: current && contactsLoaded, failed: current && contactsFailed) { await loadContacts(job) }
             }
-            if let place = locations.first {
-                JobSiteSection(place: place, showsLabel: locations.count > 1)
+            if !customerLocations.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    PaperGroupHeader(title: "Customer locations", count: customerLocations.count)
+                    Text("Choose a customer location; this job has no confirmed site.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(customerLocations) { place in
+                        DisclosureGroup {
+                            JobSiteSection(place: place, showsLabel: true)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(place.label).foregroundStyle(Theme.foreground)
+                                Text("\(place.kind == "billing" ? "Billing" : "Service") · \(place.address)").foregroundStyle(Theme.muted)
+                            }
+                            .font(Theme.font(15)).fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                    }
+                }
             }
-            // What's installed here and what they pay (JS-08); the tech records a unit they find in place.
-            CustomerEquipmentSection(customerID: job.customerId, locations: locations, onlyLocationID: locations.first?.id)
+            // No account location is assumed to be this job's site; keep all equipment visible.
+            CustomerEquipmentSection(customerID: job.customerId, locations: customerLocations)
             CustomerMembershipSection(customerID: job.customerId, editable: false)
             JobVisitCounts(latestNote: notes.last?.body, noteCount: notes.count + outbox.pendingNotes(for: job.id).count,
                            photoCount: mediaCount, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
@@ -1100,9 +1188,12 @@ struct JobDetailView: View {
     }
     private func load() async {
         let generation = session.generation
+        let authorityRevision = session.authorityRevision
+        let policyVersion = session.policyVersion
         do {
             let loadedJob = try await api.fieldJob(jobId)
-            guard session.generation == generation else { return }
+            guard session.generation == generation, session.authorityRevision == authorityRevision,
+                  session.policyVersion == policyVersion else { return }
             guard loadedJob.id == jobId, loadedJob.organizationId == session.activeOrganization?.id else {
                 throw Problem(title: "Job could not be verified", status: nil, detail: nil)
             }
@@ -1110,11 +1201,20 @@ struct JobDetailView: View {
             // Record before the follow-up requests below, while the identity is known to match.
             RecentItems.shared.record(.job, id: loadedJob.id, title: loadedJob.title,
                                       subtitle: "JOB-\(loadedJob.id.suffix(4).uppercased()) · \(store.customerName(loadedJob.customerId))")
-            if locations.isEmpty, session.can("customer.view", feature: "core_crm"),
-               let places = try? await api.fieldLocations(loadedJob.customerId), session.generation == generation {
-                locations = places
+            let locationContext = customerContext(loadedJob)
+            if locationContext == nil || locationsContext != locationContext {
+                locations = []
+                locationsContext = nil
             }
-            if !contactsLoaded { await loadContacts(loadedJob) }
+            if let locationContext,
+               let places = try? await api.fieldLocations(loadedJob.customerId),
+               session.generation == generation, session.authorityRevision == authorityRevision,
+               session.policyVersion == policyVersion, customerContext(loadedJob) == locationContext, job?.id == loadedJob.id,
+               job?.customerId == loadedJob.customerId {
+                locations = places
+                locationsContext = locationContext
+            }
+            if let locationContext, contactsContext != locationContext || !contactsLoaded { await loadContacts(loadedJob) }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
             let loadedNotes = try await api.fieldNotes(jobId)
@@ -1137,21 +1237,43 @@ struct JobDetailView: View {
 
     /// JS-06: every contact and the account; the header's Call and Text reach the primary one.
     private func loadContacts(_ job: JobRecord) async {
-        guard session.can("customer.view", feature: "core_crm") else { return }
+        guard let context = customerContext(job) else { return }
         let generation = session.generation
+        if contactsContext != context {
+            contacts = []
+            customerRecord = nil
+            customerPhone = nil
+            contactsLoaded = false
+            contactsFailed = false
+            contactsContext = nil
+        }
+        func stillCurrent() -> Bool {
+            session.generation == generation && self.job?.id == job.id &&
+                self.job?.customerId == job.customerId && customerContext(job) == context
+        }
         do {
             let people = try await api.fieldContacts(job.customerId)
             let account = try? await api.fieldCustomer(job.customerId)
-            guard session.generation == generation else { return }
-            contacts = people
-            customerRecord = account
+            guard stillCurrent() else { return }
+            let verified = people.filter { $0.organizationId == job.organizationId && $0.customerId == job.customerId }
+            let verifiedAccount = account.flatMap { $0.organizationId == job.organizationId && $0.id == job.customerId ? $0 : nil }
+            contacts = verified
+            customerRecord = verifiedAccount
             contactsFailed = false
-            customerPhone = people.first(where: \.primary)?.phone ?? people.first(where: { $0.phone != nil })?.phone ?? account?.phone
+            customerPhone = verified.first(where: \.primary)?.phone ?? verified.first(where: { $0.phone != nil })?.phone ?? verifiedAccount?.phone
         } catch is CancellationError { return } catch {
-            guard session.generation == generation else { return }
+            guard stillCurrent() else { return }
             contactsFailed = true
-            if customerPhone == nil { customerPhone = (try? await api.fieldCustomer(job.customerId))?.phone }
+            if customerPhone == nil {
+                let fallback = try? await api.fieldCustomer(job.customerId)
+                guard stillCurrent() else { return }
+                if let fallback, fallback.organizationId == job.organizationId, fallback.id == job.customerId {
+                    customerPhone = fallback.phone
+                }
+            }
         }
+        guard stillCurrent() else { return }
+        contactsContext = context
         contactsLoaded = true
     }
 
@@ -1347,4 +1469,21 @@ enum JobInvoiceMemory {
     }
 
     static func clear() { UserDefaults.standard.removeObject(forKey: key) }
+}
+
+/// Customer account locations do not establish a job site. A destination is chosen explicitly.
+enum JobLocationPolicy {
+    static func context(generation: UUID, authorityRevision: UUID, policyVersion: Int, canView: Bool, organizationID: String, customerID: String) -> String {
+        [generation.uuidString, authorityRevision.uuidString, String(policyVersion), String(canView), organizationID, customerID].map { "\($0.utf8.count):\($0)" }.joined()
+    }
+
+    static func accountLocations(_ locations: [ServiceLocationRecord], customerID: String, organizationID: String) -> [ServiceLocationRecord] {
+        locations.filter { $0.customerId == customerID && $0.organizationId == organizationID }
+    }
+
+    static func directions(for locationID: String?, in locations: [ServiceLocationRecord]) -> URL? {
+        guard let locationID, let place = locations.first(where: { $0.id == locationID }),
+              !place.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return Directions.url(address: place.address, coordinates: place.coordinates)
+    }
 }

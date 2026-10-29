@@ -67,6 +67,30 @@ final class WorkspaceAPITests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "limit" })?.value, "50")
     }
 
+    /// `price_book.item_revisions.sell_price_amount` is a Postgres bigint. node-pg (the API's
+    /// driver) serializes int8 as a JSON string, which is what GET /v1/query actually returns.
+    func testPriceBookCollectionDecodesPostgresBigintSellPrice() async throws {
+        let payload = #"{"schemaVersion":1,"items":[{"id":"11111111-1111-4111-8111-111111111111","resourceId":"price_book_items","label":"Panel service","subtitle":"service","fields":{"price_book_items.id":"11111111-1111-4111-8111-111111111111","price_book_items.current_revision":1,"price_book_items.description":"Panel service","price_book_items.unit":"each","price_book_items.sell_price_amount":"125000","price_book_items.currency":"USD","price_book_items.tax_classification":"taxable","price_book_items.kind":"service","price_book_items.archived_at":null}}],"nextCursor":null,"planId":"plan","resourceId":"price_book_items","viewId":null,"purpose":"collection","localMode":"complete"}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")
+
+        let page = try await api.priceBookItems(limit: 50)
+
+        XCTAssertEqual(page.items.first?.description, "Panel service")
+        XCTAssertEqual(page.items.first?.sellPrice.amount, 125_000)
+        XCTAssertEqual(page.items.first?.sellPrice.currency, "USD")
+        XCTAssertEqual(page.items.first?.revision, 1)
+        XCTAssertNil(page.items.first?.archivedAt)
+        XCTAssertNil(page.nextCursor)
+    }
+
+    func testPriceBookLoadErrorHidesTheDecoderSentence() {
+        let raw = Problem(title: "Invalid API response", status: 200,
+                          detail: "The data couldn’t be read because it isn’t in the correct format.")
+        XCTAssertEqual(PriceBookLoadError.message(for: raw), "The price book couldn't be loaded.")
+        let refused = Problem(title: "Forbidden", status: 403, detail: "Price book is off for your role.")
+        XCTAssertEqual(PriceBookLoadError.message(for: refused), "Price book is off for your role.")
+    }
+
     func testPriceBookDetailDecodesCurrentRevisionWithoutGuessing() async throws {
         let payload = #"{"item":{"id":"11111111-1111-4111-8111-111111111111","organizationId":"44444444-4444-4444-8444-444444444444","status":"active","currentRevision":3,"createdAt":"2026-10-26T00:00:00Z","updatedAt":"2026-10-26T00:00:00Z"},"revision":{"organizationId":"44444444-4444-4444-8444-444444444444","itemId":"11111111-1111-4111-8111-111111111111","revision":3,"description":"Replace capacitor","unit":"each","sellPrice":{"amount":12500,"currency":"USD"},"taxClassification":"taxable","kind":"material","createdAt":"2026-10-26T00:00:00Z"}}"#
         let api = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")

@@ -590,28 +590,18 @@ struct LineItemActions: View {
     let remove: () -> Void
 
     var body: some View {
-        Menu { LineItemMenuItems(canMoveUp: canMoveUp, canMoveDown: canMoveDown, moveUp: moveUp, moveDown: moveDown, remove: remove) } label: {
+        var items: [ThorbisMenuItem] = []
+        if canMoveUp { items.append(ThorbisMenuItem("Move up", icon: "arrow.up") { moveUp() }) }
+        if canMoveDown { items.append(ThorbisMenuItem("Move down", icon: "arrow.down") { moveDown() }) }
+        items.append(ThorbisMenuItem("Remove line", icon: "trash", role: .destructive) { remove() })
+        return ThorbisMenu(items: items,
+                           accessibilityLabel: "Actions for \(name.isEmpty ? "line item" : name)") {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.muted)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .accessibilityLabel("Actions for \(name.isEmpty ? "line item" : name)")
-    }
-}
-
-struct LineItemMenuItems: View {
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-    let moveUp: () -> Void
-    let moveDown: () -> Void
-    let remove: () -> Void
-
-    var body: some View {
-        if canMoveUp { Button(action: moveUp) { Label("Move up", systemImage: "arrow.up") } }
-        if canMoveDown { Button(action: moveDown) { Label("Move down", systemImage: "arrow.down") } }
-        Button(role: .destructive, action: remove) { Label("Remove line", systemImage: "trash") }
     }
 }
 
@@ -656,10 +646,8 @@ extension View {
     /// Cancel and swipe never throw away edits silently (MA-16, MA-17).
     func discardChangesGuard(hasChanges: Bool, busy: Bool, isPresented: Binding<Bool>, discard: @escaping () -> Void) -> some View {
         interactiveDismissDisabled(busy || hasChanges)
-            .confirmationDialog("Discard your changes?", isPresented: isPresented, titleVisibility: .visible) {
-                Button("Discard changes", role: .destructive, action: discard)
-                Button("Keep editing", role: .cancel) {}
-            }
+            .thorbisConfirm("Discard your changes?", isPresented: isPresented,
+                            actions: [ThorbisConfirmAction("Discard changes", role: .destructive, action: discard)])
     }
 }
 

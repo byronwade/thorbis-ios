@@ -1124,8 +1124,8 @@ extension APIClient {
         try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/completion-invoice"), body: EmptyObject())
     }
 
-    func fieldMedia(_ jobID: String) async throws -> [MediaAssetRecord] {
-        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"))
+    func fieldMedia(_ jobID: String, includeArchived: Bool = false) async throws -> [MediaAssetRecord] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : [])
     }
 
     func registerFieldMedia(_ jobID: String, request: FieldMediaRegistrationRequest) async throws -> FieldMediaRegistration {

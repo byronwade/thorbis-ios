@@ -40,13 +40,17 @@ struct ThorbisApp: App {
             guard let session else { throw CancellationError() }
             return try await Store.fetchAuthorized(api: api, session: session)
         }
-        session.onInvalidate = { [weak store, weak pendingMedia] in store?.invalidate(); pendingMedia?.bind(nil) }
+        session.onInvalidate = { [weak store, weak pendingMedia] in
+            store?.invalidate()
+            pendingMedia?.bind(nil)
+            JobLiveActivity.retire()
+        }
+        session.onJobAuthorityRevoked = { JobLiveActivity.retire() }
         session.onSignedOut = { [weak store, weak outbox, weak pendingMedia] in
             store?.cache.clearAll()
             outbox?.clearAll()
             pendingMedia?.clearAll()
             JobDetailCache.clearAll()
-            Task { await JobLiveActivity.endAll() }
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
             Task { @MainActor in RecentItems.shared.clear() }

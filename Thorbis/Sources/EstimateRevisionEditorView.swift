@@ -189,12 +189,10 @@ struct EstimateRevisionEditorView: View {
             .animation(EstimateLineGroupsEditor.spring, value: searching)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
-            .confirmationDialog("Reload the latest estimate?", isPresented: $confirmReload, titleVisibility: .visible) {
-                Button("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }
-                Button("Keep editing", role: .cancel) {}
-            } message: {
-                Text("The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.")
-            }
+            .thorbisConfirm("Reload the latest estimate?",
+                            message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
+                            isPresented: $confirmReload,
+                            actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
         }
     }
 
