@@ -4,7 +4,7 @@
 
 **Goal:** Present every estimate for one job together and let the customer approve multiple independent estimates within one protected handoff, using required canonical per-document signing.
 
-**Architecture:** A small handoff model owns selection, frozen reviewed terms, per-document progress and the current-authority lease. The existing CustomerModeContainer owns navigation/exit, and CustomerEstimatePresentation gains an explicit handoff context so its existing per-document APIs/signature logic remain canonical. The job owns the model above the container's hand-back branch, preserving progress when authentication is canceled or the customer goes back.
+**Architecture:** A small handoff model owns selection, frozen reviewed terms, per-document progress and the current-authority lease. The existing CustomerModeContainer owns navigation/exit, and CustomerEstimatePresentation gains an explicit handoff context so its existing per-document APIs/signature logic remain canonical. An App-owned presenter retains the model above session phase/generation changes and the container's hand-back branch, preserving protection and progress when authentication is canceled or the customer goes back.
 
 **Tech Stack:** Existing Swift6/SwiftUI/ObservableObject, Foundation, XCTest/XCUITest; iOS18 minimum and pinned dependencies unchanged.
 
@@ -69,7 +69,7 @@ Coordinator approved the full design and authority bounds. Fresh builder check `
 - Add `TechJobStep.presentEstimates` (no single-estimate ID). Use it for any eligible sent estimate before the approved-work invoice shortcut. Keep `.showEstimate(id:)` only for the existing explicit individual draft path; no new Present path auto-issues drafts.
 - For native fixtures inject the existing `MediaTransfer(api:storageSession:)` via the handoff adapter; production uses its normal transfer. The DEBUG transport must intercept storage PUT as well as API calls, verify exact synthetic asset/document identity and emit sanitized request/result receipts. No MediaTransfer production semantics or SDK changes are required.
 
-- [ ] **Step 1: Write behavioral REDs against the current exclusive/shortcut behavior.**
+- [x] **Step 1: Write behavioral REDs against the current exclusive/shortcut behavior.**
 
 Add test scaffolds only as needed to compile; a missing type is not sufficient RED. Required assertions:
 
@@ -84,11 +84,11 @@ Add test scaffolds only as needed to compile; a missing type is not sufficient R
 
 Run the affected selectors and retain actual assertion failures before behavior implementation. Existing fixture/parser stubs may compile new types, but must not implement the behavior before RED.
 
-- [ ] **Step 2: Implement the focused state/model and staff entry.**
+- [x] **Step 2: Implement the focused state/model and staff entry.**
 
 Use existing complete collections and canonical issued revision reads. Store no new business records or offline queue. Keep collection partial/loading explicit; block selected approval until complete and verified. Make Present dominant for populated Estimates, Add estimate visible in its header, and preserve every existing menu/detail route. Model ownership must survive CustomerModeContainer's hand-back/Go back branch.
 
-- [ ] **Step 3: Add meaningful canonical checkpoint/recovery REDs, then adapt the existing per-document view.**
+- [x] **Step 3: Add meaningful canonical checkpoint/recovery REDs, then adapt the existing per-document view.**
 
 Required tests:
 - `testTwoPlainApprovalsUseDistinctConfirmedSignatureAssets`: A and B each encode their own exact revision and fresh image reference; no signature/consent crosses documents.
@@ -100,11 +100,11 @@ Required tests:
 
 Use real API/URLProtocol fixtures and stored media confirmation responses; never replace approval with setting a local Approved flag. Keep original exact caller-scope validation tests. Guard before/after every await. Preserve a submitted-but-unconfirmed attempt until canonical reconciliation; no blind new token/asset after connectivity loss.
 
-- [ ] **Step 4: Implement the customer overview/review/checkpoints/results.**
+- [x] **Step 4: Implement the customer overview/review/checkpoints/results.**
 
 Show all cards with explicit independent selection, exact price/status and no default selection. Drafts remain read-only. Display selected scope/amounts and option choices before signing. Preserve customer typography/56pt controls. Reuse existing sign/consent UI and canonical methods through the handoff context; only required per-doc signing repeats. Customer explicitly chooses Next estimate after confirmation, never automatic reader advance. End with per-document results and one owner-authenticated hand-back. All child Back/Done/swipe stays customer-only; live invalidation renders protected recovery rather than exposing staff.
 
-- [ ] **Step 5: Make the actual native journey RED, implement bounded DEBUG fixtures, then GREEN.**
+- [x] **Step 5: Make the actual native journey RED, implement bounded DEBUG fixtures, then GREEN.**
 
 Create anonymized fixtures with two sent estimates, approved+sent, draft and a foreign-job record; no private screenshot data. Intercept exact existing GET/POST/media PUT/confirm routes and expose sanitized receipt proof of the encoded identities, two distinct signature media IDs and per-item states. Fixtures may simulate a lost response after a recorded commit; no provider/customer network fallback and no production preview exposure.
 
@@ -116,13 +116,13 @@ Required native cases in `JobEstimateHandoffUITests`:
 - `testWorkspaceRetirementKeepsProtectedOwnerAndNoOldDocuments`: no stale cards or requests, no unauthenticated staff exposure.
 - `testLargeTextAndTabletRetainAllCardsPricesActionsAndSignatureIsolation`: phone/iPad portrait/landscape, largest Dynamic Type/dark and explicit navigation without signature swiping.
 
-- [ ] **Step 6: Qualify important affected checks and inspect native Paper alignment.**
+- [x] **Step 6: Qualify important affected checks and inspect native Paper alignment.**
 
 Use xcodegen only for new files; preserve Package.resolved and StripeTerminal5.8.1. Run focused `JobEstimateHandoffTests`, `TechnicianFlowTests`, `CustomerPresentationTests`, `CustomerEstimateReviewTests`, `JobCommercialDocumentsTests`, applicable signature/media/API tests and `WhatsNewTests`; add exact selectors when implementation exposes an affected boundary. Run the new native journey and relevant existing document book/signing/payment regression cases, not a repetitive full scheme by default.
 
 Use the existing owned iPhone/iPad destinations, one Xcode owner, existing package cache/derived data, and unique outside-derived xcresults. Wait the same handle through result-import epilogues; zero selected tests is not a pass. Inspect full-screen screenshots (app-cropped landscape images can mislead), VoiceOver labels/focus, child Back/native dismissal completion, large text and Reduce Motion. Record actual scope/counts and unresolved physical-device/assistive-technology/RTL gaps; do not infer performance targets were measured.
 
-- [ ] **Step 7: Record evidence, self-review and hand off for independent whole-task review.**
+- [x] **Step 7: Record evidence, self-review and hand off for independent whole-task review.**
 
 Update execution/evidence and a unique new release note. Clarify golden rule22: multiple independent estimates can be chosen together while packages within one estimate remain exclusive and per-document approval/evidence stays canonical. No other golden rule change.
 
@@ -133,3 +133,11 @@ Coordinator owns review, integration/commit/PR and the next unique TestFlight bu
 ## Self-review
 
 All specification sections map to Task1: entry/retention (Steps1–2), immutable review/selection/authority (Steps1–3), required signing and protected navigation (Steps3–4), real native behavior (Step5), adaptation/regressions/release evidence (Steps6–7). Review Focus cases each have an explicit named test. New types are a narrow adapter around existing methods, not an approval engine or backend contract. No blocking interface or product ambiguity remains; builder check and coordinator's protected-owner clarification are recorded above.
+
+### Approved production owner lifetime clarification
+
+Coordinator authorized the bounded App ownership adjustment after verifying `App.appContent` replaces `RootView().id(session.generation)` and changes phase branches. The new handoff alone uses an App-owned `JobEstimateHandoffPresenter` and stable outer ZStack cover, above those branches. Reuse CustomerModeContainer; invalidation permanently retires private contents while the protected owner remains. Only successful existing owner authentication clears the active presenter. Generic invoice/document covers and session/resync/router semantics remain unchanged. Actual production workspace-generation, signed-out and workspace-selection transitions must prove staff stays hidden, including denied unlock. Retained exact attempts survive child Back and cancelled handback; invalid scope clears private data, and authenticated exit releases the retained owner with weak callbacks. This supplements the approved flow, not a global router.
+
+### Approved canonical result and protected child corrections
+
+Coordinator approved retaining the existing PublicEstimateActionPatch acceptance when present, otherwise reading the same retained token's full action. Confirm selected packages only against canonical accepted state, bound revision/hash/option/currency/total. Bare approved aggregate remains visible without inferred package price or signer. No replacement token, endpoint or consent version. The scoped destination environment calls the same guarded CustomerModeContainer unlock function; only authenticated owner exit clears the App presenter. Tests must count actual authentication attempts, require exactly one hittable stable owner-exit control, and verify semantic staff visibility after success. Label-mismatch failures are locator failures; earlier selected-review/first-confirmation stops remain preserved as unexplained intermediates.

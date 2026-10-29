@@ -1,6 +1,6 @@
 # Job estimate handoff design
 
-Status: draft for coordinator and independent builder review; no product implementation yet.
+Status: implemented and natively qualified on `3f5d70e`; TestFlight build79 archive/upload pending.
 Base: c42444c2b1f5667290f64c6988206c56100f8bfb, branch codex/job-estimate-handoff.
 
 ## Outcome
@@ -9,7 +9,7 @@ From a job's Estimates tab, a technician taps **Present estimates** and hands ov
 
 This is independent estimates, not selecting multiple mutually exclusive packages inside one estimate. It is not a new atomic approval endpoint or one signature reused across documents.
 
-## Verified current behavior
+## Verified behavior before this change
 
 - PaperJobDetailView.swift:248 gives the Estimates tab a Build an estimate primary action. Rows at645 open individual EstimateDetailView. Show to customer is in Job actions at367.
 - TechnicianFlow.swift:111 advances to Create invoice when any estimate is approved, before considering remaining sent estimates at114. Consequently an Approved + Sent job can hide its remaining approval work from the dominant next step.
@@ -86,3 +86,11 @@ No implementation or performance claim is made by this document. Historical save
 ## Builder/coordinator review
 
 The coordinator approved the complete journey and authority bounds. Fresh builder check `/root/estimate_handoff_builder_check` returned “nothing important left unanswered.” Scope retirement clears the handoff's private contents and cancels its work inside the protected customer owner/recovery screen; it does not dismiss the outer cover onto staff controls. Ordinary composition choices are delegated to the implementation plan. No additional user approval menu is required.
+
+### Approved production owner lifetime clarification
+
+Coordinator authorized the bounded App ownership adjustment after verifying `App.appContent` replaces `RootView().id(session.generation)` and changes phase branches. The new handoff alone uses an App-owned `JobEstimateHandoffPresenter` and stable outer ZStack cover, above those branches. Reuse CustomerModeContainer; invalidation permanently retires private contents while the protected owner remains. Only successful existing owner authentication clears the active presenter. Generic invoice/document covers and session/resync/router semantics remain unchanged. Actual production workspace-generation, signed-out and workspace-selection transitions must prove staff stays hidden, including denied unlock. Retained exact attempts survive child Back and cancelled handback; invalid scope clears private data, and authenticated exit releases the retained owner with weak callbacks. This supplements the approved flow, not a global router.
+
+### Approved canonical result and protected child corrections
+
+Coordinator approved retaining the existing PublicEstimateActionPatch acceptance when present, otherwise reading the same retained token's full action. Confirm selected packages only against canonical accepted state, bound revision/hash/option/currency/total. Bare approved aggregate remains visible without inferred package price or signer. No replacement token, endpoint or consent version. The scoped destination environment calls the same guarded CustomerModeContainer unlock function; only authenticated owner exit clears the App presenter. Tests must count actual authentication attempts, require exactly one hittable stable owner-exit control, and verify semantic staff visibility after success. Label-mismatch failures are locator failures; earlier selected-review/first-confirmation stops remain preserved as unexplained intermediates.
