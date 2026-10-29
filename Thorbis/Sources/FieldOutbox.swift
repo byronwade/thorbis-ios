@@ -1,5 +1,187 @@
 import Foundation
 import Darwin
+import CryptoKit
+
+enum SavedWorkInventory {
+    enum Failure: Error { case inaccessible, changed, unsupported }
+    private struct Observation {
+        let root: URL
+        let components: [String]
+        let metadata: stat?
+    }
+
+    /// A digest only; paths and file contents never leave this helper. This does not
+    /// lock the filesystem after return and must not by itself authorize deletion.
+    static func snapshot(roots: [URL], onItemScanned: (@Sendable () -> Void)? = nil) async throws -> Data {
+        try Task.checkCancellation()
+        let worker = Task.detached(priority: .utility) { try scan(roots: roots, onItemScanned: onItemScanned) }
+        let digest = try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: { worker.cancel() }
+        try Task.checkCancellation()
+        return digest
+    }
+
+    private static func scan(roots: [URL], onItemScanned: (@Sendable () -> Void)?) throws -> Data {
+        var digest = SHA256()
+        var observations: [Observation] = []
+        for (index, root) in roots.enumerated() {
+            try Task.checkCancellation()
+            digest.update(data: Data("root:\(index)\0".utf8))
+            try scanRoot(root, digest: &digest, onItemScanned: onItemScanned, observations: &observations)
+        }
+        for observation in observations { try verify(observation) }
+        return Data(digest.finalize())
+    }
+
+    private static func same(_ lhs: stat, _ rhs: stat) -> Bool {
+        lhs.st_dev == rhs.st_dev && lhs.st_ino == rhs.st_ino && lhs.st_mode == rhs.st_mode &&
+        lhs.st_size == rhs.st_size && lhs.st_mtimespec.tv_sec == rhs.st_mtimespec.tv_sec &&
+        lhs.st_mtimespec.tv_nsec == rhs.st_mtimespec.tv_nsec && lhs.st_ctimespec.tv_sec == rhs.st_ctimespec.tv_sec &&
+        lhs.st_ctimespec.tv_nsec == rhs.st_ctimespec.tv_nsec
+    }
+
+    private static func scanRoot(_ url: URL, digest: inout SHA256, onItemScanned: (@Sendable () -> Void)?, observations: inout [Observation]) throws {
+        try Task.checkCancellation()
+        guard let (descriptor, chain) = try openRoot(url) else {
+            if let (unexpectedFD, _) = try openRoot(url) { close(unexpectedFD); throw Failure.changed }
+            digest.update(data: Data("missing\0".utf8))
+            observations.append(.init(root: url, components: [], metadata: nil))
+            return
+        }
+        defer { close(descriptor) }
+        guard let before = chain.last else { throw Failure.unsupported }
+        observations.append(.init(root: url, components: [], metadata: before))
+        try scanDirectory(descriptor, name: url.lastPathComponent, before: before, digest: &digest,
+                          onItemScanned: onItemScanned, root: url, path: [], observations: &observations)
+        guard let (checkedFD, checkedChain) = try openRoot(url) else { throw Failure.changed }
+        defer { close(checkedFD) }
+        guard chain.count == checkedChain.count,
+              zip(chain, checkedChain).allSatisfy({ $0.0.st_dev == $0.1.st_dev && $0.0.st_ino == $0.1.st_ino && $0.0.st_mode == $0.1.st_mode }),
+              let last = checkedChain.last, same(before, last) else { throw Failure.changed }
+    }
+
+    private static func verify(_ observation: Observation) throws {
+        try Task.checkCancellation()
+        guard let (rootFD, chain) = try openRoot(observation.root) else {
+            if case nil = observation.metadata { return }
+            throw Failure.changed
+        }
+        guard let expected = observation.metadata else { close(rootFD); throw Failure.changed }
+        var current = rootFD
+        defer { close(current) }
+        if observation.components.isEmpty {
+            guard let root = chain.last, same(expected, root) else { throw Failure.changed }
+            return
+        }
+        for (index, component) in observation.components.enumerated() {
+            var info = stat()
+            guard fstatat(current, component, &info, AT_SYMLINK_NOFOLLOW) == 0 else { throw Failure.changed }
+            if index == observation.components.count - 1 {
+                guard same(expected, info) else { throw Failure.changed }
+            } else {
+                guard info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else { throw Failure.changed }
+                let next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+                guard next >= 0 else { throw Failure.changed }
+                var opened = stat()
+                guard fstat(next, &opened) == 0, same(info, opened) else { close(next); throw Failure.changed }
+                close(current); current = next
+            }
+        }
+    }
+
+    /// Reject symlinks at every ancestor, not only at the root's last component.
+    private static func openRoot(_ url: URL) throws -> (Int32, [stat])? {
+        guard url.isFileURL, url.path.hasPrefix("/") else { throw Failure.unsupported }
+        let components = url.standardizedFileURL.pathComponents.filter { $0 != "/" }
+        guard !components.isEmpty else { throw Failure.unsupported }
+        var current = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard current >= 0 else { throw Failure.inaccessible }
+        var chain: [stat] = []
+        do {
+            for component in components {
+                var before = stat()
+                guard fstatat(current, component, &before, AT_SYMLINK_NOFOLLOW) == 0 else {
+                    if errno == ENOENT { close(current); return nil }
+                    throw Failure.inaccessible
+                }
+                guard before.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else { throw Failure.unsupported }
+                let next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+                guard next >= 0 else { throw Failure.inaccessible }
+                var opened = stat()
+                guard fstat(next, &opened) == 0, same(before, opened) else { close(next); throw Failure.changed }
+                chain.append(opened)
+                close(current)
+                current = next
+            }
+            return (current, chain)
+        } catch {
+            close(current)
+            throw error
+        }
+    }
+
+    private static func scanDirectory(_ descriptor: Int32, name: String, before: stat, digest: inout SHA256,
+                                      onItemScanned: (@Sendable () -> Void)?, root: URL, path: [String],
+                                      observations: inout [Observation]) throws {
+        digest.update(data: Data("directory:\(name)\0\(before.st_dev):\(before.st_ino):\(before.st_mode):\(before.st_size):\(before.st_mtimespec.tv_sec):\(before.st_mtimespec.tv_nsec):\(before.st_ctimespec.tv_sec):\(before.st_ctimespec.tv_nsec)\0".utf8))
+        let duplicate = dup(descriptor)
+        guard duplicate >= 0 else { throw Failure.inaccessible }
+        guard let stream = fdopendir(duplicate) else { close(duplicate); throw Failure.inaccessible }
+        defer { closedir(stream) }
+        var names: [String] = []
+        errno = 0
+        while let entry = readdir(stream) {
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(validatingUTF8: $0) }
+            }
+            guard let name else { throw Failure.unsupported }
+            if name != "." && name != ".." { names.append(name) }
+            errno = 0
+        }
+        guard errno == 0 else { throw Failure.inaccessible }
+        for child in names.sorted() {
+          do {
+            try Task.checkCancellation()
+            var initial = stat()
+            guard fstatat(descriptor, child, &initial, AT_SYMLINK_NOFOLLOW) == 0 else { throw Failure.changed }
+            let childPath = path + [child]
+            observations.append(.init(root: root, components: childPath, metadata: initial))
+            let kind = initial.st_mode & mode_t(S_IFMT)
+            guard kind == mode_t(S_IFDIR) || kind == mode_t(S_IFREG) else { throw Failure.unsupported }
+            let flags = O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC | (kind == mode_t(S_IFDIR) ? O_DIRECTORY : 0)
+            let openedFD = openat(descriptor, child, flags)
+            guard openedFD >= 0 else { throw Failure.inaccessible }
+            defer { close(openedFD) }
+            var opened = stat()
+            guard fstat(openedFD, &opened) == 0, same(initial, opened) else { throw Failure.changed }
+            if kind == mode_t(S_IFDIR) {
+                try scanDirectory(openedFD, name: child, before: initial, digest: &digest, onItemScanned: onItemScanned,
+                                  root: root, path: childPath, observations: &observations)
+            } else {
+                digest.update(data: Data("file:\(child)\0\(initial.st_dev):\(initial.st_ino):\(initial.st_mode):\(initial.st_size):\(initial.st_mtimespec.tv_sec):\(initial.st_mtimespec.tv_nsec):\(initial.st_ctimespec.tv_sec):\(initial.st_ctimespec.tv_nsec)\0".utf8))
+                var content = SHA256()
+                var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+                while true {
+                    try Task.checkCancellation()
+                    let count = read(openedFD, &buffer, buffer.count)
+                    guard count >= 0 else { throw Failure.inaccessible }
+                    if count == 0 { break }
+                    content.update(data: Data(buffer.prefix(count)))
+                }
+                digest.update(data: Data(content.finalize()))
+            }
+            var afterOpen = stat(), afterPath = stat()
+            guard fstat(openedFD, &afterOpen) == 0, same(initial, afterOpen),
+                  fstatat(descriptor, child, &afterPath, AT_SYMLINK_NOFOLLOW) == 0, same(initial, afterPath) else { throw Failure.changed }
+            onItemScanned?()
+          }
+        }
+        var after = stat()
+        guard fstat(descriptor, &after) == 0, same(before, after) else { throw Failure.changed }
+        digest.update(data: Data("end\0".utf8))
+    }
+}
 
 /// A job change made without signal. It is saved to disk before it is ever sent, so a
 /// killed app or a dropped connection resends the same `commandId`, which the server

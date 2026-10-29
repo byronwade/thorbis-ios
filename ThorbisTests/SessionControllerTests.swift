@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import Thorbis
 
 @MainActor
@@ -469,6 +470,90 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertEqual(outbox.entries.map(\.id), [note.id])
         XCTAssertEqual(media.items, [photo])
         XCTAssertEqual(try? media.read(photo), Data("image".utf8))
+    }
+
+    func testSavedWorkInventoryDetectsSameSizeReplacementAndNestedLegacyFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("saved-work-inventory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let legacy = root.appendingPathComponent("PendingPhotos")
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let photo = legacy.appendingPathComponent("before.jpg")
+        try Data("first".utf8).write(to: photo)
+        let first = try await SavedWorkInventory.snapshot(roots: [legacy])
+        try Data("other".utf8).write(to: photo)
+        let changed = try await SavedWorkInventory.snapshot(roots: [legacy])
+        XCTAssertNotEqual(first, changed)
+        let missing = try await SavedWorkInventory.snapshot(roots: [root.appendingPathComponent("Outbox")])
+        XCTAssertNotEqual(first, missing)
+    }
+
+    func testSavedWorkInventoryRefusesSymlinks() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("saved-work-inventory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("external"), withDestinationURL: root.deletingLastPathComponent())
+        do {
+            _ = try await SavedWorkInventory.snapshot(roots: [root])
+            XCTFail("Unknown links cannot establish the saved-work inventory")
+        } catch { }
+    }
+
+    func testSavedWorkInventoryRefusesFIFOsWithoutBlocking() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("saved-work-inventory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        XCTAssertEqual(mkfifo(root.appendingPathComponent("pipe").path, 0o600), 0)
+        do {
+            _ = try await SavedWorkInventory.snapshot(roots: [root])
+            XCTFail("A FIFO is not a saved-work file")
+        } catch { }
+    }
+
+    func testSavedWorkInventoryRefusesSymlinkAncestor() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("saved-work-inventory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("target")
+        try FileManager.default.createDirectory(at: target.appendingPathComponent("queue"), withIntermediateDirectories: true)
+        let link = root.appendingPathComponent("redirect")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        do {
+            _ = try await SavedWorkInventory.snapshot(roots: [link.appendingPathComponent("queue")])
+            XCTFail("A symlink ancestor cannot establish the saved-work inventory")
+        } catch { }
+    }
+
+    func testSavedWorkInventoryCanReadSimulatorApplicationSupportRoot() async throws {
+        let support = try XCTUnwrap(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first)
+        let root = support.appendingPathComponent("inventory-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("fixture".utf8).write(to: root.appendingPathComponent("queue.json"))
+        _ = try await SavedWorkInventory.snapshot(roots: [root])
+    }
+
+    func testSavedWorkInventoryRefusesFileChangedAfterItWasScanned() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("saved-work-inventory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let first = root.appendingPathComponent("a")
+        try Data("first".utf8).write(to: first)
+        try Data("later".utf8).write(to: root.appendingPathComponent("b"))
+        do {
+            _ = try await SavedWorkInventory.snapshot(roots: [root], onItemScanned: {
+                try? Data("other".utf8).write(to: first)
+            })
+            XCTFail("A file changed during scanning cannot produce a usable inventory")
+        } catch { }
+    }
+
+    func testSavedWorkInventoryRefusesAnInaccessiblePathInsteadOfTreatingItAsMissing() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("saved-work-inventory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("not a directory".utf8).write(to: root)
+        do {
+            _ = try await SavedWorkInventory.snapshot(roots: [root.appendingPathComponent("queue")])
+            XCTFail("An inaccessible path is not proof that saved work is absent")
+        } catch { }
     }
 
     func testAuthenticatedDetail401InvalidatesSessionAndStoreBeforeThrowing() async {
