@@ -41,11 +41,14 @@ struct SettingsView: View {
                 }
 
                 Section("This phone") {
-                    Picker(selection: $appearance) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
-                    } label: { row("Appearance", symbol: "circle.lefthalf.filled", value: nil) }
+                    ThorbisMenu(items: [
+                        ThorbisMenuItem("System", isSelected: appearance == "system") { appearance = "system" },
+                        ThorbisMenuItem("Light", isSelected: appearance == "light") { appearance = "light" },
+                        ThorbisMenuItem("Dark", isSelected: appearance == "dark") { appearance = "dark" },
+                    ], title: "Appearance") {
+                        row("Appearance", symbol: "circle.lefthalf.filled",
+                            value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System", opens: true)
+                    }
                     Button {
                         Task { await notificationsTapped() }
                     } label: {
@@ -76,11 +79,10 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
-            .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                Button("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }
-            } message: {
-                Text(outbox.signOutWarning)
-            }
+            .thorbisConfirm("Sign out of Thorbis?",
+                            message: outbox.signOutWarning,
+                            isPresented: $confirmSignOut,
+                            actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }])
             .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
         }
     }
