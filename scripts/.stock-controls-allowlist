@@ -3,7 +3,6 @@
 # (Updated: PR1 — design system landed; sweep migrates these next.)
 Thorbis/Sources/InvoicePaymentCollection.swift
 Thorbis/Sources/JobOperationsViews.swift
-Thorbis/Sources/EquipmentMembershipViews.swift
 Thorbis/Sources/Screens.swift
 Thorbis/Sources/PaperJobDetailView.swift
 Thorbis/Sources/SettingsView.swift
@@ -13,10 +12,8 @@ Thorbis/Sources/MediaView.swift
 Thorbis/Sources/InvoiceLineEditorView.swift
 Thorbis/Sources/FinancialViews.swift
 Thorbis/Sources/TeamViews.swift
-Thorbis/Sources/PublicEstimateActionView.swift
 Thorbis/Sources/Onboarding.swift
 Thorbis/Sources/NewEstimateView.swift
 Thorbis/Sources/EstimateRevisionEditorView.swift
 Thorbis/Sources/EstimateBuilder.swift
 Thorbis/Sources/CustomerPresentation.swift
-Thorbis/Sources/BillingViews.swift
