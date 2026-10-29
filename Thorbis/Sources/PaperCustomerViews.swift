@@ -700,7 +700,11 @@ struct CustomerDetailView: View {
         recordsLoading = true
         defer { if recordsLoadGeneration == request { recordsLoading = false } }
         do {
-            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer.id, api: api)
+            let access = CustomerRecordAccess(
+                estimates: session.can("estimate.view", feature: "estimates"),
+                invoices: session.can("invoice.view", feature: "invoicing")
+            )
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer.id, api: api, access: access)
             guard recordsLoadGeneration == request else { return }
             records = compiled
             recordsError = nil

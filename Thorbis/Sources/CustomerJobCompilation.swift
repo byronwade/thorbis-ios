@@ -125,23 +125,46 @@ struct CustomerJobCompilation: Equatable {
     }
 }
 
+/// Which money records this person is allowed to compile onto the customer.
+/// Photos, notes, and documents stay available when estimates or invoices are not.
+struct CustomerRecordAccess: Equatable, Sendable {
+    var estimates: Bool
+    var invoices: Bool
+    static let all = CustomerRecordAccess(estimates: true, invoices: true)
+}
+
+/// The invoice name used on the customer record. The status alone collides when two invoices share it.
+enum CustomerRecordLabel {
+    static func invoice(_ invoice: InvoiceRecord) -> String {
+        "INV-\(invoice.id.suffix(4).uppercased()) · \(invoice.status.statusLabel)"
+    }
+}
+
 @MainActor
 enum CustomerJobCompilationLoader {
-    /// Loads the customer's jobs, then each job's notes, media, and estimate links.
-    /// There is no customer-wide media or notes route; the groups are built from the job routes.
-    static func load(customerID: String, api: APIClient) async throws -> CustomerJobCompilation {
+    /// Loads the customer's jobs, then each job's notes, media, and the estimate links and invoices
+    /// this person can read. There is no customer-wide media or notes route; the groups are built from the job routes.
+    static func load(customerID: String, api: APIClient, access: CustomerRecordAccess = .all) async throws -> CustomerJobCompilation {
         let jobs = try await api.fieldJobs(customerID: customerID)
         let contacts = try await api.fieldContacts(customerID)
         let locations = try await api.fieldLocations(customerID)
-        let estimates = try await api.fieldEstimates(customerID: customerID)
-        let invoices = try await api.fieldInvoices(customerID: customerID)
+        let estimates = access.estimates ? try await api.fieldEstimates(customerID: customerID) : []
+        var invoices = access.invoices ? try await api.fieldInvoices(customerID: customerID) : []
+        var seenInvoices = Set(invoices.map(\.id))
         var notesByJob: [String: [JobNoteRecord]] = [:]
         var mediaByJob: [String: [MediaAssetRecord]] = [:]
         var linksByJob: [String: [JobEstimateLink]] = [:]
         for job in jobs {
             notesByJob[job.id] = try await api.fieldNotes(job.id)
             mediaByJob[job.id] = try await api.fieldMedia(job.id)
-            linksByJob[job.id] = try await api.fieldJobEstimateLinks(job.id)
+            if access.estimates {
+                linksByJob[job.id] = try await api.fieldJobEstimateLinks(job.id)
+            }
+            if access.invoices {
+                for invoice in try await jobInvoices(job.id, api: api) where seenInvoices.insert(invoice.id).inserted {
+                    invoices.append(invoice)
+                }
+            }
         }
         var history: [CustomerHistoryEntry] = []
         var cursor: String?
@@ -163,5 +186,15 @@ enum CustomerJobCompilationLoader {
             invoices: invoices,
             history: history
         )
+    }
+
+    /// The organization invoice list is empty for a technician who can still read the job.
+    /// A server without this route (404 or 405) keeps the customer list. Any other failure still fails the load.
+    private static func jobInvoices(_ jobID: String, api: APIClient) async throws -> [InvoiceRecord] {
+        do {
+            return try await api.fieldJobInvoices(jobID)
+        } catch let problem as Problem where problem.status == 404 || problem.status == 405 {
+            return []
+        }
     }
 }

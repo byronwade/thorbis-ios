@@ -13,8 +13,8 @@ struct CustomerRecordsView: View {
             linkedSection("Estimates", total: compilation.estimateCount, groups: compilation.estimates, symbol: "doc.text", extra: compilation.estimatesOffJob.map { ($0.title, PaperRoute.estimate($0.id)) }) { estimate in
                 (estimate.title, PaperRoute.estimate(estimate.id))
             }
-            linkedSection("Invoices", total: compilation.invoiceCount, groups: compilation.invoices, symbol: "doc.plaintext", extra: compilation.invoicesOffJob.map { ($0.status.statusLabel, PaperRoute.invoice($0.id)) }) { invoice in
-                (invoice.status.statusLabel, PaperRoute.invoice(invoice.id))
+            linkedSection("Invoices", total: compilation.invoiceCount, groups: compilation.invoices, symbol: "doc.plaintext", extra: compilation.invoicesOffJob.map { (CustomerRecordLabel.invoice($0), PaperRoute.invoice($0.id)) }) { invoice in
+                (CustomerRecordLabel.invoice(invoice), PaperRoute.invoice(invoice.id))
             }
             activitySection
         }

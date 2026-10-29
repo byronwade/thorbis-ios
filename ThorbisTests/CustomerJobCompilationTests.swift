@@ -35,7 +35,7 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertTrue(compiled.invoicesOffJob.isEmpty)
 
         let requests = URLProtocolFixture.recorded
-        XCTAssertEqual(requests.count, 12)
+        XCTAssertEqual(requests.count, 14)
         assertCustomerQuery(requests[0], path: "/v1/jobs")
         XCTAssertEqual(requests[1].url?.path, "/v1/customers/\(customer)/contacts")
         XCTAssertEqual(requests[2].url?.path, "/v1/customers/\(customer)/locations")
@@ -44,10 +44,12 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertEqual(requests[5].url?.path, "/v1/jobs/\(jobA)/notes")
         XCTAssertEqual(requests[6].url?.path, "/v1/jobs/\(jobA)/media")
         XCTAssertEqual(requests[7].url?.path, "/v1/jobs/\(jobA)/estimates")
-        XCTAssertEqual(requests[8].url?.path, "/v1/jobs/\(jobB)/notes")
-        XCTAssertEqual(requests[9].url?.path, "/v1/jobs/\(jobB)/media")
-        XCTAssertEqual(requests[10].url?.path, "/v1/jobs/\(jobB)/estimates")
-        XCTAssertEqual(requests[11].url?.path, "/v1/customers/\(customer)/history")
+        XCTAssertEqual(requests[8].url?.path, "/v1/jobs/\(jobA)/invoices")
+        XCTAssertEqual(requests[9].url?.path, "/v1/jobs/\(jobB)/notes")
+        XCTAssertEqual(requests[10].url?.path, "/v1/jobs/\(jobB)/media")
+        XCTAssertEqual(requests[11].url?.path, "/v1/jobs/\(jobB)/estimates")
+        XCTAssertEqual(requests[12].url?.path, "/v1/jobs/\(jobB)/invoices")
+        XCTAssertEqual(requests[13].url?.path, "/v1/customers/\(customer)/history")
     }
 
     func testArchivedMediaIsLeftOutOfTheCustomerCounts() async throws {
@@ -69,7 +71,7 @@ final class CustomerJobCompilationTests: XCTestCase {
         let looseInvoice = invoice(id: uid(80_000), jobID: nil)
         replies[3] = page([estimate(id: uid(7_000), title: "On the job"), looseEstimate])
         replies[4] = page([invoice(id: uid(9_000), jobID: jobA), looseInvoice])
-        replies[11] = page([
+        replies[13] = page([
             ["occurredAt": "2026-08-01T12:00:00Z", "kind": "payment", "subjectId": uid(90), "summary": "Paid"],
             ["occurredAt": "2026-08-02T12:00:00Z", "kind": "contact", "subjectId": uid(50), "summary": "Added a contact"],
         ])
@@ -87,6 +89,111 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertEqual(compiled.accountActivity.map(\.kind), ["payment", "contact"])
     }
 
+    func testAnInvoiceThatExistsOnlyOnTheJobIsStillCounted() async throws {
+        var replies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0, estimatesA: 0, estimatesB: 0, invoicesA: 0, invoicesB: 0, historyA: 0, historyB: 0)
+        let onlyOnJob = invoice(id: uid(9_500), jobID: jobA)
+        replies[4] = page([])
+        replies[8] = page([onlyOnJob])
+        let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, api: client)
+
+        XCTAssertEqual(compiled.invoiceCount, 1)
+        XCTAssertEqual(compiled.invoices.map(\.jobID), [jobA])
+        XCTAssertEqual(compiled.invoices.first?.items.map(\.id), [uid(9_500)])
+        XCTAssertTrue(compiled.invoicesOffJob.isEmpty)
+    }
+
+    func testAJobInvoiceAlreadyOnTheCustomerListIsNotCountedTwice() async throws {
+        var replies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0, estimatesA: 0, estimatesB: 0, invoicesA: 1, invoicesB: 0, historyA: 0, historyB: 0)
+        replies[8] = page([
+            invoice(id: uid(9_000), jobID: jobA),
+            invoice(id: uid(9_500), jobID: jobA),
+        ])
+        let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, api: client)
+
+        XCTAssertEqual(compiled.invoiceCount, 2)
+        XCTAssertEqual(compiled.invoices.first?.items.map(\.id), [uid(9_000), uid(9_500)])
+    }
+
+    func testAMissingJobInvoiceRouteKeepsTheCustomerList() async throws {
+        let bodies = fixture(photosA: 1, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0, estimatesA: 0, estimatesB: 0, invoicesA: 1, invoicesB: 0, historyA: 0, historyB: 0)
+        var replies = bodies.map { URLProtocolFixture.Reply(200, $0) }
+        replies[8] = URLProtocolFixture.Reply(404, #"{"title":"Not found","status":404,"detail":"No job invoices"}"#)
+        replies[12] = URLProtocolFixture.Reply(405, #"{"title":"Method not allowed","status":405}"#)
+        let client = APIClient(session: URLProtocolFixture.session(replies), baseURL: "https://app.thorbis.com")
+
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, api: client)
+
+        XCTAssertEqual(compiled.invoiceCount, 1)
+        XCTAssertEqual(compiled.photoCount, 1)
+        XCTAssertEqual(compiled.invoices.first?.items.map(\.id), [uid(9_000)])
+    }
+
+    func testAnotherJobInvoiceFailureStillFailsTheCompilation() async throws {
+        let bodies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0, estimatesA: 0, estimatesB: 0, invoicesA: 1, invoicesB: 0, historyA: 0, historyB: 0)
+        var replies = bodies.map { URLProtocolFixture.Reply(200, $0) }
+        replies[8] = URLProtocolFixture.Reply(500, #"{"title":"Server error","status":500,"detail":"Unavailable"}"#)
+        let client = APIClient(session: URLProtocolFixture.session(replies), baseURL: "https://app.thorbis.com")
+
+        do {
+            _ = try await CustomerJobCompilationLoader.load(customerID: customer, api: client)
+            XCTFail("A job invoice failure other than 404 or 405 must fail the compilation")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.status, 500)
+        }
+    }
+
+    func testPhotosStillCompileWhenEstimatesAndInvoicesAreClosed() async throws {
+        let replies = [
+            page([job(id: jobA, title: "Water heater"), job(id: jobB, title: "AC not cooling")]),
+            page([contact()]),
+            page([location()]),
+            page([]),
+            page([media(id: uid(1_000), job: jobA, kind: "photo", archived: false), media(id: uid(1_001), job: jobA, kind: "photo", archived: false)]),
+            page([]),
+            page([media(id: uid(2_000), job: jobB, kind: "photo", archived: false)]),
+            page([]),
+        ]
+        let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+
+        let compiled = try await CustomerJobCompilationLoader.load(
+            customerID: customer,
+            api: client,
+            access: CustomerRecordAccess(estimates: false, invoices: false)
+        )
+
+        XCTAssertEqual(compiled.photoCount, 3)
+        XCTAssertEqual(compiled.estimateCount, 0)
+        XCTAssertEqual(compiled.invoiceCount, 0)
+        let paths = URLProtocolFixture.recorded.compactMap { $0.url?.path }
+        XCTAssertFalse(paths.contains("/v1/estimates"))
+        XCTAssertFalse(paths.contains("/v1/invoices"))
+        XCTAssertFalse(paths.contains { $0.hasPrefix("/v1/jobs/") && ($0.hasSuffix("/estimates") || $0.hasSuffix("/invoices")) })
+        XCTAssertEqual(paths.filter { $0.hasSuffix("/media") }.count, 2)
+    }
+
+    func testAnInvoiceRowNamesTheInvoiceAndItsStatus() {
+        let record = InvoiceRecord(
+            id: uid(9_000), organizationId: org, customerId: customer, jobId: jobA, createdByUserId: author,
+            locationId: nil, scheduleId: nil, origin: "manual", sourceOperationKey: "op", sourceEstimateId: nil,
+            sourceEstimateRevisionNumber: nil, manualPhysicalServiceEvidence: nil, status: "issued", lines: [],
+            linesRevision: 1, amountPaid: 0, currency: "USD", issuedAt: nil, paidAt: nil, voidedAt: nil,
+            createdAt: "2026-07-01T12:00:00Z", updatedAt: "2026-07-01T12:00:00Z"
+        )
+        XCTAssertEqual(CustomerRecordLabel.invoice(record), "INV-9000 · Issued")
+        let sameStatus = InvoiceRecord(
+            id: uid(9_001), organizationId: org, customerId: customer, jobId: jobA, createdByUserId: author,
+            locationId: nil, scheduleId: nil, origin: "manual", sourceOperationKey: "op", sourceEstimateId: nil,
+            sourceEstimateRevisionNumber: nil, manualPhysicalServiceEvidence: nil, status: "issued", lines: [],
+            linesRevision: 1, amountPaid: 0, currency: "USD", issuedAt: nil, paidAt: nil, voidedAt: nil,
+            createdAt: "2026-07-01T12:00:00Z", updatedAt: "2026-07-01T12:00:00Z"
+        )
+        XCTAssertNotEqual(CustomerRecordLabel.invoice(record), CustomerRecordLabel.invoice(sameStatus))
+    }
+
     private func assertGrouped<Item>(_ groups: [CustomerJobGroup<Item>], counts: (Int, Int)) {
         XCTAssertEqual(groups.map(\.jobID), [jobA, jobB])
         XCTAssertEqual(groups.map(\.title), ["Water heater", "AC not cooling"])
@@ -99,7 +206,7 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertTrue(items.contains(URLQueryItem(name: "customerId", value: customer)))
     }
 
-    /// Reply order matches CustomerJobCompilationLoader: jobs, contacts, locations, estimates, invoices, then each job's notes, media, and estimate links, then history.
+    /// Reply order matches CustomerJobCompilationLoader with estimates and invoices open: jobs, contacts, locations, estimates, invoices, then each job's notes, media, estimate links, and invoices, then history.
     private func fixture(photosA: Int, photosB: Int, notesA: Int, notesB: Int, documentsA: Int, documentsB: Int, estimatesA: Int, estimatesB: Int, invoicesA: Int, invoicesB: Int, historyA: Int, historyB: Int, archivedPhotoOnA: Bool = false, archivedDocumentOnA: Bool = false) -> [String] {
         let estimates = (0..<estimatesA).map { estimate(id: uid(7_000 + $0), title: "Estimate A \($0)") }
             + (0..<estimatesB).map { estimate(id: uid(8_000 + $0), title: "Estimate B \($0)") }
@@ -124,9 +231,11 @@ final class CustomerJobCompilationTests: XCTestCase {
             page((0..<notesA).map { note(id: uid(5_000 + $0), job: jobA, body: "Note A \($0)") }),
             page(mediaA),
             page(linksA),
+            page([]),
             page((0..<notesB).map { note(id: uid(6_000 + $0), job: jobB, body: "Note B \($0)") }),
             page(mediaB),
             page(linksB),
+            page([]),
             page(history),
         ]
     }
