@@ -685,21 +685,12 @@ struct CustomerDetailView: View {
                 if activityLoading && activity.isEmpty { SkeletonRows(count: 4, inset: 0) }
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(activity) { event in
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: activitySymbol(for: event.kind))
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                                .frame(width: 30, height: 30)
-                                .background(Theme.fill, in: Circle())
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(event.summary).font(Theme.font(15, weight: .medium)).lineLimit(3)
-                                Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
-                            }
+                        if let destination = event.destination {
+                            NavigationLink(value: destination) { activityRow(event, opens: true) }
+                                .buttonStyle(RowPressStyle())
+                        } else {
+                            activityRow(event, opens: false)
                         }
-                        .padding(.vertical, 9)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
                     }
                 }
                 if activity.isEmpty && !activityLoading && activityError == nil {
@@ -718,6 +709,34 @@ struct CustomerDetailView: View {
                 }
             }
         }
+    }
+
+    /// One activity row. `opens` rows carry a chevron and a 44pt target so it reads as
+    /// tappable; terminal rows (payment/contact/location, which have no detail yet) stay flat.
+    private func activityRow(_ event: CustomerHistoryEntry, opens: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: activitySymbol(for: event.kind))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .frame(width: 30, height: 30)
+                .background(Theme.fill, in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(event.summary).font(Theme.font(15, weight: .medium)).lineLimit(3)
+                Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+            if opens {
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.muted.opacity(0.55))
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, minHeight: opens ? 44 : 0, alignment: .leading)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
     private func loadActivity(reset: Bool) async {
