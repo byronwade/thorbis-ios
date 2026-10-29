@@ -229,6 +229,7 @@ struct JobDetailView: View {
             if let job { await loadContacts(job) }
             await loadInvoices()
             if let job { await loadJobEstimates(job) }
+            if selectedTab == "Activity" { await loadVerifiedActivity() }
         }
         .task(id: jobActivityScope) {
             if selectedTab == "Activity" { await loadVerifiedActivity() }
@@ -761,7 +762,10 @@ struct JobDetailView: View {
         if jobActivityScope == nil {
             Text("You don’t have access to this job’s activity.").font(Theme.font(15)).foregroundStyle(Theme.muted)
         } else if let activityError, activityRequestedScope == jobActivityScope, activityPublishedScope != jobActivityScope {
-            ErrorBanner(message: activityError) { await loadVerifiedActivity() }
+            VStack(alignment: .leading, spacing: 14) {
+                ErrorBanner(message: activityError) { await loadVerifiedActivity() }
+                if !scopedPendingNotes.isEmpty { verifiedActivityContent(nil) }
+            }
         } else if let verified = activityVerifiedJob, activityPublishedScope == jobActivityScope {
             verifiedActivityContent(verified)
         } else {
@@ -800,9 +804,9 @@ struct JobDetailView: View {
         }
     }
 
-    private func verifiedActivityContent(_ job: JobRecord) -> some View {
+    private func verifiedActivityContent(_ job: JobRecord?) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let activityError, activityRequestedScope == jobActivityScope {
+            if job != nil, let activityError, activityRequestedScope == jobActivityScope {
                 ErrorBanner(message: "Activity may be out of date. \(activityError)") { await loadVerifiedActivity() }
             }
             HStack(spacing: 6) {
@@ -824,7 +828,7 @@ struct JobDetailView: View {
                     ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject),
                                  details: ActivityDetails(title: entry.title, body: entry.body,
                                      when: entry.date.formatted(date: .abbreviated, time: .shortened), context: "Job activity"),
-                                 ownerID: "job:\(job.id)", currentRoute: .job(job.id), canView: session.can("job.view", feature: "jobs")) {
+                                 ownerID: "job:\(jobId)", currentRoute: .job(jobId), canView: session.can("job.view", feature: "jobs")) {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
                             Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
@@ -857,7 +861,7 @@ struct JobDetailView: View {
             if timeline(job).isEmpty {
                 PaperEmptyState(symbol: "clock", title: "No activity yet", message: "Notes and status changes on this job show up here.")
             }
-            if session.can("job.note", feature: "jobs") {
+            if job != nil && session.can("job.note", feature: "jobs") {
                 HStack(alignment: .bottom, spacing: 8) {
                     TextField("Add a note or update…", text: $note, axis: .vertical)
                         .font(Theme.font(16))
@@ -892,19 +896,31 @@ struct JobDetailView: View {
         var isNote: Bool { body != nil }
     }
 
-    private func timeline(_ job: JobRecord) -> [TimelineEntry] {
+    private var scopedPendingNotes: [OutboxEntry] {
+        guard let scope = jobActivityScope else { return [] }
+        return outbox.activityNotes(for: jobId, actorID: scope.actorID, organizationID: scope.organizationID)
+    }
+
+    private func timeline(_ job: JobRecord?) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         if activityFilter != "Status" {
-            entries += outbox.pendingNotes(for: job.id).compactMap { entry in
+            entries += scopedPendingNotes.compactMap { entry in
                 guard case .note(let payload) = entry.action else { return nil }
-                let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
-                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath", subject: ActivityFeedSubject(kind: "note", jobID: job.id))
+                let status: String
+                switch entry.state {
+                case .pending: status = "Note · waiting to sync"
+                case .rejected: status = "Note · couldn't sync"
+                case .held: status = "Note · waiting for review"
+                }
+                return TimelineEntry(id: "queued-\(entry.id)", title: status, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath", subject: ActivityFeedSubject(kind: "note", jobID: jobId))
             }
-            entries += activityVerifiedNotes.compactMap { record in
-                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble", subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
+            if let job {
+                entries += activityVerifiedNotes.compactMap { record in
+                    JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble", subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
+                }
             }
         }
-        if activityFilter != "Notes" {
+        if activityFilter != "Notes", let job {
             entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill", subject: ActivityFeedSubject(kind: "status", jobID: job.id)) }
         }
         return entries.sorted { $0.date > $1.date }

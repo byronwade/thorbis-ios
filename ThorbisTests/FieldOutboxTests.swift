@@ -59,6 +59,18 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertNotEqual(box.captureContext(matchingActorID: actor, organizationID: org), context)
         XCTAssertEqual(box.entries.map(\.id), [note.id])
     }
+    func testJobActivityOnlyReadsNotesFromTheMatchingQueueBindingAndJob() throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Saved offline")), policyVersion: 4))
+        box.enqueue(.note(.init(jobId: jobB, body: "Other job")), policyVersion: 4)
+        box.enqueue(.progress(.init(jobId: jobA, to: "arrived")), policyVersion: 4)
+        XCTAssertEqual(box.activityNotes(for: jobA, actorID: actor, organizationID: org).map(\.id), [note.id])
+        XCTAssertTrue(box.activityNotes(for: jobA, actorID: "other", organizationID: org).isEmpty)
+        XCTAssertTrue(box.activityNotes(for: jobA, actorID: actor, organizationID: "other").isEmpty)
+        box.bind(actorID: nil, organizationID: nil)
+        XCTAssertTrue(box.activityNotes(for: jobA, actorID: actor, organizationID: org).isEmpty)
+    }
+
     func testSignOutWarningCountsChangesQueuedInOtherWorkspaces() {
         let box = outbox()
         box.enqueue(.note(.init(jobId: jobA, body: "Gate code 4417")), policyVersion: 4)

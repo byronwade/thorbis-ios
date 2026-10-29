@@ -254,6 +254,12 @@ final class FieldOutbox: ObservableObject {
         entries.filter { $0.jobID == jobID && { if case .note = $0.action { true } else { false } }($0) }
     }
 
+    /// Local notes belong to the verified queue owner even when server history is unavailable.
+    func activityNotes(for jobID: String, actorID: String, organizationID: String) -> [OutboxEntry] {
+        guard captureContext(matchingActorID: actorID, organizationID: organizationID) != nil else { return [] }
+        return pendingNotes(for: jobID).filter { $0.actorId == actorID && $0.organizationId == organizationID }
+    }
+
     /// Sends queued changes oldest first. Uses the offline command endpoint when the
     /// workspace has it, otherwise the same REST routes the app uses online.
     func drain(api: APIClient, useCommandEndpoint: Bool, canSend: @MainActor () -> Bool = { true }) async {
