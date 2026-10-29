@@ -21,3 +21,7 @@ Thorbis/Sources/EstimateRevisionEditorView.swift
 Thorbis/Sources/EstimateBuilder.swift
 Thorbis/Sources/CustomerPresentation.swift
 Thorbis/Sources/BillingViews.swift
+# Existing catalog-release screens pending accessible control migration.
+Thorbis/Sources/SavedWorkReviewView.swift
+Thorbis/Sources/CustomerJobDocumentBook.swift
+Thorbis/Sources/LegacyMediaRecoveryView.swift
