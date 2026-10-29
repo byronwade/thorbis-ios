@@ -1,4 +1,3 @@
 # Files still using stock SwiftUI controls, pending migration to the design system.
 # Shrink this list in each sweep PR; when empty, the guard is absolute.
-# (Updated: PR1 — design system landed; sweep migrates these next.)
-Thorbis/Sources/MemberAccess.swift
+# The migration is complete — this list is intentionally empty and the CI guard is blocking.
