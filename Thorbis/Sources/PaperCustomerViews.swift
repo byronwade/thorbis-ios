@@ -201,6 +201,31 @@ private enum CustomerContactSheetItem: Identifiable {
     }
 }
 
+/// Identity and authority that authorized a compiled customer record.
+struct CustomerRecordsScope: Equatable {
+    let actorID: String
+    let organizationID: String
+    let customerID: String
+    let generation: UUID
+    let authorityRevision: UUID
+    let policyVersion: Int?
+    let access: CustomerRecordAccess
+
+    @MainActor func isCurrent(session: SessionController) -> Bool {
+        Self.capture(session: session, customerID: customerID) == self
+    }
+
+    @MainActor static func capture(session: SessionController, customerID: String) -> CustomerRecordsScope? {
+        guard session.can("customer.view", feature: "core_crm"),
+              let actorID = session.user?.id, let organizationID = session.activeOrganization?.id else { return nil }
+        return CustomerRecordsScope(actorID: actorID, organizationID: organizationID, customerID: customerID,
+            generation: session.generation, authorityRevision: session.authorityRevision, policyVersion: session.policyVersion,
+            access: CustomerRecordAccess(jobs: session.can("job.view", feature: "jobs"),
+                estimates: session.can("estimate.view", feature: "estimates"),
+                invoices: session.can("invoice.view", feature: "invoicing")))
+    }
+}
+
 struct CustomerDetailView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
@@ -232,6 +257,9 @@ struct CustomerDetailView: View {
     @State private var recordsLoading = false
     @State private var recordsError: String?
     @State private var recordsLoadGeneration = 0
+    @State private var recordsPublishedScope: CustomerRecordsScope?
+    @State private var recordsRequestedScope: CustomerRecordsScope?
+    private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
     @State private var smsConsentKey = UUID().uuidString
@@ -336,6 +364,14 @@ struct CustomerDetailView: View {
         }
         .task { await load() }
         .task { await loadSmsConsent() }
+        .task(id: recordsScope) {
+            if recordsPublishedScope != recordsScope {
+                records = nil
+                recordsPublishedScope = nil
+                recordsError = nil
+            }
+            if tab == "Records" { await loadRecords() }
+        }
         .onAppear {
             RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
             #if DEBUG
@@ -658,20 +694,22 @@ struct CustomerDetailView: View {
         }
     }
     private var recordsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !session.can("customer.view", feature: "core_crm") {
+        let scope = recordsScope
+        let visible = scope != nil && recordsPublishedScope == scope ? records : nil
+        let visibleError = scope != nil && recordsRequestedScope == scope ? recordsError : nil
+        return VStack(alignment: .leading, spacing: 10) {
+            if scope == nil {
                 emptyText("You don’t have access to this customer’s records.")
             } else {
-                if let recordsError {
-                    ErrorBanner(message: records == nil ? "Records did not load. \(recordsError)" : recordsError) {
+                if let visibleError {
+                    ErrorBanner(message: visible == nil ? "Records did not load. \(visibleError)" : visibleError) {
                         await loadRecords()
-                    }
-                    .accessibilityIdentifier("customer-records-retry")
+                    }.accessibilityIdentifier("customer-records-retry")
                 }
-                if recordsLoading && records == nil {
+                if visible == nil && visibleError == nil {
                     SkeletonRows(count: 4, inset: 0)
-                } else if let records {
-                    CustomerRecordsView(compilation: records)
+                } else if let visible {
+                    CustomerRecordsView(compilation: visible) { await loadRecords() }
                         .accessibilityIdentifier("customer-records")
                 }
             }
@@ -679,24 +717,24 @@ struct CustomerDetailView: View {
     }
 
     private func loadRecords() async {
-        guard session.can("customer.view", feature: "core_crm"), !recordsLoading else { return }
+        guard let scope = recordsScope else { return }
+        guard !recordsLoading || recordsRequestedScope != scope else { return }
         recordsLoadGeneration += 1
         let request = recordsLoadGeneration
         recordsLoading = true
+        recordsRequestedScope = scope
+        recordsError = nil
         defer { if recordsLoadGeneration == request { recordsLoading = false } }
         do {
-            let access = CustomerRecordAccess(
-                jobs: session.can("job.view", feature: "jobs"),
-                estimates: session.can("estimate.view", feature: "estimates"),
-                invoices: session.can("invoice.view", feature: "invoicing")
-            )
-            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer.id, api: api, access: access)
-            guard recordsLoadGeneration == request else { return }
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: scope.customerID,
+                organizationID: scope.organizationID, api: api, access: scope.access)
+            guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
             records = compiled
+            recordsPublishedScope = scope
             recordsError = nil
         } catch is CancellationError {
         } catch {
-            guard recordsLoadGeneration == request else { return }
+            guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
             recordsError = error.localizedDescription
         }
     }

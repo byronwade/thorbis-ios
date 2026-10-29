@@ -501,6 +501,19 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        if PaperPreview.screen == "customer-records",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup"),
+           request.httpMethod == "GET",
+           ["/v1/jobs/00000000-0000-4000-8000-000000002214/photos/00000000-0000-4000-8000-000000033000",
+            "/v1/jobs/00000000-0000-4000-8000-000000002201/photos/00000000-0000-4000-8000-000000033001"].contains(url.path),
+           let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGOwb9kCRAwQCgAnPgXdEEuqSQAAAABJRU5ErkJggg=="),
+           let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                                          headerFields: ["Content-Type": "image/png", "Content-Length": "\(data.count)"]) {
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         let status: Int
         let payload: Any
         if request.httpMethod != nil && request.httpMethod != "GET" {
@@ -856,6 +869,33 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if path == "/v1/jobs/\(id)" { return job }
             if path == "/v1/jobs/\(id)/notes" {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
+            }
+            if path == "/v1/jobs/\(id)/media", PaperPreview.screen == "customer-records",
+               (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-photo-rollup") ||
+                ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup")) {
+                let mixed = ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup")
+                let count = id.hasSuffix("2214") ? 15 : (id.hasSuffix("2201") ? (mixed ? 19 : 20) : 0)
+                let base = id.hasSuffix("2214") ? 31000 : 32000
+                let items: [[String: Any]] = (0..<count).map { number in
+                    let assetID = String(format: "00000000-0000-4000-8000-%012d", base + number)
+                    let reconciled = mixed && id.hasSuffix("2214") && number == 0
+                    return ["id": assetID, "organizationId": org, "jobId": id, "uploaderUserId": actor,
+                            "kind": "photo", "mime": reconciled ? "image/png" : "image/jpeg", "sizeBytes": reconciled ? 73 : 128,
+                            "originalFilename": reconciled ? "reconciled.bin" : "sample-\(base + number).jpg", "contentHash": "preview",
+                            "storageKey": "preview/\(assetID)", "uploadState": "stored", "tags": [String](),
+                            "caption": "\(id.hasSuffix("2214") ? "AC" : "Drain") photo \(number + 1)", "archived": false,
+                            "createdAt": now, "updatedAt": now]
+                }
+                return ["items": items]
+            }
+            if path == "/v1/jobs/\(id)/photos", PaperPreview.screen == "customer-records",
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup") {
+                let isFirst = id.hasSuffix("2214")
+                let photoID = isFirst ? "00000000-0000-4000-8000-000000033000" : "00000000-0000-4000-8000-000000033001"
+                let key = isFirst ? "preview/00000000-0000-4000-8000-000000031000" : "preview/legacy-photo"
+                guard isFirst || id.hasSuffix("2201") else { return ["items": []] }
+                return ["items": [["id": photoID, "organizationId": org, "jobId": id, "authorUserId": actor,
+                                   "contentType": "image/png", "byteSize": 73, "storageKey": key, "createdAt": now]]]
             }
             if path == "/v1/jobs/\(id)/media", PaperPreview.screen == "job-media" {
                 return ["items": [[
