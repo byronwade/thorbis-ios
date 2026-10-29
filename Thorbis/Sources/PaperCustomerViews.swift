@@ -701,6 +701,7 @@ struct CustomerDetailView: View {
         defer { if recordsLoadGeneration == request { recordsLoading = false } }
         do {
             let access = CustomerRecordAccess(
+                jobs: session.can("job.view", feature: "jobs"),
                 estimates: session.can("estimate.view", feature: "estimates"),
                 invoices: session.can("invoice.view", feature: "invoicing")
             )

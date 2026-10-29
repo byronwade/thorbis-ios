@@ -125,12 +125,21 @@ struct CustomerJobCompilation: Equatable {
     }
 }
 
-/// Which money records this person is allowed to compile onto the customer.
+/// Which collections this person is allowed to compile onto the customer.
+/// Customer estimates, invoices, and history still load when jobs are closed.
 /// Photos, notes, and documents stay available when estimates or invoices are not.
 struct CustomerRecordAccess: Equatable, Sendable {
+    var jobs: Bool
     var estimates: Bool
     var invoices: Bool
-    static let all = CustomerRecordAccess(estimates: true, invoices: true)
+
+    init(jobs: Bool = true, estimates: Bool, invoices: Bool) {
+        self.jobs = jobs
+        self.estimates = estimates
+        self.invoices = invoices
+    }
+
+    static let all = CustomerRecordAccess(jobs: true, estimates: true, invoices: true)
 }
 
 /// The invoice name used on the customer record. The status alone collides when two invoices share it.
@@ -145,7 +154,7 @@ enum CustomerJobCompilationLoader {
     /// Loads the customer's jobs, then each job's notes, media, and the estimate links and invoices
     /// this person can read. There is no customer-wide media or notes route; the groups are built from the job routes.
     static func load(customerID: String, api: APIClient, access: CustomerRecordAccess = .all) async throws -> CustomerJobCompilation {
-        let jobs = try await api.fieldJobs(customerID: customerID)
+        let jobs = access.jobs ? try await api.fieldJobs(customerID: customerID) : []
         let contacts = try await api.fieldContacts(customerID)
         let locations = try await api.fieldLocations(customerID)
         let estimates = access.estimates ? try await api.fieldEstimates(customerID: customerID) : []

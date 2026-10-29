@@ -175,6 +175,38 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertEqual(paths.filter { $0.hasSuffix("/media") }.count, 2)
     }
 
+    func testCustomerMoneyStillLoadsWhenJobsAreClosed() async throws {
+        let replies = [
+            page([contact()]),
+            page([location()]),
+            page([estimate(id: uid(7_000), title: "Loose estimate")]),
+            page([invoice(id: uid(9_000), jobID: nil)]),
+            page([["occurredAt": "2026-08-02T12:00:00Z", "kind": "contact", "subjectId": uid(50), "summary": "Added a contact"]]),
+        ]
+        let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+
+        let compiled = try await CustomerJobCompilationLoader.load(
+            customerID: customer,
+            api: client,
+            access: CustomerRecordAccess(jobs: false, estimates: true, invoices: true)
+        )
+
+        XCTAssertEqual(compiled.estimateCount, 1)
+        XCTAssertEqual(compiled.estimatesOffJob.map(\.title), ["Loose estimate"])
+        XCTAssertEqual(compiled.invoiceCount, 1)
+        XCTAssertEqual(compiled.invoicesOffJob.map(\.id), [uid(9_000)])
+        XCTAssertEqual(compiled.photoCount, 0)
+        XCTAssertEqual(compiled.contacts.count, 1)
+        XCTAssertEqual(compiled.locations.count, 1)
+        XCTAssertEqual(compiled.accountActivity.map(\.kind), ["contact"])
+        let paths = URLProtocolFixture.recorded.compactMap { $0.url?.path }
+        XCTAssertFalse(paths.contains("/v1/jobs"))
+        XCTAssertFalse(paths.contains { $0.hasPrefix("/v1/jobs/") })
+        XCTAssertTrue(paths.contains("/v1/estimates"))
+        XCTAssertTrue(paths.contains("/v1/invoices"))
+        XCTAssertTrue(paths.contains("/v1/customers/\(customer)/history"))
+    }
+
     func testAnInvoiceRowNamesTheInvoiceAndItsStatus() {
         let record = InvoiceRecord(
             id: uid(9_000), organizationId: org, customerId: customer, jobId: jobA, createdByUserId: author,
