@@ -33,6 +33,12 @@ struct PriceBookSearchResult: Identifiable, Equatable {
     }
 }
 
+struct PriceBookSearchPage {
+    let results: [PriceBookSearchResult]
+    let total: Int
+    let offset: Int
+}
+
 struct PriceBookSearchIndex {
     private struct Entry {
         let item: PriceBookListItem
@@ -73,13 +79,22 @@ struct PriceBookSearchIndex {
     /// Ranked results for `query` (EB-02, EB-03). An empty query lists the filter's items A to Z.
     func search(_ query: String, kind: PriceBookKindFilter = .all,
                 usage: [String: PriceBookUsage] = [:], now: Date = Date()) -> [PriceBookSearchResult] {
+        page(query, kind: kind, usage: usage, now: now).results
+    }
+
+    /// Counts all locally loaded matches while only formatting the requested visible prefix.
+    func page(_ query: String, kind: PriceBookKindFilter = .all,
+              usage: [String: PriceBookUsage] = [:], now: Date = Date(),
+              excludingIDs: Set<String> = [], limit: Int? = nil, offset: Int = 0) -> PriceBookSearchPage {
         let queryWords = Self.words(query)
-        let candidates = entries.filter { kind.includes($0.item) }
+        let candidates = entries.filter { kind.includes($0.item) && !excludingIDs.contains($0.item.id) }
         guard !queryWords.isEmpty else {
-            return candidates
-                .sorted { $0.item.description.localizedStandardCompare($1.item.description) == .orderedAscending }
-                .prefix(Self.resultLimit)
-                .map { PriceBookSearchResult(item: $0.item, highlights: []) }
+            let sorted = candidates.sorted { $0.item.description.localizedStandardCompare($1.item.description) == .orderedAscending }
+            let pageSize = max(1, limit ?? max(1, sorted.count))
+            let start = min(max(0, offset), sorted.isEmpty ? 0 : ((sorted.count - 1) / pageSize) * pageSize)
+            return PriceBookSearchPage(results: sorted.dropFirst(start).prefix(pageSize).map {
+                PriceBookSearchResult(item: $0.item, highlights: [])
+            }, total: sorted.count, offset: start)
         }
         // "R-410A" typed against a book that writes "R410A": try the query with each letter word
         // joined to its neighbouring number too, the same join the index makes.
@@ -97,9 +112,12 @@ struct PriceBookSearchIndex {
             if lhsLength != rhsLength { return lhsLength < rhsLength }
             return lhs.entry.item.description.localizedStandardCompare(rhs.entry.item.description) == .orderedAscending
         }
-        return scored.prefix(Self.resultLimit).map {
+        let pageSize = max(1, limit ?? max(1, scored.count))
+        let start = min(max(0, offset), scored.isEmpty ? 0 : ((scored.count - 1) / pageSize) * pageSize)
+        let results = scored.dropFirst(start).prefix(pageSize).map {
             PriceBookSearchResult(item: $0.entry.item, highlights: Self.highlights(in: $0.entry.item.description, words: queryWords))
         }
+        return PriceBookSearchPage(results: results, total: scored.count, offset: start)
     }
 
     /// EB-04: the items this device adds most often and most recently.
