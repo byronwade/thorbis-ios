@@ -23,6 +23,10 @@ struct InvoiceLineEditorView: View {
 
     private var searching: Bool { canEdit && (focus == .search || !query.isEmpty) }
 
+    private var catalogContext: PriceBookCatalogContext {
+        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
+    }
+
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
         self.onSaved = onSaved
@@ -34,7 +38,7 @@ struct InvoiceLineEditorView: View {
     }
 
     private var canUsePriceBook: Bool {
-        session.can("pricebook.view", feature: "price_book")
+        session.can("pricebook.view", feature: "price_book") && invoice.currency == "USD"
     }
 
     private var canIssue: Bool {
@@ -57,8 +61,10 @@ struct InvoiceLineEditorView: View {
             }
             if searching {
                 PriceBookResultsList(
-                    catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                    quantityOnEstimate: priceBookQuantity, addItem: addCatalogItem, addCustom: addCustomLine,
+                    catalog: catalog, context: catalogContext, query: query, kind: kind,
+                    canUsePriceBook: canUsePriceBook,
+                    quantityInCurrentDraft: priceBookQuantity, secondaryPriceText: { _ in nil },
+                    addItem: addCatalogItem, addCustomLine: addCustomLine,
                     retry: { Task { await refreshCatalog(force: true) } }
                 )
                 .disabled(busy)
@@ -177,7 +183,8 @@ struct InvoiceLineEditorView: View {
                     .disabled(busy)
             }
         }
-        .task { await refreshCatalog() }
+        .task(id: catalogContext) { await refreshCatalog() }
+        .onChange(of: catalogContext) { _, _ in finishSearch() }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
@@ -244,11 +251,13 @@ struct InvoiceLineEditorView: View {
     }
 
     private func priceBookQuantity(_ itemID: String) -> Int? {
-        editor.catalogQuantity(for: itemID)
+        editor.quantity(ofPriceBookItem: itemID)
     }
 
     private func addCatalogItem(_ item: PriceBookListItem) {
-        guard !busy else { return }
+        guard !busy, canEdit, !editor.hasUnsupportedLineSources, canUsePriceBook,
+              invoice.organizationId == catalogContext.organizationID,
+              catalog.context == catalogContext else { return }
         do {
             try editor.addPriceBookItem(item)
             error = nil
@@ -278,7 +287,9 @@ struct InvoiceLineEditorView: View {
 
     private func refreshCatalog(force: Bool = false) async {
         guard canUsePriceBook else { return }
-        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
+        let expected = catalogContext
+        await catalog.refresh(api: api, organizationID: expected.organizationID,
+                              sessionGeneration: expected.sessionGeneration, force: force)
     }
 
     private var invoiceEditorHeading: some View {

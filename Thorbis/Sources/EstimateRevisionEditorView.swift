@@ -69,7 +69,7 @@ struct EstimateRevisionEditorView: View {
     private var editingDraft: Bool { editor.estimate.status == "draft" }
 
     private var revisionReady: Bool {
-        editingDraft || (editor.estimate.currentRevisionNumber ?? 0) > 0
+        !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) > 0
     }
 
     private var canSave: Bool {
@@ -108,10 +108,10 @@ struct EstimateRevisionEditorView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if !editor.canRevise {
                         ErrorBanner(message: "This estimate cannot be revised from its current status.")
-                    } else if !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) <= 0 {
-                        ErrorBanner(message: EstimateRevisionEditorError.missingRevision.localizedDescription)
                     } else if !session.can("estimate.create", feature: "estimates") {
                         ErrorBanner(message: "Your account cannot create estimate revisions.")
+                    } else if !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) <= 0 {
+                        ErrorBanner(message: EstimateRevisionEditorError.missingRevision.localizedDescription)
                     }
                     if editor.hasUnsupportedLineSources {
                         ErrorBanner(message: EstimateRevisionEditorError.unsupportedLineSource.localizedDescription)
@@ -128,7 +128,7 @@ struct EstimateRevisionEditorView: View {
                     lineSection
                     optionSection
                     Text(editingDraft
-                         ? "Saving updates this draft. It will not be sent automatically."
+                         ? "Changes aren't saved when you close this screen."
                          : "Saving creates a replacement draft for the current estimate revision. It will not be sent automatically.")
                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 2)
@@ -153,11 +153,19 @@ struct EstimateRevisionEditorView: View {
             .keyboardDoneButton()
             .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if canEdit {
-                    EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
-                                      prompt: searchPrompt, finish: finishSearch)
-                        .disabled(busy)
+                VStack(spacing: 0) {
+                    if canEdit {
+                        EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
+                                          prompt: searchPrompt, finish: finishSearch)
+                            .disabled(busy)
+                    }
+                    if editingDraft && canRevise {
+                        ErrorBanner(message: "Draft changes can't be saved yet.")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 8)
+                    }
                 }
+                .background(Theme.background)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
@@ -385,6 +393,10 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func save() async {
+        guard !editingDraft else {
+            error = "Draft changes can't be saved yet."
+            return
+        }
         guard canRevise else {
             error = "You no longer have permission to revise this estimate."
             return
