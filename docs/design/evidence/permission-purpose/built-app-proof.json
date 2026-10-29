@@ -1,0 +1,10 @@
+{
+  "NSBluetoothAlwaysUsageDescription": "Thorbis uses Bluetooth to connect to supported card readers for in-person payments.",
+  "NSLocationWhenInUseUsageDescription": "Thorbis uses your location to show your position on the schedule map and verify where in-person card payments occur.",
+  "ThorbisTapToPayEnabled": false,
+  "NSCameraUsageDescription": "Thorbis uses the camera to add job photos, such as before and after shots, to the job you are working on.",
+  "NSFaceIDUsageDescription": "Thorbis uses Face ID so only you can leave customer mode after handing your device to a customer.",
+  "bundleID": "com.thorbis.field",
+  "InfoSHA256": "25c238e30c4e6e1e3c5c5611dadb81e7ccec905246a1e7b3bc489334a0a90b74",
+  "SDKVersion": "5.8.1"
+}

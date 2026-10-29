@@ -1,0 +1,9 @@
+{
+  "build": 80,
+  "runtimeSource": "d6e638594414b749ef8d513a2911a918a9a6f73e",
+  "archive": "succeeded",
+  "upload": "succeeded",
+  "testFlight": "dashboard verification pending",
+  "signedAudit": "passed",
+  "uploadTime": "2026-10-29 11:38:40 EDT"
+}
