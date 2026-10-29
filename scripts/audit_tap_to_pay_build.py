@@ -24,6 +24,15 @@ def validate(enabled, signed, allowed):
     return errors
 
 
+def validate_sdk_purposes(info):
+    errors = []
+    for key in ("NSBluetoothAlwaysUsageDescription", "NSLocationWhenInUseUsageDescription"):
+        value = info.get(key)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"The app must declare a nonempty {key} for its linked SDK and location features.")
+    return errors
+
+
 def validate_binding(info, signed, profile, distribution=False):
     errors = []
     bundle_id = info.get("CFBundleIdentifier")
@@ -63,7 +72,8 @@ def main():
             info = plistlib.load(source)
         command_bytes("/usr/bin/codesign", "--verify", "--deep", "--strict", str(args.app))
         enabled = info.get(POLICY)
-        errors = validate(enabled, {}, {}) if enabled is not True else []
+        errors = validate_sdk_purposes(info)
+        errors += validate(enabled, {}, {}) if enabled is not True else []
         if enabled is True:
             signed = plistlib.loads(command_bytes(
                 "/usr/bin/codesign", "--display", "--entitlements", "-", "--xml", str(args.app)))

@@ -1,0 +1,2 @@
+The app must declare a nonempty NSBluetoothAlwaysUsageDescription for its linked SDK and location features.
+The app must declare a nonempty NSLocationWhenInUseUsageDescription for its linked SDK and location features.
