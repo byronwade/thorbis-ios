@@ -1,0 +1,6 @@
+{
+  "Thorbis/Sources/InvoicePaymentCollection.swift": "7996c2079d86a44d7faabd9c5233baeef1f6dd4c7bb349634770fe2e1591f13c",
+  "Thorbis/Sources/TapToPay.swift": "fe551e224cd66fd6f04dc92fc0a43c99374728e787c04de64a9c37c9feff8898",
+  "ThorbisTests/InvoicePaymentCollectionTests.swift": "d7f270bfd3d9e665ee1efe5f9f8a7c9af7edcf20cf6e6830cb1a1e549b5e11fe",
+  "ThorbisTests/TapToPayReadinessTests.swift": "a59c0423c521faf0db1bb2ede59b60315ffd3f87072d8d6f05234aeb8b93c2ab"
+}
