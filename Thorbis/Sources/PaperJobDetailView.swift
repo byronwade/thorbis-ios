@@ -43,6 +43,16 @@ struct JobDetailView: View {
     @State private var loadedInvoiceModelID: String?
     @State private var showCollectPayment = false
     @State private var activityFilter = "All"
+    @State private var activityVerifiedJob: JobRecord?
+    @State private var activityVerifiedNotes: [JobNoteRecord] = []
+    @State private var activityPublishedScope: ActivityAccessScope?
+    @State private var activityRequestedScope: ActivityAccessScope?
+    @State private var activityRequest = 0
+    @State private var activityError: String?
+    private var jobActivityScope: ActivityAccessScope? {
+        ActivityAccessScope.capture(session: session, ownerID: "job:\(jobId)",
+                                    allowed: session.can("job.view", feature: "jobs"))
+    }
     @State private var showSchedule = false
     private var estimateRead: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
@@ -220,6 +230,9 @@ struct JobDetailView: View {
             await loadInvoices()
             if let job { await loadJobEstimates(job) }
         }
+        .task(id: jobActivityScope) {
+            if selectedTab == "Activity" { await loadVerifiedActivity() }
+        }
         // The Lock Screen card follows the status shown here, queued steps included.
         .task(id: liveActivityKey) {
             guard let job else { return }
@@ -231,6 +244,7 @@ struct JobDetailView: View {
         .onAppear { if job != nil { Task { await load() } } }
         .onChange(of: selectedTab) { previous, tab in
             if tab == "Invoice" { Task { await loadInvoices() } }
+            if tab == "Activity" { Task { await loadVerifiedActivity() } }
             // Photos added on the Photos tab show in the Overview count straight away (JS-09).
             if previous == "Photos" { Task { await loadMediaCount() } }
         }
@@ -743,8 +757,54 @@ struct JobDetailView: View {
     }
 
     /// Paper 21B: filter pills, a quiet timeline of notes and status changes, composer last.
-    private func activityContent(_ job: JobRecord) -> some View {
+    @ViewBuilder private func activityContent(_ job: JobRecord) -> some View {
+        if jobActivityScope == nil {
+            Text("You don’t have access to this job’s activity.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+        } else if let activityError, activityRequestedScope == jobActivityScope, activityPublishedScope != jobActivityScope {
+            ErrorBanner(message: activityError) { await loadVerifiedActivity() }
+        } else if let verified = activityVerifiedJob, activityPublishedScope == jobActivityScope {
+            verifiedActivityContent(verified)
+        } else {
+            SkeletonRows(count: 4, inset: 0)
+        }
+    }
+
+    private func loadVerifiedActivity() async {
+        guard let scope = jobActivityScope else { return }
+        activityRequest += 1
+        let request = activityRequest
+        activityRequestedScope = scope
+        activityError = nil
+        do {
+            let verified = try await api.fieldJob(jobId)
+            guard activityRequest == request, jobActivityScope == scope, !Task.isCancelled else { return }
+            guard verified.id == jobId, verified.organizationId == scope.organizationID else {
+                throw Problem(title: "Activity unavailable", status: nil, detail: "The job could not be verified.")
+            }
+            let loadedNotes = try await api.fieldNotes(jobId)
+            guard activityRequest == request, jobActivityScope == scope, !Task.isCancelled else { return }
+            guard loadedNotes.allSatisfy({ $0.jobId == jobId && $0.organizationId == scope.organizationID }) else {
+                throw Problem(title: "Activity unavailable", status: nil, detail: "Some notes could not be verified.")
+            }
+            activityVerifiedJob = verified
+            activityVerifiedNotes = loadedNotes
+            activityPublishedScope = scope
+            activityError = nil
+        } catch is CancellationError {
+        } catch {
+            guard activityRequest == request, jobActivityScope == scope else { return }
+            if activityPublishedScope != scope { activityPublishedScope = nil }
+            activityError = error.isConnectivityFailure
+                ? "Connect to verify this job’s activity."
+                : error.localizedDescription
+        }
+    }
+
+    private func verifiedActivityContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 14) {
+            if let activityError, activityRequestedScope == jobActivityScope {
+                ErrorBanner(message: "Activity may be out of date. \(activityError)") { await loadVerifiedActivity() }
+            }
             HStack(spacing: 6) {
                 ForEach(["All", "Notes", "Status"], id: \.self) { filter in
                     Button { activityFilter = filter } label: {
@@ -761,7 +821,10 @@ struct JobDetailView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(timeline(job)) { entry in
-                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
+                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject),
+                                 details: ActivityDetails(title: entry.title, body: entry.body,
+                                     when: entry.date.formatted(date: .abbreviated, time: .shortened), context: "Job activity"),
+                                 ownerID: "job:\(job.id)", currentRoute: .job(job.id), canView: session.can("job.view", feature: "jobs")) {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
                             Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
@@ -837,7 +900,7 @@ struct JobDetailView: View {
                 let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
                 return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath", subject: ActivityFeedSubject(kind: "note", jobID: job.id))
             }
-            entries += notes.compactMap { record in
+            entries += activityVerifiedNotes.compactMap { record in
                 JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble", subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
             }
         }
@@ -1267,6 +1330,7 @@ struct JobDetailView: View {
             notes.append(saved)
             note = ""
             error = nil
+            if selectedTab == "Activity" { await loadVerifiedActivity() }
         } catch is CancellationError {} catch {
             if error.isConnectivityFailure {
                 outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)

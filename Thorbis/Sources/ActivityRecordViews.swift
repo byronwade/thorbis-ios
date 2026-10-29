@@ -8,32 +8,125 @@ enum ActivityRecordLabel {
     }
 }
 
-/// Wraps an activity row in a link only when the row already names a real record.
+/// Exact information already shown by a feed, captured when its row is selected.
+struct ActivityDetails: Equatable {
+    let title: String
+    var body: String? = nil
+    var when: String? = nil
+    var context: String? = nil
+}
+
+/// The authority and owning record that permitted a feed entry to be seen.
+struct ActivityAccessScope: Equatable {
+    let actorID: String
+    let organizationID: String
+    let ownerID: String
+    let generation: UUID
+    let authorityRevision: UUID
+
+    @MainActor static func capture(session: SessionController, ownerID: String, allowed: Bool) -> Self? {
+        guard allowed, let actor = session.user?.id, let organization = session.activeOrganization?.id else { return nil }
+        return Self(actorID: actor, organizationID: organization, ownerID: ownerID,
+                    generation: session.generation, authorityRevision: session.authorityRevision)
+    }
+}
+
+struct PresentedActivityDetails: Identifiable {
+    let id = UUID()
+    let details: ActivityDetails
+    let scope: ActivityAccessScope
+}
+
+enum ActivitySelection {
+    static func opensRecord(_ destination: ActivityDestination?, currentRoute: PaperRoute?) -> Bool {
+        guard let destination else { return false }
+        return destination.route != currentRoute
+    }
+}
+
+/// Opens a different named record when available; otherwise shows the activity itself.
 struct ActivityLink<Content: View>: View {
     let destination: ActivityDestination?
+    let details: ActivityDetails
+    let ownerID: String
+    var currentRoute: PaperRoute? = nil
+    var canView: Bool = true
     @ViewBuilder var content: () -> Content
+    @EnvironmentObject private var session: SessionController
+    @State private var presented: PresentedActivityDetails?
+
+    private var scope: ActivityAccessScope? {
+        ActivityAccessScope.capture(session: session, ownerID: ownerID, allowed: canView)
+    }
 
     var body: some View {
-        if let destination {
-            NavigationLink(value: destination.route) { label }
+        Group {
+            if let destination, ActivitySelection.opensRecord(destination, currentRoute: currentRoute) {
+                NavigationLink(value: destination.route) { label }
+                    .buttonStyle(RowPressStyle())
+                    .disabled(scope == nil)
+            } else {
+                Button {
+                    guard let scope else { return }
+                    presented = PresentedActivityDetails(details: details, scope: scope)
+                } label: { label }
                 .buttonStyle(RowPressStyle())
-        } else {
-            label
+                .disabled(scope == nil)
+                .sheet(item: $presented) { snapshot in
+                    NavigationStack {
+                        if snapshot.scope == scope {
+                            ActivityDetailsView(details: snapshot.details)
+                        } else {
+                            ContentUnavailableView("Activity unavailable", systemImage: "lock", description: Text("This activity is no longer available."))
+                        }
+                    }
+                }
+                .onChange(of: scope) { _, current in
+                    if presented?.scope != current { presented = nil }
+                }
+            }
         }
     }
 
     private var label: some View {
         HStack(spacing: 8) {
-            content()
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            if destination != nil {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
-            }
+            content().frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.muted)
+                .accessibilityHidden(true)
         }
         .contentShape(Rectangle())
+    }
+}
+
+private struct ActivityDetailsView: View {
+    let details: ActivityDetails
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let context = details.context, !context.isEmpty {
+                    Text(context).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                }
+                Text(details.title).font(Theme.font(20, weight: .medium))
+                    .accessibilityAddTraits(.isHeader)
+                if let when = details.when, !when.isEmpty {
+                    Text(when).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                if let body = details.body, !body.isEmpty {
+                    Text(body).font(Theme.font(16)).textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .navigationTitle("Activity details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
 }
 

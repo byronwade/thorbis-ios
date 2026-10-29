@@ -1,0 +1,7 @@
+# Activity selection — in progress
+
+All five activity-link entry points are being updated so named records open their existing destinations, while events without a supported record open a read-only detail containing the available full text. Events targeting the current job or invoice show details rather than push a duplicate screen. Details are snapshots scoped to the current actor, workspace, owner, session and authority revision.
+
+The exact-source `build-for-testing` succeeded (`/private/tmp/thorbis-activity-final-build-v4.log`). Focused runtime tests executed zero cases: CoreSimulator stalled at application launch, and the run was interrupted after 115 seconds (`/private/tmp/thorbis-activity-focused-v4.log`, `/tmp/thorbis-activity-focused-v4.xcresult`, `/private/tmp/thorbis-activity-v4-sample.txt`). Payment/refund confirmation reachability and runtime behavior are unverified.
+
+Release blocker: cold offline job Activity previously used an unscoped cache. The current WIP requires an online job-scope verification on cold open, which is an offline availability regression. Do not ship until a safe scoped durable access proof or equivalent owner contract preserves supported offline behavior. The currently uninstantiated invoice activity view requires an authority-origin check if activated. No new TestFlight build contains this work.

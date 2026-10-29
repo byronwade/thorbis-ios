@@ -36,6 +36,47 @@ final class SessionControllerTests: XCTestCase {
         return (SessionController(api: api, defaults: isolatedDefaults()), api)
     }
 
+    func testActivityScopeRejectsCompletionAfterSameVersionRevokeAndRegrant() async {
+        let enabled = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
+        let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, enabled),
+            .init(200, activeSession), .init(200, revoked), .init(200, enabled),
+            .init(200, activeSession), .init(200, catalog), .init(200, enabled)
+        ])
+        await session.restore()
+        func scope() -> ActivityAccessScope? {
+            ActivityAccessScope.capture(session: session, ownerID: "customer:\(first)",
+                                        allowed: session.can("customer.view", feature: "core_crm"))
+        }
+        let initial = scope()
+        let recordsScope = CustomerRecordsScope.capture(session: session, customerID: first)
+        XCTAssertNotNil(initial)
+        XCTAssertNotNil(recordsScope)
+        let generation = session.generation
+        let (completion, continuation) = AsyncStream<Void>.makeStream()
+        var stalePublished = false
+        let pending = Task { @MainActor in
+            for await _ in completion {
+                if initial == scope() { stalePublished = true }
+                break
+            }
+        }
+        await session.revalidate()
+        XCTAssertNil(scope())
+        await session.revalidate()
+        XCTAssertNotNil(scope())
+        XCTAssertEqual(session.generation, generation)
+        XCTAssertNotEqual(initial, scope(), "Old activity loads and presented snapshots cannot become current after regrant")
+        XCTAssertNotEqual(recordsScope, CustomerRecordsScope.capture(session: session, customerID: first),
+                          "Old compiled records cannot become current after regrant")
+        continuation.yield(())
+        continuation.finish()
+        await pending.value
+        XCTAssertFalse(stalePublished, "An old response cannot publish after authority is restored")
+        XCTAssertNotEqual(scope(), ActivityAccessScope.capture(session: session, ownerID: "customer:other", allowed: true))
+    }
+
     func testRestoreNullSessionLeavesNoAuthority() async {
         let (session, api) = controller([.init(200, "null")])
 

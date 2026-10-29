@@ -3,6 +3,7 @@ import SwiftUI
 /// The customer's photos, notes, documents, estimates, invoices, and activity,
 /// each list still grouped under the job it came from.
 struct CustomerRecordsView: View {
+    @EnvironmentObject private var session: SessionController
     let compilation: CustomerJobCompilation
     let customerID: String
 
@@ -85,7 +86,9 @@ struct CustomerRecordsView: View {
             ForEach(compilation.activity, id: \.jobID) { group in
                 jobHeading(group.title, jobID: group.jobID, count: group.count)
                 ForEach(group.items) { entry in
-                    ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
+                    ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID),
+                                 details: ActivityDetails(title: entry.summary, when: ActivityRecordLabel.noteWhen(entry.occurredAt), context: group.title),
+                                 ownerID: "customer:\(customerID)", canView: session.can("customer.view", feature: "core_crm")) {
                         Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
                     }
                 }
@@ -93,7 +96,9 @@ struct CustomerRecordsView: View {
             if !compilation.accountActivity.isEmpty {
                 Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
                 ForEach(compilation.accountActivity) { entry in
-                    ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
+                    ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID),
+                                 details: ActivityDetails(title: entry.summary, when: ActivityRecordLabel.noteWhen(entry.occurredAt), context: "Customer activity"),
+                                 ownerID: "customer:\(customerID)", canView: session.can("customer.view", feature: "core_crm")) {
                         Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
                     }
                 }

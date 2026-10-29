@@ -57,6 +57,24 @@ final class ActivityDestinationTests: XCTestCase {
         XCTAssertEqual(ActivityDestinationMapping.customerHistory(contact, customerID: customer), .contact(customerID: customer, contactID: other))
     }
 
+    func testSameParentOpensActivityDetailsWhileDifferentRecordsKeepTheirRoute() {
+        XCTAssertFalse(ActivitySelection.opensRecord(nil, currentRoute: .job(job)))
+        XCTAssertFalse(ActivitySelection.opensRecord(.job(job), currentRoute: .job(job)))
+        XCTAssertFalse(ActivitySelection.opensRecord(.invoice(job), currentRoute: .invoice(job)))
+        XCTAssertFalse(ActivitySelection.opensRecord(.payment(invoiceID: job, paymentID: other), currentRoute: .invoice(job)))
+        XCTAssertTrue(ActivitySelection.opensRecord(.estimate(other), currentRoute: .job(job)))
+        XCTAssertTrue(ActivitySelection.opensRecord(.job(job), currentRoute: nil))
+    }
+
+    func testPresentedDetailsPreserveTheSnapshotEvenIfTheRowChanges() {
+        let scope = ActivityAccessScope(actorID: job, organizationID: customer, ownerID: "job:one", generation: UUID(), authorityRevision: UUID())
+        var row = ActivityDetails(title: "Original", body: "Long detail", context: "Job")
+        let presented = PresentedActivityDetails(details: row, scope: scope)
+        row = ActivityDetails(title: "Changed")
+        XCTAssertEqual(presented.details.title, "Original")
+        XCTAssertEqual(presented.details.body, "Long detail")
+    }
+
     func testANoteDetailShowsAReadableTime() throws {
         let raw = "2026-07-01T15:04:00Z"
         let shown = ActivityRecordLabel.noteWhen(raw)
