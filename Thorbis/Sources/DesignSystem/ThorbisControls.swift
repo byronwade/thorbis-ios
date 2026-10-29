@@ -135,7 +135,7 @@ struct ThorbisConfirmCard: View {
                     Button { onChoose(action) } label: {
                         Text(action.title).font(Theme.font(17, weight: .medium))
                             .frame(maxWidth: .infinity).frame(height: 50)
-                            .foregroundStyle(action.role == .destructive ? Theme.onInk : Theme.onInk)
+                            .foregroundStyle(Theme.onInk)
                             .background(action.role == .destructive ? Theme.destructive : Theme.ink,
                                         in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
@@ -178,6 +178,20 @@ extension View {
             ThorbisConfirmCard(title: title, message: message, actions: actions,
                                onChoose: { action in isPresented.wrappedValue = false; action.action() },
                                onCancel: { isPresented.wrappedValue = false })
+        }
+    }
+
+    /// Present a confirm sheet bound to an optional item, in place of
+    /// `.confirmationDialog(..., presenting:)`. The sheet shows while `item` is non-nil and clears
+    /// it on dismiss (so a swipe-away reads as Cancel).
+    func thorbisConfirm<Item: Identifiable>(item: Binding<Item?>,
+                                            title: @escaping (Item) -> String,
+                                            message: ((Item) -> String)? = nil,
+                                            actions: @escaping (Item) -> [ThorbisConfirmAction]) -> some View {
+        sheet(item: item) { value in
+            ThorbisConfirmCard(title: title(value), message: message?(value), actions: actions(value),
+                               onChoose: { action in item.wrappedValue = nil; action.action() },
+                               onCancel: { item.wrappedValue = nil })
         }
     }
 }
