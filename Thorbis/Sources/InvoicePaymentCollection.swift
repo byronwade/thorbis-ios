@@ -555,12 +555,10 @@ private struct InvoicePaymentDetailSheet: View {
             #endif
         }
         .interactiveDismissDisabled(refundModel.isSubmitting)
-        .confirmationDialog("Discard the saved refund reason?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-            Button("Discard saved reason", role: .destructive) { refundModel.discardSavedIntent() }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text(discardMessage)
-        }
+        .thorbisConfirm("Discard the saved refund reason?",
+                        message: discardMessage,
+                        isPresented: $confirmDiscard,
+                        actions: [ThorbisConfirmAction("Discard saved reason", role: .destructive) { refundModel.discardSavedIntent() }])
         #if DEBUG
         .task {
             guard PaperPreview.enabled,
@@ -689,27 +687,23 @@ private struct InvoicePaymentRefundForm: View {
             }
         }
         #endif
-        .confirmationDialog("Refund the full payment of \(amountText)?", isPresented: $confirmRefund, titleVisibility: .visible) {
-            Button("Refund \(amountText)", role: .destructive) {
-                Task {
-                    if await model.submitRefund() {
-                        await onRefundCompleted()
-                        dismiss()
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This returns the entire recorded payment. Partial refunds are not available here, and this action cannot be undone.")
-        }
-        .confirmationDialog("Discard the saved refund reason?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-            Button("Discard saved reason", role: .destructive) { model.discardSavedIntent() }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text(model.intent?.state == .draft
-                 ? "This removes the saved draft reason."
-                 : "This removes the saved reason the app needs to check the refund outcome safely.")
-        }
+        .thorbisConfirm("Refund the full payment of \(amountText)?",
+                        message: "This returns the entire recorded payment. Partial refunds are not available here, and this action cannot be undone.",
+                        isPresented: $confirmRefund,
+                        actions: [ThorbisConfirmAction("Refund \(amountText)", role: .destructive) {
+                            Task {
+                                if await model.submitRefund() {
+                                    await onRefundCompleted()
+                                    dismiss()
+                                }
+                            }
+                        }])
+        .thorbisConfirm("Discard the saved refund reason?",
+                        message: model.intent?.state == .draft
+                            ? "This removes the saved draft reason."
+                            : "This removes the saved reason the app needs to check the refund outcome safely.",
+                        isPresented: $confirmDiscard,
+                        actions: [ThorbisConfirmAction("Discard saved reason", role: .destructive) { model.discardSavedIntent() }])
     }
 
     private var reasonEntry: some View {
@@ -921,12 +915,10 @@ struct InvoicePaymentCollectionSheet: View {
                     },
                     onDone: { dismiss() })
             }
-            .confirmationDialog(recordConfirmationTitle, isPresented: $showRecordConfirmation, titleVisibility: .visible) {
-                Button(primaryTitle) { Task { await recordPayment() } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(recordConfirmationMessage)
-            }
+            .thorbisConfirm(recordConfirmationTitle,
+                            message: recordConfirmationMessage,
+                            isPresented: $showRecordConfirmation,
+                            actions: [ThorbisConfirmAction(primaryTitle) { Task { await recordPayment() } }])
             .task {
                 // Open on the iPhone reader when this workspace and phone can take cards in person.
                 if tapToPayAvailable && model.pendingRequest == nil && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
@@ -1078,14 +1070,10 @@ struct InvoicePaymentCollectionSheet: View {
                     option = .cash
                 }
                 Divider().overlay(Theme.border).padding(.leading, 48)
-                Menu {
-                    Button("Bank transfer (ACH) received", systemImage: "building.columns") {
-                        option = .bankTransfer
-                    }
-                    Button("Card collected elsewhere", systemImage: "creditcard") {
-                        option = .externalCard
-                    }
-                } label: {
+                ThorbisMenu(items: [
+                    ThorbisMenuItem("Bank transfer (ACH) received", icon: "building.columns") { option = .bankTransfer },
+                    ThorbisMenuItem("Card collected elsewhere", icon: "creditcard") { option = .externalCard },
+                ], accessibilityLabel: "Other payment received") {
                     optionLabel(
                         title: option.isExternalReceipt ? (option.recordedMethod?.displayName ?? "Other payment received") : "Other payment received",
                         subtitle: option.isExternalReceipt ? "Record money already received" : "Bank transfer or card collected elsewhere",

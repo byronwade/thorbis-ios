@@ -31,6 +31,7 @@ struct JobDetailView: View {
     @State private var showPause = false
     @State private var busy = false
     @State private var error: String?
+    @State private var noteSaveError: String?
     @State private var selectedTab = "Overview"
     @StateObject private var documents = JobDocumentCollections()
     @State private var documentGeneration: UUID?
@@ -43,6 +44,16 @@ struct JobDetailView: View {
     @State private var loadedInvoiceModelID: String?
     @State private var showCollectPayment = false
     @State private var activityFilter = "All"
+    @State private var activityVerifiedJob: JobRecord?
+    @State private var activityVerifiedNotes: [JobNoteRecord] = []
+    @State private var activityPublishedScope: ActivityAccessScope?
+    @State private var activityRequestedScope: ActivityAccessScope?
+    @State private var activityRequest = 0
+    @State private var activityError: String?
+    private var jobActivityScope: ActivityAccessScope? {
+        ActivityAccessScope.capture(session: session, ownerID: "job:\(jobId)",
+                                    allowed: session.can("job.view", feature: "jobs"))
+    }
     @State private var showSchedule = false
     private var estimateRead: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
@@ -219,6 +230,10 @@ struct JobDetailView: View {
             if let job { await loadContacts(job) }
             await loadInvoices()
             if let job { await loadJobEstimates(job) }
+            if selectedTab == "Activity" { await loadVerifiedActivity() }
+        }
+        .task(id: jobActivityScope) {
+            if selectedTab == "Activity" { await loadVerifiedActivity() }
         }
         // The Lock Screen card follows the status shown here, queued steps included.
         .task(id: liveActivityKey) {
@@ -231,6 +246,7 @@ struct JobDetailView: View {
         .onAppear { if job != nil { Task { await load() } } }
         .onChange(of: selectedTab) { previous, tab in
             if tab == "Invoice" { Task { await loadInvoices() } }
+            if tab == "Activity" { Task { await loadVerifiedActivity() } }
             // Photos added on the Photos tab show in the Overview count straight away (JS-09).
             if previous == "Photos" { Task { await loadMediaCount() } }
         }
@@ -743,8 +759,57 @@ struct JobDetailView: View {
     }
 
     /// Paper 21B: filter pills, a quiet timeline of notes and status changes, composer last.
-    private func activityContent(_ job: JobRecord) -> some View {
+    @ViewBuilder private func activityContent(_ job: JobRecord) -> some View {
+        if jobActivityScope == nil {
+            Text("You don’t have access to this job’s activity.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+        } else if let activityError, activityRequestedScope == jobActivityScope, activityPublishedScope != jobActivityScope {
+            VStack(alignment: .leading, spacing: 14) {
+                ErrorBanner(message: activityError) { await loadVerifiedActivity() }
+                if !scopedPendingNotes.isEmpty { verifiedActivityContent(nil) }
+            }
+        } else if let verified = activityVerifiedJob, activityPublishedScope == jobActivityScope {
+            verifiedActivityContent(verified)
+        } else {
+            SkeletonRows(count: 4, inset: 0)
+        }
+    }
+
+    private func loadVerifiedActivity() async {
+        guard let scope = jobActivityScope else { return }
+        activityRequest += 1
+        let request = activityRequest
+        activityRequestedScope = scope
+        activityError = nil
+        do {
+            let verified = try await api.fieldJob(jobId, requireFresh: true)
+            guard activityRequest == request, jobActivityScope == scope, !Task.isCancelled else { return }
+            guard verified.id == jobId, verified.organizationId == scope.organizationID else {
+                throw Problem(title: "Activity unavailable", status: nil, detail: "The job could not be verified.")
+            }
+            let loadedNotes = try await api.fieldNotes(jobId, requireFresh: true)
+            guard activityRequest == request, jobActivityScope == scope, !Task.isCancelled else { return }
+            guard loadedNotes.allSatisfy({ $0.jobId == jobId && $0.organizationId == scope.organizationID }) else {
+                throw Problem(title: "Activity unavailable", status: nil, detail: "Some notes could not be verified.")
+            }
+            activityVerifiedJob = verified
+            activityVerifiedNotes = loadedNotes
+            activityPublishedScope = scope
+            activityError = nil
+        } catch is CancellationError {
+        } catch {
+            guard activityRequest == request, jobActivityScope == scope else { return }
+            if activityPublishedScope != scope { activityPublishedScope = nil }
+            activityError = error.isConnectivityFailure
+                ? "Connect to verify this job’s activity."
+                : error.localizedDescription
+        }
+    }
+
+    private func verifiedActivityContent(_ job: JobRecord?) -> some View {
         VStack(alignment: .leading, spacing: 14) {
+            if job != nil, let activityError, activityRequestedScope == jobActivityScope {
+                ErrorBanner(message: "Activity may be out of date. \(activityError)") { await loadVerifiedActivity() }
+            }
             HStack(spacing: 6) {
                 ForEach(["All", "Notes", "Status"], id: \.self) { filter in
                     Button { activityFilter = filter } label: {
@@ -761,7 +826,10 @@ struct JobDetailView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(timeline(job)) { entry in
-                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
+                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject),
+                                 details: ActivityDetails(title: entry.title, body: entry.body,
+                                     when: entry.date.formatted(date: .abbreviated, time: .shortened), context: "Job activity"),
+                                 ownerID: "job:\(jobId)", currentRoute: .job(jobId), canView: session.can("job.view", feature: "jobs")) {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
                             Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
@@ -794,7 +862,7 @@ struct JobDetailView: View {
             if timeline(job).isEmpty {
                 PaperEmptyState(symbol: "clock", title: "No activity yet", message: "Notes and status changes on this job show up here.")
             }
-            if session.can("job.note", feature: "jobs") {
+            if job != nil && session.can("job.note", feature: "jobs") {
                 HStack(alignment: .bottom, spacing: 8) {
                     TextField("Add a note or update…", text: $note, axis: .vertical)
                         .font(Theme.font(16))
@@ -810,6 +878,9 @@ struct JobDetailView: View {
                     .buttonStyle(PressStyle())
                     .disabled(!canSaveNote || busy)
                     .accessibilityLabel("Save note")
+                }
+                if let noteSaveError {
+                    Text(noteSaveError).font(Theme.font(14)).foregroundStyle(Theme.destructive)
                 }
             }
         }
@@ -829,19 +900,31 @@ struct JobDetailView: View {
         var isNote: Bool { body != nil }
     }
 
-    private func timeline(_ job: JobRecord) -> [TimelineEntry] {
+    private var scopedPendingNotes: [OutboxEntry] {
+        guard let scope = jobActivityScope else { return [] }
+        return outbox.activityNotes(for: jobId, actorID: scope.actorID, organizationID: scope.organizationID)
+    }
+
+    private func timeline(_ job: JobRecord?) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         if activityFilter != "Status" {
-            entries += outbox.pendingNotes(for: job.id).compactMap { entry in
+            entries += scopedPendingNotes.compactMap { entry in
                 guard case .note(let payload) = entry.action else { return nil }
-                let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
-                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath", subject: ActivityFeedSubject(kind: "note", jobID: job.id))
+                let status: String
+                switch entry.state {
+                case .pending: status = "Note · waiting to sync"
+                case .rejected: status = "Note · couldn't sync"
+                case .held: status = "Note · waiting for review"
+                }
+                return TimelineEntry(id: "queued-\(entry.id)", title: status, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath", subject: ActivityFeedSubject(kind: "note", jobID: jobId))
             }
-            entries += notes.compactMap { record in
-                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble", subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
+            if let job {
+                entries += activityVerifiedNotes.compactMap { record in
+                    JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble", subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
+                }
             }
         }
-        if activityFilter != "Notes" {
+        if activityFilter != "Notes", let job {
             entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill", subject: ActivityFeedSubject(kind: "status", jobID: job.id)) }
         }
         return entries.sorted { $0.date > $1.date }
@@ -1214,13 +1297,24 @@ struct JobDetailView: View {
         }
     }
     @discardableResult private func progress(_ request: FieldProgressRequest) async -> Bool {
+        guard let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let context = outbox.captureContext(matchingActorID: actor, organizationID: organization) else { return false }
+        let generation = session.generation, authority = session.authorityRevision
+        let requestGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        func current() -> Bool {
+            session.generation == generation && session.authorityRevision == authority && session.user?.id == actor &&
+            session.activeOrganization?.id == organization && api.requestGeneration == requestGeneration &&
+            api.normalizedOrigin == origin && outbox.captureContext(matchingActorID: actor, organizationID: organization) == context
+        }
         if session.isOffline || outbox.pendingStatus(for: jobId) != nil {
-            return queue(request)
+            return queue(request, context: context)
         }
         busy = true
         defer { busy = false }
         do {
-            job = try await api.progressFieldJob(jobId, request: request)
+            let updated = try await api.progressFieldJob(jobId, request: request)
+            guard current() else { return false }
+            job = updated
             committed += 1
             // The progress response carries no allowedTransitions; re-read the job so the
             // next step (Mark arrived, Start work, ...) appears without a manual refresh.
@@ -1229,19 +1323,23 @@ struct JobDetailView: View {
             error = nil
             return true
         } catch is CancellationError { return false } catch {
-            if error.isConnectivityFailure { return queue(request) }
+            guard current() else { return false }
+            if error.isConnectivityFailure { return queue(request, context: context) }
             self.error = error.localizedDescription
             return false
         }
     }
 
     /// No signal: the step is saved on the phone and sent in order later; the header says so.
-    private func queue(_ request: FieldProgressRequest) -> Bool {
+    private func queue(_ request: FieldProgressRequest, context: FieldOutbox.CaptureContext) -> Bool {
         guard let payload = OutboxEntry.ProgressPayload(jobID: jobId, request: request) else {
             error = "Pausing a job needs a connection."
             return false
         }
-        outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
+        guard outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0, matching: context) != nil else {
+            error = "Couldn’t save this change on this phone. Try again."
+            return false
+        }
         committed += 1
         error = nil
         if !session.isOffline { Task { await syncQueued() } }
@@ -1254,27 +1352,51 @@ struct JobDetailView: View {
         await store.refresh(api)
     }
     private func saveNote() async {
-        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let original = note
+        let trimmed = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let context = outbox.captureContext(matchingActorID: actor, organizationID: organization) else {
+            noteSaveError = "Couldn’t save this note. Check your workspace and try again."
+            return
+        }
+        let generation = session.generation, authority = session.authorityRevision
+        let requestGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        func current() -> Bool {
+            session.generation == generation && session.authorityRevision == authority && session.user?.id == actor &&
+            session.activeOrganization?.id == organization && api.requestGeneration == requestGeneration &&
+            api.normalizedOrigin == origin && outbox.captureContext(matchingActorID: actor, organizationID: organization) == context
+        }
         if session.isOffline {
-            outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
-            note = ""
+            queueNote(trimmed, original: original, context: context)
             return
         }
         busy = true
         defer { busy = false }
         do {
-            let saved = try await api.addFieldNote(jobId, body: note.trimmingCharacters(in: .whitespacesAndNewlines))
+            let saved = try await api.addFieldNote(jobId, body: trimmed)
+            guard current() else { return }
             notes.append(saved)
-            note = ""
+            if note == original { note = "" }
+            noteSaveError = nil
             error = nil
+            if selectedTab == "Activity" { await loadVerifiedActivity() }
         } catch is CancellationError {} catch {
+            guard current() else { return }
             if error.isConnectivityFailure {
-                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
-                note = ""
+                queueNote(trimmed, original: original, context: context)
             } else {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func queueNote(_ body: String, original: String, context: FieldOutbox.CaptureContext) {
+        guard outbox.enqueue(.note(.init(jobId: jobId, body: body)), policyVersion: session.policyVersion ?? 0, matching: context) != nil else {
+            noteSaveError = "Couldn’t save this note on this phone. Try again."
+            return
+        }
+        if note == original { note = "" }
+        noteSaveError = nil
     }
 }
 

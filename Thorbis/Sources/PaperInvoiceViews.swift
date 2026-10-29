@@ -178,7 +178,10 @@ struct PaperJobInvoiceContent: View {
 
             VStack(alignment: .leading, spacing: 11) {
                 ForEach(Array(activityItems.enumerated()), id: \.offset) { index, event in
-                    ActivityLink(destination: ActivityDestinationMapping.destination(for: event.subject)) {
+                    ActivityLink(destination: ActivityDestinationMapping.destination(for: event.subject),
+                                 details: ActivityDetails(title: event.title,
+                                     when: event.date?.formatted(date: .abbreviated, time: .shortened), context: "Invoice activity"),
+                                 ownerID: "invoice:\(displayedInvoice.id)", currentRoute: .invoice(displayedInvoice.id), canView: session.can("invoice.view", feature: "invoicing")) {
                     HStack(alignment: .top, spacing: 10) {
                         ZStack {
                             Circle().stroke(Theme.border, lineWidth: 1.4).frame(width: 9, height: 9)

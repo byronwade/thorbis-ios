@@ -42,6 +42,145 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertTrue(relaunched.entries.isEmpty, "Another actor never sees these changes")
     }
 
+    func testFailedDiskWriteDoesNotReportSavedOrDiscardExistingQueue() throws {
+        let box = outbox()
+        let existing = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Existing")), policyVersion: 1))
+        let queue = directory.appendingPathComponent("Outbox")
+        let backup = directory.appendingPathComponent("Outbox-backup")
+        try FileManager.default.moveItem(at: queue, to: backup)
+        try Data("not a directory".utf8).write(to: queue)
+
+        XCTAssertNil(box.enqueue(.note(.init(jobId: jobA, body: "Unsaved")), policyVersion: 1))
+        XCTAssertEqual(box.entries.map(\.id), [existing.id])
+
+        try FileManager.default.removeItem(at: queue)
+        try FileManager.default.moveItem(at: backup, to: queue)
+        XCTAssertEqual(outbox().entries.map(\.id), [existing.id])
+    }
+
+    func testUnreadableExistingQueueIsNotOverwrittenByNewNote() throws {
+        let queue = directory.appendingPathComponent("Outbox")
+        try FileManager.default.createDirectory(at: queue, withIntermediateDirectories: true)
+        let file = queue.appendingPathComponent("\(actor)_\(org).json")
+        let unreadable = Data("invalid retained queue".utf8)
+        try unreadable.write(to: file)
+        let box = outbox()
+
+        XCTAssertNil(box.enqueue(.note(.init(jobId: jobA, body: "Unsaved")), policyVersion: 1))
+        XCTAssertEqual(try Data(contentsOf: file), unreadable)
+        XCTAssertTrue(box.entries.isEmpty)
+    }
+
+    func testSignOutWarnsWhenAnyQueueCannotBeRead() throws {
+        let queue = directory.appendingPathComponent("Outbox")
+        try FileManager.default.createDirectory(at: queue, withIntermediateDirectories: true)
+        try Data("invalid".utf8).write(to: queue.appendingPathComponent("other-workspace.json"))
+        let box = outbox()
+        XCTAssertTrue(box.signOutWarning.contains("could not be read"))
+        XCTAssertTrue(box.signOutWarning.contains("Signing out"))
+    }
+
+    func testSignOutWarnsWhenQueueDirectoryCannotBeRead() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("not a directory".utf8).write(to: directory.appendingPathComponent("Outbox"))
+        let box = outbox()
+        XCTAssertTrue(box.signOutWarning.contains("could not be read"))
+        XCTAssertTrue(box.signOutWarning.contains("Signing out"))
+    }
+
+    func testRebindingSameIdentityReloadsPreviouslyUnreadableQueue() throws {
+        let first = outbox()
+        let saved = try XCTUnwrap(first.enqueue(.note(.init(jobId: jobA, body: "Keep")), policyVersion: 1))
+        let file = directory.appendingPathComponent("Outbox/\(actor)_\(org).json")
+        let bytes = try Data(contentsOf: file)
+        try Data("invalid".utf8).write(to: file)
+        let retry = outbox()
+        XCTAssertTrue(retry.entries.isEmpty)
+        try bytes.write(to: file)
+        retry.bind(actorID: actor, organizationID: org)
+        XCTAssertEqual(retry.entries.map(\.id), [saved.id])
+    }
+
+    func testRetryingNoteReloadsQueueAfterStorageBecomesReadable() throws {
+        let first = outbox()
+        let saved = try XCTUnwrap(first.enqueue(.note(.init(jobId: jobA, body: "Keep")), policyVersion: 1))
+        let file = directory.appendingPathComponent("Outbox/\(actor)_\(org).json")
+        let bytes = try Data(contentsOf: file)
+        try Data("invalid".utf8).write(to: file)
+        let retry = outbox()
+        let context = try XCTUnwrap(retry.captureContext(matchingActorID: actor, organizationID: org))
+        XCTAssertNil(retry.enqueue(.note(.init(jobId: jobA, body: "New")), policyVersion: 1, matching: context))
+        try bytes.write(to: file)
+        let new = try XCTUnwrap(retry.enqueue(.note(.init(jobId: jobA, body: "New")), policyVersion: 1, matching: context))
+        XCTAssertEqual(outbox().entries.map(\.id), [saved.id, new.id])
+    }
+
+    func testRetrySucceedsWhenPreviouslyUnreadableQueueIsDefinitelyAbsent() throws {
+        let queue = directory.appendingPathComponent("Outbox")
+        try FileManager.default.createDirectory(at: queue, withIntermediateDirectories: true)
+        let file = queue.appendingPathComponent("\(actor)_\(org).json")
+        try Data("unreadable".utf8).write(to: file)
+        let box = outbox()
+        let context = try XCTUnwrap(box.captureContext(matchingActorID: actor, organizationID: org))
+        XCTAssertNil(box.enqueue(.note(.init(jobId: jobA, body: "New")), policyVersion: 1, matching: context))
+        try FileManager.default.removeItem(at: file)
+        let saved = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "New")), policyVersion: 1, matching: context))
+        XCTAssertEqual(outbox().entries.map(\.id), [saved.id])
+    }
+
+    func testDirectoryAtQueuePathIsNotTreatedAsMissing() throws {
+        let file = directory.appendingPathComponent("Outbox/\(actor)_\(org).json")
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
+        let box = outbox()
+        XCTAssertNil(box.enqueue(.note(.init(jobId: jobA, body: "New")), policyVersion: 1))
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+    }
+
+    func testInitialBindDoesNotAdoptOrOverwriteQueueWithAnotherOwner() throws {
+        let foreign = outbox()
+        foreign.bind(actorID: "other-actor", organizationID: org)
+        try XCTUnwrap(foreign.enqueue(.note(.init(jobId: jobA, body: "Private")), policyVersion: 1))
+        let queue = directory.appendingPathComponent("Outbox")
+        let foreignFile = queue.appendingPathComponent("other-actor_\(org).json")
+        let file = queue.appendingPathComponent("\(actor)_\(org).json")
+        let bytes = try Data(contentsOf: foreignFile)
+        try bytes.write(to: file)
+
+        let box = outbox()
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertTrue(box.signOutWarning.contains("could not be read"))
+        XCTAssertNil(box.enqueue(.note(.init(jobId: jobA, body: "New")), policyVersion: 1))
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
+    func testInitialBindRejectsQueueFromAnotherWorkspace() throws {
+        let foreign = outbox()
+        foreign.bind(actorID: actor, organizationID: "other-workspace")
+        try XCTUnwrap(foreign.enqueue(.note(.init(jobId: jobA, body: "Private")), policyVersion: 1))
+        let queue = directory.appendingPathComponent("Outbox")
+        let bytes = try Data(contentsOf: queue.appendingPathComponent("\(actor)_other-workspace.json"))
+        let file = queue.appendingPathComponent("\(actor)_\(org).json")
+        try bytes.write(to: file)
+        let box = outbox()
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertNil(box.enqueue(.note(.init(jobId: jobA, body: "New")), policyVersion: 1))
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+
+    func testDelayedNoteAndProgressCannotEnterAnotherWorkspaceQueue() throws {
+        let box = outbox()
+        let context = try XCTUnwrap(box.captureContext(matchingActorID: actor, organizationID: org))
+        box.bind(actorID: actor, organizationID: "other-workspace")
+        XCTAssertNil(box.enqueue(.note(.init(jobId: jobA, body: "Private note")), policyVersion: 1, matching: context))
+        XCTAssertNil(box.enqueue(.progress(.init(jobId: jobA, to: "en_route")), policyVersion: 1, matching: context))
+        XCTAssertTrue(box.entries.isEmpty)
+        box.bind(actorID: actor, organizationID: org)
+        XCTAssertNil(box.enqueue(.note(.init(jobId: jobA, body: "Old request")), policyVersion: 1, matching: context))
+        XCTAssertTrue(box.entries.isEmpty)
+    }
+
     func testMatchingContextIsReadOnlyAndRedundantVerifiedBindingStaysStable() throws {
         let box = outbox()
         let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Retain")), policyVersion: 1))
@@ -59,6 +198,18 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertNotEqual(box.captureContext(matchingActorID: actor, organizationID: org), context)
         XCTAssertEqual(box.entries.map(\.id), [note.id])
     }
+    func testJobActivityOnlyReadsNotesFromTheMatchingQueueBindingAndJob() throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Saved offline")), policyVersion: 4))
+        box.enqueue(.note(.init(jobId: jobB, body: "Other job")), policyVersion: 4)
+        box.enqueue(.progress(.init(jobId: jobA, to: "arrived")), policyVersion: 4)
+        XCTAssertEqual(box.activityNotes(for: jobA, actorID: actor, organizationID: org).map(\.id), [note.id])
+        XCTAssertTrue(box.activityNotes(for: jobA, actorID: "other", organizationID: org).isEmpty)
+        XCTAssertTrue(box.activityNotes(for: jobA, actorID: actor, organizationID: "other").isEmpty)
+        box.bind(actorID: nil, organizationID: nil)
+        XCTAssertTrue(box.activityNotes(for: jobA, actorID: actor, organizationID: org).isEmpty)
+    }
+
     func testSignOutWarningCountsChangesQueuedInOtherWorkspaces() {
         let box = outbox()
         box.enqueue(.note(.init(jobId: jobA, body: "Gate code 4417")), policyVersion: 4)
@@ -198,6 +349,23 @@ final class FieldOutboxTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("Expected intercepted request count \(count)")
+    }
+
+    func testDelayedCommandCompletionInvalidatesSavedWorkReview() async throws {
+        let reviewGate = SavedWorkMutationGate()
+        let box = FieldOutbox(directory: directory, defaults: UserDefaults(suiteName: "outbox.\(UUID().uuidString)")!, mutationGate: reviewGate)
+        box.bind(actorID: actor, organizationID: org)
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Saved")), policyVersion: 1))
+        let networkGate = URLProtocolFixture.Gate()
+        let reply = #"{"outcomes":[{"commandId":"\#(note.id)","status":"applied"}]}"#
+        let client = api([.init(200, reply, gate: networkGate)])
+        let pendingDrain = Task { await box.drain(api: client, useCommandEndpoint: true) }
+        try await waitForRequests(1)
+        let review = reviewGate.beginReview()
+        networkGate.release()
+        await pendingDrain.value
+        XCTAssertTrue(box.entries.isEmpty)
+        XCTAssertFalse(reviewGate.performIfCurrent(review) {})
     }
 
     func testRevocationDuringCommandBatchStopsLaterDelivery() async throws {

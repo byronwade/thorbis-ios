@@ -297,14 +297,24 @@ struct ScheduleView: View {
 
     private func progress(_ job: Job, _ request: FieldProgressRequest) async {
         guard busyJobID == nil else { return }
+        guard let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let context = outbox.captureContext(matchingActorID: actor, organizationID: organization) else { return }
+        let generation = session.generation, authority = session.authorityRevision
+        let requestGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        func current() -> Bool {
+            session.generation == generation && session.authorityRevision == authority && session.user?.id == actor &&
+            session.activeOrganization?.id == organization && api.requestGeneration == requestGeneration &&
+            api.normalizedOrigin == origin && outbox.captureContext(matchingActorID: actor, organizationID: organization) == context
+        }
         if session.isOffline || !outbox.pending.filter({ $0.jobID == job.id }).isEmpty {
-            queue(job, request)
+            queue(job, request, context: context)
             return
         }
         busyJobID = job.id
         defer { busyJobID = nil }
         do {
             _ = try await api.progressFieldJob(job.id, request: request)
+            guard current() else { return }
             committed += 1
             await loadHero(job)
             progressError = nil
@@ -313,17 +323,21 @@ struct ScheduleView: View {
             }
         } catch is CancellationError {
         } catch {
-            if error.isConnectivityFailure { queue(job, request) } else { progressError = error.localizedDescription }
+            guard current() else { return }
+            if error.isConnectivityFailure { queue(job, request, context: context) } else { progressError = error.localizedDescription }
         }
     }
 
     /// No signal: save the step on the phone; it is sent in order when signal returns.
-    private func queue(_ job: Job, _ request: FieldProgressRequest) {
+    private func queue(_ job: Job, _ request: FieldProgressRequest, context: FieldOutbox.CaptureContext) {
         guard let payload = OutboxEntry.ProgressPayload(jobID: job.id, request: request) else {
             progressError = "That change needs a connection."
             return
         }
-        outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
+        guard outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0, matching: context) != nil else {
+            progressError = "Couldn’t save this change on this phone. Try again."
+            return
+        }
         committed += 1
         progressError = nil
         if !session.isOffline {

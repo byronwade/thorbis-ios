@@ -81,6 +81,8 @@ final class SessionController: ObservableObject {
     /// Policy version of the verified authority; offline command envelopes carry it.
     private(set) var policyVersion: Int?
 
+    /// Changes before publishing or retiring authority, even when policy version is unchanged.
+    @Published private(set) var authorityRevision = UUID()
     private(set) var generation = UUID()
     var onInvalidate: (() -> Void)?
     /// Non-nil only after actor and workspace authority are verified. A nil pair
@@ -173,6 +175,7 @@ final class SessionController: ObservableObject {
             let exposure: FeaturesPayload = try await api.send("GET", "/v1/features", authed: false)
             guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
             guard exposure.organizationId == currentOrganization.id else { await restore(); return }
+            authorityRevision = UUID()
             capabilities = Set(catalog.capabilities)
             features = exposure.features
             sessionDeadline = sessionExpiry
@@ -202,6 +205,7 @@ final class SessionController: ObservableObject {
         guard generation == requestGeneration, let snapshot = snapshots.load(),
               Date() < snapshot.sessionDeadline, snapshot.authorityDeadline.map({ Date() < $0 }) ?? true
         else { return false }
+        authorityRevision = UUID()
         user = snapshot.user
         organizations = snapshot.organizations
         activeOrganization = snapshot.organization
@@ -345,6 +349,7 @@ final class SessionController: ObservableObject {
 
     @discardableResult
     private func invalidate(next: Phase) -> UUID {
+        authorityRevision = UUID()
         generation = UUID()
         revalidation = nil
         isOffline = false
@@ -472,6 +477,7 @@ final class SessionController: ObservableObject {
             guard exposure.organizationId == organization.id,
                   Self.date(exposure.evaluatedAt) != nil
             else { throw SessionValidationError(reason: "Workspace features could not be verified.") }
+            self.authorityRevision = UUID()
             self.user = actor
             self.activeOrganization = organization
             self.capabilities = Set(catalog.capabilities)

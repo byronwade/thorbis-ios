@@ -201,6 +201,26 @@ private enum CustomerContactSheetItem: Identifiable {
     }
 }
 
+/// Identity and authority under which the customer record collection was fetched.
+struct CustomerRecordsScope: Equatable {
+    let actorID: String
+    let organizationID: String
+    let customerID: String
+    let generation: UUID
+    let authorityRevision: UUID
+    let access: CustomerRecordAccess
+
+    @MainActor static func capture(session: SessionController, customerID: String) -> Self? {
+        guard session.can("customer.view", feature: "core_crm"),
+              let actor = session.user?.id, let organization = session.activeOrganization?.id else { return nil }
+        return Self(actorID: actor, organizationID: organization, customerID: customerID,
+                    generation: session.generation, authorityRevision: session.authorityRevision,
+                    access: CustomerRecordAccess(jobs: session.can("job.view", feature: "jobs"),
+                        estimates: session.can("estimate.view", feature: "estimates"),
+                        invoices: session.can("invoice.view", feature: "invoicing")))
+    }
+}
+
 struct CustomerDetailView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
@@ -216,6 +236,12 @@ struct CustomerDetailView: View {
     @State private var activityLoading = false
     @State private var activityError: String?
     @State private var activityLoadGeneration = 0
+    @State private var activityPublishedScope: ActivityAccessScope?
+    @State private var activityRequestedScope: ActivityAccessScope?
+    private var activityScope: ActivityAccessScope? {
+        ActivityAccessScope.capture(session: session, ownerID: "customer:\(customer.id)",
+                                    allowed: session.can("customer.view", feature: "core_crm"))
+    }
     @State private var locationState = ServiceLocationCollectionState()
     @State private var error: String?
     @State private var showNewJob = false
@@ -232,6 +258,9 @@ struct CustomerDetailView: View {
     @State private var recordsLoading = false
     @State private var recordsError: String?
     @State private var recordsLoadGeneration = 0
+    @State private var recordsPublishedScope: CustomerRecordsScope?
+    @State private var recordsRequestedScope: CustomerRecordsScope?
+    private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
     @State private var smsConsentKey = UUID().uuidString
@@ -336,6 +365,12 @@ struct CustomerDetailView: View {
         }
         .task { await load() }
         .task { await loadSmsConsent() }
+        .task(id: activityScope) {
+            if tab == "Activity" { await loadActivity(reset: true) }
+        }
+        .task(id: recordsScope) {
+            if tab == "Records" { await loadRecords() }
+        }
         .onAppear {
             RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
             #if DEBUG
@@ -658,20 +693,22 @@ struct CustomerDetailView: View {
         }
     }
     private var recordsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !session.can("customer.view", feature: "core_crm") {
+        let scope = recordsScope
+        let visible = scope != nil && recordsPublishedScope == scope ? records : nil
+        let visibleError = scope != nil && recordsRequestedScope == scope ? recordsError : nil
+        return VStack(alignment: .leading, spacing: 10) {
+            if scope == nil {
                 emptyText("You don’t have access to this customer’s records.")
             } else {
-                if let recordsError {
-                    ErrorBanner(message: records == nil ? "Records did not load. \(recordsError)" : recordsError) {
+                if let visibleError {
+                    ErrorBanner(message: visible == nil ? "Records did not load. \(visibleError)" : visibleError) {
                         await loadRecords()
-                    }
-                    .accessibilityIdentifier("customer-records-retry")
+                    }.accessibilityIdentifier("customer-records-retry")
                 }
-                if recordsLoading && records == nil {
+                if visible == nil && visibleError == nil {
                     SkeletonRows(count: 4, inset: 0)
-                } else if let records {
-                    CustomerRecordsView(compilation: records)
+                } else if let visible {
+                    CustomerRecordsView(compilation: visible, customerID: customer.id)
                         .accessibilityIdentifier("customer-records")
                 }
             }
@@ -679,50 +716,56 @@ struct CustomerDetailView: View {
     }
 
     private func loadRecords() async {
-        guard session.can("customer.view", feature: "core_crm"), !recordsLoading else { return }
+        guard let scope = recordsScope else { return }
+        guard !recordsLoading || recordsRequestedScope != scope else { return }
         recordsLoadGeneration += 1
         let request = recordsLoadGeneration
         recordsLoading = true
+        recordsRequestedScope = scope
+        recordsError = nil
         defer { if recordsLoadGeneration == request { recordsLoading = false } }
         do {
-            let access = CustomerRecordAccess(
-                jobs: session.can("job.view", feature: "jobs"),
-                estimates: session.can("estimate.view", feature: "estimates"),
-                invoices: session.can("invoice.view", feature: "invoicing")
-            )
-            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer.id, api: api, access: access)
-            guard recordsLoadGeneration == request else { return }
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer.id, api: api, access: scope.access)
+            guard recordsLoadGeneration == request, recordsScope == scope else { return }
             records = compiled
+            recordsPublishedScope = scope
             recordsError = nil
         } catch is CancellationError {
         } catch {
-            guard recordsLoadGeneration == request else { return }
+            guard recordsLoadGeneration == request, recordsScope == scope else { return }
             recordsError = error.localizedDescription
         }
     }
 
     private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let scope = activityScope
+        let visible = scope != nil && activityPublishedScope == scope ? activity : []
+        let cursor = scope != nil && activityPublishedScope == scope ? activityCursor : nil
+        let visibleError = scope != nil && activityRequestedScope == scope ? activityError : nil
+        let loading = scope != nil && activityRequestedScope == scope && activityLoading
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Text("Customer activity").font(Theme.font(13, weight: .medium))
-                Text("\(activity.count)").font(Theme.font(12))
-                if activityCursor != nil { Text("· loaded").font(Theme.font(12)) }
+                Text("\(visible.count)").font(Theme.font(12))
+                if cursor != nil { Text("· loaded").font(Theme.font(12)) }
             }.foregroundStyle(Theme.muted).padding(.bottom, 6)
-            if !session.can("customer.view", feature: "core_crm") {
+            if scope == nil {
                 emptyText("You don’t have access to customer activity.")
             } else {
-                if let activityError {
-                    ErrorBanner(message: activity.isEmpty ? "Activity did not load. \(activityError)" : activityError) {
+                if let activityError = visibleError {
+                    ErrorBanner(message: visible.isEmpty ? "Activity did not load. \(activityError)" : activityError) {
                         // A failed "load earlier" keeps its cursor, so retry continues the page
                         // instead of throwing away what already loaded.
-                        await loadActivity(reset: activityCursor == nil)
+                        await loadActivity(reset: cursor == nil)
                     }
                     .accessibilityIdentifier("customer-activity-retry")
                 }
-                if activityLoading && activity.isEmpty { SkeletonRows(count: 4, inset: 0) }
+                if loading && visible.isEmpty { SkeletonRows(count: 4, inset: 0) }
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(activity) { event in
-                        ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id)) {
+                    ForEach(visible) { event in
+                        ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id),
+                                     details: ActivityDetails(title: event.summary, when: ActivityRecordLabel.noteWhen(event.occurredAt), context: "Customer activity"),
+                                     ownerID: "customer:\(customer.id)", canView: session.can("customer.view", feature: "core_crm")) {
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: activitySymbol(for: event.kind))
                                     .font(.system(size: 13, weight: .medium))
@@ -740,49 +783,54 @@ struct CustomerDetailView: View {
                         }
                     }
                 }
-                if activity.isEmpty && !activityLoading && activityError == nil {
+                if visible.isEmpty && !loading && visibleError == nil {
                     emptyText("Nothing yet…")
                 }
-                if activityCursor != nil {
+                if cursor != nil {
                     Button {
                         Task { await loadActivity(reset: false) }
                     } label: {
-                        Text(activityLoading ? "Loading…" : activityError == nil ? "Load earlier activity" : "Retry earlier activity")
+                        Text(loading ? "Loading…" : visibleError == nil ? "Load earlier activity" : "Retry earlier activity")
                             .font(Theme.font(13, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(PressStyle())
-                    .disabled(activityLoading)
+                    .disabled(loading)
                 }
             }
         }
     }
 
     private func loadActivity(reset: Bool) async {
-        guard session.can("customer.view", feature: "core_crm"), !activityLoading else { return }
-        if reset {
+        guard let scope = activityScope else { return }
+        guard !activityLoading || activityRequestedScope != scope else { return }
+        let needsReset = reset || activityPublishedScope != scope
+        if needsReset {
             activityLoadGeneration += 1
             activityCursor = nil
         } else if activityCursor == nil {
             return
         }
         let request = activityLoadGeneration
-        let cursor = reset ? nil : activityCursor
+        let cursor = needsReset ? nil : activityCursor
         activityLoading = true
+        activityRequestedScope = scope
+        activityError = nil
         defer { if activityLoadGeneration == request { activityLoading = false } }
         do {
             let page = try await api.fieldCustomerHistory(customer.id, cursor: cursor)
-            guard activityLoadGeneration == request else { return }
-            if reset { activity = page.items }
+            guard activityLoadGeneration == request, activityScope == scope else { return }
+            if needsReset { activity = page.items }
             else {
                 let existingIDs = Set(activity.map(\.id))
                 activity.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
             }
+            activityPublishedScope = scope
             activityCursor = page.nextCursor
             activityError = nil
         } catch is CancellationError {
         } catch {
-            guard activityLoadGeneration == request else { return }
+            guard activityLoadGeneration == request, activityScope == scope else { return }
             activityError = error.localizedDescription
         }
     }

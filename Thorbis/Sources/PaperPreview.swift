@@ -937,7 +937,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [
                     ["occurredAt": "2026-10-27T16:10:00Z", "kind": "job", "subjectId": "job-2214", "summary": "Job booked: AC not cooling"],
                     ["occurredAt": "2026-10-20T15:00:00Z", "kind": "contact", "subjectId": "contact-1", "summary": "Agreed to job texts"],
-                    ["occurredAt": "2026-10-12T18:30:00Z", "kind": "payment", "subjectId": "pay-1", "summary": "Card payment of $480.00"],
+                    ["occurredAt": "2026-10-12T18:30:00Z", "kind": "payment", "subjectId": "pay-1", "summary": ProcessInfo.processInfo.arguments.contains("--paper-preview-long-activity") ? "Card payment of $480.00. " + String(repeating: "Detailed service history. ", count: 12) + "Final activity detail." : "Card payment of $480.00"],
                     ["occurredAt": "2026-10-12T17:55:00Z", "kind": "invoice", "subjectId": "inv-1", "summary": "Invoice sent for drain cleaning"],
                     ["occurredAt": "2026-10-11T14:00:00Z", "kind": "estimate", "subjectId": "est-1", "summary": "Estimate approved: drain cleaning"]
                 ], "nextCursor": NSNull()] as [String: Any]

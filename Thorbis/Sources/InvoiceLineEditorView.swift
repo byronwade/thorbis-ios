@@ -211,12 +211,10 @@ struct InvoiceLineEditorView: View {
             // Keeping a second action bar above the keyboard obscures quick-edit fields.
             if !searching { invoiceCommitActions }
         }
-        .confirmationDialog("Issue invoice?", isPresented: $confirmIssue, titleVisibility: .visible) {
-            Button("Issue invoice", role: .destructive) { Task { await issue() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The current lines will be saved first if needed, then locked as issued invoice paper.")
-        }
+        .thorbisConfirm("Issue invoice?",
+                        message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
+                        isPresented: $confirmIssue,
+                        actions: [ThorbisConfirmAction("Issue invoice", role: .destructive) { Task { await issue() } }])
         .sheet(isPresented: $showPriceBook) {
             NavigationStack {
                 PaperPriceBookPicker(api: api, currency: invoice.currency, customerID: invoice.customerId,
@@ -229,12 +227,10 @@ struct InvoiceLineEditorView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .confirmationDialog("Reload the latest invoice?", isPresented: $confirmReload, titleVisibility: .visible) {
-            Button("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }
-            Button("Keep editing", role: .cancel) {}
-        } message: {
-            Text("The invoice changed on the server. Reloading replaces this form with the latest saved lines.")
-        }
+        .thorbisConfirm("Reload the latest invoice?",
+                        message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
+                        isPresented: $confirmReload,
+                        actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
     }
 
     private var invoiceCommitActions: some View {

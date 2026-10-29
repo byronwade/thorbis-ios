@@ -1,5 +1,24 @@
 import SwiftUI
 
+extension DynamicTypeSize {
+    /// A rough multiplier for fitted-height sheets so they grow (and don't clip) at large text.
+    /// Biased to over-estimate — extra height is harmless dim space; too little clips rows.
+    var sheetHeightScale: CGFloat {
+        switch self {
+        case .xSmall, .small, .medium, .large: 1.0
+        case .xLarge: 1.1
+        case .xxLarge: 1.2
+        case .xxxLarge: 1.35
+        case .accessibility1: 1.6
+        case .accessibility2: 1.9
+        case .accessibility3: 2.2
+        case .accessibility4: 2.5
+        case .accessibility5: 2.8
+        @unknown default: 1.35
+        }
+    }
+}
+
 // MARK: - Model
 
 /// One row in a `ThorbisMenu`.
@@ -75,17 +94,19 @@ struct ThorbisMenuCard: View {
     var title: String? = nil
     let onSelect: (ThorbisMenuItem) -> Void
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var estimatedHeight: CGFloat {
         let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? 50 : 62) }
         let header: CGFloat = title == nil ? 0 : 32
-        return rows + header + 40 // card padding + bottom inset
+        // Bias up with Dynamic Type so a fitted-height sheet never clips at large text; over-
+        // estimating only leaves dim space above the bottom-anchored card.
+        return (rows + header + 40) * typeSize.sheetHeightScale
     }
 
     private var detents: Set<PresentationDetent> {
         if verticalSizeClass == .compact { return [.large] }
-        return estimatedHeight <= 420 && !dynamicTypeSize.isAccessibilitySize
+        return estimatedHeight <= 420 && !typeSize.isAccessibilitySize
             ? [.height(estimatedHeight)] : [.medium, .large]
     }
 

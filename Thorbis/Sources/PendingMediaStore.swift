@@ -53,7 +53,7 @@ final class PendingMediaStore: ObservableObject {
         let hash: String
     }
     private enum StorageError: LocalizedError {
-        case unbound, invalid, unreadable, existing, recoveryUnavailable, recoveryConflict
+        case unbound, invalid, unreadable, existing, recoveryUnavailable, recoveryConflict, reviewInProgress
         var errorDescription: String? {
             switch self {
             case .unbound: "Open the original workspace before saving or retrying this media."
@@ -62,23 +62,27 @@ final class PendingMediaStore: ObservableObject {
             case .existing: "This media is already saved. Retry its existing upload."
             case .recoveryUnavailable: "This destination is no longer verified. Reopen recovery from the current job and try again."
             case .recoveryConflict: "A different saved item uses this photo ID. Both copies remain on this phone and need review."
+            case .reviewInProgress: "Finish reviewing saved work, then try again."
             }
         }
     }
     private let directory: URL
     private let legacyDirectory: URL
+    private let mutationGate: SavedWorkMutationGate
     private var scope: PendingMediaScope?
     private var binding = UUID()
     private var draining = false
     private var validated: Set<PendingMedia> = []
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, mutationGate: SavedWorkMutationGate = .shared) {
         let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         self.directory = base.appendingPathComponent("PendingMedia", isDirectory: true)
         legacyDirectory = base.appendingPathComponent("PendingPhotos", isDirectory: true)
+        self.mutationGate = mutationGate
     }
 
     func bind(_ candidate: PendingMediaScope?) {
+        guard mutationGate.recordMutation() else { return }
         let normalized = candidate.flatMap { value -> PendingMediaScope? in
             guard !value.actorID.isEmpty, !value.organizationID.isEmpty,
                   let origin = APIClient.normalizedOrigin(value.origin) else { return nil }
@@ -114,6 +118,7 @@ final class PendingMediaStore: ObservableObject {
     }
 
     func save(_ media: PendingMedia, data: Data, context: CaptureContext) throws {
+        guard mutationGate.recordMutation() else { throw StorageError.reviewInProgress }
         guard let scope else { throw StorageError.unbound }
         guard context.scope == scope, context.binding == binding else { throw StorageError.unbound }
         guard UUID(uuidString: media.jobID) != nil, !data.isEmpty, data.count <= 8 * 1024 * 1024,
@@ -141,6 +146,7 @@ final class PendingMediaStore: ObservableObject {
     }
 
     func read(_ media: PendingMedia) throws -> Data {
+        guard mutationGate.recordMutation() else { throw StorageError.reviewInProgress }
         guard let scope, items.contains(media) else { throw StorageError.unbound }
         do {
             let path = try unit(media, scope: scope)
@@ -167,6 +173,7 @@ final class PendingMediaStore: ObservableObject {
     }
 
     func reload() {
+        guard mutationGate.recordMutation() else { return }
         storageWarning = nil
         items = []; unverifiedIDs = []
         if let scope {
@@ -226,6 +233,7 @@ final class PendingMediaStore: ObservableObject {
     }
 
     func clearAll() {
+        guard mutationGate.recordMutation() else { return }
         binding = UUID(); scope = nil; items = []; errors = [:]; validated = []; unverifiedIDs = []
         var failed = false
         for folder in [directory, legacyDirectory] where FileManager.default.fileExists(atPath: folder.path) {
@@ -256,6 +264,7 @@ final class PendingMediaStore: ObservableObject {
                     kind: item.kind, mime: item.mime, originalFilename: item.filename, data: data, tags: item.tags,
                     capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID, currentAuthority: current)
                 guard current() else { return }
+                guard mutationGate.recordMutation() else { return }
                 try finishRecoveredSources(item, data: data, owner: owner, current: current)
                 guard current() else { return }
                 try FileManager.default.removeItem(at: unit(item, scope: owner))
@@ -389,6 +398,7 @@ final class PendingMediaStore: ObservableObject {
         let currentJob = try await api.fieldJob(destination.job.id, requireFresh: true)
         try checkRecovery(context, generation: generation, api: api, canUpload: canUpload)
         try verifyRecoveryJob(currentJob, id: destination.job.id, context: context)
+        guard mutationGate.recordMutation() else { throw StorageError.reviewInProgress }
         let metadata = try legacyURL(candidate.id, extension: "json")
         let payload = try legacyURL(candidate.id, extension: "jpg")
         let path = try unit(candidate.media, scope: context.scope)

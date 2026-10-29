@@ -1,4 +1,221 @@
 import Foundation
+import Darwin
+import CryptoKit
+
+@MainActor
+final class SavedWorkMutationGate {
+    /// In-process invalidation only. This is not a filesystem lock or permission
+    /// to delete; an external inventory proof and coordinated commit are required.
+    static let shared = SavedWorkMutationGate()
+    private var revision = UUID()
+    private var reviews: [UUID: UUID] = [:]
+    private var checking = false
+    private var rejectedMutation = false
+    func beginReview() -> UUID {
+        let token = UUID()
+        reviews[token] = revision
+        return token
+    }
+    @discardableResult
+    func recordMutation() -> Bool {
+        revision = UUID(); reviews.removeAll()
+        guard !checking else { rejectedMutation = true; return false }
+        return true
+    }
+    func cancelReview(_ token: UUID) { reviews[token] = nil }
+    func performIfCurrent(_ token: UUID, _ operation: () -> Void) -> Bool {
+        guard !checking else { rejectedMutation = true; return false }
+        guard let expected = reviews.removeValue(forKey: token), expected == revision else { return false }
+        checking = true
+        rejectedMutation = false
+        operation()
+        checking = false
+        let succeeded = !rejectedMutation
+        _ = recordMutation()
+        return succeeded
+    }
+}
+
+enum SavedWorkInventory {
+    enum Failure: Error { case inaccessible, changed, unsupported }
+    private struct Observation {
+        let root: URL
+        let components: [String]
+        let metadata: stat?
+    }
+
+    /// A digest only; paths and file contents never leave this helper. This does not
+    /// lock the filesystem after return and must not by itself authorize deletion.
+    static func snapshot(roots: [URL], onItemScanned: (@Sendable () -> Void)? = nil) async throws -> Data {
+        try Task.checkCancellation()
+        let worker = Task.detached(priority: .utility) { try scan(roots: roots, onItemScanned: onItemScanned) }
+        let digest = try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: { worker.cancel() }
+        try Task.checkCancellation()
+        return digest
+    }
+
+    private static func scan(roots: [URL], onItemScanned: (@Sendable () -> Void)?) throws -> Data {
+        var digest = SHA256()
+        var observations: [Observation] = []
+        for (index, root) in roots.enumerated() {
+            try Task.checkCancellation()
+            digest.update(data: Data("root:\(index)\0".utf8))
+            try scanRoot(root, digest: &digest, onItemScanned: onItemScanned, observations: &observations)
+        }
+        for observation in observations { try verify(observation) }
+        return Data(digest.finalize())
+    }
+
+    private static func same(_ lhs: stat, _ rhs: stat) -> Bool {
+        lhs.st_dev == rhs.st_dev && lhs.st_ino == rhs.st_ino && lhs.st_mode == rhs.st_mode &&
+        lhs.st_size == rhs.st_size && lhs.st_mtimespec.tv_sec == rhs.st_mtimespec.tv_sec &&
+        lhs.st_mtimespec.tv_nsec == rhs.st_mtimespec.tv_nsec && lhs.st_ctimespec.tv_sec == rhs.st_ctimespec.tv_sec &&
+        lhs.st_ctimespec.tv_nsec == rhs.st_ctimespec.tv_nsec
+    }
+
+    private static func scanRoot(_ url: URL, digest: inout SHA256, onItemScanned: (@Sendable () -> Void)?, observations: inout [Observation]) throws {
+        try Task.checkCancellation()
+        guard let (descriptor, chain) = try openRoot(url) else {
+            if let (unexpectedFD, _) = try openRoot(url) { close(unexpectedFD); throw Failure.changed }
+            digest.update(data: Data("missing\0".utf8))
+            observations.append(.init(root: url, components: [], metadata: nil))
+            return
+        }
+        defer { close(descriptor) }
+        guard let before = chain.last else { throw Failure.unsupported }
+        observations.append(.init(root: url, components: [], metadata: before))
+        try scanDirectory(descriptor, name: url.lastPathComponent, before: before, digest: &digest,
+                          onItemScanned: onItemScanned, root: url, path: [], observations: &observations)
+        guard let (checkedFD, checkedChain) = try openRoot(url) else { throw Failure.changed }
+        defer { close(checkedFD) }
+        guard chain.count == checkedChain.count,
+              zip(chain, checkedChain).allSatisfy({ $0.0.st_dev == $0.1.st_dev && $0.0.st_ino == $0.1.st_ino && $0.0.st_mode == $0.1.st_mode }),
+              let last = checkedChain.last, same(before, last) else { throw Failure.changed }
+    }
+
+    private static func verify(_ observation: Observation) throws {
+        try Task.checkCancellation()
+        guard let (rootFD, chain) = try openRoot(observation.root) else {
+            if case nil = observation.metadata { return }
+            throw Failure.changed
+        }
+        guard let expected = observation.metadata else { close(rootFD); throw Failure.changed }
+        var current = rootFD
+        defer { close(current) }
+        if observation.components.isEmpty {
+            guard let root = chain.last, same(expected, root) else { throw Failure.changed }
+            return
+        }
+        for (index, component) in observation.components.enumerated() {
+            var info = stat()
+            guard fstatat(current, component, &info, AT_SYMLINK_NOFOLLOW) == 0 else { throw Failure.changed }
+            if index == observation.components.count - 1 {
+                guard same(expected, info) else { throw Failure.changed }
+            } else {
+                guard info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else { throw Failure.changed }
+                let next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+                guard next >= 0 else { throw Failure.changed }
+                var opened = stat()
+                guard fstat(next, &opened) == 0, same(info, opened) else { close(next); throw Failure.changed }
+                close(current); current = next
+            }
+        }
+    }
+
+    /// Reject symlinks at every ancestor, not only at the root's last component.
+    private static func openRoot(_ url: URL) throws -> (Int32, [stat])? {
+        guard url.isFileURL, url.path.hasPrefix("/") else { throw Failure.unsupported }
+        let components = url.standardizedFileURL.pathComponents.filter { $0 != "/" }
+        guard !components.isEmpty else { throw Failure.unsupported }
+        var current = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard current >= 0 else { throw Failure.inaccessible }
+        var chain: [stat] = []
+        do {
+            for component in components {
+                var before = stat()
+                guard fstatat(current, component, &before, AT_SYMLINK_NOFOLLOW) == 0 else {
+                    if errno == ENOENT { close(current); return nil }
+                    throw Failure.inaccessible
+                }
+                guard before.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else { throw Failure.unsupported }
+                let next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+                guard next >= 0 else { throw Failure.inaccessible }
+                var opened = stat()
+                guard fstat(next, &opened) == 0, same(before, opened) else { close(next); throw Failure.changed }
+                chain.append(opened)
+                close(current)
+                current = next
+            }
+            return (current, chain)
+        } catch {
+            close(current)
+            throw error
+        }
+    }
+
+    private static func scanDirectory(_ descriptor: Int32, name: String, before: stat, digest: inout SHA256,
+                                      onItemScanned: (@Sendable () -> Void)?, root: URL, path: [String],
+                                      observations: inout [Observation]) throws {
+        digest.update(data: Data("directory:\(name)\0\(before.st_dev):\(before.st_ino):\(before.st_mode):\(before.st_size):\(before.st_mtimespec.tv_sec):\(before.st_mtimespec.tv_nsec):\(before.st_ctimespec.tv_sec):\(before.st_ctimespec.tv_nsec)\0".utf8))
+        let duplicate = dup(descriptor)
+        guard duplicate >= 0 else { throw Failure.inaccessible }
+        guard let stream = fdopendir(duplicate) else { close(duplicate); throw Failure.inaccessible }
+        defer { closedir(stream) }
+        var names: [String] = []
+        errno = 0
+        while let entry = readdir(stream) {
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) { String(validatingUTF8: $0) }
+            }
+            guard let name else { throw Failure.unsupported }
+            if name != "." && name != ".." { names.append(name) }
+            errno = 0
+        }
+        guard errno == 0 else { throw Failure.inaccessible }
+        for child in names.sorted() {
+          do {
+            try Task.checkCancellation()
+            var initial = stat()
+            guard fstatat(descriptor, child, &initial, AT_SYMLINK_NOFOLLOW) == 0 else { throw Failure.changed }
+            let childPath = path + [child]
+            observations.append(.init(root: root, components: childPath, metadata: initial))
+            let kind = initial.st_mode & mode_t(S_IFMT)
+            guard kind == mode_t(S_IFDIR) || kind == mode_t(S_IFREG) else { throw Failure.unsupported }
+            let flags = O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC | (kind == mode_t(S_IFDIR) ? O_DIRECTORY : 0)
+            let openedFD = openat(descriptor, child, flags)
+            guard openedFD >= 0 else { throw Failure.inaccessible }
+            defer { close(openedFD) }
+            var opened = stat()
+            guard fstat(openedFD, &opened) == 0, same(initial, opened) else { throw Failure.changed }
+            if kind == mode_t(S_IFDIR) {
+                try scanDirectory(openedFD, name: child, before: initial, digest: &digest, onItemScanned: onItemScanned,
+                                  root: root, path: childPath, observations: &observations)
+            } else {
+                digest.update(data: Data("file:\(child)\0\(initial.st_dev):\(initial.st_ino):\(initial.st_mode):\(initial.st_size):\(initial.st_mtimespec.tv_sec):\(initial.st_mtimespec.tv_nsec):\(initial.st_ctimespec.tv_sec):\(initial.st_ctimespec.tv_nsec)\0".utf8))
+                var content = SHA256()
+                var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+                while true {
+                    try Task.checkCancellation()
+                    let count = read(openedFD, &buffer, buffer.count)
+                    guard count >= 0 else { throw Failure.inaccessible }
+                    if count == 0 { break }
+                    content.update(data: Data(buffer.prefix(count)))
+                }
+                digest.update(data: Data(content.finalize()))
+            }
+            var afterOpen = stat(), afterPath = stat()
+            guard fstat(openedFD, &afterOpen) == 0, same(initial, afterOpen),
+                  fstatat(descriptor, child, &afterPath, AT_SYMLINK_NOFOLLOW) == 0, same(initial, afterPath) else { throw Failure.changed }
+            onItemScanned?()
+          }
+        }
+        var after = stat()
+        guard fstat(descriptor, &after) == 0, same(before, after) else { throw Failure.changed }
+        digest.update(data: Data("end\0".utf8))
+    }
+}
 
 /// A job change made without signal. It is saved to disk before it is ever sent, so a
 /// killed app or a dropped connection resends the same `commandId`, which the server
@@ -105,14 +322,21 @@ final class FieldOutbox: ObservableObject {
     /// design.thorbis.com MA-17: signing out deletes this phone's saved work, so the dialog says
     /// what would be lost.
     var signOutWarning: String {
-        let waiting = entries.count + otherWorkspaceEntryCount
+        let inventory = savedWorkInventory
+        if inventory.unreadable {
+            return "Some saved work could not be read. Signing out deletes it from this phone, including any unsynced changes."
+        }
+        let waiting = entries.count + inventory.otherCount
         return waiting == 0
             ? "Jobs and customers saved on this phone are removed. You can sign back in at any time."
             : "\(waiting) change\(waiting == 1 ? "" : "s") on this phone \(waiting == 1 ? "hasn't" : "haven't") synced yet. Signing out deletes \(waiting == 1 ? "it" : "them")."
     }
 
     private let directory: URL
+    private let mutationGate: SavedWorkMutationGate
     private var identity: (actorID: String, organizationID: String)?
+    /// Do not replace an existing queue that could not be read or decoded.
+    private var queueReadable = false
     private var binding = UUID()
     private var activeDrain: UUID?
     /// Opaque read-only proof of the current verified queue binding.
@@ -131,9 +355,10 @@ final class FieldOutbox: ObservableObject {
     /// Arrived) only offers steps the server has actually allowed from that status.
     private(set) var learnedTransitions: [String: [String]] = [:]
 
-    init(directory: URL? = nil, defaults: UserDefaults = .standard) {
+    init(directory: URL? = nil, defaults: UserDefaults = .standard, mutationGate: SavedWorkMutationGate = .shared) {
         let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         self.directory = base.appendingPathComponent("Outbox", isDirectory: true)
+        self.mutationGate = mutationGate
         self.defaults = defaults
         learnedTransitions = (defaults.dictionary(forKey: "thorbis.learned-transitions") as? [String: [String]]) ?? [:]
         if let saved = defaults.string(forKey: "thorbis.device-id"), UUID(uuidString: saved) != nil {
@@ -152,55 +377,102 @@ final class FieldOutbox: ObservableObject {
 
     /// Changes queued in other workspaces on this phone; `clearAll()` deletes those too, so the
     /// sign-out warning has to count them.
-    private var otherWorkspaceEntryCount: Int {
+    private var savedWorkInventory: (otherCount: Int, unreadable: Bool) {
         let current = file?.lastPathComponent
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        return files
-            .filter { $0.pathExtension == "json" && $0.lastPathComponent != current }
-            .compactMap { try? Data(contentsOf: $0) }
-            .compactMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) }
-            .reduce(0) { $0 + $1.count }
+        let files: [URL]
+        do {
+            files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            return (0, false)
+        } catch { return (0, true) }
+        var count = 0
+        var unreadable = identity != nil && !queueReadable
+        for item in files {
+            guard item.pathExtension == "json" else { unreadable = true; continue }
+            do {
+                let saved = try JSONDecoder().decode([OutboxEntry].self, from: Data(contentsOf: item))
+                if item.lastPathComponent != current { count += saved.count }
+            } catch { unreadable = true }
+        }
+        return (count, unreadable)
     }
 
     /// Bound to the verified actor and workspace; another identity never sees these changes.
     func bind(actorID: String?, organizationID: String?) {
+        if let actorID, let organizationID,
+           identity?.actorID == actorID, identity?.organizationID == organizationID, queueReadable { return }
+        guard mutationGate.recordMutation() else { return }
         guard let actorID, let organizationID else {
             binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
             identity = nil
             entries = []
+            queueReadable = false
             return
         }
-        guard identity?.actorID != actorID || identity?.organizationID != organizationID else { return }
         binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = (actorID, organizationID)
-        entries = file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) } ?? []
+        entries = []
+        queueReadable = false
+        restoreQueueIfReadable()
     }
 
     /// Sign-out: unsent changes for this phone are deleted with the session.
     func clearAll() {
+        guard mutationGate.recordMutation() else { return }
         binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = nil
         entries = []
+        queueReadable = false
         try? FileManager.default.removeItem(at: directory)
     }
 
-    private func persist() {
-        guard let file else { return }
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try JSONEncoder().encode(entries).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        } catch {}
+    private func write(_ entries: [OutboxEntry]) throws {
+        guard mutationGate.recordMutation() else { throw CocoaError(.fileWriteNoPermission) }
+        guard let file, queueReadable else { throw CocoaError(.fileWriteUnknown) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(entries).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    private func persist() { try? write(entries) }
+
+    /// Only a proven absent file is an empty queue. Every other read or ownership
+    /// failure preserves the file and blocks writes until a later successful retry.
+    private func restoreQueueIfReadable() {
+        guard let identity, let file else { return }
+        if let data = try? Data(contentsOf: file),
+           let saved = try? JSONDecoder().decode([OutboxEntry].self, from: data),
+           saved.allSatisfy({ $0.actorId == identity.actorID && $0.organizationId == identity.organizationID }) {
+            entries = saved
+            queueReadable = true
+            return
+        }
+        var info = stat()
+        let result = lstat(file.path, &info)
+        let failure = errno
+        if result == -1 && failure == ENOENT {
+            entries = []
+            queueReadable = true
+        }
     }
 
     @discardableResult
     func enqueue(_ action: OutboxEntry.Action, policyVersion: Int) -> OutboxEntry? {
+        guard mutationGate.recordMutation() else { return nil }
         guard let identity else { return nil }
+        if !queueReadable { restoreQueueIfReadable() }
         let entry = OutboxEntry(id: UUID().uuidString.lowercased(), deviceId: deviceID, actorId: identity.actorID,
                                 organizationId: identity.organizationID, policyVersion: policyVersion,
                                 createdAt: Date(), action: action)
-        entries.append(entry)
-        persist()
+        let updated = entries + [entry]
+        do { try write(updated) } catch { return nil }
+        entries = updated
         return entry
+    }
+
+    @discardableResult
+    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, matching context: CaptureContext) -> OutboxEntry? {
+        guard captureContext(matchingActorID: context.actorID, organizationID: context.organizationID) == context else { return nil }
+        return enqueue(action, policyVersion: policyVersion)
     }
 
     func learn(_ job: JobRecord) {
@@ -214,6 +486,7 @@ final class FieldOutbox: ObservableObject {
 
     /// Drops a refused change; the job's held changes go back in the queue.
     func dismiss(_ entry: OutboxEntry) {
+        guard mutationGate.recordMutation() else { return }
         entries.removeAll { $0.id == entry.id }
         release(jobID: entry.jobID)
         persist()
@@ -221,6 +494,7 @@ final class FieldOutbox: ObservableObject {
 
     /// Sends a refused change again, with the job's held changes after it.
     func retry(_ entry: OutboxEntry) {
+        guard mutationGate.recordMutation() else { return }
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         entries[index].state = .pending
         release(jobID: entry.jobID)
@@ -252,6 +526,12 @@ final class FieldOutbox: ObservableObject {
 
     func pendingNotes(for jobID: String) -> [OutboxEntry] {
         entries.filter { $0.jobID == jobID && { if case .note = $0.action { true } else { false } }($0) }
+    }
+
+    /// Local notes belong to the verified queue owner even when server history is unavailable.
+    func activityNotes(for jobID: String, actorID: String, organizationID: String) -> [OutboxEntry] {
+        guard captureContext(matchingActorID: actorID, organizationID: organizationID) != nil else { return [] }
+        return pendingNotes(for: jobID).filter { $0.actorId == actorID && $0.organizationId == organizationID }
     }
 
     /// Sends queued changes oldest first. Uses the offline command endpoint when the
@@ -316,6 +596,7 @@ final class FieldOutbox: ObservableObject {
                 guard current() else { return sent }
                 for outcome in result.outcomes {
                     guard current() else { return sent }
+                    guard mutationGate.recordMutation() else { return sent }
                     if outcome.status == "applied" || outcome.status == "duplicate" {
                         entries.removeAll { $0.id == outcome.commandId }
                         sent += 1
@@ -366,6 +647,7 @@ final class FieldOutbox: ObservableObject {
                     _ = try await api.addFieldNote(payload.jobId, body: payload.body)
                 }
                 guard current() else { return sent }
+                guard mutationGate.recordMutation() else { return sent }
                 entries.removeAll { $0.id == entry.id }
                 sent += 1
                 persist()
@@ -377,6 +659,7 @@ final class FieldOutbox: ObservableObject {
                 if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status), status != 401, status != 429 {
                     let applied = status == 409 ? await alreadyApplied(entry, api: api, current: current) : false
                     guard current() else { return sent }
+                    guard mutationGate.recordMutation() else { return sent }
                     if applied {
                         entries.removeAll { $0.id == entry.id }
                         sent += 1
@@ -398,6 +681,7 @@ final class FieldOutbox: ObservableObject {
 
     /// A refused change holds every later change to the same job for review.
     private func reject(_ id: String, reason: String) {
+        guard mutationGate.recordMutation() else { return }
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index].state = .rejected(reason)
         let jobID = entries[index].jobID

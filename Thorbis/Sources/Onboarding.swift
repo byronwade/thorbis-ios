@@ -220,8 +220,11 @@ struct SignUpView: View {
 /// Shown when the account has no company or more than one, and as the switcher sheet from More.
 struct WorkspaceGateView: View {
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var pendingMedia: PendingMediaStore
     @Environment(\.dismiss) private var dismiss
     @State private var creating = false
+    @State private var confirmSignOut = false
 
     var body: some View {
         NavigationStack {
@@ -255,7 +258,7 @@ struct WorkspaceGateView: View {
                     }
                     if session.phase != .ready {
                         Section {
-                            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
+                            Button("Sign out", role: .destructive) { confirmSignOut = true }
                         }
                     }
                 }
@@ -269,6 +272,11 @@ struct WorkspaceGateView: View {
                 }
             }
         }
+        .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
+        } message: {
+            Text(pendingMedia.signOutWarning(outboxWarning: outbox.signOutWarning))
+        }
     }
 }
 
@@ -276,6 +284,8 @@ struct WorkspaceGateView: View {
 struct CreateCompanyForm: View {
     let firstCompany: Bool
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var pendingMedia: PendingMediaStore
     @State private var name = ""
     @State private var busy = false
     @State private var error: String?
@@ -357,9 +367,8 @@ struct CreateCompanyForm: View {
         .toolbar(firstCompany ? .hidden : .automatic, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { focused = true }
-        .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
-        }
+        .thorbisConfirm("Sign out of Thorbis?", message: pendingMedia.signOutWarning(outboxWarning: outbox.signOutWarning), isPresented: $confirmSignOut,
+                        actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
     }
 
     private var greeting: String {
