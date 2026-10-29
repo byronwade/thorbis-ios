@@ -11,6 +11,63 @@ struct JobDocumentRow: View {
     var customerFacing = false
 
     var body: some View {
+        Group {
+            if customerFacing { customerRow } else { technicianRow }
+        }
+        .foregroundStyle(Theme.foreground)
+        .multilineTextAlignment(.leading)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+        .contentShape(Rectangle())
+    }
+
+    private var technicianRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    titleText
+                    Spacer(minLength: 4)
+                    if let amount { Text(amount).moneyStyle(.row).fixedSize() }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    titleText
+                    if let amount { Text(amount).moneyStyle(.row) }
+                }
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 8) {
+                    PaperStatusChip(status: status)
+                    Text(reference).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 4)
+                    if fresh { PaperDisclosure() }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    PaperStatusChip(status: status)
+                    HStack {
+                        Text(reference).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 4)
+                        if fresh { PaperDisclosure() }
+                    }
+                }
+            }
+            if let detail {
+                Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            }
+            if !fresh {
+                Label("Needs refresh", systemImage: "arrow.clockwise")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            }
+        }
+    }
+
+    private var titleText: some View {
+        Text(title).font(Theme.font(17, weight: .medium))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var customerRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Text(reference).font(Theme.monoFont(customerFacing ? 14 : 12))
@@ -35,13 +92,6 @@ struct JobDocumentRow: View {
                 if fresh { PaperDisclosure() }
             }
         }
-        .foregroundStyle(Theme.foreground)
-        .multilineTextAlignment(.leading)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
-        .contentShape(Rectangle())
     }
 }
 

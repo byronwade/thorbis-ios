@@ -394,12 +394,41 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Schedule"].firstMatch.isHittable)
         capture(app, "Actual workspace replacement stays inside protected customer owner")
     }
+    func testJobEstimatesRemainReadableAtLargestText() {
+        let app = open(["--paper-preview-handoff-hide-controls",
+                        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let first = app.buttons["job-estimate-00000000-0000-4000-8000-000000008101"]
+        let second = app.buttons["job-estimate-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30))
+        XCTAssertTrue(second.exists)
+        XCTAssertTrue(first.label.contains("Sample repair") && first.label.contains("$190.00") && first.label.contains("Sent"))
+        XCTAssertTrue(second.label.contains("Sample additional work") && second.label.contains("$320.00") && second.label.contains("Sent"))
+        XCTAssertTrue(app.buttons["Add estimate"].exists)
+        let present = app.buttons["Present estimates"]
+        XCTAssertTrue(present.exists)
+        let tabs = app.buttons["Estimates"]
+        XCTAssertTrue(tabs.exists)
+        for _ in 0..<8 {
+            let frame = first.frame
+            if first.isHittable && frame.minY >= tabs.frame.maxY && frame.maxY <= present.frame.minY { break }
+            let upward = frame.maxY > present.frame.minY
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.7 : 0.4))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.5 : 0.6))
+            start.press(forDuration: 0.1, thenDragTo: end)
+        }
+        XCTAssertTrue(first.isHittable, app.debugDescription)
+        XCTAssertGreaterThanOrEqual(first.frame.minY, tabs.frame.maxY)
+        XCTAssertLessThanOrEqual(first.frame.maxY, present.frame.minY)
+        capture(app, "Job estimates at largest text")
+    }
+
     func testAllEstimatesUseOnePrimaryEntryAndKeepAddVisible() {
         let app = open(["--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 30), "Existing estimates need one obvious customer presentation action")
+        let present = thorbisStableButton(app, "Present estimates")
         capture(app, "Job estimates before entering customer handoff")
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10), "Existing estimates need one obvious customer presentation action")
         XCTAssertTrue(app.buttons["Add estimate"].exists)
-        app.buttons["Present estimates"].tap()
+        present.tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
         XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"].exists)

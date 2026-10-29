@@ -215,7 +215,10 @@ final class JobDocumentsSafetyUITests: XCTestCase {
     func testEstimateTotalsRemainAvailableInADisclosure() {
         let app = launch()
         ready(app)
-        app.buttons["Estimates"].tap()
+        let estimates = thorbisStableButton(app, "Estimates")
+        estimates.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: estimates)
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
         let disclosure = app.buttons["Estimate totals"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
         disclosure.tap()

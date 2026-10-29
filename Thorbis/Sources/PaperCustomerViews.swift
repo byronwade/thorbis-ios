@@ -230,6 +230,10 @@ struct CustomerDetailView: View {
     @State private var isRemovingLocation = false
     @State private var locationError: String?
     @State private var tab = "Overview"
+    @State private var records: CustomerJobCompilation?
+    @State private var recordsLoading = false
+    @State private var recordsError: String?
+    @State private var recordsLoadGeneration = 0
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
     @State private var smsConsentKey = UUID().uuidString
@@ -284,13 +288,14 @@ struct CustomerDetailView: View {
                     case "Jobs":
                         if session.can("job.view", feature: "jobs") { jobsSection }
                         else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
+                    case "Records": recordsSection
                     case "Activity": activitySection
                     default: activitySection
                     }
                 }.padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 24)
                 } header: {
                     // Pinned like the job page's tabs.
-                    PaperTabs(options: ["Overview", "Jobs", "Activity"], selection: $tab).background(Theme.background)
+                    PaperTabs(options: ["Overview", "Jobs", "Records", "Activity"], selection: $tab).background(Theme.background)
                 }
             }
         }
@@ -339,14 +344,17 @@ struct CustomerDetailView: View {
             RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
             #if DEBUG
             if PaperPreview.enabled && PaperPreview.screen == "customer-activity" { tab = "Activity" }
+            if PaperPreview.enabled && PaperPreview.screen == "customer-records" { tab = "Records" }
             #endif
         }
         .onChange(of: tab) { _, selectedTab in
             if selectedTab == "Activity" { Task { await loadActivity(reset: true) } }
+            if selectedTab == "Records" { Task { await loadRecords() } }
         }
         .refreshable {
             await load()
             if tab == "Activity" { await loadActivity(reset: true) }
+            if tab == "Records" { await loadRecords() }
         }
         .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
         .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task { await load(); await loadSmsConsent() } }) {
@@ -664,6 +672,50 @@ struct CustomerDetailView: View {
             if jobs.isEmpty { emptyText("No jobs") }
         }
     }
+    private var recordsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !session.can("customer.view", feature: "core_crm") {
+                emptyText("You don’t have access to this customer’s records.")
+            } else {
+                if let recordsError {
+                    ErrorBanner(message: records == nil ? "Records did not load. \(recordsError)" : recordsError) {
+                        await loadRecords()
+                    }
+                    .accessibilityIdentifier("customer-records-retry")
+                }
+                if recordsLoading && records == nil {
+                    SkeletonRows(count: 4, inset: 0)
+                } else if let records {
+                    CustomerRecordsView(compilation: records)
+                        .accessibilityIdentifier("customer-records")
+                }
+            }
+        }
+    }
+
+    private func loadRecords() async {
+        guard session.can("customer.view", feature: "core_crm"), !recordsLoading else { return }
+        recordsLoadGeneration += 1
+        let request = recordsLoadGeneration
+        recordsLoading = true
+        defer { if recordsLoadGeneration == request { recordsLoading = false } }
+        do {
+            let access = CustomerRecordAccess(
+                jobs: session.can("job.view", feature: "jobs"),
+                estimates: session.can("estimate.view", feature: "estimates"),
+                invoices: session.can("invoice.view", feature: "invoicing")
+            )
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer.id, api: api, access: access)
+            guard recordsLoadGeneration == request else { return }
+            records = compiled
+            recordsError = nil
+        } catch is CancellationError {
+        } catch {
+            guard recordsLoadGeneration == request else { return }
+            recordsError = error.localizedDescription
+        }
+    }
+
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -685,21 +737,22 @@ struct CustomerDetailView: View {
                 if activityLoading && activity.isEmpty { SkeletonRows(count: 4, inset: 0) }
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(activity) { event in
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: activitySymbol(for: event.kind))
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                                .frame(width: 30, height: 30)
-                                .background(Theme.fill, in: Circle())
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(event.summary).font(Theme.font(15, weight: .medium)).lineLimit(3)
-                                Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                        ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id)) {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: activitySymbol(for: event.kind))
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Theme.muted)
+                                    .frame(width: 30, height: 30)
+                                    .background(Theme.fill, in: Circle())
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(event.summary).font(Theme.font(15, weight: .medium)).lineLimit(3)
+                                    Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                                }
                             }
+                            .padding(.vertical, 9)
+                            .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
                         }
-                        .padding(.vertical, 9)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
                     }
                 }
                 if activity.isEmpty && !activityLoading && activityError == nil {

@@ -66,14 +66,35 @@ struct EstimateRevisionEditorView: View {
         }
     }
 
+    private var editingDraft: Bool { editor.estimate.status == "draft" }
+
+    private var revisionReady: Bool {
+        !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) > 0
+    }
+
     private var canSave: Bool {
-        !busy && canEdit && (editor.estimate.currentRevisionNumber ?? 0) > 0 &&
+        !busy && canEdit && revisionReady &&
         editor.hasChanges && !editor.hasUnsupportedLineSources && (!editor.hasCreditLines || canDiscount)
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
+                if let error {
+                    ErrorBanner(message: error)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                }
+                if staleRevision {
+                    Button { confirmReload = true } label: {
+                        Label("Review latest estimate", systemImage: "arrow.clockwise")
+                            .font(Theme.font(14, weight: .medium))
+                            .foregroundStyle(Theme.brandText)
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityHint("Loads the current server version and replaces these edits")
+                    .padding(.horizontal, 20)
+                }
                 if searching {
                     PriceBookResultsList(
                         catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
@@ -82,24 +103,15 @@ struct EstimateRevisionEditorView: View {
                         secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom,
                         retry: { Task { await refreshCatalog(force: true) } }
                     )
+                    .disabled(busy)
                 } else {
                 VStack(alignment: .leading, spacing: 18) {
-                    if let error { ErrorBanner(message: error) }
-                    if staleRevision {
-                        Button { confirmReload = true } label: {
-                            Label("Review latest estimate", systemImage: "arrow.clockwise")
-                                .font(Theme.font(14, weight: .medium))
-                                .foregroundStyle(Theme.brandText)
-                                .frame(minHeight: 44)
-                        }
-                        .accessibilityHint("Loads the current server version and replaces these edits")
-                    }
                     if !editor.canRevise {
                         ErrorBanner(message: "This estimate cannot be revised from its current status.")
-                    } else if (editor.estimate.currentRevisionNumber ?? 0) <= 0 {
-                        ErrorBanner(message: EstimateRevisionEditorError.missingRevision.localizedDescription)
                     } else if !session.can("estimate.create", feature: "estimates") {
                         ErrorBanner(message: "Your account cannot create estimate revisions.")
+                    } else if !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) <= 0 {
+                        ErrorBanner(message: EstimateRevisionEditorError.missingRevision.localizedDescription)
                     }
                     if editor.hasUnsupportedLineSources {
                         ErrorBanner(message: EstimateRevisionEditorError.unsupportedLineSource.localizedDescription)
@@ -115,7 +127,9 @@ struct EstimateRevisionEditorView: View {
                     detailsCard.disabled(busy || !canEdit)
                     lineSection
                     optionSection
-                    Text("Saving creates a replacement draft for the current estimate revision. It will not be sent automatically.")
+                    Text(editingDraft
+                         ? "Changes aren't saved when you close this screen."
+                         : "Saving creates a replacement draft for the current estimate revision. It will not be sent automatically.")
                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 2)
                 }
@@ -129,7 +143,7 @@ struct EstimateRevisionEditorView: View {
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
-            .navigationTitle("Revise estimate")
+            .navigationTitle(editingDraft ? "Edit estimate" : "Revise estimate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -139,11 +153,19 @@ struct EstimateRevisionEditorView: View {
             .keyboardDoneButton()
             .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if canEdit {
-                    EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
-                                      prompt: searchPrompt, finish: finishSearch)
-                        .disabled(busy)
+                VStack(spacing: 0) {
+                    if canEdit {
+                        EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
+                                          prompt: searchPrompt, finish: finishSearch)
+                            .disabled(busy)
+                    }
+                    if editingDraft && canRevise {
+                        ErrorBanner(message: "Draft changes can't be saved yet.")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 8)
+                    }
                 }
+                .background(Theme.background)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
@@ -175,7 +197,7 @@ struct EstimateRevisionEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("EST-\(editor.estimate.id.suffix(4).uppercased()) · REVISION \(editor.estimate.currentRevisionNumber ?? 0)")
                 .font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
-            Text("New replacement draft")
+            Text(editingDraft ? "Edit draft" : "New replacement draft")
                 .font(Theme.font(24, weight: .medium)).tracking(-0.36)
             Text(editor.estimate.status.statusLabel)
                 .font(Theme.font(12, weight: .medium))
@@ -207,7 +229,7 @@ struct EstimateRevisionEditorView: View {
     private var lineSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             EstimateLineGroupsEditor(
-                lines: $editor.lines,
+                lines: editableLines,
                 disabled: busy || !canEdit || editor.hasUnsupportedLineSources,
                 focus: $focus,
                 addTo: { group in startAdding(optionID: nil, group: group) },
@@ -253,6 +275,22 @@ struct EstimateRevisionEditorView: View {
         }
     }
 
+    private var editableLines: Binding<[EstimateRevisionLineDraft]> {
+        Binding(
+            get: { editor.lines },
+            set: { proposed in
+                guard editor.canRevise else { return }
+                editor.lines = proposed
+                for line in proposed {
+                    let quantityText = line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let quantity = Int(quantityText), (1...100_000).contains(quantity), String(quantity) == quantityText {
+                        try? editor.setQuantity(line.id, quantity)
+                    }
+                }
+            }
+        )
+    }
+
     private func sectionTitle(_ title: String, count: Int) -> some View {
         HStack(spacing: 7) {
             Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
@@ -261,8 +299,9 @@ struct EstimateRevisionEditorView: View {
     }
 
     private var saveTitle: String {
-        guard editor.options.isEmpty, let total = editor.lines.subtotal() else { return "Save revised draft" }
-        return "Save revised draft · \(money(total, currency: "USD"))"
+        let verb = editingDraft ? "Save draft" : "Save revised draft"
+        guard editor.options.isEmpty, let total = editor.lines.subtotal() else { return verb }
+        return "\(verb) · \(money(total, currency: "USD"))"
     }
 
     private func refreshCatalog(force: Bool = false) async {
@@ -345,7 +384,19 @@ struct EstimateRevisionEditorView: View {
         }
     }
 
+    /// Canonicalize a finished price at save time. Live keystrokes keep the raw text.
+    private func commitPrices() {
+        for line in editor.lines {
+            guard let cents = EstimateRevisionEditorState.parsePrice(line.unitPrice) else { continue }
+            try? editor.setUnitPrice(line.id, cents: cents)
+        }
+    }
+
     private func save() async {
+        guard !editingDraft else {
+            error = "Draft changes can't be saved yet."
+            return
+        }
         guard canRevise else {
             error = "You no longer have permission to revise this estimate."
             return
@@ -353,6 +404,7 @@ struct EstimateRevisionEditorView: View {
         busy = true
         defer { busy = false }
         do {
+            commitPrices()
             let revised = try await api.reviseFieldEstimate(
                 editor.estimate.id,
                 request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount)

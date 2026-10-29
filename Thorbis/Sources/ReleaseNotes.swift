@@ -13,6 +13,47 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-29-job-estimate-layout",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "doc.text", title: "Scan job estimates faster",
+                      detail: "See the work, price and status first, with totals and actions close at hand."),
+            ],
+            fixes: 0
+        ),
+        ReleaseNote(
+            id: "2026-10-29-activity-opens",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "arrow.up.right", title: "Open the record behind activity",
+                      detail: "Activity rows open the job, estimate, invoice, note, photo, contact, or location they name."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-draft-lines",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "book.closed", title: "Edit invoice lines in the price book",
+                      detail: "Search the price book on an invoice draft, then adjust or remove items."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-customer-records",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "rectangle.stack", title: "A customer's jobs in one place",
+                      detail: "See every job's photos, notes, documents, estimates, invoices, and activity together, still grouped by job."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-menu-room",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Search sits at the top of the menu",
+                      detail: "Search has its own row under the company, and the account opens Settings with room to tap."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-job-estimate-handoff",
             date: "2026-10-29",
             highlights: [
