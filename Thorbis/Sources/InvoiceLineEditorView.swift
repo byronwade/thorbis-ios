@@ -201,8 +201,14 @@ struct InvoiceLineEditorView: View {
         }
         .task(id: catalogContext) { await refreshCatalog() }
         .onChange(of: catalogContext) { _, _ in finishSearch() }
+        .onChange(of: editingAddedLine) { _, expanded in
+            if expanded { focus = nil }
+        }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) {
+            // The search Done action returns to invoice review and its commit actions.
+            // Keeping a second action bar above the keyboard obscures quick-edit fields.
+            if !searching {
             HStack(spacing: 10) {
                 if canIssue {
                     Button("Save draft") { Task { await save() } }
@@ -221,6 +227,7 @@ struct InvoiceLineEditorView: View {
             }
             .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
             .background(Theme.chrome)
+            }
         }
         .confirmationDialog("Issue invoice?", isPresented: $confirmIssue, titleVisibility: .visible) {
             Button("Issue invoice", role: .destructive) { Task { await issue() } }

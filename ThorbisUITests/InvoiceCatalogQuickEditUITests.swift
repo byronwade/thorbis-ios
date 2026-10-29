@@ -3,9 +3,77 @@ import XCTest
 @MainActor
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     func testLastAddedLineCanBeEditedWithoutLeavingCatalog() {
+        assertLastAddedLineCanBeEdited(extraArguments: [])
+    }
+
+    func testLargestTextKeepsQuickEditingAndInvoiceReviewReachable() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-pages"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-pages",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
+        let search = app.textFields["Search price book or type a line"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        search.typeText("Camera sewer inspection")
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009999"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        item.tap()
+        let added = app.otherElements["invoice-added-line-editor"]
+        XCTAssertTrue(added.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(app.buttons["Save draft"].exists)
+        XCTAssertFalse(app.buttons["Issue invoice"].exists)
+        added.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Edit added line")).firstMatch.tap()
+        let description = added.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        let identity = String(description.identifier.dropFirst("invoice-line-description-".count))
+        let quantity = added.otherElements["invoice-line-quantity-" + identity].textFields.firstMatch
+        let searchBar = app.otherElements["invoice-catalog-search"]
+        // At XXXL the wrapped summary and editor exceed the keyboard-visible viewport.
+        // Scroll normally; the existing interactive policy may dismiss the search keyboard.
+        for _ in 0..<8 {
+            let visibleTop = searchBar.frame.maxY + 8
+            // The keyboard AX frame starts below its predictive/accessory surfaces.
+            // Keep the gesture in the upper half of the header-to-keyboard interval.
+            let keyboard = app.keyboards.firstMatch
+            let visibleBottom = keyboard.exists
+                ? (searchBar.frame.maxY + keyboard.frame.minY) / 2
+                : app.frame.maxY - 16
+            if quantity.frame.minY >= visibleTop && quantity.frame.maxY <= visibleBottom { break }
+            let distance = min(quantity.frame.maxY - visibleBottom + 8, visibleBottom - visibleTop - 16)
+            let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.midX, dy: visibleBottom - 8))
+            let end = start.withOffset(CGVector(dx: 0, dy: -distance))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTAssertGreaterThanOrEqual(quantity.frame.minY, searchBar.frame.maxY)
+        XCTAssertLessThan(quantity.frame.maxY, app.frame.maxY - 16)
+        XCTAssertTrue(quantity.isHittable, app.debugDescription)
+        quantity.tap()
+        XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
+        replaceQuantityWithTen(quantity, in: app)
+        XCTAssertEqual(quantity.value as? String, "10")
+        XCTAssertEqual(search.value as? String, "Camera sewer inspection")
+        let editingProof = XCTAttachment(screenshot: app.screenshot())
+        editingProof.name = "Largest text quantity editing above the keyboard after scrolling"
+        editingProof.lifetime = .keepAlways
+        add(editingProof)
+        searchBar.buttons["Done"].tap()
+        XCTAssertFalse(added.exists)
+        XCTAssertTrue(app.buttons["Save draft"].isHittable)
+        XCTAssertTrue(app.buttons["Issue invoice"].isHittable)
+        XCTAssertEqual(app.otherElements["invoice-line-quantity-" + identity].textFields.firstMatch.value as? String, "10")
+        let reviewProof = XCTAttachment(screenshot: app.screenshot())
+        reviewProof.name = "Largest text return to invoice review actions"
+        reviewProof.lifetime = .keepAlways
+        add(reviewProof)
+    }
+
+    private func assertLastAddedLineCanBeEdited(extraArguments: [String]) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-pages"] + extraArguments
         app.launch()
         XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
         let search = app.textFields["Search price book or type a line"]
@@ -22,6 +90,8 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         added.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Edit added line")).firstMatch.tap()
         let description = added.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
         XCTAssertTrue(description.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Save draft"].exists, "Commit actions must not cover quick-edit fields")
+        XCTAssertFalse(app.buttons["Issue invoice"].exists)
         let firstIdentity = String(description.identifier.dropFirst("invoice-line-description-".count))
         XCTAssertFalse(firstIdentity.isEmpty)
         let quantity = added.otherElements["invoice-line-quantity-" + firstIdentity].textFields.firstMatch
@@ -29,8 +99,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(quantity.isHittable, app.debugDescription)
         quantity.tap()
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5), "The quantity field must acquire its numeric keyboard before editing")
-        quantity.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: .command)
-        quantity.typeText("0")
+        replaceQuantityWithTen(quantity, in: app)
         XCTAssertEqual(quantity.value as? String, "10")
         XCTAssertEqual(search.value as? String, "Camera sewer inspection")
         XCTAssertTrue(app.buttons.matching(identifier: item.identifier).matching(NSPredicate(format: "value == %@", "10 in draft")).firstMatch.waitForExistence(timeout: 5))
@@ -51,9 +120,18 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(identifier: item.identifier).matching(NSPredicate(format: "value == %@", "11 in draft")).firstMatch.waitForExistence(timeout: 5))
         app.otherElements["invoice-catalog-search"].buttons["Done"].tap()
         XCTAssertFalse(added.exists)
+        XCTAssertTrue(app.buttons["Save draft"].isHittable)
+        XCTAssertTrue(app.buttons["Issue invoice"].isHittable)
         XCTAssertEqual(app.otherElements["invoice-line-quantity-" + firstIdentity].textFields.firstMatch.value as? String, "10")
         XCTAssertEqual(app.otherElements["invoice-line-quantity-" + secondIdentity].textFields.firstMatch.value as? String, "1")
         XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "invoice-line-description-", "Camera sewer inspection")).count, 2)
+    }
+
+    private func replaceQuantityWithTen(_ quantity: XCUIElement, in app: XCUIApplication) {
+        // Select the existing single digit using the native touch interaction.
+        // Type through the application so XCTest does not reposition the field caret.
+        quantity.doubleTap()
+        app.typeText("10")
     }
 
     func testRepeatedInlineAddsKeepCatalogReachableWithKeyboard() {
