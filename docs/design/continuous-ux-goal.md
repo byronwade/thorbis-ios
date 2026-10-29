@@ -2,6 +2,12 @@
 
 Updated by the user on 28 October 2026.
 
+App-wide context now lives in [iOS golden rules](ios-golden-rules.md), with the
+[full supplied guidelines](references/ios-field-management-guidelines-source.md)
+and [implementation process](ios-implementation-process.md). Read and apply them
+to every current and future change. Preserve all functionality while improving
+the whole app's consistency, field usability, accessibility and truthful state.
+
 Continuously improve the entire Thorbis iOS application so it feels as simple,
 intuitive, and easy to use as Apple products, with beautiful presentation based
 on [design.thorbis.com](https://design.thorbis.com). Preserve every existing
