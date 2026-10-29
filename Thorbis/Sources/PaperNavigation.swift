@@ -725,8 +725,26 @@ struct ServerSearchPage: Decodable {
 }
 
 extension APIClient {
+    /// The Search Gateway pages with `nextCursor`. Keep asking until it stops, and refuse a blank or repeated cursor.
     func search(_ query: String, limit: Int = 25) async throws -> ServerSearchPage {
-        try await send("GET", "/v1/search", queryItems: [URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: String(limit))])
+        let generation = requestGeneration
+        var items: [ServerSearchResult] = []
+        var cursor: String?
+        var seen = Set<String>()
+        var completeness: String?
+        let queryItems = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: String(limit))]
+        repeat {
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { throw CancellationError() }
+            let page: ServerSearchPage = try await send("GET", "/v1/search", queryItems: queryItems, cursor: cursor)
+            items.append(contentsOf: page.items)
+            completeness = page.completeness
+            cursor = page.nextCursor
+            if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
+                throw Problem(title: "Pagination cursor loop", status: nil, detail: "Repeated or empty cursor")
+            }
+        } while cursor != nil
+        return ServerSearchPage(items: items, nextCursor: nil, completeness: completeness)
     }
 }
 
