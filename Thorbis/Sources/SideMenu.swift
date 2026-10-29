@@ -56,9 +56,9 @@ final class RecentItems: ObservableObject {
     }
 }
 
-/// A side menu like the web app's sidebar (and ChatGPT's): workspace and search at the top, the
-/// pinned tabs, every other place, recent jobs and customers, then New job and settings. The tab
-/// bar stays; this is a second way to get anywhere in one tap.
+/// A side menu like the web app's sidebar: workspace and search at the top, the pinned tabs,
+/// every other place, recent jobs and customers, then New job and one account row. The tab bar
+/// stays; this is a second way to get anywhere in one tap.
 struct SideMenu: View {
     let open: (MenuItem) -> Void
     let openRecent: (RecentItems.Item) -> Void
@@ -79,8 +79,7 @@ struct SideMenu: View {
         MenuItem.allCases.filter { !pinned.contains($0) && !layout.hidden.contains($0) && $0.permitted(session) && $0.route != nil }
     }
 
-    /// design.thorbis.com MA-02: workspace, places (current one marked), recents, then the thumb
-    /// zone: search and the one ink New job, and the person opening Settings.
+    /// Workspace and search at the top. The footer is only New job and one account row.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The company is a control when there is another to switch to.
@@ -106,6 +105,10 @@ struct SideMenu: View {
             .accessibilityLabel(switchWorkspace == nil ? "Company: \(session.activeOrganization?.name ?? "Thorbis")"
                                                        : "Company: \(session.activeOrganization?.name ?? "Thorbis"). Switch company")
             .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 4)
+
+            SidebarSearchButton(action: search)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -140,49 +143,19 @@ struct SideMenu: View {
             }
             .scrollIndicators(.hidden)
 
-            // Thumb zone (MA-06): search fills the row, the one ink commit beside it.
-            VStack(spacing: 6) {
-                HStack(spacing: 8) {
-                    Button(action: search) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass")
-                            Text("Search")
-                            Spacer(minLength: 0)
-                        }
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 14).frame(height: 44)
-                        .background(Theme.fill, in: Capsule())
-                        .contentShape(Capsule())
+            VStack(spacing: 12) {
+                if session.can("job.create", feature: "jobs") {
+                    Button(action: newJob) {
+                        Label("New job", systemImage: "plus")
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.onInk)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.ink, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
                     .buttonStyle(PressStyle())
-                    if session.can("job.create", feature: "jobs") {
-                        Button(action: newJob) {
-                            Label("New job", systemImage: "plus")
-                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.onInk)
-                                .padding(.horizontal, 16).frame(height: 44)
-                                .background(Theme.ink, in: Capsule())
-                                .fixedSize()
-                        }
-                        .buttonStyle(PressStyle())
-                    }
                 }
-                Button(action: settings) {
-                    HStack(spacing: 10) {
-                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .frame(width: 30, height: 30).background(Theme.fill, in: Circle())
-                            .dynamicTypeSize(...DynamicTypeSize.large)
-                        Text(session.user?.name ?? "Account").font(Theme.font(15, weight: .medium)).lineLimit(1)
-                        Spacer(minLength: 0)
-                        Image(systemName: "gearshape").foregroundStyle(Theme.muted)
-                    }
-                    .padding(.horizontal, 6)
-                    .frame(minHeight: 48).contentShape(Rectangle())
-                }
-                .buttonStyle(RowPressStyle())
-                .accessibilityLabel("Settings, \(session.user?.name ?? "account")")
+                SidebarAccountButton(name: session.user?.name ?? "", action: settings)
             }
-            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
+            .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 22)
             .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
         }
         .foregroundStyle(Theme.foreground)

@@ -174,7 +174,25 @@ struct RootView: View {
     /// its width (parallax), the card dims to 40% and rounds to 24 with progress, and release settles
     /// on a critically damped spring from the finger's projected end. Transform and opacity only, so
     /// nothing re-lays out mid-gesture. With Reduce Motion nothing slides: the menu fades in over the app.
-    private func phoneNavigation() -> some View {
+    @ViewBuilder private func phoneNavigation() -> some View {
+        #if DEBUG
+        if PaperPreview.enabled, PaperPreview.screen == "ipad-sidebar" {
+            // Screenshot-only: this phone is narrower than the 1000pt sidebar breakpoint.
+            // The column is the same 244pt sidebar the regular-width layout uses.
+            sidebar
+                .frame(maxHeight: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface.ignoresSafeArea())
+                .task { await store.refresh(api) }
+        } else {
+            phoneDrawer()
+        }
+        #else
+        phoneDrawer()
+        #endif
+    }
+
+    private func phoneDrawer() -> some View {
         GeometryReader { geometry in
             let width = min(geometry.size.width * 0.82, 330)
             let base: CGFloat = drawerOpen ? width : 0
@@ -557,11 +575,7 @@ struct RootView: View {
                     Image(systemName: "chevron.down").font(.system(size: 12))
                 }.padding(.horizontal, 8).frame(minHeight: 44)
             }.padding(.bottom, 10)
-            Button { search = true } label: {
-                HStack(spacing: 8) { Image(systemName: "magnifyingglass"); Text("Search"); Spacer() }
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.horizontal, 10)
-                    .frame(minHeight: 44).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            }.padding(.bottom, 12)
+            SidebarSearchButton { search = true }.padding(.bottom, 12)
             if session.can("job.view", feature: "jobs") {
                 sidebarRow("Schedule", icon: "calendar", target: .schedule, count: JobFiltering.schedule(store.jobs, range: .today).count)
                 sidebarRow("Jobs", icon: "briefcase", target: .jobs, count: store.jobs.count)
@@ -571,14 +585,8 @@ struct RootView: View {
             if session.can("pricebook.view", feature: "price_book") { menuRow("Price book", icon: "book.closed") { priceBook = true } }
             menuRow("Workspace tools", icon: "slider.horizontal.3") { settings = true }
             Spacer()
-            Button { settings = true } label: {
-                HStack(spacing: 9) {
-                    Avatar(name: session.user?.name ?? "", size: 26)
-                    Text(session.user?.name ?? "Account").font(Theme.font(15)).lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: "gearshape").font(.system(size: 15)).foregroundStyle(Theme.muted)
-                }.padding(.horizontal, 8).frame(minHeight: 44)
-            }
+            SidebarAccountButton(name: session.user?.name ?? "") { settings = true }
+                .padding(.top, 12)
         }.padding(.vertical, 14).padding(.horizontal, 10).frame(width: 244)
             .foregroundStyle(Theme.foreground).buttonStyle(.plain)
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
