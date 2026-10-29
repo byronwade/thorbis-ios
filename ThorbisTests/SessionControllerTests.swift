@@ -434,6 +434,43 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded[5].url?.path, "/api/auth/sign-in/email")
     }
 
+    func testSignOutDoesNotEraseNewSavedWorkWhileDeviceUnbindIsAwaiting() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("signout-race-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog),
+            .init(200, features), .init(200, "{}")
+        ])
+        let outbox = FieldOutbox(directory: root, defaults: isolatedDefaults())
+        outbox.bind(actorID: actor, organizationID: first)
+        let media = PendingMediaStore(directory: root)
+        let scope = PendingMediaScope(actorID: actor, organizationID: first, origin: "https://app.thorbis.com")
+        media.bind(scope)
+        session.onSignedOut = { outbox.clearAll(); media.clearAll() }
+        let (resume, continuation) = AsyncStream<Void>.makeStream()
+        var unbinding = false
+        session.onWillUnbindDevice = {
+            unbinding = true
+            for await _ in resume { break }
+        }
+        await session.restore()
+        let signOut = Task { await session.signOut() }
+        for _ in 0..<100 where !unbinding { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(unbinding)
+        let note = try XCTUnwrap(outbox.enqueue(.note(.init(jobId: first, body: "Pending field note")), policyVersion: 1))
+        let photo = PendingMedia(id: UUID().uuidString, jobID: first, filename: "before.jpg", tags: [],
+                                 capturedAt: Date(), kind: "photo", mime: "image/jpeg")
+        try media.save(photo, data: Data("image".utf8), context: try XCTUnwrap(media.captureContext))
+        continuation.yield(())
+        continuation.finish()
+        await signOut.value
+
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(outbox.entries.map(\.id), [note.id])
+        XCTAssertEqual(media.items, [photo])
+        XCTAssertEqual(try? media.read(photo), Data("image".utf8))
+    }
+
     func testAuthenticatedDetail401InvalidatesSessionAndStoreBeforeThrowing() async {
         let (session, api) = controller([
             .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog),
