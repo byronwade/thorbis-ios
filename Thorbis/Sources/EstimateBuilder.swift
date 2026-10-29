@@ -57,9 +57,11 @@ extension Array where Element == EstimateRevisionLineDraft {
     @discardableResult
     mutating func addPriceBookItem(_ item: PriceBookListItem, to group: EstimateLineGroup? = nil) -> UUID? {
         let price = EstimateRevisionEditorState.priceText(item.sellPrice.amount)
+        let targetGroup = group ?? .forKind(item.kind)
         if let index = firstIndex(where: { line in
             guard case .priceBookSelection(let id, let revision) = line.source else { return false }
-            return id == item.id && revision == item.revision && line.description == item.description && line.unitPrice == price
+            return id == item.id && revision == item.revision && line.group == targetGroup &&
+                line.description == item.description && line.unitPrice == price
         }), let quantity = Int(self[index].quantity), quantity < 100_000 {
             self[index].quantity = String(quantity + 1)
             return self[index].id
@@ -68,7 +70,7 @@ extension Array where Element == EstimateRevisionLineDraft {
         let line = EstimateRevisionLineDraft(
             description: item.description, quantity: "1", unitPrice: price,
             source: .priceBookSelection(itemID: item.id, revision: item.revision),
-            group: group ?? .forKind(item.kind),
+            group: targetGroup,
             priceBookOriginal: PriceBookLineOriginal(description: item.description, unitPrice: price)
         )
         insert(line, at: insertionIndex(for: line.group))

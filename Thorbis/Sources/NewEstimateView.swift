@@ -53,7 +53,9 @@ struct NewEstimateView: View {
                     PriceBookResultsList(
                         catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
                             query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                        quantityInCurrentDraft: { lines.quantity(ofPriceBookItem: $0) },
+                        quantityInCurrentDraft: { id in
+                            (addGroup.map { lines.lines(in: $0) } ?? lines).quantity(ofPriceBookItem: id)
+                        },
                         secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom, retry: { Task { await refreshCatalog(force: true) } }
                     )
                 } else {
@@ -72,17 +74,22 @@ struct NewEstimateView: View {
             }
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .safeAreaInset(edge: .top, spacing: 0) {
-                EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
-                                  prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
-                                  finish: finishSearch)
-                    .disabled(busy)
+                VStack(spacing: 0) {
+                    EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
+                                      prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
+                                      finish: finishSearch)
+                        .disabled(busy)
+                    if searching {
+                        PaperActionBar(title: reviewTitle, symbol: "list.bullet", busy: busy) { finishSearch() }
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if let removed {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
                     }
-                    if focus != .search {
+                    if !searching {
                         EstimateBuilderTotal(total: total)
                         PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
                                        disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
@@ -104,6 +111,10 @@ struct NewEstimateView: View {
         if created != nil { return "Retry adding to job" }
         guard let total else { return "Save estimate" }
         return "Save estimate · \(money(total, currency: "USD"))"
+    }
+
+    private var reviewTitle: String {
+        "Review estimate · \(lines.count) \(lines.count == 1 ? "item" : "items")"
     }
 
     private var builder: some View {
