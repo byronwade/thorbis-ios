@@ -81,13 +81,13 @@ every future feature, and report the exact available build.
 
 ## Ongoing work at adoption
 
-- Build 1.0 (75) is the last verified delivered baseline. This documentation update
-  does not represent a new TestFlight build or whole-app conformance.
-- The job document book, swipe/explicit navigation, discount breakdown and scoped
-  payment history remain in progress under
-  [their plan](../superpowers/plans/2026-10-28-job-document-book.md). Regression
-  tests currently reproduce missing behavior; unfinished scaffolding is not ready
-  to ship. Resume by making those tests pass, then implement the full journey.
+- The rules were adopted at build 1.0 (75). The job document book is now delivered
+  in [build 1.0 (76)](../release/build-76.md), with scoped swiping/explicit
+  navigation, discounts, payments/refunds, protected signing and large-text
+  adaptations. This batch does not certify whole-app conformance.
+- The [execution record](../superpowers/execution/2026-10-28-job-document-book.md)
+  preserves regressions, review findings, actual test scope, screenshots and
+  delivery proof. Continue applying the golden rules to the remaining app work.
 - Customer/technician catalog offers, exact quote/acceptance, approved additions
   and bill-once billing remain required under the
   [customer add-on design](../superpowers/specs/2026-10-28-customer-addons-design.md).

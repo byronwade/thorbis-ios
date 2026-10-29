@@ -66,8 +66,13 @@ column threshold (241.2pt). Accessibility line and total rows now stack, preserv
 ordinary Paper geometry and combined reading order. Individual amounts reuse the
 checked total helper. The final95-run and iPad1-run include that fix.
 
-Signed archive/upload/processed tester availability remain the next separate gate.
-No build76 availability is inferred from tests or source review.
+Signed archive and upload succeeded for **1.0 (76)** on October28 at22:58EDT.
+Apple processing completed; build76 is assigned to Internal Testers(2), and What
+to Test shows Saved. [Delivery record](../../release/build-76.md) and
+[dashboard proof](../../design/evidence/build-76/testflight-confirmation.png).
+Runtime source956a22f and172frozen Swift files match the archive. App+widget76,
+strict signature/team, preview/control exclusion and disabled Tap audit passed.
+This closes the document-book delivery batch; the overall continuous goal stays active.
 
 ## Decisions and limits
 

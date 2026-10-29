@@ -55,13 +55,13 @@ All original customer document and feature-retention requirements remain require
 - [x] Implement book using native paging and explicit buttons, narrow state and lazy child pages; keep decisions outside swipe surface. Reuse CustomerLinesCard and price rows; history in a disclosure, no internal data.
 - [x] Extend read-only preview fixtures with actual multiple documents, a discount and recorded/refunded payments; no requests escape fixture.
 - [x] Run model/native journeys, largest text/dark/iPad visual checks, important affected suites and release notes tests; expected zero failures/skips.
-- [ ] Commit and record screenshots/fingerprints.
+- [x] Commit and record screenshots/fingerprints.
 
 ### Task 3: Review and TestFlight delivery
 
 **Files:** execution evidence, release notes as needed; existing archive/export workflow.
 
 - [x] Fresh whole-branch review; fix Important/Critical in one RED/GREEN pass and affected suites, record rulings/minors.
-- [ ] Verify source fingerprints and release boundaries; create signed archive with unique next build after ASC preflight.
-- [ ] Upload, then verify processing, notes saved and existing tester group assignment. Attach new draft PR; no duplicate tester invites.
-- [ ] Report exact available build and any unfinished larger app work. Do not mark full persistent goal complete.
+- [x] Verify source fingerprints and release boundaries; create signed archive with unique next build after ASC preflight.
+- [x] Upload, then verify processing, notes saved and existing tester group assignment. Attach new draft PR; no duplicate tester invites.
+- [x] Report exact available build and any unfinished larger app work. Do not mark full persistent goal complete.

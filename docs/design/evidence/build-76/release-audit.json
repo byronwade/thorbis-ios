@@ -1,0 +1,21 @@
+{
+  "sourceCommit": "956a22f5c9615bf5dde502757c2861c81634e8cd",
+  "version": "1.0",
+  "build": "76",
+  "bundleIdentifier": "com.thorbis.field",
+  "extensions": [
+    "com.thorbis.field.widgets"
+  ],
+  "teamIdentifier": "T677262U5B",
+  "tapToPayEnabled": false,
+  "releasePreviewBoundary": "passed",
+  "strictCodeSignature": "passed",
+  "matchingSwiftFingerprints": 172,
+  "deviceFamily": [
+    1,
+    2
+  ],
+  "minOS": "18.0",
+  "archive": "/private/tmp/thorbis-76.lxkhtd68/Thorbis.xcarchive",
+  "verifiedAt": "2026-10-29T02:56:42.486925+00:00"
+}
