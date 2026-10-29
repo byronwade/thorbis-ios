@@ -671,7 +671,7 @@ struct CustomerDetailView: View {
                 if recordsLoading && records == nil {
                     SkeletonRows(count: 4, inset: 0)
                 } else if let records {
-                    CustomerRecordsView(compilation: records)
+                    CustomerRecordsView(compilation: records, customerID: customer.id)
                         .accessibilityIdentifier("customer-records")
                 }
             }
