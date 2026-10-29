@@ -394,7 +394,7 @@ final class CustomerJobCompilationTests: XCTestCase {
         ])
         let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
 
-        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, api: client)
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client)
 
         let grouped = compiled.activity.flatMap(\.items)
         XCTAssertEqual(grouped.map(\.kind).sorted(), ["estimate", "invoice", "job"])
