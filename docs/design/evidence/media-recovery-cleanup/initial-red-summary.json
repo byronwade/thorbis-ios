@@ -1,0 +1,66 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "FA43B63E-98C9-4336-B1F7-A55E9D4B4B0A",
+        "deviceName" : "Thorbis Job Documents 2026-10-28",
+        "modelName" : "iPhone 17 Pro",
+        "osBuildNumber" : "23A343",
+        "osVersion" : "26.0",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 2,
+      "passedTests" : 0,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "Thorbis · Built with macOS 26.7.1",
+  "expectedFailures" : 0,
+  "failedTests" : 2,
+  "finishTime" : 1793250777.398,
+  "passedTests" : 0,
+  "result" : "Failed",
+  "skippedTests" : 0,
+  "startTime" : 1793250674.349,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "XCTAssertEqual failed: (\"[]\") is not equal to (\"[\"33333333-3333-4333-8333-333333333333\"]\")",
+      "targetName" : "ThorbisTests",
+      "testIdentifier" : 1,
+      "testIdentifierString" : "LegacyMediaRecoveryTests/testChangedLegacyRemnantRetainsBothOriginalAndScopedRecoveryProof()",
+      "testIdentifierURL" : "test://com.apple.xcode/Thorbis/ThorbisTests/LegacyMediaRecoveryTests/testChangedLegacyRemnantRetainsBothOriginalAndScopedRecoveryProof",
+      "testName" : "testChangedLegacyRemnantRetainsBothOriginalAndScopedRecoveryProof()"
+    },
+    {
+      "failureText" : "XCTAssertEqual failed: (\"1\") is not equal to (\"0\") - Confirmed upload must not orphan the json remnant",
+      "targetName" : "ThorbisTests",
+      "testIdentifier" : 2,
+      "testIdentifierString" : "LegacyMediaRecoveryTests/testConfirmedUploadFinishesInterruptedLegacyCleanupBeforeRemovingProof()",
+      "testIdentifierURL" : "test://com.apple.xcode/Thorbis/ThorbisTests/LegacyMediaRecoveryTests/testConfirmedUploadFinishesInterruptedLegacyCleanupBeforeRemovingProof",
+      "testName" : "testConfirmedUploadFinishesInterruptedLegacyCleanupBeforeRemovingProof()"
+    }
+  ],
+  "title" : "Test - Thorbis",
+  "topInsights" : [
+    {
+      "category" : "Common Failures",
+      "impact" : "50% of failures",
+      "text" : "2 runs of 1 test failed with XCTAssertEqual failed: (\"[]\") is not equal to (\"[\"33333333-3333-4333-8333-333333333333\"]\")"
+    },
+    {
+      "category" : "Common Failures",
+      "impact" : "50% of failures",
+      "text" : "2 runs of 1 test failed with XCTAssertEqual failed: (\"1\") is not equal to (\"0\")"
+    }
+  ],
+  "totalTestCount" : 2
+}
