@@ -635,6 +635,10 @@ enum PaperRoute: Hashable {
     case businessSetup
     case companyDetails
     case job(String)
+    case media(jobID: String, assetID: String)
+    case note(jobID: String, noteID: String)
+    case contact(customerID: String, contactID: String)
+    case location(customerID: String, locationID: String)
 }
 
 private struct PaperDestinations: ViewModifier {
@@ -685,6 +689,10 @@ struct PaperRouteView: View {
         case .businessSetup: BusinessSetupView()
         case .companyDetails: CompanyDetailsView()
         case .job(let id): JobDetailView(jobId: id)
+        case .media(let jobID, let assetID): JobMediaDetailView(jobID: jobID, assetID: assetID)
+        case .note(let jobID, let noteID): JobNoteDetailView(jobID: jobID, noteID: noteID)
+        case .contact(let customerID, let contactID): CustomerContactDetailView(customerID: customerID, contactID: contactID)
+        case .location(let customerID, let locationID): ServiceLocationDetailView(customerID: customerID, locationID: locationID)
         case .local(let section):
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 LocalWorkspaceView(section: section, actorID: actor, organizationID: org)
