@@ -5,9 +5,6 @@ Thorbis/Sources/JobOperationsViews.swift
 Thorbis/Sources/Screens.swift
 Thorbis/Sources/PaperJobDetailView.swift
 Thorbis/Sources/SettingsView.swift
-Thorbis/Sources/PaperComponents.swift
 Thorbis/Sources/MemberAccess.swift
 Thorbis/Sources/MediaView.swift
 Thorbis/Sources/TeamViews.swift
-Thorbis/Sources/NewEstimateView.swift
-Thorbis/Sources/EstimateBuilder.swift
