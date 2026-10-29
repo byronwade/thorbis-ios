@@ -1,8 +1,10 @@
 import Foundation
 
 enum InvoiceLineEditorError: Error, LocalizedError, Equatable {
+    case notDraft
     case noLines
     case tooManyLines
+    case missingLine
     case descriptionRequired
     case descriptionTooLong
     case invalidQuantity
@@ -15,8 +17,10 @@ enum InvoiceLineEditorError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .notDraft: "Only a draft invoice can change line items."
         case .noLines: "An invoice needs at least one line item."
         case .tooManyLines: "An invoice can contain up to 500 line items."
+        case .missingLine: "That line is no longer on this invoice."
         case .descriptionRequired: "Enter a description for each line item."
         case .descriptionTooLong: "Line item descriptions can contain up to 211 characters."
         case .invalidQuantity: "Quantity must be a whole number from 1 to 100,000."
@@ -152,23 +156,47 @@ struct InvoiceLineEditorState: Equatable {
     }
 
     mutating func addManualLine() {
-        guard lines.count < 500 else { return }
+        guard invoice.status == "draft", lines.count < 500 else { return }
         lines.append(InvoiceLineDraft(description: "", quantity: "1", unitPrice: "",
                                       source: .manual))
     }
 
-    mutating func removeLine(id: UUID) {
-        lines.removeAll { $0.id == id }
+    mutating func removeLine(id: UUID) throws {
+        try requireDraft()
+        guard let index = lines.firstIndex(where: { $0.id == id }) else {
+            throw InvoiceLineEditorError.missingLine
+        }
+        lines.remove(at: index)
     }
 
     mutating func moveLine(id: UUID, to destinationIndex: Int) {
-        guard let sourceIndex = lines.firstIndex(where: { $0.id == id }),
+        guard invoice.status == "draft",
+              let sourceIndex = lines.firstIndex(where: { $0.id == id }),
               lines.indices.contains(destinationIndex), sourceIndex != destinationIndex else { return }
         let line = lines.remove(at: sourceIndex)
         lines.insert(line, at: destinationIndex)
     }
 
+    mutating func setQuantity(_ id: UUID, _ quantity: Int) throws {
+        try requireDraft()
+        guard (1...100_000).contains(quantity) else { throw InvoiceLineEditorError.invalidQuantity }
+        guard let index = lines.firstIndex(where: { $0.id == id }) else {
+            throw InvoiceLineEditorError.missingLine
+        }
+        lines[index].quantity = String(quantity)
+    }
+
+    mutating func setUnitPrice(_ id: UUID, cents: Int) throws {
+        try requireDraft()
+        guard cents.magnitude <= 100_000_000 else { throw InvoiceLineEditorError.invalidPrice }
+        guard let index = lines.firstIndex(where: { $0.id == id }) else {
+            throw InvoiceLineEditorError.missingLine
+        }
+        lines[index].unitPrice = Self.priceText(cents)
+    }
+
     mutating func addPriceBookItem(_ item: PriceBookListItem) throws {
+        try requireDraft()
         guard item.archivedAt == nil else { throw InvoiceLineEditorError.archivedPriceBookItem }
         guard UUID(uuidString: item.id) != nil, (1...Int(Int32.max)).contains(item.revision),
               invoice.currency == "USD", item.sellPrice.currency == "USD",
@@ -185,6 +213,7 @@ struct InvoiceLineEditorState: Equatable {
     }
 
     func makeRequest() throws -> FieldInvoiceLinesRequest {
+        try requireDraft()
         guard invoice.currency == "USD" else { throw InvoiceLineEditorError.unsupportedCurrency }
         guard !lines.isEmpty else { throw InvoiceLineEditorError.noLines }
         guard lines.count <= 500 else { throw InvoiceLineEditorError.tooManyLines }
@@ -216,6 +245,15 @@ struct InvoiceLineEditorState: Equatable {
         }
         return FieldInvoiceLinesRequest(expectedLinesRevision: invoice.linesRevision,
                                         lines: encodedLines, priceBookOverrideReason: overrideReason)
+    }
+
+    private func requireDraft() throws {
+        guard invoice.status == "draft" else { throw InvoiceLineEditorError.notDraft }
+    }
+
+    /// Cents for a finished price. Incomplete text such as "4." or "" returns nil so a field can keep it.
+    static func priceCents(_ text: String) -> Int? {
+        try? parsePrice(text)
     }
 
     private static func parsePrice(_ rawValue: String) throws -> Int {

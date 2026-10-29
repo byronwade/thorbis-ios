@@ -4,13 +4,22 @@ import XCTest
 final class InvoiceLineEditorTests: XCTestCase {
     private let invoiceJSON = #"{"id":"00000000-0000-4000-8000-00000000000a","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","origin":"job_completion","sourceOperationKey":"completion:test","status":"draft","linesRevision":3,"amountPaid":0,"currency":"USD","lines":[{"id":"00000000-0000-4000-8000-00000000000b","description":"Repair","quantity":2,"unitPrice":{"amount":1250,"currency":"USD"},"source":{"kind":"manual"}}],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
 
-    private func makeInvoice(_ lines: String? = nil) throws -> InvoiceRecord {
+    private func makeInvoice(_ lines: String? = nil, status: String = "draft") throws -> InvoiceRecord {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(invoiceJSON.utf8)) as? [String: Any])
+        object["status"] = status
         if let lines {
             object["lines"] = try JSONSerialization.jsonObject(with: Data("[\(lines)]".utf8))
         }
         let payload = try JSONSerialization.data(withJSONObject: object)
         return try JSONDecoder().decode(InvoiceRecord.self, from: payload)
+    }
+
+    private func capacitor() -> PriceBookListItem {
+        PriceBookListItem(
+            id: "11111111-1111-4111-8111-111111111111", description: "Replace capacitor",
+            unit: "each", kind: "material", taxClassification: "taxable",
+            sellPrice: .init(amount: 12500, currency: "USD"), revision: 7, archivedAt: nil
+        )
     }
 
     func testEditorUsesObservedRevisionAndConvertsDecimalPriceToExactCents() throws {
@@ -101,6 +110,58 @@ final class InvoiceLineEditorTests: XCTestCase {
         XCTAssertTrue(state.hasUnsupportedLineSources)
         XCTAssertThrowsError(try state.makeRequest()) {
             XCTAssertEqual($0 as? InvoiceLineEditorError, .unsupportedLineSource)
+        }
+    }
+
+    func testDraftInvoiceAddsAdjustsAndRemovesAPriceBookLineInOneSession() throws {
+        var state = InvoiceLineEditorState(invoice: try makeInvoice())
+        let before = state.lines.count
+
+        try state.addPriceBookItem(capacitor())
+        let added = try XCTUnwrap(state.lines.last)
+        try state.setQuantity(added.id, 4)
+        try state.setUnitPrice(added.id, cents: 9900)
+        state.priceBookOverrideReason = "Customer approved the adjusted price"
+
+        let editedRequest = try state.makeRequest()
+        let edited = try XCTUnwrap(editedRequest.lines.last)
+        XCTAssertEqual(edited.description, "Replace capacitor")
+        XCTAssertEqual(edited.quantity, 4)
+        XCTAssertEqual(edited.unitPrice.amount, 9900)
+        XCTAssertEqual(editedRequest.priceBookOverrideReason, "Customer approved the adjusted price")
+
+        try state.removeLine(id: added.id)
+        let saved = try state.makeRequest()
+        XCTAssertEqual(saved.lines.count, before)
+        XCTAssertFalse(saved.lines.contains { $0.description == "Replace capacitor" })
+    }
+
+    func testIssuedPaidAndVoidInvoicesRefusePriceBookEdits() throws {
+        let item = capacitor()
+        for status in ["issued", "paid", "void"] {
+            var state = InvoiceLineEditorState(invoice: try makeInvoice(status: status))
+            let lineID = try XCTUnwrap(state.lines.first?.id)
+            let quantity = state.lines[0].quantity
+            let price = state.lines[0].unitPrice
+
+            XCTAssertThrowsError(try state.addPriceBookItem(item)) {
+                XCTAssertEqual($0 as? InvoiceLineEditorError, .notDraft)
+            }
+            XCTAssertThrowsError(try state.setQuantity(lineID, 4)) {
+                XCTAssertEqual($0 as? InvoiceLineEditorError, .notDraft)
+            }
+            XCTAssertThrowsError(try state.setUnitPrice(lineID, cents: 9900)) {
+                XCTAssertEqual($0 as? InvoiceLineEditorError, .notDraft)
+            }
+            XCTAssertThrowsError(try state.removeLine(id: lineID)) {
+                XCTAssertEqual($0 as? InvoiceLineEditorError, .notDraft)
+            }
+            XCTAssertThrowsError(try state.makeRequest()) {
+                XCTAssertEqual($0 as? InvoiceLineEditorError, .notDraft)
+            }
+            XCTAssertEqual(state.lines.count, 1)
+            XCTAssertEqual(state.lines[0].quantity, quantity)
+            XCTAssertEqual(state.lines[0].unitPrice, price)
         }
     }
 }

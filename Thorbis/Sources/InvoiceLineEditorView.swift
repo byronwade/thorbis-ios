@@ -16,6 +16,12 @@ struct InvoiceLineEditorView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var staleRevision = false
+    @ObservedObject private var catalog = PriceBookCatalog.shared
+    @State private var query = ""
+    @State private var kind = PriceBookKindFilter.all
+    @FocusState private var focus: EstimateBuilderFocus?
+
+    private var searching: Bool { canEdit && (focus == .search || !query.isEmpty) }
 
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
@@ -37,6 +43,13 @@ struct InvoiceLineEditorView: View {
 
     var body: some View {
         ScrollView {
+            if searching {
+                PriceBookResultsList(
+                    catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
+                    quantityOnEstimate: priceBookQuantity, addItem: addCatalogItem, addCustom: addCustomLine,
+                    retry: { Task { await refreshCatalog(force: true) } }
+                )
+            } else {
             VStack(alignment: .leading, spacing: 18) {
                 if let error { ErrorBanner(message: error) }
                 if staleRevision {
@@ -83,12 +96,19 @@ struct InvoiceLineEditorView: View {
                     VStack(spacing: 0) {
                         ForEach($editor.lines) { $line in
                             EditableInvoiceLineRow(
-                                line: $line,
+                                line: committedLine($line),
                                 canMoveUp: editor.lines.first?.id != line.id,
                                 canMoveDown: editor.lines.last?.id != line.id,
                                 moveUp: { moveLine(line.id, offset: -1) },
                                 moveDown: { moveLine(line.id, offset: 1) },
-                                remove: { editor.removeLine(id: line.id) }
+                                remove: {
+                                    do {
+                                        try editor.removeLine(id: line.id)
+                                        error = nil
+                                    } catch {
+                                        self.error = error.localizedDescription
+                                    }
+                                }
                             )
                             .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
                             if line.id != editor.lines.last?.id {
@@ -133,6 +153,7 @@ struct InvoiceLineEditorView: View {
             .padding(.bottom, 24)
             .frame(maxWidth: 640)
             .frame(maxWidth: .infinity)
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
@@ -145,6 +166,14 @@ struct InvoiceLineEditorView: View {
             }
         }
         .keyboardDoneButton()
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if canEdit && !editor.hasUnsupportedLineSources {
+                EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
+                                  prompt: "Search price book or type a line", finish: finishSearch)
+                    .disabled(busy)
+            }
+        }
+        .task { await refreshCatalog() }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
@@ -193,6 +222,71 @@ struct InvoiceLineEditorView: View {
         } message: {
             Text("The invoice changed on the server. Reloading replaces this form with the latest saved lines.")
         }
+    }
+
+    private func committedLine(_ line: Binding<InvoiceLineDraft>) -> Binding<InvoiceLineDraft> {
+        Binding(
+            get: { line.wrappedValue },
+            set: { proposed in
+                guard editor.invoice.status == "draft" else { return }
+                var next = proposed
+                let quantityText = proposed.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let quantity = Int(quantityText), (1...100_000).contains(quantity), String(quantity) == quantityText {
+                    try? editor.setQuantity(proposed.id, quantity)
+                    if let stored = editor.lines.first(where: { $0.id == proposed.id })?.quantity {
+                        next.quantity = stored
+                    }
+                }
+                if let cents = InvoiceLineEditorState.priceCents(proposed.unitPrice) {
+                    try? editor.setUnitPrice(proposed.id, cents: cents)
+                    if let stored = editor.lines.first(where: { $0.id == proposed.id })?.unitPrice {
+                        next.unitPrice = stored
+                    }
+                }
+                line.wrappedValue = next
+            }
+        )
+    }
+
+    private func priceBookQuantity(_ itemID: String) -> Int? {
+        let matches = editor.lines.filter { line in
+            if case .priceBookSelection(let id, _) = line.source { return id == itemID }
+            return false
+        }
+        guard !matches.isEmpty else { return nil }
+        return matches.reduce(0) { $0 + (Int($1.quantity) ?? 0) }
+    }
+
+    private func addCatalogItem(_ item: PriceBookListItem) {
+        do {
+            try editor.addPriceBookItem(item)
+            error = nil
+            catalog.recordUse(item.id)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func addCustomLine(_ text: String) {
+        let before = editor.lines.count
+        editor.addManualLine()
+        guard editor.lines.count > before, let index = editor.lines.indices.last else {
+            error = InvoiceLineEditorError.tooManyLines.localizedDescription
+            return
+        }
+        editor.lines[index].description = text
+        finishSearch()
+    }
+
+    private func finishSearch() {
+        query = ""
+        kind = .all
+        focus = nil
+    }
+
+    private func refreshCatalog(force: Bool = false) async {
+        guard canUsePriceBook else { return }
+        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
     }
 
     private var invoiceEditorHeading: some View {
