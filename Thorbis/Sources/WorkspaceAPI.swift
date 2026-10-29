@@ -62,6 +62,46 @@ struct PriceBookPage {
     let nextCursor: String?
 }
 
+/// What the price book screen says when a load fails. A decode mismatch used to surface
+/// Foundation's "isn't in the correct format" sentence; people get one plain line instead.
+enum PriceBookLoadError {
+    static let friendly = "The price book couldn't be loaded."
+
+    static func message(for error: Error) -> String {
+        if let problem = error as? Problem {
+            if problem.title == "Invalid API response" || problem.title == "Invalid Price Book response" {
+                return friendly
+            }
+            if let detail = problem.detail, !detail.isEmpty { return detail }
+            if let title = problem.title, !title.isEmpty { return title }
+        }
+        let raw = error.localizedDescription
+        if raw.contains("correct format") || raw.contains("couldn’t be read") || raw.contains("couldn't be read") {
+            return friendly
+        }
+        return raw
+    }
+}
+
+/// `price_book.item_revisions.sell_price_amount` is `bigint`. node-pg's default int8 parser
+/// puts that on the wire as a JSON string. The in-memory API and older fixtures send a number.
+private struct PostgresBigint: Decodable {
+    let value: Int
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let number = try? container.decode(Int.self) {
+            value = number
+            return
+        }
+        let text = try container.decode(String.self)
+        guard let number = Int(text) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Expected a bigint")
+        }
+        value = number
+    }
+}
+
 struct PriceBookItem: Decodable {
     let id: String
     let organizationId: String
@@ -96,7 +136,8 @@ private struct PriceBookQueryResponse: Decodable {
             let revision: Int
             let description: String
             let unit: String
-            let sellPriceAmount: Int
+            /// Postgres `bigint`. node-pg sends int8 as a JSON string; a JSON number still decodes.
+            let sellPriceAmount: PostgresBigint
             let currency: String
             let taxClassification: String
             let kind: String
@@ -168,7 +209,7 @@ extension APIClient {
             PriceBookListItem(id: entry.id, description: entry.fields.description,
                               unit: entry.fields.unit, kind: entry.fields.kind,
                               taxClassification: entry.fields.taxClassification,
-                              sellPrice: FieldMoney(amount: entry.fields.sellPriceAmount,
+                              sellPrice: FieldMoney(amount: entry.fields.sellPriceAmount.value,
                                                     currency: entry.fields.currency),
                               revision: entry.fields.revision, archivedAt: entry.fields.archivedAt)
         }, nextCursor: response.nextCursor)
