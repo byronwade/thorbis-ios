@@ -88,15 +88,8 @@ struct JobEstimateSummary {
             guard ["approved", "sent"].contains(record.status) else { continue }
             let currency = record.lines.first?.unitPrice.currency ?? "USD"
             guard currency.utf8.count == 3, currency.utf8.allSatisfy({ (65...90).contains($0) }) else { return nil }
-            var total = 0
-            for line in record.lines {
-                guard line.unitPrice.currency == currency, line.quantity >= 0, line.unitPrice.amount >= 0 else { return nil }
-                let product = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
-                let sum = total.addingReportingOverflow(product.partialValue)
-                guard !product.overflow, !sum.overflow else { return nil }
-                total = sum.partialValue
-            }
-            let sum = (sums[record.status]?[currency] ?? 0).addingReportingOverflow(total)
+            guard let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) else { return nil }
+            let sum = (sums[record.status]?[currency] ?? 0).addingReportingOverflow(amounts.total)
             guard !sum.overflow else { return nil }
             sums[record.status, default: [:]][currency] = sum.partialValue
         }
@@ -150,10 +143,10 @@ extension JobDocumentRead where Record == InvoiceRecord {
     }
 
     private static func isOwed(_ invoice: InvoiceRecord) -> Bool {
-        guard invoice.status == "issued", invoice.currency == "USD", invoice.amountPaid >= 0,
-              invoice.lines.allSatisfy({ $0.unitPrice.currency == invoice.currency && $0.unitPrice.amount >= 0 }),
-              let total = paperLinesTotal(invoice.lines) else { return false }
-        return total > invoice.amountPaid
+        guard invoice.status == "issued", invoice.currency == "USD",
+              let amounts = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency,
+                                                     amountPaid: invoice.amountPaid) else { return false }
+        return amounts.due > 0
     }
 }
 

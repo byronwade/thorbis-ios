@@ -569,7 +569,7 @@ struct CustomerInvoicePresentation: View {
     @State private var error: String?
     @State private var signedBy: String?
 
-    init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?,
+    init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?, initiallySigning: Bool = false,
          onSigned: @escaping (InvoiceRecord) -> Void, onDone: @escaping () -> Void) {
         self.invoice = invoice
         self.customerName = customerName
@@ -578,6 +578,7 @@ struct CustomerInvoicePresentation: View {
         self.onSigned = onSigned
         self.onDone = onDone
         _name = State(initialValue: customerName)
+        _signing = State(initialValue: initiallySigning)
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
@@ -627,12 +628,8 @@ struct CustomerInvoicePresentation: View {
 
     /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest.
     private var amountRows: [CustomerAmountRow] {
-        var rows = [CustomerAmountRow(label: "Total", amount: money(total, currency: invoice.currency), emphasis: invoice.amountPaid == 0)]
-        if invoice.amountPaid > 0 {
-            rows.append(CustomerAmountRow(label: "Paid", amount: money(invoice.amountPaid, currency: invoice.currency), emphasis: false))
-            rows.append(CustomerAmountRow(label: "Amount due", amount: dueText, emphasis: true))
-        }
-        return rows
+        CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
+            .map { customerAmountRows($0, currency: invoice.currency) } ?? []
     }
 
     private var signScreen: some View {
@@ -741,20 +738,25 @@ struct CustomerLinesCard: View {
     let currency: String
     let type: CustomerType
     let rows: [CustomerAmountRow]
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(lines) { line in
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(line.description).font(Theme.font(type.body))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
-                            .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            lineDetails(line).frame(maxWidth: .infinity, alignment: .leading)
+                            lineValue(line).minimumScaleFactor(0.6).lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 16) {
+                            lineDetails(line)
+                            Spacer(minLength: 8)
+                            lineValue(line).fixedSize()
+                        }
                     }
-                    Spacer(minLength: 8)
-                    Text(money(line.quantity * line.unitPrice.amount, currency: line.unitPrice.currency))
-                        .font(Theme.monoFont(type.body)).fixedSize()
                 }
                 .padding(.vertical, 14)
                 .accessibilityElement(children: .combine)
@@ -765,12 +767,19 @@ struct CustomerLinesCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             ForEach(rows, id: \.self) { row in
-                HStack(alignment: .firstTextBaseline) {
-                    Text(row.label).font(Theme.font(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
-                    Spacer(minLength: 8)
-                    Text(row.amount)
-                        .font(Theme.monoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
-                        .minimumScaleFactor(0.6).lineLimit(1)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            amountLabel(row)
+                            amountValue(row).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline) {
+                            amountLabel(row)
+                            Spacer(minLength: 8)
+                            amountValue(row)
+                        }
+                    }
                 }
                 .padding(.vertical, row.emphasis ? 16 : 10)
                 .accessibilityElement(children: .combine)
@@ -780,6 +789,46 @@ struct CustomerLinesCard: View {
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
     }
+
+    private func lineDetails(_ line: FieldLine) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(line.description).font(Theme.font(type.body))
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
+                .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func lineValue(_ line: FieldLine) -> some View {
+        Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
+            .font(Theme.monoFont(type.body))
+    }
+
+    private func amountLabel(_ row: CustomerAmountRow) -> some View {
+        Text(row.label).font(Theme.font(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func amountValue(_ row: CustomerAmountRow) -> some View {
+        Text(row.amount)
+            .font(Theme.monoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
+            .minimumScaleFactor(0.6).lineLimit(1)
+    }
+}
+
+func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, invoice: Bool = true) -> [CustomerAmountRow] {
+    var rows: [CustomerAmountRow] = []
+    if amounts.credits < 0 {
+        rows.append(.init(label: "Subtotal", amount: money(amounts.subtotal, currency: currency), emphasis: false))
+        rows.append(.init(label: "Discounts and credits", amount: money(amounts.credits, currency: currency), emphasis: false))
+    }
+    rows.append(.init(label: "Total", amount: money(amounts.total, currency: currency), emphasis: !invoice))
+    if invoice {
+        if amounts.paid > 0 { rows.append(.init(label: "Paid", amount: money(amounts.paid, currency: currency), emphasis: false)) }
+        rows.append(.init(label: "Amount due", amount: money(amounts.due, currency: currency), emphasis: true))
+    }
+    return rows
 }
 
 /// The one commit on a customer screen. Same ink, radius and heights as CustomerCommitButton,

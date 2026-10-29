@@ -51,7 +51,7 @@ Native unit/API fixtures must cover identity, discounts, overflow, payment histo
 navigation boundaries, stale/session/cancellation. Native journeys must swipe and
 use buttons through at least two estimates and two invoices for one job, exclude
 another job, display discount/payment/refund details, preserve review/payment
-handoffs, and exercise large Dynamic Type/dark mode. Run full native scheme,
+handoffs, and exercise large Dynamic Type/dark mode. Run important affected native suites under the current user testing preference,
 independent whole-branch review, release notes, archive/sign/upload and verify
 existing TestFlight tester group before claiming delivery.
 
@@ -66,6 +66,6 @@ document swipe pattern and are rejected for this surface. Native paging is an
 implementation choice with explicit controls as required by CP-10.
 
 12ui installed0.2.130 and attempted a Paper-anchored review; service requires its
-own sign-in and produced no candidates. Optional tooling preference asked;
-continue data work meanwhile. Existing explicit Paper fidelity and continuous-work
+own sign-in and produced no candidates. Latest user choice is the existing Paper design directly;
+no further12ui sign-in is required. Existing explicit Paper fidelity and continuous-work
 authorization govern implementation; do not replace Paper with an unreviewed image.

@@ -347,6 +347,11 @@ struct CustomerModeContainer<Content: View>: View {
                 }
             }
         }
+        #if DEBUG
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
+        }
+        #endif
         .interactiveDismissDisabled()
         .persistentSystemOverlays(.hidden)
     }

@@ -67,16 +67,8 @@ final class InvoicePaymentCollectionModel: ObservableObject {
 
     var totalCents: Int? {
         guard let invoice, invoice.currency == "USD" else { return nil }
-        var total = 0
-        for line in invoice.lines {
-            guard line.quantity >= 0, line.unitPrice.amount >= 0,
-                  line.unitPrice.currency == invoice.currency else { return nil }
-            let (lineTotal, productOverflow) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
-            let (nextTotal, sumOverflow) = total.addingReportingOverflow(lineTotal)
-            guard !productOverflow, !sumOverflow else { return nil }
-            total = nextTotal
-        }
-        return total
+        return CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency,
+                                       amountPaid: invoice.amountPaid)?.total
     }
 
     var outstandingCents: Int? {
@@ -114,18 +106,28 @@ final class InvoicePaymentCollectionModel: ObservableObject {
 
     func load() async {
         guard !isLoading else { return }
+        let generation = api.requestGeneration
         isLoading = true
         historyComplete = false
+        payments = []
         defer { isLoading = false }
         do {
             try Task.checkCancellation()
             let loadedInvoice = try await api.fieldInvoice(invoiceID)
+            try Task.checkCancellation()
+            guard generation == api.requestGeneration else { throw CancellationError() }
             guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
             try Task.checkCancellation()
-            payments = try await api.fieldPayments(invoiceID)
+            let loadedPayments = try await api.fieldPayments(invoiceID)
+            try Task.checkCancellation()
+            guard generation == api.requestGeneration else { throw CancellationError() }
+            guard validHistory(loadedPayments, for: loadedInvoice) else {
+                throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
+            }
+            payments = loadedPayments
             historyComplete = true
             loadError = nil
             if acceptedPaymentID == nil, let request = pendingRequest,
@@ -134,8 +136,30 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             reconcileAcceptedPayment()
         } catch is CancellationError {
+            invoice = nil
+            payments = []
+            pendingRequest = nil
+            historyComplete = false
         } catch {
             loadError = error.localizedDescription
+        }
+    }
+
+    private func validHistory(_ records: [FieldPaymentRecord], for invoice: InvoiceRecord) -> Bool {
+        var ids = Set<String>()
+        return records.allSatisfy { payment in
+            guard payment.invoiceId == invoice.id, payment.organizationId == invoice.organizationId,
+                  ids.insert(payment.id.lowercased()).inserted,
+                  payment.amount.currency == invoice.currency, payment.amount.amount > 0 else { return false }
+            let refunded = payment.refundedAmount ?? (payment.status == .refunded ? payment.amount.amount : 0)
+            guard refunded >= 0, refunded <= payment.amount.amount else { return false }
+            let received = payment.amount.amount - refunded
+            if payment.status == .refunded && received != 0 { return false }
+            if let net = payment.netAmount {
+                return net.currency == invoice.currency && net.amount == received
+            }
+            // Legacy full refunds can omit netAmount; a partial refund must supply it.
+            return refunded == 0 || payment.status == .refunded
         }
     }
 

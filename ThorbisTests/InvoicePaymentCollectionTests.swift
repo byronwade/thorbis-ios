@@ -6,6 +6,109 @@ final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
 
+    func testPartialRefundUsesOnlyTheRemainingReceivedAmount() async throws {
+        var receipt = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payment(idempotencyKey: "partial-refund").utf8)) as? [String: Any])
+        receipt["refundedAmount"] = 1000
+        receipt["netAmount"] = ["amount": 1500, "currency": "USD"]
+        let page = String(decoding: try JSONSerialization.data(withJSONObject: ["items": [receipt]]), as: UTF8.self)
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice(amountPaid: 1500)), .init(200, page)]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        await model.load()
+        XCTAssertTrue(model.historyComplete)
+        XCTAssertEqual(model.paymentTotalCents, 1500)
+        XCTAssertEqual(model.outstandingCents, 8500)
+        XCTAssertTrue(model.canRecordPayment)
+    }
+
+    func testCancellationDoesNotLeaveAnActionableInvoiceOrHistory() async {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice(), gate: gate)]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let loading = Task { await model.load() }
+        await waitForRequests(1)
+        loading.cancel()
+        gate.release()
+        await loading.value
+        XCTAssertNil(model.invoice)
+        XCTAssertFalse(model.historyComplete)
+        XCTAssertFalse(model.canRecordPayment)
+    }
+
+    func testMalformedHistoryCannotEnableCollectionOrPublishMoney() async throws {
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payment(idempotencyKey: "malformed-history").utf8)) as? [String: Any])
+        for changed: [String: Any] in [
+            ["amount": ["amount": -2500, "currency": "USD"]],
+            ["amount": ["amount": 2500, "currency": "EUR"]],
+            ["netAmount": ["amount": -1, "currency": "USD"]],
+            ["refundedAmount": 3000],
+            ["refundedAmount": 1000]
+        ] {
+            var malformed = original
+            changed.forEach { malformed[$0.key] = $0.value }
+            let page = String(decoding: try JSONSerialization.data(withJSONObject: ["items": [malformed]]), as: UTF8.self)
+            let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice()), .init(200, page)]), baseURL: "https://app.thorbis.com")
+            let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+            await model.load()
+            XCTAssertFalse(model.historyComplete)
+            XCTAssertTrue(model.payments.isEmpty)
+            XCTAssertFalse(model.canRecordPayment)
+            XCTAssertNotNil(model.loadError)
+        }
+    }
+
+    func testChangedAPIContextCannotPublishTheFormerInvoicesHistory() async {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice()), .init(200, #"{"items":[]}"#, gate: gate)]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let loading = Task { await model.load() }
+        await waitForRequests(2)
+        client.invalidateRequests()
+        gate.release()
+        await loading.value
+        XCTAssertNil(model.invoice)
+        XCTAssertTrue(model.payments.isEmpty)
+        XCTAssertFalse(model.historyComplete)
+        XCTAssertFalse(model.canRecordPayment)
+    }
+
+    func testDiscountedIssuedInvoiceKeepsItsCorrectCollectableBalance() async throws {
+        let rows: [[String: Any]] = [
+            ["id": "charge", "description": "Service", "quantity": 1, "unitPrice": ["amount": 10000, "currency": "USD"]],
+            ["id": "discount", "description": "Member discount", "quantity": 1, "unitPrice": ["amount": -1500, "currency": "USD"]]
+        ]
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, try editedInvoice(["lines": rows])), .init(200, #"{"items":[]}"#)]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        await model.load()
+        XCTAssertEqual(model.totalCents, 8500)
+        XCTAssertEqual(model.outstandingCents, 8500)
+        XCTAssertTrue(model.canRecordPayment)
+    }
+
+    func testForeignOrDuplicatedHistoryCannotBeShownAsThisInvoicesPayments() async throws {
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payment(idempotencyKey: "test-history").utf8)) as? [String: Any])
+        for changed in [["invoiceId": paymentID], ["organizationId": paymentID]] {
+            var foreign = original
+            changed.forEach { foreign[$0.key] = $0.value }
+            let page = String(decoding: try JSONSerialization.data(withJSONObject: ["items": [foreign]]), as: UTF8.self)
+            let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice(amountPaid: 2500)), .init(200, page)]), baseURL: "https://app.thorbis.com")
+            let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+            await model.load()
+            XCTAssertFalse(model.historyComplete)
+            XCTAssertTrue(model.payments.isEmpty)
+            XCTAssertFalse(model.canRecordPayment)
+            XCTAssertNotNil(model.loadError)
+        }
+        let duplicate = payment(idempotencyKey: "test-history")
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice(amountPaid: 5000)), .init(200, #"{"items":[\#(duplicate),\#(duplicate)]}"#)]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        await model.load()
+        XCTAssertFalse(model.historyComplete)
+        XCTAssertTrue(model.payments.isEmpty)
+        XCTAssertFalse(model.canRecordPayment)
+    }
+
     func testScopedRefreshRejectsForeignContentsAndLocksExistingPaper() async throws {
         let scope = JobDocumentScope(jobID: "00000000-0000-4000-8000-000000000001",
             organizationID: "00000000-0000-4000-8000-000000000002", customerID: "00000000-0000-4000-8000-000000000003")

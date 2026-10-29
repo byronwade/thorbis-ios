@@ -1,6 +1,6 @@
 # Customer job document book Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Present every job estimate and invoice together with swipe navigation and clear discounts/payment history, then deliver a verified TestFlight update.
 
@@ -39,11 +39,11 @@ All original customer document and feature-retention requirements remain require
 
 **Interfaces:** CustomerDocumentAmounts.init?(lines:[FieldLine],currency:String,amountPaid:Int=0), subtotal/credits/total/paid/due:Int. InvoicePaymentCollectionModel.totalCents/outstandingCents reuse this projection; load validates full history against verified invoice and API generation before publishing.
 
-- [ ] Write tests for25000charges-2500credits=22500total,10000paid=12500due; overflow/mixed currency/negative totals refuse. Discounted issued invoice permits valid collection; foreign/duplicate/malformed payment histories refuse without publication or collection; session/cancellation refuses late results.
-- [ ] Run focused test RED (compile absence then behavioral failing stubs where necessary); inspect counts/output.
-- [ ] Implement checked display projection and guarded history load; no vendor calls or new money rules.
-- [ ] Run focused unit tests and full relevant payment suites; expected zero failures/skips.
-- [ ] Commit locally with evidence.
+- [x] Write tests for25000charges-2500credits=22500total,10000paid=12500due; overflow/mixed currency/negative totals refuse. Discounted issued invoice permits valid collection; foreign/duplicate/malformed payment histories refuse without publication or collection; session/cancellation refuses late results.
+- [x] Run focused test RED (compile absence then behavioral failing stubs where necessary); inspect counts/output.
+- [x] Implement checked display projection and guarded history load; no vendor calls or new money rules.
+- [x] Run focused unit tests and full relevant payment suites; expected zero failures/skips.
+- [x] Commit locally with evidence.
 
 ### Task 2: Browse all job documents
 
@@ -51,17 +51,17 @@ All original customer document and feature-retention requirements remain require
 
 **Interfaces:** Stable CustomerJobDocumentID(kind,id) and ordered selection with previous/next; book consumes exact-scope reads, payment history state and Task1 amount projection. Existing openEstimate/openInvoice and authentication own actions. Read-only pages never mint/sign/pay automatically.
 
-- [ ] Write model/native RED for two estimates/two invoices, swipe/button navigation, overview jump, foreign exclusion, removed selection and stale refusal; show original credit descriptions, labelled savings/paid/due and dated refunds; preserve canonical approval and selected-invoice handoff.
-- [ ] Implement book using native paging and explicit buttons, narrow state and lazy child pages; keep decisions outside swipe surface. Reuse CustomerLinesCard and price rows; history in a disclosure, no internal data.
-- [ ] Extend read-only preview fixtures with actual multiple documents, a discount and recorded/refunded payments; no requests escape fixture.
-- [ ] Run model/native journeys, largest text/dark/iPad visual checks, full scheme and release notes tests; expected zero failures/skips.
+- [x] Write model/native RED for two estimates/two invoices, swipe/button navigation, overview jump, foreign exclusion, removed selection and stale refusal; show original credit descriptions, labelled savings/paid/due and dated refunds; preserve canonical approval and selected-invoice handoff.
+- [x] Implement book using native paging and explicit buttons, narrow state and lazy child pages; keep decisions outside swipe surface. Reuse CustomerLinesCard and price rows; history in a disclosure, no internal data.
+- [x] Extend read-only preview fixtures with actual multiple documents, a discount and recorded/refunded payments; no requests escape fixture.
+- [x] Run model/native journeys, largest text/dark/iPad visual checks, important affected suites and release notes tests; expected zero failures/skips.
 - [ ] Commit and record screenshots/fingerprints.
 
 ### Task 3: Review and TestFlight delivery
 
 **Files:** execution evidence, release notes as needed; existing archive/export workflow.
 
-- [ ] Fresh whole-branch review; fix Important/Critical in one RED/GREEN pass and full scheme, record rulings/minors.
+- [x] Fresh whole-branch review; fix Important/Critical in one RED/GREEN pass and affected suites, record rulings/minors.
 - [ ] Verify source fingerprints and release boundaries; create signed archive with unique next build after ASC preflight.
 - [ ] Upload, then verify processing, notes saved and existing tester group assignment. Attach new draft PR; no duplicate tester invites.
 - [ ] Report exact available build and any unfinished larger app work. Do not mark full persistent goal complete.

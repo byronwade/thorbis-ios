@@ -58,8 +58,15 @@ Use a compact evidence table in the feature's execution record:
 | Accessibility and adaptation | Large Dynamic Type, VoiceOver/focus, contrast/motion, phone/iPad and RTL/long text as relevant |
 | Reliability/performance | Relevant tests, representative data, device/runtime measurements; no inferred pass |
 | Privacy and permissions | No sensitive analytics/log payloads, contextual permissions and valid denial recovery |
-| Release | Fresh full native scheme, source fingerprints, notes, archive/signing and distribution boundary checks |
+| Release | Fresh native qualification, source fingerprints, notes, archive/signing and distribution boundary checks |
 | TestFlight delivery | Unique build, successful upload, completed processing and intended group access |
+
+For the current continuous delivery goal, the user explicitly requested important
+testing and skipping repetitive basic tests/CI. Choose regression suites for the
+changed financial, identity, consent and native journeys, plus release boundary
+checks. Run a broader scheme when risk or a new failure warrants it; record the
+actual scope and never describe a focused run as a full scheme. Do not omit a
+known failing required check to speed an upload.
 
 Record pass/fail/not-tested/not-applicable with concrete evidence and a reason.
 Review scope must match the claim. A scoped docs change does not require an app
