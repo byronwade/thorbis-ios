@@ -1,0 +1,11 @@
+Build 78 — saved work and recovery
+
+Tap the saved-work banner to review waiting changes, photos and scans grouped by job. Open a job, use Back to return to the same review, or Done to return to your original screen. Retry eligible changes from the review; photo previews, tags and file retries remain in the job Photos area.
+
+This build also improves cleanup of older recovered photos so changed or inaccessible originals are preserved. Existing job-specific swipeable estimates/invoices, discounts and invoice payment/refund history remain available.
+
+Please test work saved while offline, reopening the app with pending work, returning from a job, and switching workspaces. Report any banner tap after reopening that does not open the review; an earlier simulator occurrence remains unexplained despite later passing checks.
+
+Known visual issue: Retry/Dismiss can still look active when editing access has been removed; the access explanation is shown and actions are disabled.
+
+Tap to Pay distribution qualification, secure manual card entry, and private check scanning/deposit are separate work in progress and are not newly enabled by this build.

@@ -1,0 +1,10 @@
+2026-10-29 03:06:02.141 xcodebuild[39922:24055442] Starting upload
+2026-10-29 03:07:34.042 xcodebuild[39922:24059620] Progress 100%: Uploading to App Store Connect… (About 4 seconds remaining. 889.33KB/s)
+2026-10-29 03:07:34.043 xcodebuild[39922:24059620] Progress 100%: Uploading to App Store Connect… (About 4 seconds remaining. 889.33KB/s)
+2026-10-29 03:07:42.001 xcodebuild[39922:24059620] Progress 100%: Completing upload…
+2026-10-29 03:07:43.867 xcodebuild[39922:24059620] Progress 100%: Waiting for package to begin processing…
+2026-10-29 03:07:44.313 xcodebuild[39922:24059620] Progress 100%: Uploaded package is processing.
+2026-10-29 03:07:44.320 xcodebuild[39922:24059620] Progress 100%: Upload succeeded.
+warning: exportArchive Upload Symbols Failed. The archive did not include a dSYM for the StripeTerminal.framework with the UUIDs [6B66F53A-307E-3AD8-AC4E-A2E5AF652AE9]. Ensure that the archive's dSYM folder includes a DWARF file for StripeTerminal.framework with the expected UUIDs.
+Uploaded Thorbis
+** EXPORT SUCCEEDED **
