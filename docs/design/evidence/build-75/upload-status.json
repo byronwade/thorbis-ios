@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "build": "75",
+  "sourceCommit": "2ed5e92a41f76c0b366b98383b3a838720fcd603",
+  "uploadedAt": "2026-10-28T20:04:00-04:00",
+  "xcodeExport": "succeeded",
+  "lastDashboardStatus": "Processing",
+  "processedAvailabilityVerified": false,
+  "testerAssignmentVerified": false,
+  "testingNotesSaved": false,
+  "dashboardVerification": "Awaiting browser sign-in after session expired",
+  "expectedGroup": "Internal Testers"
+}

@@ -17,9 +17,9 @@ menus or disclosures for secondary actions while keeping common work direct.
 
 ## Field flows (end to end)
 
-- **Estimates.** Built from the Price Book on a job (price-book provenance kept) and linked to the job (`POST /v1/jobs/{id}/estimates/{estimateId}/link`). The job's Estimates tab lists every linked estimate.
-- **Customer mode.** "Show to customer" on a customer or job hands the device over full screen (`CustomerModeContainer`): no tab bar, no staff menus, no swipe-down. The customer checks and fixes their name, phone, email, billing and service addresses, other contacts, best way to reach them and job texts, in 20 pt type with 56 pt commits. Leaving needs the technician's Face ID or passcode; the technician then reviews the changes and saves them through the normal audited customer, contact, location and text-consent routes, under their own name. Needs `customer.edit`.
-- **Payments.** Collect payment opens on the card payment link (`POST /v1/invoices/{id}/pay-link`). Tap to Pay is not offered until Apple's entitlement and a card-present terminal exist.
+- **Estimates and invoices.** The job lists all verified documents associated with that job, with honest partial-load recovery. Technician estimate and draft-invoice editors use the full paginated Price Book, ranked search and continuous adding while retaining their different line/provenance rules. Customer-selected add-ons and postapproval change-order billing remain separate unfinished contracts.
+- **Customer mode.** A job's "Show to customer" opens its commercial document hub, with every verified estimate and invoice for that job. New estimate decisions load current immutable issued terms before review and bind signing to matching paper/action identity and price; opening failures offer retry. Customer contact self-edit remains available through Customer details. `CustomerModeContainer` keeps staff chrome out and requires owner authentication for hand-back. Contact edits retain technician review and the audited customer/contact/location/text-consent routes under `customer.edit`.
+- **Payments.** Collect payment opens the secure card link (`POST /v1/invoices/{id}/pay-link`) with QR/sharing. Received-payment choices include cash/check and the existing bank-transfer/card-collected-elsewhere methods. Tap to Pay remains disabled pending signed distribution qualification.
 - **Photos.** Camera capture with Before / After / Other filing (server tags `Before` / `After`). Photos are kept on disk until the server confirms them.
 - **Lifecycle.** List items and progress responses carry no `allowedTransitions`, so the app re-reads `GET /v1/jobs/{id}` after each step and for Schedule's Next up.
 - **Offline.**
@@ -39,7 +39,7 @@ menus or disclosures for secondary actions while keeping common work direct.
 
 ## Not full design or product parity
 
-The page contains 133 artboards, including unimplemented workflows and several empty iPad frames. Build 15 does **not** constitute an exact match to every artboard or parity with the full TanStack product.
+The page contains 133 artboards, including unimplemented workflows and several empty iPad frames. Delivered native flows do **not** constitute an exact match to every artboard or parity with the full TanStack product.
 
 - Google/Apple sign-in and self-service signup in Paper have no supported staff native flow here. Login retains email/password and a real reset request; account invitation remains administrator-managed.
 - Manual job creation submits only the supported customer, title, and notes fields. Priority and the attachment, mention, checklist, and camera controls in Paper do not have matching job-create API fields, so the composer does not imply that they are saved. The API's `job.locationId` is organization branch scope, not a customer service-address ID; schedule and technician assignment use the existing job-detail actions after creation.
