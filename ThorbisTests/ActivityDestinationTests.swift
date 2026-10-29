@@ -57,6 +57,15 @@ final class ActivityDestinationTests: XCTestCase {
         XCTAssertEqual(ActivityDestinationMapping.customerHistory(contact, customerID: customer), .contact(customerID: customer, contactID: other))
     }
 
+    func testANoteDetailShowsAReadableTime() throws {
+        let raw = "2026-07-01T15:04:00Z"
+        let shown = ActivityRecordLabel.noteWhen(raw)
+        let date = try XCTUnwrap(JobFiltering.date(raw))
+        XCTAssertEqual(shown, date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
+        XCTAssertNotEqual(shown, raw)
+        XCTAssertEqual(ActivityRecordLabel.noteWhen("not-a-date"), "not-a-date")
+    }
+
     private func destination(_ kind: String, subjectID: String? = nil, jobID: String? = nil, invoiceID: String? = nil, customerID: String? = nil) -> ActivityDestination? {
         ActivityDestinationMapping.destination(for: ActivityFeedSubject(kind: kind, subjectID: subjectID, jobID: jobID, invoiceID: invoiceID, customerID: customerID))
     }

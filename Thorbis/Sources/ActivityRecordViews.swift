@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// The time shown on an opened note. An unreadable value stays as the server sent it.
+enum ActivityRecordLabel {
+    static func noteWhen(_ createdAt: String) -> String {
+        guard let date = JobFiltering.date(createdAt) else { return createdAt }
+        return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+    }
+}
+
 /// Wraps an activity row in a link only when the row already names a real record.
 struct ActivityLink<Content: View>: View {
     let destination: ActivityDestination?
@@ -50,7 +58,7 @@ struct JobNoteDetailView: View {
                         .foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
-                    Text(note.createdAt)
+                    Text(ActivityRecordLabel.noteWhen(note.createdAt))
                         .font(Theme.font(13))
                         .foregroundStyle(Theme.muted)
                 }
