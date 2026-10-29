@@ -111,7 +111,7 @@ struct JobDetailView: View {
                             }
                         }
                         .padding(.horizontal, Theme.gutter)
-                        .padding(.top, selectedTab == "Invoice" ? 4 : 22)
+                        .padding(.top, selectedTab == "Invoice" ? 4 : selectedTab == "Estimates" ? 12 : 22)
                         .padding(.bottom, 28)
                     } header: {
                         tabBar.background(Theme.background)
@@ -618,9 +618,34 @@ struct JobDetailView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     PaperGroupHeader(title: "Estimates", count: jobEstimates.count + (estimateRead?.unavailableIDs.count ?? 0))
                     if canBuildEstimate {
-                        Button(action: buildEstimate) { Label("Add estimate", systemImage: "plus").font(Theme.font(15, weight: .medium)).frame(minHeight: 44) }
-                            .accessibilityLabel("Add estimate")
+                        Button(action: buildEstimate) {
+                            Label("Add estimate", systemImage: "plus")
+                                .font(Theme.font(15, weight: .medium))
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Add estimate")
                     }
+                }
+                if !estimatesLoaded {
+                    SkeletonRows(count: 2, leading: false, inset: 0)
+                } else if jobEstimates.isEmpty && !estimatesFailed {
+                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
+                                    message: "Build one from the price book. It's added to this job automatically.")
+                }
+                ForEach(jobEstimates) { estimate in
+                    NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
+                        JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true)
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityIdentifier("job-estimate-\(estimate.id)")
+                    .disabled(estimateRead?.freshIDs.contains(estimate.id) != true)
+                }
+                ForEach(estimateRead?.unavailableIDs ?? [], id: \.self) { id in
+                    JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
+                                   status: "unavailable", amount: nil, fresh: false)
+                        .accessibilityIdentifier("job-estimate-unavailable-\(id)")
                 }
                 if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true) {
                     DisclosureGroup {
@@ -645,25 +670,6 @@ struct JobDetailView: View {
                     .tint(Theme.foreground)
                     .padding(15)
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                }
-                if !estimatesLoaded {
-                    SkeletonRows(count: 2, leading: false, inset: 0)
-                } else if jobEstimates.isEmpty && !estimatesFailed {
-                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
-                                    message: "Build one from the price book. It's added to this job automatically.")
-                }
-                ForEach(jobEstimates) { estimate in
-                    NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
-                        JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true)
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("job-estimate-\(estimate.id)")
-                    .disabled(estimateRead?.freshIDs.contains(estimate.id) != true)
-                }
-                ForEach(estimateRead?.unavailableIDs ?? [], id: \.self) { id in
-                    JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
-                                   status: "unavailable", amount: nil, fresh: false)
-                        .accessibilityIdentifier("job-estimate-unavailable-\(id)")
                 }
             }
         }
