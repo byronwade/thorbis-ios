@@ -1,7 +1,7 @@
 import SwiftUI
 import UserNotifications
 
-/// Settings as grouped lists with the person on top, opened from the side menu's gear.
+/// Settings as grouped lists with the person on top, opened from Settings in the bottom bar's menu.
 /// Native grouped lists per D-025 (Apple HIG for settings), Thorbis tokens for color.
 struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
@@ -37,6 +37,18 @@ struct SettingsView: View {
                     }
                     NavigationLink { CustomizeMenuView() } label: {
                         row("Customize menu", symbol: "slider.horizontal.3", value: nil)
+                    }
+                    // Owners reach the business screens here, now that the More screen is off the menu.
+                    if session.can("organization.settings.edit") {
+                        NavigationLink(value: PaperRoute.businessSetup) {
+                            row("Set up your business", symbol: "checklist", value: nil)
+                        }
+                        NavigationLink(value: PaperRoute.companyDetails) {
+                            row("Company details", symbol: "building.2", value: nil)
+                        }
+                        NavigationLink(value: PaperRoute.payments) {
+                            row("Payments", symbol: "creditcard", value: nil)
+                        }
                     }
                 }
 
@@ -77,6 +89,7 @@ struct SettingsView: View {
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .paperDestinations()
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
             .thorbisConfirm("Sign out of Thorbis?",

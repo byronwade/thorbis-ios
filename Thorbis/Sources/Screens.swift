@@ -758,8 +758,8 @@ struct MoreView: View {
                         actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
     }
 
-    /// MA-05: the same header as every tab root (menu button, 30/500 title). Switching
-    /// workspace and New job live in the side menu, so they are not repeated here.
+    /// MA-05: the same header as every tab root (30/500 title). Switching business lives in the
+    /// bottom bar's menu and New job on the bar's round button, so they are not repeated here.
     private var workspaceHeader: some View {
         PaperHeader(title: "More", subtitle: session.activeOrganization?.name ?? "Workspace")
     }

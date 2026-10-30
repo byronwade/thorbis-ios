@@ -12,10 +12,19 @@ struct RootView: View {
     @State private var selectedTab = PrimaryTab.initial.rawValue
     /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
     @State private var customPaths: [String: NavigationPath] = [:]
-    @State private var drawerOpen = false
+    /// The pop-up menu over the bottom bar.
+    @State private var menuOpen = false
+    /// The last place opened from the menu that is not pinned; the bar's switcher slot shows it.
+    @State private var lastPlace: MenuItem?
+    /// Places opened at least once this launch. They stay alive so each keeps its scroll and stack.
+    @State private var visited: Set<String> = []
+    @State private var newCustomer = false
+    @State private var newEstimate = false
+    @State private var reviewOutbox = false
+    @ObservedObject private var recents = RecentItems.shared
+    /// The phone's width, which sizes the pop-up menu against the bar.
+    @State private var phoneWidth: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Live finger travel while dragging the menu open or closed.
-    @State private var drawerDrag: CGFloat = 0
     @State private var showSettings = false
     @State private var path = NavigationPath()
     @State private var schedulePath = NavigationPath()
@@ -169,11 +178,9 @@ struct RootView: View {
         }
     }
 
-    /// ChatGPT-style push (design.thorbis.com MA-03, MA-04): the menu sits underneath and the whole
-    /// app slides right as one card that follows the finger both ways. The menu eases in from 30% of
-    /// its width (parallax), the card dims to 40% and rounds to 24 with progress, and release settles
-    /// on a critically damped spring from the finger's projected end. Transform and opacity only, so
-    /// nothing re-lays out mid-gesture. With Reduce Motion nothing slides: the menu fades in over the app.
+    /// Linear-style phone navigation: no side menu and no system tab bar. A floating bar holds the
+    /// pinned places and a switcher slot; the switcher opens a menu of every place, with the business
+    /// switcher on top. The bar shows on a place's first screen and steps aside for pushed screens.
     @ViewBuilder private func phoneNavigation() -> some View {
         #if DEBUG
         if PaperPreview.enabled, PaperPreview.screen == "ipad-sidebar" {
@@ -185,123 +192,220 @@ struct RootView: View {
                 .background(Theme.surface.ignoresSafeArea())
                 .task { await store.refresh(api) }
         } else {
-            phoneDrawer()
+            phoneShell()
         }
         #else
-        phoneDrawer()
+        phoneShell()
         #endif
     }
 
-    private func phoneDrawer() -> some View {
+    private func phoneShell() -> some View {
         GeometryReader { geometry in
-            let width = min(geometry.size.width * 0.82, 330)
-            let base: CGFloat = drawerOpen ? width : 0
-            let offset = min(max(base + drawerDrag, 0), width)
-            let progress = width > 0 ? offset / width : 0
-            ZStack(alignment: .leading) {
-                SideMenu(open: { item in closeDrawer(); open(item) },
-                         openRecent: { item in closeDrawer(); openRecent(item) },
-                         search: { closeDrawer(); selectedTab = PrimaryTab.search.rawValue },
-                         newJob: { closeDrawer(); createJob = true },
-                         settings: { closeDrawer(); showSettings = true },
-                         close: closeDrawer,
-                         current: selectedTab,
-                         switchWorkspace: session.organizations.count > 1 ? { closeDrawer(); workspace = true } : nil)
-                    .frame(width: width)
-                    .offset(x: reduceMotion ? 0 : -width * 0.3 * (1 - progress))
-                    .opacity(reduceMotion ? progress : (progress > 0 ? 1 : 0))
-                    .zIndex(reduceMotion ? 2 : 0)
-                    .allowsHitTesting(drawerOpen)
-                    .accessibilityHidden(!drawerOpen)
-                phoneTabs()
-                    .clipShape(RoundedRectangle(cornerRadius: reduceMotion ? 0 : 24 * progress, style: .continuous))
-                    // D-017: a rounded figure on canvas gets a real rim that follows its radius.
-                    .overlay {
-                        RoundedRectangle(cornerRadius: reduceMotion ? 0 : 24 * progress, style: .continuous)
-                            .strokeBorder(Theme.border, lineWidth: 1)
-                            .opacity(reduceMotion ? 0 : progress)
-                            .allowsHitTesting(false)
-                    }
-                    // MA-04: while the menu is open the app is inert for VoiceOver too.
-                    .accessibilityHidden(drawerOpen)
-                    .overlay {
-                        // D-021: a dim mix over the card; tap or drag it to close. It is the one
-                        // element VoiceOver finds over the app while the menu is open.
-                        Color.black.opacity(0.4 * progress)
-                            .clipShape(RoundedRectangle(cornerRadius: reduceMotion ? 0 : 24 * progress, style: .continuous))
-                            .contentShape(Rectangle())
-                            .onTapGesture { closeDrawer() }
-                            .allowsHitTesting(drawerOpen)
-                            .accessibilityElement()
-                            .accessibilityLabel("Close menu")
-                            .accessibilityAddTraits(.isButton)
-                            .accessibilityAction { closeDrawer() }
-                            .accessibilityHidden(!drawerOpen)
-                    }
-                    .offset(x: reduceMotion ? 0 : offset)
-                    .simultaneousGesture(drawerOpen ? closeDrag(width: width) : nil)
-                    .overlay(alignment: .leading) {
-                        // Swipe in from the left edge at a tab's first screen; elsewhere the
-                        // system back swipe keeps that edge.
-                        if !drawerOpen && atTabRoot {
-                            Color.clear.frame(width: 24).contentShape(Rectangle())
-                                .gesture(openDrag(width: width))
-                                .accessibilityHidden(true)
+            phonePlaces()
+                .accessibilityHidden(menuOpen)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    // Pulled down into the home indicator's margin, like Linear, so it sits low and small.
+                    if atTabRoot || menuOpen {
+                        VStack(spacing: 10) {
+                            if let job = currentJob, !menuOpen {
+                                CurrentJobChip(job: job, customer: store.customerName(job.customerId)) {
+                                    store.requestedJobID = job.id
+                                }
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
+                            bottomBar
                         }
+                        .padding(.bottom, AppBottomBar.bottomGap)
+                        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85), value: currentJob?.id)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: barSync)
                     }
-                    .zIndex(1)
-                    // Always full-bleed, so the card's corners meet the screen's and opening the
-                    // menu never changes the layout under the finger.
-                    .ignoresSafeArea(.container)
-            }
-            .background(Theme.surface.ignoresSafeArea())
-            // Rotation or a new window size closes the menu instead of leaving it half-open.
-            .onChange(of: geometry.size.width) { if drawerOpen { closeDrawer() } }
+                }
+                // The bar measures from the screen's edge, not the home indicator, so screens get an
+                // inset exactly as tall as the bar and nothing hides behind it.
+                .ignoresSafeArea(.container, edges: .bottom)
+                .overlay {
+                    if menuOpen {
+                        // A light veil; a tap anywhere outside the menu closes it.
+                        Color.black.opacity(0.08)
+                            .ignoresSafeArea()
+                            .onTapGesture { closeMenu() }
+                            .accessibilityHidden(true)
+                            .transition(.opacity)
+                    }
+                }
+                .overlay(alignment: .bottomLeading) {
+                    if menuOpen {
+                        appMenu
+                            // As wide as the bar's capsule, so it reads as the capsule opening up.
+                            .frame(maxHeight: geometry.size.height - 24, alignment: .bottom)
+                            .padding(.leading, 16)
+                            .padding(.bottom, barDrop(geometry))
+                            .transition(reduceMotion
+                                ? .opacity
+                                : .scale(scale: 0.6, anchor: .bottomLeading).combined(with: .opacity))
+                    }
+                }
+                // Rotation or a new window size closes the menu instead of leaving it misplaced.
+                .onChange(of: geometry.size.width, initial: true) { phoneWidth = geometry.size.width }
+                .onChange(of: geometry.size.width) { if menuOpen { closeMenu() } }
         }
     }
 
-    private func openDrag(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { drawerDrag = max(0, $0.translation.width) }
-            .onEnded { value in
-                let open = value.translation.width > width * 0.35 || value.predictedEndTranslation.width > width * 0.6
-                settleDrawer(open: open)
-            }
+    /// The places bar pins: the layout's tabs this role can open.
+    private var pinnedPlaces: [MenuItem] { layout.visibleTabs(session) }
+
+    private var menuPlaces: [MenuItem] {
+        AppMenuContent.places(tabs: pinnedPlaces, hidden: layout.hidden, order: layout.menuOrder,
+                              permitted: { $0.permitted(session) })
     }
 
-    private func closeDrag(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { drawerDrag = min(0, $0.translation.width) }
-            .onEnded { value in
-                let close = -value.translation.width > width * 0.3 || -value.predictedEndTranslation.width > width * 0.5
-                settleDrawer(open: !close)
-            }
+    private var localSections: [LocalWorkspaceSection] {
+        guard session.user?.id != nil, session.activeOrganization?.id != nil else { return [] }
+        return LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) }
     }
 
-    private func settleDrawer(open: Bool) {
-        if open != drawerOpen { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-        // MA-03: critically damped (no bounce) at 0.3 s; Reduce Motion fades in 150 ms.
-        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.3, dampingFraction: 1)) {
-            drawerOpen = open
-            drawerDrag = 0
+    /// The job this person is on now. Schedule already leads with it, so the chip stays off there.
+    private var currentJob: Job? {
+        guard selectedTab != MenuItem.schedule.rawValue, session.can("job.view", feature: "jobs") else { return nil }
+        let me = session.user?.id
+        return PaperWorkGroups.inProgress(store.jobs).first { $0.assignedToUserId == nil || $0.assignedToUserId == me }
+    }
+
+    private var barSync: AppBottomBar.Sync? {
+        if !outbox.needsReview.isEmpty { return .needsReview(outbox.needsReview.count) }
+        if outbox.syncing { return .syncing(outbox.pending.count) }
+        if !outbox.pending.isEmpty { return .waiting(outbox.pending.count) }
+        return nil
+    }
+
+    /// Long-press Search: the last records opened here, and the outbox when it holds anything.
+    private var searchActions: [[AppBottomBar.QuickAction]] {
+        let recent = recents.items.prefix(4).map { item in
+            AppBottomBar.QuickAction(title: item.title, symbol: item.kind == .job ? "briefcase" : "person") { openRecent(item) }
+        }
+        var sync: [AppBottomBar.QuickAction] = []
+        if !outbox.needsReview.isEmpty {
+            let count = outbox.needsReview.count
+            sync.append(.init(title: "Review \(count) change\(count == 1 ? "" : "s")", symbol: "exclamationmark.triangle") { reviewOutbox = true })
+        } else if !outbox.pending.isEmpty {
+            let count = outbox.pending.count
+            sync.append(.init(title: "\(count) change\(count == 1 ? "" : "s") waiting to sync", symbol: "arrow.triangle.2.circlepath",
+                              enabled: false) {})
+        }
+        return [Array(recent), sync].filter { !$0.isEmpty }
+    }
+
+    /// The bar's +: the record the screen showing is about, else a job.
+    private var barCreate: (label: String, run: () -> Void)? {
+        let canCustomer = session.can("customer.create", feature: "core_crm")
+        let canEstimate = session.can("estimate.create", feature: "estimates")
+        switch selectedTab {
+        case MenuItem.customers.rawValue where canCustomer: return ("New customer", { closeMenu(); newCustomer = true })
+        case MenuItem.estimates.rawValue where canEstimate: return ("New estimate", { closeMenu(); newEstimate = true })
+        default:
+            if session.can("job.create", feature: "jobs") { return ("New job", { closeMenu(); createJob = true }) }
+            if canCustomer { return ("New customer", { closeMenu(); newCustomer = true }) }
+            return nil
         }
     }
 
-    private func phoneTabs() -> some View {
-        TabView(selection: $selectedTab) {
-            ForEach(layout.visibleTabs(session)) { item in
-                Tab(item.tabTitle, systemImage: item.symbol, value: item.rawValue) { tabRoot(item) }
-            }
-            Tab(PrimaryTab.more.title, systemImage: PrimaryTab.more.symbol, value: PrimaryTab.more.rawValue) {
-                NavigationStack(path: $morePath) { MoreView().paperDestinations() }
-            }
-            Tab(value: PrimaryTab.search.rawValue, role: .search) {
-                PaperGlobalSearch(embedded: true)
+    /// Long-press +: the other things people start from the field.
+    private var newActions: [[AppBottomBar.QuickAction]] {
+        var create: [AppBottomBar.QuickAction] = []
+        if session.can("job.create", feature: "jobs") {
+            create.append(.init(title: "New job", symbol: "briefcase") { createJob = true })
+        }
+        if session.can("estimate.create", feature: "estimates") {
+            create.append(.init(title: "New estimate", symbol: "doc.text") { newEstimate = true })
+        }
+        if session.can("customer.create", feature: "core_crm") {
+            create.append(.init(title: "New customer", symbol: "person.badge.plus") { newCustomer = true })
+        }
+        return [create]
+    }
+
+    private func openRecent(_ item: RecentItems.Item) {
+        switch item.kind {
+        case .job: store.requestedJobID = item.id
+        case .customer: store.requestedRecord = .customer(item.id)
+        }
+    }
+
+    /// Negative bottom padding that lowers the bar from the safe area to `AppBottomBar.bottomGap` off the
+    /// screen edge. Phones without a home indicator keep the gap above the edge.
+    private func barDrop(_ geometry: GeometryProxy) -> CGFloat {
+        AppBottomBar.bottomGap - geometry.safeAreaInsets.bottom
+    }
+
+    private var bottomBar: some View {
+        AppBottomBar(
+            pinned: pinnedPlaces,
+            switcher: AppMenuContent.switcher(current: MenuItem(rawValue: selectedTab), last: lastPlace, pinned: pinnedPlaces),
+            current: selectedTab,
+            menuOpen: menuOpen,
+            select: { open($0) },
+            openMenu: { setMenu(open: true) },
+            search: { closeMenu(); search = true },
+            create: barCreate,
+            sync: barSync,
+            searchActions: searchActions,
+            newActions: newActions
+        )
+    }
+
+    private var appMenu: some View {
+        AppMenu(
+            width: phoneWidth,
+            circles: barCreate == nil ? 1 : 2,
+            places: menuPlaces,
+            local: localSections,
+            current: selectedTab,
+            open: { item in closeMenu(); open(item) },
+            openLocal: { section in
+                closeMenu()
+                primaryTab = .more
+                morePath = NavigationPath()
+                morePath.append(PaperRoute.local(section))
+            },
+            manageBusinesses: { closeMenu(); workspace = true },
+            settings: { closeMenu(); showSettings = true },
+            search: { closeMenu(); search = true },
+            close: closeMenu
+        )
+    }
+
+    private func setMenu(open: Bool) {
+        guard open != menuOpen else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.86)) {
+            menuOpen = open
+        }
+    }
+
+    private func closeMenu() { setMenu(open: false) }
+
+    /// Every place this launch has opened, kept alive and stacked; only the selected one shows.
+    private func phonePlaces() -> some View {
+        let ids = (menuPlaces.map(\.rawValue) + [PrimaryTab.more.rawValue]).filter { visited.contains($0) || $0 == selectedTab }
+        return ZStack {
+            ForEach(ids, id: \.self) { id in
+                let here = id == selectedTab
+                place(id)
+                    .opacity(here ? 1 : 0)
+                    .allowsHitTesting(here)
+                    .accessibilityHidden(!here)
+                    .zIndex(here ? 1 : 0)
             }
         }
-        // The menu button and the avatar open the side menu.
-        .environment(\.paperShowMenu, { Task { @MainActor in settleDrawer(open: true) } })
+        .onChange(of: selectedTab, initial: true) { visited.insert(selectedTab) }
+        // The bottom bar is the way around; screens drop their top-left menu button.
+        .environment(\.paperShowMenu, { Task { @MainActor in setMenu(open: true) } })
+        .environment(\.paperMenuButton, false)
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $search) { PaperGlobalSearch() }
+        .sheet(isPresented: $newCustomer) { NewCustomerSheet() }
+        .sheet(isPresented: $newEstimate) { NewEstimateView() }
+        .sheet(isPresented: $reviewOutbox) { OutboxReviewSheet() }
         .background(Theme.background)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
@@ -354,7 +458,7 @@ struct RootView: View {
             case "my-day", "schedule": primaryTab = .schedule
             case "customers": primaryTab = .customers
             case "menu", "more": primaryTab = .more
-            case "search": primaryTab = .search
+            case "search": search = true
             case "inbox":
                 primaryTab = .more
                 morePath.append(PaperRoute.inbox)
@@ -366,15 +470,17 @@ struct RootView: View {
             case "signature": previewSignature = true
             case "new-job": createJob = true
             case "settings": showSettings = true
-            case "side-menu", "side-menu-search":
+            case "app-menu", "app-menu-edit", "side-menu", "side-menu-search": menuOpen = true
+            case "bar-live", "bar-syncing":
+                // A tech mid-job on Jobs, with two changes saved on the phone.
                 RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
                 RecentItems.shared.clear()
                 RecentItems.shared.record(.customer, id: "preview-customer-2", title: "Riverstone HVAC", subtitle: "Customer")
-                RecentItems.shared.record(.job, id: "preview-job-3", title: "No heat upstairs", subtitle: "JOB-2208")
-                RecentItems.shared.record(.job, id: "preview-job-2", title: "Water heater leak", subtitle: "JOB-2211")
-                RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
-                RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
-                drawerOpen = true
+                RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214")
+                if PaperPreview.screen == "bar-live" { PaperPreviewProtocol.simulateNoSignal = true; await session.revalidate() }
+                outbox.enqueue(.note(.init(jobId: PaperPreview.jobID, body: "Gate code 4417.")), policyVersion: session.policyVersion ?? 1)
+                outbox.enqueue(.note(.init(jobId: PaperPreview.jobID, body: "Replaced the capacitor.")), policyVersion: session.policyVersion ?? 1)
+                primaryTab = .jobs
             case "attention": primaryTab = .more; morePath.append(PaperRoute.attention)
             case "estimate-detail", "estimate-draft-detail": primaryTab = .more; morePath.append(PaperRoute.estimate(PaperPreview.estimate.id))
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
@@ -425,64 +531,24 @@ struct RootView: View {
         }
     }
 
-    private func closeDrawer() { settleDrawer(open: false) }
-
-    /// A tab if it is one; otherwise More with that place pushed.
+    /// Every place is its own root; one that is not pinned takes the bar's switcher slot.
     private func open(_ item: MenuItem) {
-        if layout.visibleTabs(session).contains(item) {
-            selectedTab = item.rawValue
-        } else if let route = item.route {
-            primaryTab = .more
-            morePath = NavigationPath()
-            morePath.append(route)
-        }
-    }
-
-    private func openRecent(_ item: RecentItems.Item) {
-        switch item.kind {
-        case .job:
-            guard session.can("job.view", feature: "jobs") else { return }
-            if store.jobs.contains(where: { $0.id == item.id }) {
-                store.requestedJobID = item.id
-                return
-            }
-            // A job opened from company search may not be in the loaded list yet; open it by ID.
-            let tabs = layout.visibleTabs(session)
-            if tabs.contains(.schedule) {
-                primaryTab = .schedule
-                schedulePath = NavigationPath()
-                schedulePath.append(PaperRoute.job(item.id))
-            } else if tabs.contains(.jobs) {
-                primaryTab = .jobs
-                jobsPath = NavigationPath()
-                jobsPath.append(PaperRoute.job(item.id))
-            } else {
-                primaryTab = .more
-                morePath = NavigationPath()
-                morePath.append(PaperRoute.job(item.id))
-            }
-        case .customer:
-            guard session.can("customer.view", feature: "core_crm") else { return }
-            // The list cache leaves out archived customers, so fall back to the saved entry and let
-            // the detail screen load the rest.
-            let customer = store.customers.first(where: { $0.id == item.id })
-                ?? Customer(id: item.id, name: item.title, archived: nil, createdAt: nil)
-            if layout.visibleTabs(session).contains(.customers) {
-                primaryTab = .customers
-                customersPath = NavigationPath()
-                customersPath.append(customer)
-            } else {
-                primaryTab = .more
-                morePath = NavigationPath()
-                morePath.append(customer)
-            }
-        }
+        if !pinnedPlaces.contains(item) { lastPlace = item }
+        selectedTab = item.rawValue
     }
 
     /// Proxy so tab switches can still be written as `primaryTab = .jobs`.
     private var primaryTab: PrimaryTab {
         get { PrimaryTab(rawValue: selectedTab) ?? .more }
         nonmutating set { selectedTab = newValue.rawValue }
+    }
+
+    @ViewBuilder private func place(_ id: String) -> some View {
+        if let item = MenuItem(rawValue: id) {
+            tabRoot(item)
+        } else {
+            NavigationStack(path: $morePath) { MoreView().paperDestinations() }
+        }
     }
 
     @ViewBuilder private func tabRoot(_ item: MenuItem) -> some View {
@@ -765,6 +831,8 @@ struct PaperGlobalSearch: View {
     @State private var serverQuery = ""
     @State private var serverFailed = false
     @State private var searching = false
+    /// The sheet opens typing-ready: the field takes focus and the keyboard is up on arrival.
+    @FocusState private var fieldFocused: Bool
     @ObservedObject private var recents = RecentItems.shared
     @State private var path = NavigationPath()
     /// Recent items that still resolve to a record this person can open.
@@ -916,6 +984,8 @@ struct PaperGlobalSearch: View {
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Jobs, customers, invoices")
+            .searchFocused($fieldFocused)
+            .task { if !embedded { fieldFocused = true } }
             .toolbar {
                 if !embedded {
                     ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }

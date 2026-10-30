@@ -127,7 +127,7 @@ struct ThorbisApp: App {
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .tint(Theme.brandText)
             #if DEBUG
-            .overlay(alignment: .bottom) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
+            .overlay(alignment: .top) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
             #endif
             .task {
                 connectivity.onReconnect = { Task { await resync() } }
