@@ -19,6 +19,7 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(second.exists)
         let present = app.buttons["Present estimates"]
         XCTAssertTrue(present.waitForExistence(timeout: 5))
+        XCTAssertTrue(present.isHittable)
         XCTAssertLessThanOrEqual(second.frame.maxY, present.frame.minY, "Both estimates should be visible above the presentation action")
         for _ in 0..<5 where !first.isHittable { app.swipeUp() }
         XCTAssertTrue(first.isHittable)
