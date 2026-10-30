@@ -21,6 +21,15 @@ struct PriceBookLineOriginal: Equatable {
 /// option package. The array always keeps Work lines before Materials, so the saved order is
 /// the order on screen.
 extension Array where Element == EstimateRevisionLineDraft {
+    /// Applies only to the captured live line if its description has not changed.
+    @discardableResult
+    mutating func applyDescription(id: UUID, original: String, value: String, authorized: Bool) -> Bool {
+        guard authorized, DescriptionCanvasLimit.utf16(200).count(value) <= 200,
+              let index = firstIndex(where: { $0.id == id }), self[index].description == original else { return false }
+        self[index].description = value
+        return true
+    }
+
     static var maximumLines: Int { 500 }
 
     func lines(in group: EstimateLineGroup) -> [EstimateRevisionLineDraft] {
@@ -496,6 +505,7 @@ struct EstimateLineGroupsEditor: View {
     let disabled: Bool
     let focus: FocusState<EstimateBuilderFocus?>.Binding
     let addTo: (EstimateLineGroup) -> Void
+    let showDescription: (UUID) -> Void
     let removed: (EstimateRevisionLineDraft, Int) -> Void
 
     var body: some View {
@@ -526,6 +536,7 @@ struct EstimateLineGroupsEditor: View {
                 ForEach(groupLines) { line in
                     EstimateBuilderLineRow(
                         line: binding(line.id),
+                        showDescription: { showDescription(line.id) },
                         focus: focus,
                         canMoveUp: line.id != groupLines.first?.id,
                         canMoveDown: line.id != groupLines.last?.id,
@@ -577,6 +588,7 @@ struct EstimateLineGroupsEditor: View {
 
 struct EstimateBuilderLineRow: View {
     @Binding var line: EstimateRevisionLineDraft
+    let showDescription: () -> Void
     let focus: FocusState<EstimateBuilderFocus?>.Binding
     let canMoveUp: Bool
     let canMoveDown: Bool
@@ -605,10 +617,16 @@ struct EstimateBuilderLineRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    TextField("Description", text: $line.description, axis: .vertical)
-                        .font(Theme.font(17)).lineLimit(1...4)
-                        .focused(focus, equals: .description(line.id))
-                        .accessibilityLabel("Line description")
+                    if DescriptionPreview.isLong(line.description) && focus.wrappedValue != .description(line.id) {
+                        Text(line.description).font(Theme.font(17)).lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityLabel("Line description preview")
+                    } else {
+                        TextField("Description", text: $line.description, axis: .vertical)
+                            .font(Theme.font(17)).lineLimit(1...2)
+                            .focused(focus, equals: .description(line.id))
+                            .accessibilityLabel("Line description")
+                    }
                     Text(line.lineTotal.map { money($0, currency: "USD") } ?? "—")
                         .font(Theme.monoFont(15, weight: .medium))
                         .contentTransition(.numericText())
@@ -616,7 +634,12 @@ struct EstimateBuilderLineRow: View {
                         .fixedSize(horizontal: true, vertical: false)
                     menu
                 }
-                DescriptionCanvasLink(text: $line.description, title: "Line description", applyTitle: "Apply to estimate", limit: .utf16(200), identifier: "estimate-line-description-more")
+                if DescriptionPreview.isLong(line.description) && focus.wrappedValue != .description(line.id) {
+                    Button("Show more", action: showDescription)
+                        .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                        .frame(minHeight: 44).accessibilityLabel("Show more line description")
+                        .accessibilityIdentifier("estimate-line-description-more")
+                }
                 HStack(spacing: 6) {
                     stepButton("minus", label: "One fewer", enabled: quantity > 1) { line.quantity = String(max(1, quantity - 1)) }
                     TextField("1", text: $line.quantity)

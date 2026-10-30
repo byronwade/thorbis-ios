@@ -14,6 +14,9 @@ struct EstimateRevisionEditorView: View {
     @State private var staleRevision = false
     @State private var confirmReload = false
     @State private var confirmDiscard = false
+    @State private var descriptionTarget: RevisionDescriptionTarget?
+    @State private var descriptionAccessRetired = false
+    @State private var documentGeneration = UUID()
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var query = ""
     @State private var kind = PriceBookKindFilter.all
@@ -154,6 +157,25 @@ struct EstimateRevisionEditorView: View {
             }
             .keyboardDoneButton()
             .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+            .sheet(item: $descriptionTarget) { target in
+                DescriptionCanvas(
+                    text: Binding(get: { descriptionValue(target) ?? target.original }, set: { _ in }),
+                    title: target.title, applyTitle: "Apply to estimate", limit: target.limit,
+                    scope: target.scope, accessRetired: $descriptionAccessRetired,
+                    targetAvailable: descriptionTargetAvailable(target), originalText: target.original,
+                    apply: { original, value in
+                        guard descriptionTargetAvailable(target), !descriptionAccessRetired, session.phase == .ready,
+                              target.scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
+                                                   generation: session.generation, authority: session.authorityRevision) else { return false }
+                        switch target.kind {
+                        case .line(let lineID, let optionID):
+                            return editor.applyLineDescription(optionID: optionID, id: lineID, original: original, value: value, authorized: true)
+                        case .option(let optionID):
+                            return editor.applyOptionDescription(id: optionID, original: original, value: value, authorized: true)
+                        }
+                    }
+                ).presentationDetents([.large])
+            }
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {
                     if canEdit {
@@ -236,6 +258,7 @@ struct EstimateRevisionEditorView: View {
                 disabled: busy || !canEdit || editor.hasUnsupportedLineSources,
                 focus: $focus,
                 addTo: { group in startAdding(optionID: nil, group: group) },
+                showDescription: { showDescription(.line($0, nil)) },
                 removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
             )
         }
@@ -263,9 +286,11 @@ struct EstimateRevisionEditorView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(15).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             }
-            ForEach($editor.options) { $option in
+            ForEach(editor.options) { option in
                 EstimateRevisionOptionEditor(
-                    option: $option,
+                    option: optionBinding(option),
+                    showDescription: { showDescription(.option(option.id)) },
+                    showLineDescription: { showDescription(.line($0, option.id)) },
                     disabled: busy || !canEdit || !optionsFeatureEnabled || editor.hasUnsupportedLineSources,
                     focus: $focus,
                     addTo: { group in startAdding(optionID: option.id, group: group) },
@@ -276,6 +301,48 @@ struct EstimateRevisionEditorView: View {
                 )
             }
         }
+    }
+
+    private func optionBinding(_ snapshot: EstimateRevisionOptionDraft) -> Binding<EstimateRevisionOptionDraft> {
+        Binding(get: { editor.options.first(where: { $0.id == snapshot.id }) ?? snapshot }, set: { value in
+            guard value.id == snapshot.id, let index = editor.options.firstIndex(where: { $0.id == snapshot.id }) else { return }
+            editor.options[index] = value
+        })
+    }
+
+    private func descriptionValue(_ target: RevisionDescriptionTarget) -> String? {
+        switch target.kind {
+        case .line(let lineID, nil): return editor.lines.first(where: { $0.id == lineID })?.description
+        case .line(let lineID, let optionID?): return editor.options.first(where: { $0.id == optionID })?.lines.first(where: { $0.id == lineID })?.description
+        case .option(let optionID): return editor.options.first(where: { $0.id == optionID })?.description
+        }
+    }
+
+    private func descriptionTargetAvailable(_ target: RevisionDescriptionTarget) -> Bool {
+        guard !busy, canEdit, !editor.hasUnsupportedLineSources, documentGeneration == target.documentGeneration,
+              estimate.id == target.estimateID, estimate.organizationId == session.activeOrganization?.id,
+              estimate.status == target.parentStatus, estimate.currentRevisionNumber == target.parentRevision,
+              editor.estimate.status == target.editorStatus, editor.estimate.currentRevisionNumber == target.editorRevision,
+              descriptionValue(target) != nil else { return false }
+        switch target.kind {
+        case .line(_, nil): return true
+        case .line(_, .some(_)), .option: return optionsFeatureEnabled
+        }
+    }
+
+    private func showDescription(_ kind: RevisionDescriptionTarget.Kind) {
+        guard !busy, canEdit, !editor.hasUnsupportedLineSources,
+              estimate.organizationId == session.activeOrganization?.id,
+              let actor = session.user?.id, let organization = session.activeOrganization?.id else { return }
+        let scope = DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision)
+        let target = RevisionDescriptionTarget(kind: kind, original: "", scope: scope, documentGeneration: documentGeneration,
+            estimateID: estimate.id, parentStatus: estimate.status, parentRevision: estimate.currentRevisionNumber,
+            editorStatus: editor.estimate.status, editorRevision: editor.estimate.currentRevisionNumber)
+        guard let original = descriptionValue(target), descriptionTargetAvailable(target) else { return }
+        descriptionAccessRetired = false
+        descriptionTarget = RevisionDescriptionTarget(kind: kind, original: original, scope: scope, documentGeneration: documentGeneration,
+            estimateID: estimate.id, parentStatus: estimate.status, parentRevision: estimate.currentRevisionNumber,
+            editorStatus: editor.estimate.status, editorRevision: editor.estimate.currentRevisionNumber)
     }
 
     private var editableLines: Binding<[EstimateRevisionLineDraft]> {
@@ -431,6 +498,7 @@ struct EstimateRevisionEditorView: View {
         defer { busy = false }
         do {
             let latest = try await api.fieldEstimate(estimate.id)
+            documentGeneration = UUID()
             editor = EstimateRevisionEditorState(estimate: latest)
             classifyLines()
             staleRevision = false
@@ -443,7 +511,10 @@ struct EstimateRevisionEditorView: View {
 }
 
 private struct EstimateRevisionOptionEditor: View {
+    @FocusState private var descriptionFocused: Bool
     @Binding var option: EstimateRevisionOptionDraft
+    let showDescription: () -> Void
+    let showLineDescription: (UUID) -> Void
     let disabled: Bool
     let focus: FocusState<EstimateBuilderFocus?>.Binding
     let addTo: (EstimateLineGroup) -> Void
@@ -466,11 +537,20 @@ private struct EstimateRevisionOptionEditor: View {
                 }
                 .accessibilityLabel("Remove \(option.title.isEmpty ? "option package" : option.title)")
             }
-            TextField("What this package includes", text: $option.description, axis: .vertical)
-                .font(Theme.font(15)).lineLimit(2...4)
-                .accessibilityLabel("Option package description")
-            DescriptionCanvasLink(text: $option.description, title: "Option description", applyTitle: "Apply to estimate", limit: .utf16Raw(500), identifier: "estimate-option-description-more")
-            EstimateLineGroupsEditor(lines: $option.lines, disabled: disabled, focus: focus, addTo: addTo, removed: removed)
+            if DescriptionPreview.isLong(option.description) && !descriptionFocused {
+                Text(option.description).font(Theme.font(15)).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel("Option description preview")
+                Button("Show more", action: showDescription)
+                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .frame(minHeight: 44).accessibilityLabel("Show more option description")
+                    .accessibilityIdentifier("estimate-option-description-more")
+            } else {
+                TextField("What this package includes", text: $option.description, axis: .vertical)
+                    .font(Theme.font(15)).lineLimit(1...2).focused($descriptionFocused)
+                    .accessibilityLabel("Option package description")
+            }
+            EstimateLineGroupsEditor(lines: $option.lines, disabled: disabled, focus: focus, addTo: addTo, showDescription: showLineDescription, removed: removed)
         }
         .disabled(disabled)
         .padding(14)
@@ -487,4 +567,20 @@ private extension View {
             .frame(minHeight: 46)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
     }
+}
+
+private struct RevisionDescriptionTarget: Identifiable {
+    enum Kind { case line(UUID, String?); case option(String) }
+    let id = UUID()
+    let kind: Kind
+    let original: String
+    let scope: DescriptionCanvasScope
+    let documentGeneration: UUID
+    let estimateID: String
+    let parentStatus: String
+    let parentRevision: Int?
+    let editorStatus: String
+    let editorRevision: Int?
+    var title: String { if case .option = kind { return "Option description" }; return "Line description" }
+    var limit: DescriptionCanvasLimit { if case .option = kind { return .utf16Raw(500) }; return .utf16(200) }
 }

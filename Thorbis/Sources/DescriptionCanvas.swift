@@ -1,6 +1,12 @@
 import SwiftUI
 
 /// A focused working copy of a description. Applying changes updates only the caller's draft.
+enum DescriptionPreview {
+    static func isLong(_ text: String) -> Bool {
+        text.count > 100 || text.filter { $0 == "\n" }.count >= 2
+    }
+}
+
 enum DescriptionCanvasLimit {
     case utf16(Int)
     case utf16Raw(Int)
@@ -13,44 +19,6 @@ enum DescriptionCanvasLimit {
     func count(_ text: String) -> Int {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         switch self { case .utf16: return value.utf16.count; case .utf16Raw: return text.utf16.count; case .unicodeScalars: return value.unicodeScalars.count }
-    }
-}
-
-struct DescriptionCanvasLink: View {
-    @Binding var text: String
-    let title: String
-    let applyTitle: String
-    let limit: DescriptionCanvasLimit?
-    let identifier: String
-    @Environment(\.isEnabled) private var isEnabled
-    @EnvironmentObject private var session: SessionController
-    @State private var showing = false
-    @State private var accessRetired = false
-    @State private var scope: DescriptionCanvasScope?
-
-    var body: some View {
-        Button("Show more") {
-            guard let actor = session.user?.id, let organization = session.activeOrganization?.id else { return }
-            scope = DescriptionCanvasScope(actor: actor, organization: organization,
-                                           generation: session.generation, authority: session.authorityRevision)
-            accessRetired = false
-            showing = true
-        }
-            .font(Theme.font(14, weight: .medium))
-            .foregroundStyle(Theme.brandText)
-            .frame(minHeight: 44)
-            .accessibilityLabel("Show more \(title.lowercased())")
-            .accessibilityIdentifier(identifier)
-            .sheet(isPresented: $showing) {
-                if let scope {
-                    DescriptionCanvas(text: $text, title: title, applyTitle: applyTitle, limit: limit,
-                                      scope: scope, accessRetired: $accessRetired)
-                        .presentationDetents([.large])
-                }
-            }
-            .onChange(of: isEnabled) { _, enabled in
-                if !enabled { accessRetired = true }
-            }
     }
 }
 

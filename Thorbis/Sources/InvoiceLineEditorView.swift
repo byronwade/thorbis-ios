@@ -349,18 +349,21 @@ struct InvoiceLineEditorView: View {
 
     private func descriptionTargetAvailable(_ target: InvoiceDescriptionTarget) -> Bool {
         !busy && canEdit && !editor.hasUnsupportedLineSources &&
-        invoice.id == target.invoiceID && invoice.organizationId == session.activeOrganization?.id &&
+        invoice.id == target.invoiceID && invoice.status == "draft" && invoice.organizationId == session.activeOrganization?.id &&
+        invoice.linesRevision == target.parentRevision && invoice.status == target.parentStatus &&
+        editor.invoice.linesRevision == target.editorRevision && editor.invoice.status == target.editorStatus &&
         editor.lines.contains(where: { $0.id == target.id })
     }
 
     private func showDescription(_ line: InvoiceLineDraft) {
-        guard !busy, canEdit, !editor.hasUnsupportedLineSources,
+        guard !busy, canEdit, invoice.status == "draft", !editor.hasUnsupportedLineSources,
               invoice.organizationId == session.activeOrganization?.id,
               let actor = session.user?.id, let organization = session.activeOrganization?.id,
               let current = editor.lines.first(where: { $0.id == line.id }) else { return }
         descriptionAccessRetired = false
         descriptionTarget = InvoiceDescriptionTarget(id: current.id, invoiceID: invoice.id, original: current.description,
-            scope: DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision))
+            parentRevision: invoice.linesRevision, parentStatus: invoice.status,
+            editorRevision: editor.invoice.linesRevision, editorStatus: editor.invoice.status, scope: DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision))
     }
 
     private func invoiceLineBinding(_ snapshot: InvoiceLineDraft) -> Binding<InvoiceLineDraft> {
@@ -541,6 +544,7 @@ struct InvoiceLineEditorView: View {
 
 private struct EditableInvoiceLineRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @FocusState private var descriptionFocused: Bool
     @Binding var line: InvoiceLineDraft
     let showDescription: () -> Void
     let canMoveUp: Bool
@@ -552,18 +556,26 @@ private struct EditableInvoiceLineRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .center, spacing: 8) {
-                TextField("Line item description", text: $line.description, axis: .vertical)
-                    .font(Theme.font(15, weight: .medium))
-                    .lineLimit(1...3)
-                    .accessibilityLabel("Line item description")
-                    .accessibilityIdentifier("invoice-line-description-\(line.id)")
+                if DescriptionPreview.isLong(line.description) && !descriptionFocused {
+                    Text(line.description).font(Theme.font(15, weight: .medium)).lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel("Line item description preview")
+                } else {
+                    TextField("Line item description", text: $line.description, axis: .vertical)
+                        .font(Theme.font(15, weight: .medium)).lineLimit(1...2)
+                        .focused($descriptionFocused)
+                        .accessibilityLabel("Line item description")
+                        .accessibilityIdentifier("invoice-line-description-\(line.id)")
+                }
                 LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
                                 moveUp: moveUp, moveDown: moveDown, remove: remove)
             }
-            Button("Show more", action: showDescription)
-                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                .frame(minHeight: 44).accessibilityLabel("Show more line item description")
-                .accessibilityIdentifier("invoice-line-description-more")
+            if DescriptionPreview.isLong(line.description) && !descriptionFocused {
+                Button("Show more", action: showDescription)
+                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .frame(minHeight: 44).accessibilityLabel("Show more line item description")
+                    .accessibilityIdentifier("invoice-line-description-more")
+            }
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 14) {
                     accessibleNumberField("Quantity", placeholder: "1", text: $line.quantity)
@@ -732,5 +744,9 @@ private struct InvoiceDescriptionTarget: Identifiable {
     let id: UUID
     let invoiceID: String
     let original: String
+    let parentRevision: Int
+    let parentStatus: String
+    let editorRevision: Int
+    let editorStatus: String
     let scope: DescriptionCanvasScope
 }

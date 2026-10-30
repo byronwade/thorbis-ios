@@ -8,6 +8,19 @@ final class EstimateBuilderTests: XCTestCase {
                           sellPrice: FieldMoney(amount: cents, currency: "USD"), revision: 3, archivedAt: nil)
     }
 
+    func testCanvasApplyRequiresLiveUnchangedLineAndAuthority() throws {
+        var lines = [EstimateRevisionLineDraft(description: "Original", quantity: "1", unitPrice: "10")]
+        let id = lines[0].id
+        XCTAssertTrue(lines.applyDescription(id: id, original: "Original", value: "Revised", authorized: true))
+        XCTAssertFalse(lines.applyDescription(id: id, original: "Original", value: "Wrong", authorized: true))
+        XCTAssertFalse(lines.applyDescription(id: id, original: "Revised", value: "Wrong", authorized: false))
+        XCTAssertFalse(lines.applyDescription(id: id, original: "Revised", value: String(repeating: "x", count: 201), authorized: true))
+        lines.removeAll()
+        lines.append(EstimateRevisionLineDraft(description: "Revised", quantity: "1", unitPrice: "10"))
+        XCTAssertFalse(lines.applyDescription(id: id, original: "Revised", value: "Wrong", authorized: true))
+        XCTAssertEqual(lines[0].description, "Revised")
+    }
+
     func testPriceBookItemsLandInTheirGroupWithWorkFirst() {
         var lines: [EstimateRevisionLineDraft] = []
         lines.addPriceBookItem(item(1, "Capacitor", kind: "material", cents: 14_500))

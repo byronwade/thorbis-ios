@@ -5,6 +5,21 @@ final class EstimateRevisionEditorTests: XCTestCase {
     private let estimateID = "00000000-0000-4000-8000-000000000008"
     private let optionID = "00000000-0000-4000-8000-000000000010"
 
+    func testCanvasApplyRequiresCurrentEstimateLineAndOption() throws {
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate())
+        let lineID = try XCTUnwrap(state.lines.first?.id)
+        XCTAssertTrue(state.applyLineDescription(optionID: nil, id: lineID, original: "Repair", value: "Updated", authorized: true))
+        XCTAssertFalse(state.applyLineDescription(optionID: nil, id: lineID, original: "Repair", value: "Wrong", authorized: true))
+        state.addOption()
+        let optionID = try XCTUnwrap(state.options.first?.id)
+        XCTAssertFalse(state.applyOptionDescription(id: optionID, original: "", value: "Wrong", authorized: false))
+        XCTAssertTrue(state.applyOptionDescription(id: optionID, original: "", value: "Details", authorized: true))
+        state.removeOption(id: optionID)
+        XCTAssertFalse(state.applyOptionDescription(id: optionID, original: "Details", value: "Wrong", authorized: true))
+        try state.removeLine(id: lineID)
+        XCTAssertFalse(state.applyLineDescription(optionID: nil, id: lineID, original: "Updated", value: "Wrong", authorized: true))
+    }
+
     private func makeEstimate(status: String = "sent", lines: String? = nil,
                               options: String? = nil, revision: Int? = 2) throws -> EstimateRecord {
         let lineJSON = lines ?? #"[{"id":"00000000-0000-4000-8000-000000000009","description":"Repair","quantity":2,"unitPrice":{"amount":1250,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000004","capturedAt":"2026-10-26T12:00:00Z"}}]"#

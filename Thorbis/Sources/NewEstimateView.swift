@@ -20,6 +20,8 @@ struct NewEstimateView: View {
     @State private var added = 0
     @State private var removed: RemovedLine?
     @State private var confirmDiscard = false
+    @State private var descriptionTarget: NewEstimateDescriptionTarget?
+    @State private var descriptionAccessRetired = false
     @FocusState private var focus: EstimateBuilderFocus?
     /// Set once the server created the estimate, so a retry only links it and never creates a duplicate.
     @State private var created: EstimateRecord?
@@ -73,6 +75,21 @@ struct NewEstimateView: View {
                 }
             }
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+            .sheet(item: $descriptionTarget) { target in
+                DescriptionCanvas(
+                    text: Binding(get: { lines.first(where: { $0.id == target.id })?.description ?? target.original }, set: { _ in }),
+                    title: "Line description", applyTitle: "Apply to estimate", limit: .utf16(200),
+                    scope: target.scope, accessRetired: $descriptionAccessRetired,
+                    targetAvailable: descriptionTargetAvailable(target), originalText: target.original,
+                    apply: { original, value in
+                        guard descriptionTargetAvailable(target), !descriptionAccessRetired,
+                              target.scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
+                                                   generation: session.generation, authority: session.authorityRevision),
+                              session.phase == .ready else { return false }
+                        return lines.applyDescription(id: target.id, original: original, value: value, authorized: true)
+                    }
+                ).presentationDetents([.large])
+            }
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {
                     EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
@@ -107,6 +124,20 @@ struct NewEstimateView: View {
         }
     }
 
+    private func descriptionTargetAvailable(_ target: NewEstimateDescriptionTarget) -> Bool {
+        !busy && created == nil && session.can("estimate.create", feature: "estimates") &&
+        lines.contains(where: { $0.id == target.id })
+    }
+
+    private func showDescription(_ id: UUID) {
+        guard !busy, created == nil, session.can("estimate.create", feature: "estimates"),
+              let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let line = lines.first(where: { $0.id == id }) else { return }
+        descriptionAccessRetired = false
+        descriptionTarget = NewEstimateDescriptionTarget(id: id, original: line.description,
+            scope: DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision))
+    }
+
     private var commitTitle: String {
         if created != nil { return "Retry adding to job" }
         guard let total else { return "Save estimate" }
@@ -138,7 +169,7 @@ struct NewEstimateView: View {
             }
             .padding(.bottom, 14)
 
-            EstimateLineGroupsEditor(lines: $lines, disabled: busy, focus: $focus, addTo: startAdding) { line, index in
+            EstimateLineGroupsEditor(lines: $lines, disabled: busy, focus: $focus, addTo: startAdding, showDescription: showDescription) { line, index in
                 withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) }
             }
             if lines.isEmpty {
@@ -243,4 +274,10 @@ struct NewEstimateView: View {
             dismiss()
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
+}
+
+private struct NewEstimateDescriptionTarget: Identifiable {
+    let id: UUID
+    let original: String
+    let scope: DescriptionCanvasScope
 }

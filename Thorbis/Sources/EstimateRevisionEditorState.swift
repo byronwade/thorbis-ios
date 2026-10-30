@@ -91,6 +91,24 @@ struct EstimateRevisionOptionDraft: Identifiable, Equatable {
 }
 
 struct EstimateRevisionEditorState: Equatable {
+    @discardableResult
+    mutating func applyLineDescription(optionID: String?, id: UUID, original: String, value: String, authorized: Bool) -> Bool {
+        guard authorized, canRevise, !hasUnsupportedLineSources else { return false }
+        if let optionID {
+            guard let index = options.firstIndex(where: { $0.id == optionID }) else { return false }
+            return options[index].lines.applyDescription(id: id, original: original, value: value, authorized: true)
+        }
+        return lines.applyDescription(id: id, original: original, value: value, authorized: true)
+    }
+
+    @discardableResult
+    mutating func applyOptionDescription(id: String, original: String, value: String, authorized: Bool) -> Bool {
+        guard authorized, canRevise, !hasUnsupportedLineSources,
+              DescriptionCanvasLimit.utf16Raw(500).count(value) <= 500,
+              let index = options.firstIndex(where: { $0.id == id }), options[index].description == original else { return false }
+        options[index].description = value
+        return true
+    }
     let estimate: EstimateRecord
     var title: String
     var lines: [EstimateRevisionLineDraft]
