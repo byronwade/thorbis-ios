@@ -518,6 +518,7 @@ private struct EditableInvoiceLineRow: View {
                 LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
                                 moveUp: moveUp, moveDown: moveDown, remove: remove)
             }
+            DescriptionCanvasLink(text: $line.description, title: "Line item description", applyTitle: "Apply to invoice", limit: .unicodeScalars(211), identifier: "invoice-line-description-more")
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 14) {
                     accessibleNumberField("Quantity", placeholder: "1", text: $line.quantity)

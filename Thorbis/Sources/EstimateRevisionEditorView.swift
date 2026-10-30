@@ -469,6 +469,7 @@ private struct EstimateRevisionOptionEditor: View {
             TextField("What this package includes", text: $option.description, axis: .vertical)
                 .font(Theme.font(15)).lineLimit(2...4)
                 .accessibilityLabel("Option package description")
+            DescriptionCanvasLink(text: $option.description, title: "Option description", applyTitle: "Apply to estimate", limit: .utf16Raw(500), identifier: "estimate-option-description-more")
             EstimateLineGroupsEditor(lines: $option.lines, disabled: disabled, focus: focus, addTo: addTo, removed: removed)
         }
         .disabled(disabled)

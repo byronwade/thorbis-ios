@@ -616,6 +616,7 @@ struct EstimateBuilderLineRow: View {
                         .fixedSize(horizontal: true, vertical: false)
                     menu
                 }
+                DescriptionCanvasLink(text: $line.description, title: "Line description", applyTitle: "Apply to estimate", limit: .utf16(200), identifier: "estimate-line-description-more")
                 HStack(spacing: 6) {
                     stepButton("minus", label: "One fewer", enabled: quantity > 1) { line.quantity = String(max(1, quantity - 1)) }
                     TextField("1", text: $line.quantity)
