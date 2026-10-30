@@ -1,3 +1,4 @@
+import CoreSpotlight
 import SwiftUI
 
 @main
@@ -53,7 +54,7 @@ struct ThorbisApp: App {
             JobDetailCache.clearAll()
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
-            Task { @MainActor in RecentItems.shared.clear() }
+            Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox, weak pendingMedia, weak api] actorID, organizationID in
             if let actorID, let organizationID {
@@ -67,7 +68,22 @@ struct ThorbisApp: App {
             if let actorID, let organizationID, let origin = api?.normalizedOrigin {
                 pendingMedia?.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: origin))
             } else { pendingMedia?.bind(nil) }
-            Task { @MainActor in RecentItems.shared.bind(actorID: actorID, organizationID: organizationID) }
+            Task { @MainActor in
+                RecentItems.shared.bind(actorID: actorID, organizationID: organizationID)
+                SpotlightIndex.shared.bind(actorID: actorID, organizationID: organizationID)
+            }
+        }
+        store.onRefreshed = { [weak session] jobs, customers in
+            guard let session, session.phase == .ready else { return }
+            SpotlightIndex.shared.replace(jobs: jobs, customers: customers,
+                                          includeJobs: session.can("job.view", feature: "jobs"),
+                                          includeCustomers: session.can("customer.view", feature: "core_crm"))
+        }
+        SpotlightIndex.shared.onOpen = { [weak store] target in
+            switch target {
+            case .job(let id): store?.requestedJobID = id
+            case .customer(let id): store?.requestedRecord = .customer(id)
+            }
         }
         PushNotifications.shared.start(api: api, store: store)
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
@@ -188,6 +204,8 @@ struct ThorbisApp: App {
                 whatsNew.skipThisLaunch = true
                 if let token = PublicEstimateActionLink.token(from: url) {
                     publicEstimateToken = token
+                } else if let query = SearchLink.query(from: url) {
+                    store.requestedSearch = query
                 } else if let jobID = JobActivityLink.jobID(from: url) {
                     store.requestedJobID = jobID
                 } else if let record = RecordLink(url: url) {
@@ -195,6 +213,11 @@ struct ThorbisApp: App {
                 } else if url.scheme == "thorbis", url.host() == "schedule" {
                     store.requestedSchedule += 1
                 }
+            }
+            .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
+                whatsNew.skipThisLaunch = true
+                SpotlightIndex.shared.open(identifier: identifier)
             }
         }
     }
@@ -236,6 +259,10 @@ final class Store: ObservableObject {
     @Published var requestedRecord: RecordLink? {
         didSet { if requestedRecord != nil { openedForRecord = true } }
     }
+    /// Words a "Search Thorbis" shortcut asked to look for; RootView opens search and clears this.
+    @Published var requestedSearch: String? {
+        didSet { if requestedSearch != nil { openedForRecord = true } }
+    }
     @Published var customers: [Customer] = []
     @Published var error: String?
     @Published var loading = false
@@ -243,6 +270,8 @@ final class Store: ObservableObject {
     @Published private(set) var cachedAt: Date?
     /// Called after the server answered a refresh, proof that it is reachable again.
     var onServerReached: (() -> Void)?
+    /// Called with the server's lists after a refresh applied for the bound identity (Spotlight).
+    var onRefreshed: (([Job], [Customer]) -> Void)?
 
     private var generation = UUID()
     private var cacheIdentity: (actorID: String, organizationID: String)?
@@ -324,6 +353,7 @@ final class Store: ObservableObject {
             if let identity = cacheIdentity {
                 cache.save(.init(savedAt: Date(), jobs: newJobs, customers: newCustomers),
                            actorID: identity.actorID, organizationID: identity.organizationID)
+                onRefreshed?(newJobs, newCustomers)
             }
             return .applied
         } catch is CancellationError {
