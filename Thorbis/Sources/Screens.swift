@@ -159,18 +159,18 @@ struct NewJobSheet: View {
                             .navigationTitle("When")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
-                                ToolbarItem(placement: .topBarLeading) { Button("Clear") { when = nil; pickingWhen = false } }
-                                ToolbarItem(placement: .topBarTrailing) { Button("Done") { if when == nil { when = Self.nextHour() }; pickingWhen = false } }
+                                ThorbisToolbarItem(placement: .topBarLeading) { Button("Clear") { when = nil; pickingWhen = false } }
+                                ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { if when == nil { when = Self.nextHour() }; pickingWhen = false } }
                             }
                     }
                     .presentationDetents([.large])
                 }
-                .navigationDestination(isPresented: createdJobRoute) {
+                .thorbisDestination(isPresented: createdJobRoute) {
                     if let createdJobID { JobDetailView(jobId: createdJobID) }
                 }
-                .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
-                .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
-                .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
+                .thorbisDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+                .thorbisDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
+                .thorbisDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
         }
         // A swipe never throws away a typed title (MA-16).
         .interactiveDismissDisabled(busy || (savedJobID == nil && !draft.title.isEmpty))
@@ -339,7 +339,7 @@ struct CustomerPickerSheet: View {
             .navigationTitle("Customer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
         .presentationDetents([.large])

@@ -102,8 +102,8 @@ struct InviteMemberSheet: View {
             .navigationTitle("Invite to team")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ToolbarItem(placement: .confirmationAction) {
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                     if busy { ProgressView() } else { Button("Send invite") { Task { await send() } }.disabled(!valid) }
                 }
             }

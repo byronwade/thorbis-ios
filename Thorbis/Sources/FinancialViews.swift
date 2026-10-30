@@ -28,7 +28,7 @@ struct EstimatesView: View {
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
-                        NavigationLink { EstimateDetailView(id: record.id) } label: {
+                        NavigationLink { EstimateDetailView(id: record.id).thorbisBackButton() } label: {
                             PaperDocumentRow(kind: .estimate, reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
                                              subtitle: store.customerName(record.customerId), status: record.status,
                                              amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") },
@@ -150,7 +150,7 @@ struct EstimateDetailView: View {
                         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
                     }
                     PaperGroupHeader(title: "Actions").padding(.top, 4)
-                    NavigationLink { CommercialDocumentView(path: "/v1/estimates/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
+                    NavigationLink { CommercialDocumentView(path: "/v1/estimates/\(id)/document").toolbar(.visible, for: .navigationBar).thorbisBackButton() } label: {
                         commercialAction("View PDF", icon: "doc.text")
                     }
                     if let signature = record.approvalSignature { SignatureBadge(label: "Approved by", signature: signature) }
@@ -328,7 +328,7 @@ struct InvoicesView: View {
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
-                        NavigationLink { InvoiceDetailView(id: record.id) } label: {
+                        NavigationLink { InvoiceDetailView(id: record.id).thorbisBackButton() } label: {
                             let total = paperLinesTotal(record.lines)
                             let due = total.map { max(0, $0 - record.amountPaid) }
                             PaperDocumentRow(kind: .invoice, reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
@@ -439,7 +439,7 @@ struct InvoiceDetailView: View {
                         Button { showToCustomer = true } label: { commercialAction("Show to customer", icon: "person.crop.rectangle") }
                             .buttonStyle(.plain)
                     }
-                    NavigationLink { CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar) } label: {
+                    NavigationLink { CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar).thorbisBackButton() } label: {
                         commercialAction("View PDF", icon: "doc.text")
                     }
                 } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }

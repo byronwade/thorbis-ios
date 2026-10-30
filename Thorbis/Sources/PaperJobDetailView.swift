@@ -202,21 +202,21 @@ struct JobDetailView: View {
                 Task { await loadInvoices() }
             }
         }
-        .navigationDestination(item: $documentInvoiceID) { id in
+        .thorbisDestination(item: $documentInvoiceID) { id in
             InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) })
                 .onDisappear { Task { await loadInvoices() } }
         }
-        .navigationDestination(item: $reviewInvoiceID) { id in
+        .thorbisDestination(item: $reviewInvoiceID) { id in
             InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) })
                 .onDisappear { Task { await loadInvoices() } }
         }
-        .navigationDestination(item: $openEstimate) { opened in
+        .thorbisDestination(item: $openEstimate) { opened in
             EstimateDetailView(id: opened.id, jobID: jobId, presentsOnOpen: opened.present)
                 .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices() } } }
         }
-        .navigationDestination(isPresented: $showWrapUp) { JobCloseoutView(jobID: jobId) }
-        .navigationDestination(isPresented: $showAssign) { JobAssignmentView(jobID: jobId) }
-        .navigationDestination(isPresented: $showFollowUps) {
+        .thorbisDestination(isPresented: $showWrapUp) { JobCloseoutView(jobID: jobId) }
+        .thorbisDestination(isPresented: $showAssign) { JobAssignmentView(jobID: jobId) }
+        .thorbisDestination(isPresented: $showFollowUps) {
             JobFollowUpsView(jobID: jobId).onDisappear { Task { await loadFollowUps() } }
         }
         .sheet(isPresented: $showNewEstimate, onDismiss: {
@@ -319,8 +319,8 @@ struct JobDetailView: View {
                 .navigationTitle("Pause job")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showPause = false }.disabled(busy) }
-                    ToolbarItem(placement: .confirmationAction) {
+                    ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { showPause = false }.disabled(busy) }
+                    ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                         Button("Pause") { Task { await pause() } }
                             .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
                     }
@@ -346,19 +346,23 @@ struct JobDetailView: View {
         }
     }
 
-    /// Native bar: system back on the left, share and the job's one menu on the right (HIG-005, JS-02).
+    /// Native bar with Thorbis circles: our back on the left (`thorbisDestination`), share and
+    /// the job's one menu on the right (HIG-005, JS-02).
     @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
         if let job {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                ShareLink(item: JobShareText.text(title: job.title, customer: store.customerName(job.customerId), scheduledFor: job.scheduledFor)) {
-                    Image(systemName: "square.and.arrow.up")
-                }
-                .accessibilityLabel("Share job")
-                let groups = menuGroups(job)
-                if !groups.isEmpty {
-                    ThorbisMenu(items: groups.flatMap { $0 }.map { menuActionItem($0, job: job) },
-                                title: "Job actions", accessibilityLabel: "Job actions") {
-                        Image(systemName: "ellipsis")
+            ThorbisToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 0) {
+                    ShareLink(item: JobShareText.text(title: job.title, customer: store.customerName(job.customerId), scheduledFor: job.scheduledFor)) {
+                        PaperCircleLabel(symbol: "square.and.arrow.up", fill: Theme.card, bordered: true)
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Share job")
+                    let groups = menuGroups(job)
+                    if !groups.isEmpty {
+                        ThorbisMenu(items: groups.flatMap { $0 }.map { menuActionItem($0, job: job) },
+                                    title: "Job actions", accessibilityLabel: "Job actions") {
+                            PaperCircleLabel(symbol: "ellipsis", fill: Theme.card, bordered: true)
+                        }
                     }
                 }
             }
@@ -823,7 +827,7 @@ struct JobDetailView: View {
                                     message: "Build one from the price book. It's added to this job automatically.")
                 }
                 ForEach(jobEstimates) { estimate in
-                    NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId) } label: {
+                    NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId).thorbisBackButton() } label: {
                         JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true)
                     }
                     .buttonStyle(PressStyle())

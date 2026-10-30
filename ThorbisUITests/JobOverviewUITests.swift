@@ -18,6 +18,30 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Invoices"].waitForExistence(timeout: 10), "Tapping the balance should open invoice content")
     }
 
+    /// The Thorbis back circle replaces the system one; both it and the edge swipe still go back.
+    func testThorbisBackButtonAndEdgeSwipeReturnFromJob() {
+        for useSwipe in [false, true] {
+            let app = preview("job", working: true)
+            let title = app.staticTexts["AC not cooling"]
+            XCTAssertTrue(title.waitForExistence(timeout: 20))
+            let back = app.navigationBars.firstMatch.buttons["Back"]
+            XCTAssertTrue(back.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(back.frame.width, 43.5)
+            XCTAssertGreaterThanOrEqual(back.frame.height, 43.5)
+            let actions = app.buttons["Job actions"]
+            XCTAssertTrue(actions.exists)
+            XCTAssertTrue(app.buttons["Share job"].exists)
+            if useSwipe {
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
+                start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+            } else {
+                back.tap()
+            }
+            // The jobs list also shows the title, so watch the job's own controls leave.
+            XCTAssertTrue(actions.waitForNonExistence(timeout: 5), useSwipe ? "Edge swipe should pop the job" : "Back should pop the job")
+        }
+    }
+
     func testDarkJobHeaderKeepsWorkAndPaymentVisible() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "-thorbis.appearance", "dark"]

@@ -262,7 +262,7 @@ struct ScheduleView: View {
         default:
             // On the job already: the next thing is wrapping it up, so that is the commit.
             if (outbox.pendingStatus(for: job.id) ?? job.status) == "in_progress", session.can("job.edit", feature: "jobs") {
-                NavigationLink { JobCloseoutView(jobID: job.id) } label: {
+                NavigationLink { JobCloseoutView(jobID: job.id).thorbisBackButton() } label: {
                     commitLabel("Wrap up", symbol: "checkmark.seal", busy: false)
                 }
                 .buttonStyle(PressStyle())

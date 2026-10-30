@@ -542,14 +542,14 @@ private struct InvoicePaymentDetailSheet: View {
             .navigationTitle("Payment details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .frame(minWidth: 44, minHeight: 44)
                         .disabled(refundModel.isSubmitting)
                 }
             }
             #if DEBUG
-            .navigationDestination(isPresented: $previewRefundForm) {
+            .thorbisDestination(isPresented: $previewRefundForm) {
                 InvoicePaymentRefundForm(model: refundModel, onRefundCompleted: onRefundCompleted)
             }
             #endif
@@ -571,7 +571,7 @@ private struct InvoicePaymentDetailSheet: View {
 
     private func refundLink(title: String) -> some View {
         NavigationLink {
-            InvoicePaymentRefundForm(model: refundModel, onRefundCompleted: onRefundCompleted)
+            InvoicePaymentRefundForm(model: refundModel, onRefundCompleted: onRefundCompleted).thorbisBackButton()
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "arrow.uturn.backward.circle")
@@ -673,7 +673,7 @@ private struct InvoicePaymentRefundForm: View {
         .navigationTitle("Refund payment")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ThorbisToolbarItem(placement: .topBarTrailing) {
                 Button("Done") { dismiss() }
                     .frame(minWidth: 44, minHeight: 44)
                     .disabled(model.isSubmitting)
@@ -895,7 +895,7 @@ struct InvoicePaymentCollectionSheet: View {
             .navigationTitle("Collect payment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ThorbisToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }.frame(minWidth: 44, minHeight: 44)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
@@ -903,7 +903,7 @@ struct InvoicePaymentCollectionSheet: View {
                     Button("Done") { amountFocused = false }.frame(minWidth: 44, minHeight: 44)
                 }
             }
-            .navigationDestination(isPresented: $showPayLinkShare) {
+            .thorbisDestination(isPresented: $showPayLinkShare) {
                 InvoicePaymentLinkView(
                     model: model, payLink: payLink, requestedBalanceCents: payLinkBalanceCents,
                     customerName: customerName, isCreating: isCreatingPayLink,

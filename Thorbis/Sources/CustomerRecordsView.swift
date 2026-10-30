@@ -46,7 +46,7 @@ struct CustomerRecordsView: View {
             }
             activitySection
         }
-        .navigationDestination(item: $openedLegacy) { photo in
+        .thorbisDestination(item: $openedLegacy) { photo in
             LegacyCustomerPhotoDetail(photo: photo)
         }
     }

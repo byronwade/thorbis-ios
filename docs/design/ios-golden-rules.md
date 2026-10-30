@@ -73,6 +73,14 @@ source evidence; verify platform/API/version claims before relying on them.
     tabs/toolbars/navigation. Use accessible Inter and the existing money/mono
     styles in content. Liquid Glass belongs to supported system navigation/action
     chrome; do not coat static forms/cards in glass or imitate unavailable APIs.
+    *User direction, 30 October 2026:* navigation and action buttons use Thorbis
+    custom controls, not the system's default buttons — the round back
+    (`ThorbisBackButton` via `thorbisDestination`), round icon circles
+    (`PaperCircleButton`/`PaperCircleLabel`, `ThorbisMenu`) and the text pill
+    (`ThorbisToolbarItem` + `ThorbisBarButtonStyle`) for Done/Cancel/Save. System
+    navigation behaviour stays native: the navigation bar, swipe-back, sheets and
+    their dismissal. Do not add stock bar buttons or `ToolbarItem` without the
+    Thorbis wrapper.
 12. **Scale and reflow.** Use Dynamic Type and semantic text styles/metrics;
     never transplant fixed desktop 12/13/14px type into essential phone content.
     Keep the same information architecture across appearances, phone widths and

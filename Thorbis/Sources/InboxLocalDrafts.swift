@@ -208,11 +208,11 @@ private struct InboxLocalComposerView: View {
             }
             .navigationTitle("Compose")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                     Button("Save draft") { save(.draft) }
                 }
-                ToolbarItem(placement: .bottomBar) {
+                ThorbisToolbarItem(placement: .bottomBar) {
                     Button(composer.channel == .sms ? "Queue locally" : "Queue email locally") { save(.queue) }
                         .disabled(composer.channel == .sms && !composer.scheduleText)
                 }

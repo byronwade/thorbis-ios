@@ -248,8 +248,8 @@ struct TeamView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if canInvite {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { inviting = true } label: { Image(systemName: "person.badge.plus") }.accessibilityLabel("Invite to team")
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    PaperCircleButton(symbol: "person.badge.plus", label: "Invite to team", fill: Theme.card, bordered: true) { inviting = true }
                 }
             }
         }
@@ -274,10 +274,10 @@ struct TeamView: View {
         .sheet(item: $changing) { member in
             MemberRoleSheet(member: member) { await load() }
         }
-        .navigationDestination(item: $opening) { member in
+        .thorbisDestination(item: $opening) { member in
             MemberAccessView(member: member) { await load() }
         }
-        .navigationDestination(item: $editingRoleID) { id in
+        .thorbisDestination(item: $editingRoleID) { id in
             RoleEditorView(roleID: id) { await load() }
         }
         .alert("New role", isPresented: $naming) {
@@ -371,7 +371,7 @@ struct MemberRoleSheet: View {
             .overlay(alignment: .top) { if !loaded { SkeletonRows(count: 4, leading: false).background(Theme.background) } }
             .navigationTitle("Change role")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            .toolbar { ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .task {
                 do { roles = try await api.organizationRoles() } catch { self.error = error.localizedDescription }
                 loaded = true

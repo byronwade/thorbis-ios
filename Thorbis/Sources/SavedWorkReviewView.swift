@@ -44,7 +44,7 @@ struct SavedWorkReviewView: View {
                         .navigationBarTitleDisplayMode(.inline)
                         .paperDestinations()
                         .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
+                            ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                                 Button("Done") { close() }.accessibilityIdentifier("saved-work-done")
                             }
                         }

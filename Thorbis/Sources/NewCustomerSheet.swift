@@ -65,7 +65,7 @@ struct NewCustomerSheet: View {
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .safeAreaInset(edge: .bottom) {
                 PaperActionBar(title: "Save customer", symbol: "person.badge.plus", busy: busy,
                                disabled: !valid || !session.can("customer.create", feature: "core_crm")) { Task { await save() } }

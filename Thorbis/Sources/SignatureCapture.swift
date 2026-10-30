@@ -84,7 +84,7 @@ struct SignatureCaptureSheet: View {
             .navigationTitle("Customer signature")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
             }
             .onAppear { if name.isEmpty { name = suggestedName } }
         }

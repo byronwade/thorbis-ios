@@ -230,8 +230,8 @@ private struct PasswordResetRequestView: View {
             .navigationBarTitleDisplayMode(.inline)
             // MA-16: Cancel leading, the commit trailing in the sheet's bar.
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                     if busy {
                         ProgressView()
                     } else {

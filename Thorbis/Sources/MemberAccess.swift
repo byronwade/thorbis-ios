@@ -101,7 +101,7 @@ struct MemberAccessView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(busy || !changed) }
+            ThorbisToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(busy || !changed) }
         }
         .sheet(isPresented: $changingRole) { MemberRoleSheet(member: member) { await onChanged() } }
         .task { await load() }

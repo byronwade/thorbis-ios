@@ -361,8 +361,8 @@ struct CustomerDetailView: View {
         .toolbar {
             let items = customerMenuItems
             if !items.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    ThorbisMenu(items: items, accessibilityLabel: "Customer actions") { Image(systemName: "ellipsis") }
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    ThorbisMenu(items: items, accessibilityLabel: "Customer actions") { PaperCircleLabel(symbol: "ellipsis", fill: Theme.card, bordered: true) }
                 }
             }
         }

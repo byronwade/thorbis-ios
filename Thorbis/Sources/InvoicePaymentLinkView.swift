@@ -55,7 +55,7 @@ struct InvoicePaymentLinkView: View {
         .navigationTitle("Payment link")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ThorbisToolbarItem(placement: .topBarTrailing) {
                 Button("Done", action: onDone).frame(minWidth: 44, minHeight: 44)
             }
         }

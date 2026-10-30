@@ -103,7 +103,7 @@ struct JobCloseoutView: View {
                             }.buttonStyle(RowPressStyle()).disabled(busy)
                         }
                         if let invoiceID, session.can("invoice.view", feature: "invoicing") {
-                            NavigationLink { InvoiceDetailView(id: invoiceID) } label: { PaperMenuRow("View invoice", symbol: "doc.text") }
+                            NavigationLink { InvoiceDetailView(id: invoiceID).thorbisBackButton() } label: { PaperMenuRow("View invoice", symbol: "doc.text") }
                                 .buttonStyle(RowPressStyle())
                         }
                     }
@@ -129,8 +129,8 @@ struct JobCloseoutView: View {
         }
         .task { await load() }
         .refreshable { await load() }
-        .navigationDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0) }
-        .navigationDestination(isPresented: $openBilling) { BillingSchedulesView() }
+        .thorbisDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0) }
+        .thorbisDestination(isPresented: $openBilling) { BillingSchedulesView() }
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
@@ -642,8 +642,8 @@ struct FollowUpBookingSheet: View {
             .navigationTitle("Book return visit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button(result == nil ? "Cancel" : "Done") { if result != nil { onDone() }; dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) {
+                ThorbisToolbarItem(placement: .topBarLeading) { Button(result == nil ? "Cancel" : "Done") { if result != nil { onDone() }; dismiss() } }
+                ThorbisToolbarItem(placement: .topBarTrailing) {
                     if result == nil {
                         Button("Book") { Task { await book() } }
                             .disabled(busy || need.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
