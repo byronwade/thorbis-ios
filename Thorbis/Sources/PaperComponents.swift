@@ -508,7 +508,9 @@ struct OutboxReviewSheet: View {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.destructive).padding(.top, 2)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("\(entry.summary) · \(store.jobs.first { $0.id == entry.jobID }?.title ?? "Job")")
+                                Text(entry.jobID == OutboxEntry.organizationRecord
+                                     ? "Company: \(entry.summary)"
+                                     : "\(entry.summary) · \(store.jobs.first { $0.id == entry.jobID }?.title ?? "Job")")
                                     .font(Theme.font(15, weight: .medium))
                                 Text(reason(entry)).font(Theme.font(13)).foregroundStyle(Theme.muted)
                                 Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)

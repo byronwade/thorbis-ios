@@ -12,6 +12,7 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         case complete(CompletePayload)
         case invoiceSignature(SignaturePayload)
         case payment(PaymentPayload)
+        case organizationFact(FactPayload)
     }
 
     /// `jobs.progress` input (domains/jobs progressJobInputSchema, a strict object).
@@ -70,6 +71,15 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         let idempotencyKey: String
     }
 
+    /// A company detail typed in setup or Company details without signal. It goes through the
+    /// same `POST /v1/organization/facts` with the identity it was typed under; facts are
+    /// append-only versions, so sending the same value twice only adds a matching version.
+    struct FactPayload: Codable, Equatable {
+        let factKey: String
+        let value: String
+        let label: String
+    }
+
     enum State: Codable, Equatable {
         case pending
         /// The server refused it; the reason is shown and nothing is resent.
@@ -102,8 +112,12 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         case .complete(let payload): payload.jobId
         case .invoiceSignature(let payload): payload.jobId
         case .payment(let payload): payload.jobId ?? payload.invoiceId
+        case .organizationFact: Self.organizationRecord
         }
     }
+
+    /// The ordering key company details share: they land in the order they were typed.
+    static let organizationRecord = "organization"
 
     /// The registered offline command, or nil for changes that only replay through REST.
     var command: String? {
@@ -112,7 +126,7 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         case .note: "jobs.addNote"
         case .acknowledgeCheck: "jobs.acknowledgeCheck"
         case .complete: "jobs.complete"
-        case .invoiceSignature, .payment: nil
+        case .invoiceSignature, .payment, .organizationFact: nil
         }
     }
 
@@ -149,6 +163,7 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         case .complete: "Completed job"
         case .invoiceSignature(let payload): "Signature from \(payload.signerName)"
         case .payment(let payload): "\(payload.method.capitalized) \(money(payload.amountCents, currency: "USD"))"
+        case .organizationFact(let payload): payload.label
         }
     }
 }
@@ -310,6 +325,12 @@ final class FieldOutbox: ObservableObject {
            let existing = entries.first(where: { if case .payment(let other) = $0.action { other.idempotencyKey == payment.idempotencyKey } else { false } }) {
             return existing
         }
+        // A newer value for the same company detail replaces the one still waiting.
+        if case .organizationFact(let fact) = action {
+            entries.removeAll {
+                if case .organizationFact(let other) = $0.action { other.factKey == fact.factKey && $0.state == .pending } else { false }
+            }
+        }
         var entry = OutboxEntry(id: UUID().uuidString.lowercased(), deviceId: deviceID, actorId: identity.actorID,
                                 organizationId: identity.organizationID, policyVersion: policyVersion,
                                 createdAt: Date(), action: action)
@@ -410,6 +431,8 @@ final class FieldOutbox: ObservableObject {
             return (try? await api.fieldInvoice(payload.invoiceId))?.customerAuthorization?.linesRevision == payload.expectedLinesRevision
         case .payment(let payload):
             return (try? await api.fieldPayments(payload.invoiceId))?.contains { $0.idempotencyKey == payload.idempotencyKey } == true
+        case .organizationFact(let payload):
+            return (try? await api.organizationProfile())?.value(payload.factKey) == payload.value
         case .note:
             return false
         }
@@ -475,7 +498,7 @@ final class FieldOutbox: ObservableObject {
                 case .note(let payload): try payload.encode(to: encoder)
                 case .acknowledgeCheck(let payload): try payload.encode(to: encoder)
                 case .complete(let payload): try payload.encode(to: encoder)
-                case .invoiceSignature, .payment: break // Never batched: `command` is nil.
+                case .invoiceSignature, .payment, .organizationFact: break // Never batched: `command` is nil.
                 }
             }
         }
@@ -551,6 +574,9 @@ final class FieldOutbox: ObservableObject {
                 _ = try await api.authorizeFieldInvoice(payload.invoiceId, expectedLinesRevision: payload.expectedLinesRevision,
                                                         signature: .init(signerName: payload.signerName, signedAt: payload.signedAt,
                                                                          imageMediaId: asset.id))
+            case .organizationFact(let payload):
+                try await api.confirmOrganizationFact(payload.factKey, value: payload.value,
+                                                      actorID: entry.actorId, organizationID: entry.organizationId)
             case .payment(let payload):
                 guard let method = FieldPaymentMethod(rawValue: payload.method) else {
                     reject(entry.id, reason: "This payment method can't be recorded from the phone.")

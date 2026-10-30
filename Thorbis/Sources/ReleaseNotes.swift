@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-hours-tax-terms",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "clock", title: "Hours, tax and terms in setup",
+                      detail: "Set your open hours, time zone, sales tax rate and payment terms. Saved offline too."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-call-log",
             date: "2026-10-30",
             highlights: [
