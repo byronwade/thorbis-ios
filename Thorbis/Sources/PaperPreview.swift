@@ -1072,6 +1072,21 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "uploadState": "stored", "tags": ["Before"], "caption": "Outdoor unit", "archived": false,
                     "createdAt": now, "updatedAt": now
                 ]
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-pages") {
+                    if queryItems.contains(where: { $0.name == "cursor" && $0.value == "next-media" }) {
+                        var later = first
+                        later["id"] = "00000000-0000-4000-8000-000000009302"
+                        later["caption"] = "Later repair"
+                        later["tags"] = ["After"]
+                        var document = first
+                        document["id"] = "00000000-0000-4000-8000-000000009303"
+                        document["kind"] = "document"
+                        document["mime"] = "application/pdf"
+                        document["originalFilename"] = "Later document.pdf"
+                        return ["items": [later, document]]
+                    }
+                    return ["items": [first], "nextCursor": "next-media"]
+                }
                 guard ProcessInfo.processInfo.arguments.contains("--paper-preview-media-dates") else { return ["items": [first]] }
                 var newest = first
                 newest["capturedAt"] = "2026-10-27T12:00:00Z"

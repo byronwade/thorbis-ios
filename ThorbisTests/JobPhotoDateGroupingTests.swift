@@ -11,6 +11,22 @@ final class JobPhotoDateGroupingTests: XCTestCase {
                          createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z")
     }
 
+    func testMediaContinuationRejectsRepeatedAndEmptyCursors() throws {
+        let repeated = JobMediaPage(items: [], nextCursor: "same")
+        XCTAssertThrowsError(try JobMediaPageIntegrity.validate(repeated, jobID: "job", organizationID: "org", seen: ["same"]))
+        XCTAssertThrowsError(try JobMediaPageIntegrity.validate(JobMediaPage(items: [], nextCursor: ""), jobID: "job", organizationID: "org", seen: []))
+        XCTAssertNoThrow(try JobMediaPageIntegrity.validate(JobMediaPage(items: [], nextCursor: "next"), jobID: "job", organizationID: "org", seen: ["same"]))
+    }
+
+    func testMediaPageRejectsDifferentJobOrChangedDuplicate() throws {
+        let original = photo("one", "2026-10-27T08:00:00Z")
+        let changed = photo("one", "2026-10-28T08:00:00Z")
+        XCTAssertThrowsError(try JobMediaPageIntegrity.validate(JobMediaPage(items: [original], nextCursor: nil), jobID: "other", organizationID: "org", seen: []))
+        XCTAssertThrowsError(try JobMediaPageIntegrity.validate(JobMediaPage(items: [changed], nextCursor: nil), jobID: "job", organizationID: "org", seen: [], existing: [original]))
+        XCTAssertThrowsError(try JobMediaPageIntegrity.validate(JobMediaPage(items: [original, original], nextCursor: nil), jobID: "job", organizationID: "org", seen: []))
+        XCTAssertNoThrow(try JobMediaPageIntegrity.validate(JobMediaPage(items: [original], nextCursor: nil), jobID: "job", organizationID: "org", seen: [], existing: [original]))
+    }
+
     func testGroupsLocalDaysNewestFirstAndKeepsServerOrderWithinDay() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: -7 * 3600)!

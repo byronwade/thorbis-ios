@@ -2,6 +2,23 @@ import XCTest
 
 @MainActor
 final class JobMediaQueueUITests: XCTestCase {
+    func testLaterFilteredPhotosAndDocumentsRemainReachable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-pages"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Counts show loaded photos"].exists)
+        app.buttons["After · 0"].tap()
+        XCTAssertTrue(app.staticTexts["No matches in loaded photos. More may be available."].exists)
+        let more = app.buttons["job-media-load-more-matches"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        XCTAssertTrue(app.buttons["Photo, Later repair"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["After · 1"].exists)
+        XCTAssertTrue(app.staticTexts["Later document.pdf"].exists)
+        XCTAssertFalse(app.buttons["job-media-load-more"].exists)
+    }
+
     func testUndatedPhotosStayVisibleAndFilterableInTheirOwnGroup() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media"]

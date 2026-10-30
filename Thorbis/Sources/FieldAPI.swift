@@ -977,6 +977,11 @@ private struct FieldPage<T: Decodable>: Decodable {
     let nextCursor: String?
 }
 
+struct JobMediaPage: Decodable {
+    let items: [MediaAssetRecord]
+    let nextCursor: String?
+}
+
 @MainActor
 extension APIClient {
     private func fieldPath(_ base: String, id: String, suffix: String = "") throws -> String {
@@ -1126,6 +1131,15 @@ extension APIClient {
 
     func fieldMedia(_ jobID: String, includeArchived: Bool = false) async throws -> [MediaAssetRecord] {
         try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : [])
+    }
+
+    func fieldMediaPage(_ jobID: String, cursor: String? = nil, kind: String? = nil) async throws -> JobMediaPage {
+        guard cursor.map({ !$0.isEmpty }) ?? true else {
+            throw Problem(title: "Invalid media cursor", status: nil, detail: "The continuation is empty.")
+        }
+        var query = [URLQueryItem(name: "limit", value: "50")]
+        if let kind { query.append(URLQueryItem(name: "kind", value: kind)) }
+        return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: query, cursor: cursor)
     }
 
     func registerFieldMedia(_ jobID: String, request: FieldMediaRegistrationRequest) async throws -> FieldMediaRegistration {
