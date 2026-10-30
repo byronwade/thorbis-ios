@@ -1,0 +1,27 @@
+# Scoped iOS visual review — 30 October 2026
+
+This is a targeted source review of the build 97 candidate (`535782b`), informed by the existing Thorbis Mobile Paper artboards and four inspected Mobbin iOS screens. It is not a rendered review of every screen or a certification of Paper parity, feature completeness, accessibility, or TestFlight availability. Suggestions below require an actual Paper/style comparison and rendered verification before release.
+
+## Reference patterns
+
+- [Shopify customer record](https://mobbin.com/screens/41b067de-2c35-47f3-ad20-adae9e642d45) separates order history and timeline under clear headings, with status words alongside an amount. Apply that hierarchy to real customer job history, preserving job boundaries and actions.
+- [Shopify order detail](https://mobbin.com/screens/991b6801-791b-4f43-b0e1-ce5e79fddb30) pairs actual item thumbnails with names and quantities, then separates the financial summary. Adapt only where real images and authoritative amounts exist.
+- [Fiverr order timeline](https://mobbin.com/screens/ea08a9f0-fb37-496e-8282-711586991fc0) uses event-specific symbols and a chronology with expandable detail. Preserve selectable Thorbis activity destinations and full note content.
+- [Shopify product selector](https://mobbin.com/screens/586debf9-f0b9-42d8-b5c6-245ee88802eb) offers search and compact selectable rows with real thumbnails and short secondary information. Keep full item descriptions, prices and selection feedback accessible.
+
+Mobbin examples inform structure; Paper Thorbis Mobile owns the app's layouts, Thorbis owns semantic tokens, and system controls stay native. Status cannot depend only on color or icons, text must reflow, and target sizes must retain the golden rules.
+
+## Observed opportunities and retained behavior
+
+1. **Customer locations** — `PaperCustomerViews.swift`, `locationsSection`: addresses, notes, parking, animals and coordinates are all inline. Consider address-first summaries and labelled disclosure for secondary details. Preserve every location, maps, edit/remove actions, permissions and mutation errors. Labels currently have a one- or three-line limit; verify full long names remain accessible.
+2. **Customer job history** — `PaperCustomerViews.swift`, `jobsSection`: rows show title and status, but not an actual schedule or assigned technician. Where authoritative fields exist, introduce date and assignee cues like the customer Paper artboard. Keep each job link, status text and honest scope; never infer assignment or date.
+3. **Customer activity** — `PaperCustomerViews.swift`, `activitySection`: selectable events already have kind-specific symbols, but summaries are limited to three lines. Make full long information reachable through its existing destination or a disclosure; keep destination mapping, pagination, retry, access checks and private data boundaries.
+4. **Job overview** — `PaperJobDetailView.swift`, `overviewContent`: office notes, visit counts, contacts, unconfirmed customer locations, equipment, memberships, past visits and job details form a long stack. Group by the field task and emphasize the real next action while retaining direct notes, photos, follow-ups, contact and location routes and the distinction between customer locations and a confirmed job site.
+5. **Job activity** — `PaperJobDetailView.swift`, `activityContent`: a timeline, symbols, dates and selectable entries already exist. Investigate date grouping and progressive display of long notes rather than repeating equal-weight blocks. Retain the full text, navigation, note entry, status filter and save state.
+6. **Job media** — `MediaView.swift`, photo grid: real thumbnails, Before/After tags, filtering, tile actions and pending uploads already exist. Paper 21A shows grouping by date; consider sections based on trustworthy capture dates with a labelled unknown-date group. Preserve every photo, filter, permission, pending/retry state and existing action. Do not fabricate visits or timestamps.
+7. **Estimate and invoice editing** — `EstimateRevisionEditorView.swift` and `InvoiceLineEditorView.swift`: catalog search exists, but warning banners, details, editable lines, options and save state compete for attention. Strengthen hierarchy around catalog selection and editable lines, while retaining reordering, overrides, discounts, options, revision checks and recovery. The estimate editor explicitly says draft changes cannot yet be saved; this is a functional gap, not a visual issue that can be declared fixed through restyling.
+8. **Reports** — `ReportsView.swift`, operations/schedule/payments content: month and day comparisons are text rows with equal-priority summary tiles. Consider accessible proportional graphics where the authoritative data supports them, with exact values still readable. Preserve incomplete-report states and keep payments and refunds distinct.
+
+## Scope still to review
+
+The app includes schedule and map; job list, assignment and closeout; customer list, contacts, equipment, membership and compiled records; estimate and invoice presentation and collection; customer document book; notices and inbox; price book; reports; team; settings; and onboarding. The observations above cover only parts of customer, job, document editing, media and reporting. Each route and relevant loading, empty, error, offline, permissions, long-content and large-text state still needs a rendered review. VoiceOver, RTL, iPad and real-device field use were not evaluated here.
