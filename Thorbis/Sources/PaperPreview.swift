@@ -707,6 +707,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if path == "/v1/notice-preferences" {
             return ["items": [["subjectKind": "role", "subjectKey": "technician", "channel": "email", "enabled": false]]]
         }
+        if path == "/v1/staff/notices", PaperPreview.screen == "inbox" {
+            return ["items": [
+                ["id": "preview-notice-new", "jobId": PaperPreview.jobID, "title": "A visit is ready", "meta": "Water heater install", "at": now, "read": false],
+                ["id": "preview-notice-read", "jobId": PaperPreview.jobID, "title": "A visit was updated", "meta": "Water heater install", "at": now, "read": true]
+            ], "unreadState": "present", "nextCursor": NSNull()] as [String: Any]
+        }
         if path == "/v1/billing-schedules/00000000-0000-4000-8000-000000009501",
            let list = fixture(path: "/v1/billing-schedules") as? [String: Any], let schedule = (list["items"] as? [[String: Any]])?.first {
             return ["schedule": schedule,
@@ -821,7 +827,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
-            if PaperPreview.screen == "notices" { enabledFeatures.append("job_booking_notices") }
+            if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
             let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
