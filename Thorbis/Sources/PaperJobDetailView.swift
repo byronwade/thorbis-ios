@@ -482,8 +482,8 @@ struct JobDetailView: View {
                 JobSiteSection(place: place, showsLabel: locations.count > 1)
             }
             // What's installed here and what they pay (JS-08); the tech records a unit they find in place.
-            CustomerEquipmentSection(customerID: job.customerId, locations: locations, onlyLocationID: locations.first?.id)
-            CustomerMembershipSection(customerID: job.customerId, editable: false)
+            CustomerEquipmentSection(customerID: job.customerId, locations: locations, onlyLocationID: locations.first?.id, jobID: job.id)
+            CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)
             JobVisitCounts(latestNote: notes.last?.body, noteCount: notes.count + outbox.pendingNotes(for: job.id).count,
                            photoCount: mediaCount, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
                            openNotes: { activityFilter = "Notes"; withMotion(.snappy) { selectedTab = "Activity" } },
