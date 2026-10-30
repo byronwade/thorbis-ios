@@ -54,13 +54,15 @@ struct DescriptionCanvasLink: View {
     }
 }
 
-private struct DescriptionCanvas: View {
+struct DescriptionCanvas: View {
     @Binding var text: String
     let title: String
     let applyTitle: String
     let limit: DescriptionCanvasLimit?
     let scope: DescriptionCanvasScope
     @Binding var accessRetired: Bool
+    let targetAvailable: Bool
+    let apply: ((String, String) -> Bool)?
     @EnvironmentObject private var session: SessionController
     @State private var working: String
     @State private var original: String
@@ -68,21 +70,24 @@ private struct DescriptionCanvas: View {
     @Environment(\.dismiss) private var dismiss
 
     init(text: Binding<String>, title: String, applyTitle: String, limit: DescriptionCanvasLimit?,
-         scope: DescriptionCanvasScope, accessRetired: Binding<Bool>) {
+         scope: DescriptionCanvasScope, accessRetired: Binding<Bool>, targetAvailable: Bool = true,
+         originalText: String? = nil, apply: ((String, String) -> Bool)? = nil) {
         _text = text
         self.title = title
         self.applyTitle = applyTitle
         self.limit = limit
         self.scope = scope
         _accessRetired = accessRetired
-        _working = State(initialValue: text.wrappedValue)
-        _original = State(initialValue: text.wrappedValue)
+        self.targetAvailable = targetAvailable
+        self.apply = apply
+        _working = State(initialValue: originalText ?? text.wrappedValue)
+        _original = State(initialValue: originalText ?? text.wrappedValue)
     }
 
     private var count: Int { limit?.count(working) ?? 0 }
     private var exceedsLimit: Bool { limit.map { count > $0.maximum } ?? false }
     private var accessValid: Bool {
-        !accessRetired && session.phase == .ready && scope.matches(actor: session.user?.id,
+        !accessRetired && targetAvailable && session.phase == .ready && scope.matches(actor: session.user?.id,
             organization: session.activeOrganization?.id, generation: session.generation, authority: session.authorityRevision)
     }
 
@@ -136,7 +141,15 @@ private struct DescriptionCanvas: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Apply") { text = working; dismiss() }
+                    Button("Apply") {
+                        guard accessValid, !exceedsLimit, text == original else { return }
+                        if let apply {
+                            if apply(original, working) { dismiss() }
+                        } else {
+                            text = working
+                            dismiss()
+                        }
+                    }
                         .accessibilityLabel(applyTitle)
                         .accessibilityInputLabels(["Apply"])
                         .disabled(!accessValid || exceedsLimit || text != original)

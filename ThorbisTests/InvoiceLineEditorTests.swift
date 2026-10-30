@@ -196,6 +196,22 @@ final class InvoiceLineEditorTests: XCTestCase {
         XCTAssertEqual(state.catalogQuantity(for: capacitor().id), 3)
     }
 
+    func testDescriptionApplyRequiresLiveUnchangedLineAndEditAuthority() throws {
+        var state = InvoiceLineEditorState(invoice: try makeInvoice())
+        let id = try XCTUnwrap(state.lines.first?.id)
+        XCTAssertTrue(state.applyDescription(id: id, original: "Repair", value: "Revised", authorized: true))
+        XCTAssertTrue(state.applyDescription(id: id, original: "Revised", value: "Repair", authorized: true))
+        XCTAssertFalse(state.applyDescription(id: id, original: "Repair", value: String(repeating: "x", count: 212), authorized: true))
+        XCTAssertFalse(state.applyDescription(id: id, original: "Repair", value: "New", authorized: false))
+        XCTAssertEqual(state.lines[0].description, "Repair")
+        state.lines[0].description = "Changed elsewhere"
+        XCTAssertFalse(state.applyDescription(id: id, original: "Repair", value: "New", authorized: true))
+        try state.removeLine(id: id)
+        state.addManualLine()
+        XCTAssertFalse(state.applyDescription(id: id, original: "Repair", value: "New", authorized: true))
+        XCTAssertNotEqual(state.lines[0].description, "New")
+    }
+
     func testIssuedPaidAndVoidInvoicesRefusePriceBookEdits() throws {
         let item = capacitor()
         for status in ["issued", "paid", "void"] {

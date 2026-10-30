@@ -62,6 +62,17 @@ struct InvoiceLineDraft: Identifiable, Equatable {
 }
 
 struct InvoiceLineEditorState: Equatable {
+    /// Applies an expanded description only to the same live, unchanged draft line.
+    /// The caller must re-check the current session and document before authorizing.
+    @discardableResult
+    mutating func applyDescription(id: UUID, original: String, value: String, authorized: Bool) -> Bool {
+        guard authorized, invoice.status == "draft", !hasUnsupportedLineSources,
+              DescriptionCanvasLimit.unicodeScalars(211).count(value) <= 211,
+              let index = lines.firstIndex(where: { $0.id == id }), lines[index].description == original else { return false }
+        lines[index].description = value
+        return true
+    }
+
     let invoice: InvoiceRecord
     var lines: [InvoiceLineDraft]
     var priceBookOverrideReason = ""

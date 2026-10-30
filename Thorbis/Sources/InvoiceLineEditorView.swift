@@ -22,6 +22,8 @@ struct InvoiceLineEditorView: View {
     @State private var kind = PriceBookKindFilter.all
     @State private var addedLineSelection: InvoiceCatalogLineSelection?
     @State private var editingAddedLine = false
+    @State private var descriptionTarget: InvoiceDescriptionTarget?
+    @State private var descriptionAccessRetired = false
     @FocusState private var focus: EstimateBuilderFocus?
 
     private var searching: Bool { canEdit && (focus == .search || !query.isEmpty || addedLineID != nil) }
@@ -130,9 +132,10 @@ struct InvoiceLineEditorView: View {
                     }
 
                     VStack(spacing: 0) {
-                        ForEach($editor.lines) { $line in
+                        ForEach(editor.lines) { line in
                             EditableInvoiceLineRow(
-                                line: committedLine($line),
+                                line: committedLine(invoiceLineBinding(line)),
+                                showDescription: { showDescription(line) },
                                 canMoveUp: editor.lines.first?.id != line.id,
                                 canMoveDown: editor.lines.last?.id != line.id,
                                 moveUp: { moveLine(line.id, offset: -1) },
@@ -215,6 +218,20 @@ struct InvoiceLineEditorView: View {
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
                         actions: [ThorbisConfirmAction("Issue invoice", role: .destructive) { Task { await issue() } }])
+        .sheet(item: $descriptionTarget) { target in
+            DescriptionCanvas(
+                text: Binding(get: { editor.lines.first(where: { $0.id == target.id })?.description ?? target.original }, set: { _ in }),
+                title: "Line item description", applyTitle: "Apply to invoice", limit: .unicodeScalars(211),
+                scope: target.scope, accessRetired: $descriptionAccessRetired,
+                targetAvailable: descriptionTargetAvailable(target), originalText: target.original,
+                apply: { original, value in
+                    guard descriptionTargetAvailable(target), !descriptionAccessRetired,
+                          target.scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
+                                               generation: session.generation, authority: session.authorityRevision) else { return false }
+                    return editor.applyDescription(id: target.id, original: original, value: value, authorized: true)
+                }
+            ).presentationDetents([.large])
+        }
         .sheet(isPresented: $showPriceBook) {
             NavigationStack {
                 PaperPriceBookPicker(api: api, currency: invoice.currency, customerID: invoice.customerId,
@@ -281,11 +298,12 @@ struct InvoiceLineEditorView: View {
 
     @ViewBuilder private var addedLineEditor: some View {
         if let selectedID = addedLineID {
-            ForEach($editor.lines) { $line in
+            ForEach(editor.lines) { line in
                 if line.id == selectedID {
                     DisclosureGroup(isExpanded: $editingAddedLine) {
                         EditableInvoiceLineRow(
-                            line: committedLine($line),
+                            line: committedLine(invoiceLineBinding(line)),
+                            showDescription: { showDescription(line) },
                             canMoveUp: editor.lines.first?.id != line.id,
                             canMoveDown: editor.lines.last?.id != line.id,
                             moveUp: { moveLine(line.id, offset: -1) },
@@ -327,6 +345,29 @@ struct InvoiceLineEditorView: View {
         let price = InvoiceLineEditorState.priceCents(line.unitPrice)
             .map { money($0, currency: invoice.currency) } ?? "Incomplete price"
         return "Qty \(line.quantity) · \(price) each"
+    }
+
+    private func descriptionTargetAvailable(_ target: InvoiceDescriptionTarget) -> Bool {
+        !busy && canEdit && !editor.hasUnsupportedLineSources &&
+        invoice.id == target.invoiceID && invoice.organizationId == session.activeOrganization?.id &&
+        editor.lines.contains(where: { $0.id == target.id })
+    }
+
+    private func showDescription(_ line: InvoiceLineDraft) {
+        guard !busy, canEdit, !editor.hasUnsupportedLineSources,
+              invoice.organizationId == session.activeOrganization?.id,
+              let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let current = editor.lines.first(where: { $0.id == line.id }) else { return }
+        descriptionAccessRetired = false
+        descriptionTarget = InvoiceDescriptionTarget(id: current.id, invoiceID: invoice.id, original: current.description,
+            scope: DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision))
+    }
+
+    private func invoiceLineBinding(_ snapshot: InvoiceLineDraft) -> Binding<InvoiceLineDraft> {
+        Binding(get: { editor.lines.first(where: { $0.id == snapshot.id }) ?? snapshot }, set: { value in
+            guard value.id == snapshot.id, let index = editor.lines.firstIndex(where: { $0.id == snapshot.id }) else { return }
+            editor.lines[index] = value
+        })
     }
 
     private func committedLine(_ line: Binding<InvoiceLineDraft>) -> Binding<InvoiceLineDraft> {
@@ -501,6 +542,7 @@ struct InvoiceLineEditorView: View {
 private struct EditableInvoiceLineRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var line: InvoiceLineDraft
+    let showDescription: () -> Void
     let canMoveUp: Bool
     let canMoveDown: Bool
     let moveUp: () -> Void
@@ -518,7 +560,10 @@ private struct EditableInvoiceLineRow: View {
                 LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
                                 moveUp: moveUp, moveDown: moveDown, remove: remove)
             }
-            DescriptionCanvasLink(text: $line.description, title: "Line item description", applyTitle: "Apply to invoice", limit: .unicodeScalars(211), identifier: "invoice-line-description-more")
+            Button("Show more", action: showDescription)
+                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                .frame(minHeight: 44).accessibilityLabel("Show more line item description")
+                .accessibilityIdentifier("invoice-line-description-more")
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 14) {
                     accessibleNumberField("Quantity", placeholder: "1", text: $line.quantity)
@@ -681,4 +726,11 @@ struct InvoiceCatalogLineSelection: Equatable {
               lines.filter({ $0.id == lineID }).count == 1 else { return nil }
         return lineID
     }
+}
+
+private struct InvoiceDescriptionTarget: Identifiable {
+    let id: UUID
+    let invoiceID: String
+    let original: String
+    let scope: DescriptionCanvasScope
 }
