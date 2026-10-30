@@ -540,15 +540,19 @@ struct WorkspacePriceBookView: View {
                 .accessibilityHidden(true)
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 6) {
-                    itemText(item, showFullDescription: showFullDescription)
+                    itemTitle(item, showFullDescription: showFullDescription)
+                    itemUnit(item)
                     itemPrice(item)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                HStack(spacing: 10) {
-                    itemText(item, showFullDescription: showFullDescription)
-                    Spacer(minLength: 6)
-                    itemPrice(item)
-                }
+                VStack(alignment: .leading, spacing: 4) {
+                    itemTitle(item, showFullDescription: showFullDescription)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        itemUnit(item)
+                        Spacer(minLength: 6)
+                        itemPrice(item).fixedSize(horizontal: true, vertical: false)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.vertical, 8).frame(minHeight: 52)
@@ -564,14 +568,16 @@ struct WorkspacePriceBookView: View {
         }
     }
 
-    private func itemText(_ item: PriceBookListItem, showFullDescription: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
-                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                .lineLimit(showFullDescription || dynamicTypeSize.isAccessibilitySize ? nil : 2)
-            Text(([item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · "))
-                .font(Theme.font(13)).foregroundStyle(Theme.muted)
-        }
+    private func itemTitle(_ item: PriceBookListItem, showFullDescription: Bool) -> some View {
+        Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
+            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+            .lineLimit(showFullDescription || dynamicTypeSize.isAccessibilitySize ? nil : 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func itemUnit(_ item: PriceBookListItem) -> some View {
+        Text(([item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · "))
+            .font(Theme.font(13)).foregroundStyle(Theme.muted)
     }
 
     private func itemPrice(_ item: PriceBookListItem) -> some View {

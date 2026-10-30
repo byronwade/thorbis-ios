@@ -11,7 +11,7 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         let price = app.staticTexts["$1,234,567.89"]
         XCTAssertTrue(price.exists)
-        XCTAssertGreaterThan(title.frame.width, 0)
+        XCTAssertGreaterThan(title.frame.width, 240, "The amount must not crowd a long item name into an unreadably narrow column.")
         XCTAssertGreaterThan(price.frame.width, 0)
         capture("Price book narrow long title and high price")
     }
