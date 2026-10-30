@@ -80,6 +80,11 @@ struct NoticeSettingsView: View {
                             }
                         }
                     }
+                    PaperGroupHeader(title: "History").padding(.top, 6)
+                    NavigationLink { NoticeDeliveryLogView() } label: {
+                        PaperMenuRow("Delivery log", symbol: "clock.arrow.circlepath", subtitle: "Recent notices and whether each was sent")
+                    }
+                    .buttonStyle(RowPressStyle())
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)

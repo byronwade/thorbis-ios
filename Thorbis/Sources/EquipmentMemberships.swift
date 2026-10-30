@@ -16,8 +16,9 @@ struct EquipmentRecord: Codable, Identifiable, Hashable {
     var installedOn: String?
     var warrantyExpiresOn: String?
     var notes: String?
-    let createdAt: String
-    let updatedAt: String
+    /// Absent on a job's service context.
+    var createdAt: String? = nil
+    var updatedAt: String? = nil
     /// Present on the company-wide list only.
     var customerName: String? = nil
     var locationLabel: String? = nil
@@ -119,6 +120,59 @@ struct MemberPricing: Codable, Hashable {
     }
 }
 
+/// `GET /v1/jobs/{id}/service-context` (job.view): the equipment and member pricing a tech needs
+/// at the door, readable by anyone assigned to the job. Units at the job's site come first.
+struct JobServiceContext: Decodable, Hashable {
+    struct Unit: Decodable, Hashable {
+        let id: String
+        let name: String
+        var locationId: String?
+        var kind: String?
+        var brand: String?
+        var model: String?
+        var serialNumber: String?
+        var installedOn: String?
+        var warrantyExpiresOn: String?
+        var notes: String?
+    }
+
+    let jobId: String
+    let customerId: String
+    var locationId: String?
+    let equipment: [Unit]
+    let memberPricing: MemberPricing
+
+    var equipmentRecords: [EquipmentRecord] {
+        equipment.map {
+            EquipmentRecord(id: $0.id, customerId: customerId, locationId: $0.locationId, name: $0.name, kind: $0.kind,
+                            brand: $0.brand, model: $0.model, serialNumber: $0.serialNumber, installedOn: $0.installedOn,
+                            warrantyExpiresOn: $0.warrantyExpiresOn, notes: $0.notes)
+        }
+    }
+
+    /// The active membership in the shape the membership row shows.
+    var memberships: [MembershipRecord] {
+        guard memberPricing.isMember, let membership = memberPricing.membership else { return [] }
+        return [MembershipRecord(id: membership.id, customerId: customerId, planId: nil, name: membership.name, kind: "membership",
+                                 cadence: nil, startsOn: nil, renewsOn: membership.renewsOn, status: "active",
+                                 discountPercent: memberPricing.discountPercent, notes: nil)]
+    }
+}
+
+/// The job's equipment and membership sections both read the context; one request serves both.
+@MainActor
+enum JobServiceContextLoader {
+    private static var inFlight: [String: Task<JobServiceContext, Error>] = [:]
+
+    static func load(_ jobID: String, api: APIClient) async throws -> JobServiceContext {
+        if let task = inFlight[jobID] { return try await task.value }
+        let task = Task { try await api.jobServiceContext(jobID) }
+        inFlight[jobID] = task
+        defer { inFlight[jobID] = nil }
+        return try await task.value
+    }
+}
+
 private struct ItemsPage<T: Decodable>: Decodable { let items: [T] }
 
 extension APIClient {
@@ -168,6 +222,10 @@ extension APIClient {
     func cancelMembership(_ customerID: String, membershipID: String) async throws -> MembershipRecord {
         struct Body: Encodable { let status = "cancelled" }
         return try await send("POST", "/v1/customers/\(try uuid(customerID))/memberships/\(try uuid(membershipID))", body: Body())
+    }
+
+    func jobServiceContext(_ jobID: String) async throws -> JobServiceContext {
+        try await send("GET", "/v1/jobs/\(try uuid(jobID))/service-context")
     }
 
     func memberPricing(_ customerID: String) async throws -> MemberPricing {
