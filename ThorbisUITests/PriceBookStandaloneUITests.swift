@@ -27,7 +27,14 @@ final class PriceBookStandaloneUITests: XCTestCase {
         let description = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final paragraph of the complete description.")).firstMatch
         XCTAssertTrue(description.exists)
         XCTAssertGreaterThan(description.frame.height, 200)
-        for _ in 0..<10 where !app.staticTexts["$1,234,567.89"].isHittable { app.swipeUp() }
+        capture("Stale description before scrolling")
+        for index in 0..<30 {
+            if app.staticTexts["$1,234,567.89"].isHittable { break }
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.80))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.66))
+            start.press(forDuration: 0.1, thenDragTo: end)
+            capture("Stale description scroll \(index + 1)")
+        }
         XCTAssertTrue(app.staticTexts["$1,234,567.89"].isHittable)
         capture("Price book stale long description and high price, largest text")
     }
