@@ -21,6 +21,7 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         search.typeText("Replace capacitor")
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
         XCTAssertTrue(item.waitForExistence(timeout: 15))
+        XCTAssertTrue(item.label.contains("Add"), "The estimate catalog should clearly offer one-tap addition")
         item.tap()
         let review = app.buttons["Review estimate · 1 item"]
         XCTAssertTrue(review.waitForExistence(timeout: 5))

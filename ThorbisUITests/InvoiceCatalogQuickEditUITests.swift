@@ -19,6 +19,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         search.typeText("Camera sewer inspection")
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009999"]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
+        XCTAssertTrue(item.label.contains("Add"), "Catalog results should make the one-tap add action clear")
         item.tap()
         let added = app.otherElements["invoice-added-line-editor"]
         XCTAssertTrue(added.waitForExistence(timeout: 5))
@@ -170,6 +171,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(item.isHittable, "Adding another item must not require closing the keyboard or editor")
         item.tap()
         XCTAssertTrue(app.buttons.matching(identifier: item.identifier).matching(NSPredicate(format: "value == %@", "2 in draft")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(item.label.contains("Add"), "Adding once must not make the row look unavailable for another addition")
         XCTAssertTrue(item.isHittable)
         XCTAssertEqual(search.value as? String, "Camera sewer inspection")
         let proof = XCTAttachment(screenshot: app.screenshot())

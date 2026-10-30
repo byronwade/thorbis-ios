@@ -441,30 +441,36 @@ private struct PriceBookCatalogResultRow: View {
         let item = result.item
         let added = quantity
         Button(action: addItem) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(PriceBookResultsList.highlighted(item.description, result.highlights))
-                        .font(Theme.font(17)).foregroundStyle(Theme.foreground)
-                        .multilineTextAlignment(.leading)
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: PriceBookKindFilter(rawValue: item.kind)?.catalogSymbol ?? "tag")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.brandText)
+                    .frame(width: 40, height: 40)
+                    .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 8) {
                     Text("\(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized) · \(item.unit)")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                        .font(Theme.monoFont(17, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                    if let secondary = secondaryPrice {
-                        Text(secondary).font(Theme.moneyFont(.line)).foregroundStyle(Theme.muted)
+                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(PriceBookResultsList.highlighted(item.description, result.highlights))
+                        .font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center, spacing: 12) {
+                            price(item).fixedSize(horizontal: true, vertical: false)
+                            Spacer(minLength: 8)
+                            addIndicator(added).fixedSize(horizontal: true, vertical: false)
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            price(item)
+                            addIndicator(added)
+                        }
                     }
-                    if let added {
-                        Label("× \(added)", systemImage: "checkmark")
-                            .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .labelStyle(.titleAndIcon)
-                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+            .padding(.horizontal, Theme.gutter).padding(.vertical, 14)
             .frame(minHeight: 56).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -473,9 +479,51 @@ private struct PriceBookCatalogResultRow: View {
         .accessibilityValue(added.map { "\($0) in draft" } ?? "Not added")
         .accessibilityHint("Adds one to the current draft")
     }
+
+    private func price(_ item: PriceBookListItem) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
+                .font(Theme.monoFont(17, weight: .medium)).foregroundStyle(Theme.foreground)
+            if let secondary = secondaryPrice {
+                Text(secondary).font(Theme.moneyFont(.line)).foregroundStyle(Theme.muted)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func addIndicator(_ added: Int?) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                if let added {
+                    Text("\(added) added").foregroundStyle(Theme.muted)
+                }
+                Label("Add", systemImage: "plus")
+                    .foregroundStyle(Theme.brandText)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 4) {
+                if let added {
+                    Text("\(added) added").foregroundStyle(Theme.muted)
+                }
+                Label("Add", systemImage: "plus")
+                    .foregroundStyle(Theme.brandText)
+            }
+        }
+        .font(Theme.font(13, weight: .medium))
+    }
 }
 
 extension PriceBookKindFilter {
+    var catalogSymbol: String {
+        switch self {
+        case .all: "square.grid.2x2"
+        case .service: "wrench.and.screwdriver"
+        case .material: "cube.box"
+        case .labor: "person"
+        case .assembly: "square.stack.3d.up"
+        }
+    }
+
     var singular: String {
         switch self {
         case .all: "Item"
