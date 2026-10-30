@@ -414,11 +414,19 @@ struct JobDetailView: View {
             if let customer = store.customers.first(where: { $0.id == job.customerId }),
                session.can("customer.view", feature: "core_crm") {
                 NavigationLink(value: customer) {
-                    Label(customer.name, systemImage: "person.crop.circle")
-                        .font(Theme.font(15, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .center, spacing: 6) {
+                        Label(customer.name, systemImage: "person.crop.circle")
+                            .fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .accessibilityHidden(true)
+                    }
+                    .font(Theme.font(15, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .frame(minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .accessibilityIdentifier("job-customer-link")
                 .accessibilityHint("Opens the customer")
             } else {
                 Text(store.customerName(job.customerId))

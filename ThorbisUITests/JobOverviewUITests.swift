@@ -2,6 +2,17 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testCustomerLinkIsComfortableAndOpensCustomerProfile() {
+        let app = preview("job", working: true)
+        let customer = app.buttons["job-customer-link"]
+        XCTAssertTrue(customer.waitForExistence(timeout: 20))
+        XCTAssertGreaterThanOrEqual(customer.frame.height, 44)
+        XCTAssertTrue(customer.label.contains("Danielle Marlowe"))
+        customer.tap()
+        XCTAssertTrue(app.buttons["Customer actions"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Records"].exists)
+    }
+
     func testJobOverviewKeepsVisitActionsBeforeCustomerDetails() {
         let app = preview("job", working: true)
         let visit = app.staticTexts["On this visit"]
