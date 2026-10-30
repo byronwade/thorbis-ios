@@ -104,6 +104,22 @@ struct JobMediaView: View {
                         }
                     }
                 }
+                if !loading && !allPhotos.isEmpty && photos.isEmpty {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) {
+                            Text("No matching photos").foregroundStyle(Theme.muted)
+                            Spacer(minLength: 0)
+                            Button("Show all photos") { filter = "All" }.frame(minHeight: 44)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("No matching photos").foregroundStyle(Theme.muted)
+                            Button("Show all photos") { filter = "All" }.frame(minHeight: 44)
+                        }
+                    }
+                    .font(.subheadline)
+                    .tint(Theme.brandText)
+                    .frame(minHeight: 44)
+                }
                 if let warning = pendingMedia.storageWarning { ErrorBanner(message: warning) }
                 if pendingMedia.legacyCount > 0 {
                     ErrorBanner(message: "Older photos remain on this phone. Check this job before choosing which photos to recover.")
@@ -138,11 +154,7 @@ struct JobMediaView: View {
                     }
                 }
                 // One empty state for the whole tab instead of two empty sections.
-                if !loading && !allPhotos.isEmpty && photos.isEmpty {
-                    PaperEmptyState(symbol: "line.3.horizontal.decrease.circle", title: "No matching photos",
-                                    message: "Try another filter to see this job's photos.",
-                                    actionTitle: "Show all photos", action: { filter = "All" })
-                } else if allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil && !loading {
+                if allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil && !loading {
                     PaperEmptyState(symbol: "camera", title: "No photos yet",
                                     message: canAdd ? "Take a before photo when you arrive. Photos and PDFs up to 8 MB." : "Photos and documents added to this job show here.")
                 }
