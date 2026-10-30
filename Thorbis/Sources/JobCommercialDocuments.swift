@@ -14,6 +14,19 @@ final class JobDocumentCollections: ObservableObject {
     func reset() { clearEstimates(); clearInvoices() }
     func replaceInvoice(_ invoice: InvoiceRecord) { invoices = invoices?.replacing(invoice) }
 
+    /// Keep the job's known documents visible while requiring a fresh membership and record read.
+    func markEstimatesStale(scope: JobDocumentScope, updated: EstimateRecord? = nil, requestedID: String? = nil) {
+        guard let read = estimates, read.scope == scope else { return }
+        estimateRequest = UUID()
+        var records = read.records
+        if let updated, let requestedID, scope.contains(updated, requestedID: requestedID),
+           let index = records.firstIndex(where: { $0.id == requestedID }) {
+            records[index] = updated
+        }
+        estimates = .init(scope: read.scope, records: records, freshIDs: [], isComplete: false,
+                          unavailableIDs: read.unavailableIDs, kind: "estimates")
+    }
+
     @discardableResult
     func loadEstimates(scope: JobDocumentScope, api: APIClient,
                        isCurrent: @escaping @MainActor () -> Bool) async -> Bool {

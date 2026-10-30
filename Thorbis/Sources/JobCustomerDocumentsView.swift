@@ -160,7 +160,13 @@ struct JobCustomerDocumentsView: View {
                 sendEstimate: session.can("estimate.send", feature: "estimates"),
                 approveEstimate: session.can("estimate.approve", feature: "estimates"))) {
                 CustomerEstimatePresentation(estimate: estimate, jobID: scope.jobID, customerName: customerName,
-                    onApproved: { _ in Task { await refresh() } }, onDone: handBack)
+                    returnToDocuments: {
+                        returnToJobDocuments()
+                    },
+                    onApproved: { approved in
+                        documents.markEstimatesStale(scope: scope, updated: approved, requestedID: estimate.id)
+                        refreshEstimatesInBackground()
+                    }, onDone: beginHandBack)
             } else {
                 CustomerJobReadOnlyPaper(estimate: estimate, handBack: handBack)
             }
@@ -176,7 +182,7 @@ struct JobCustomerDocumentsView: View {
                         paymentModel?.acceptInvoiceMutationResponse(updated)
                         paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
-                    }, onDone: handBack)
+                    }, onDone: beginHandBack)
             } else {
                 CustomerJobReadOnlyPaper(invoice: invoice, handBack: handBack)
             }
@@ -188,6 +194,12 @@ struct JobCustomerDocumentsView: View {
         case .estimate(let estimate): "EST-\(estimate.id.suffix(4).uppercased())"
         case .invoice(let invoice, _): "INV-\(invoice.id.suffix(4).uppercased())"
         }
+    }
+
+    private func beginHandBack() {
+        paper = nil
+        book = nil
+        handBack()
     }
 
     private func empty(_ text: String) -> some View {
@@ -206,6 +218,23 @@ struct JobCustomerDocumentsView: View {
         if canViewInvoices {
             await documents.loadInvoices(scope: scope, api: api) {
                 session.generation == generation && currentWorkspace && canViewInvoices
+            }
+        }
+    }
+
+    private func returnToJobDocuments() {
+        guard currentWorkspace, canViewEstimates,
+              let presented = paper, case .estimate = presented else { return }
+        documents.markEstimatesStale(scope: scope)
+        paper = nil
+        refreshEstimatesInBackground()
+    }
+
+    private func refreshEstimatesInBackground() {
+        let generation = session.generation
+        Task {
+            await documents.loadEstimates(scope: scope, api: api) {
+                session.generation == generation && currentWorkspace && canViewEstimates
             }
         }
     }
