@@ -47,6 +47,23 @@ final class JobFilteringTests: XCTestCase {
         XCTAssertNil(JobFiltering.activeCustomerJob([other, scheduled], customerID: "c"))
     }
 
+    func testPastScheduledCustomerVisitIsScopedAndOrderedDeterministically() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
+        func job(_ id: String, _ customer: String, _ time: String?, _ status: String) -> Job {
+            Job(id: id, customerId: customer, title: id, status: status,
+                createdAt: nil, updatedAt: nil, allowedTransitions: nil, scheduledFor: time)
+        }
+        let jobs = [job("b", "c", "2026-10-28T12:00:00Z", "scheduled"),
+                    job("a", "c", "2026-10-28T12:00:00Z", "dispatched"),
+                    job("recent", "c", "2026-10-29T10:00:00Z", "scheduled"),
+                    job("other", "other", "2026-10-27T10:00:00Z", "scheduled"),
+                    job("canceled", "c", "2026-10-27T10:00:00Z", "canceled"),
+                    job("unknown", "c", nil, "scheduled")]
+        XCTAssertEqual(JobFiltering.overdueScheduledVisit(jobs, customerID: "c", now: now)?.id, "a")
+        XCTAssertNil(JobFiltering.overdueScheduledVisit(jobs, customerID: "missing", now: now))
+        XCTAssertNil(JobFiltering.overdueScheduledVisit([jobs[5]], customerID: "c", now: now))
+    }
+
     func testUnscheduledLaneShowsHowLongTheJobHasWaited() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         XCTAssertEqual(ScheduleCompactRow.age(since: now, now: now), "Today")

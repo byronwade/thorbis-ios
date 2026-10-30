@@ -91,9 +91,11 @@ struct CustomersView: View {
         .sheet(item: $newJobFor) { customer in NewJobSheet(preselected: customer) }
     }
     private func customerRow(_ customer: CustomerRecord) -> some View {
-        let nextVisit = JobFiltering.nextScheduledVisit(store.jobs, customerID: customer.id)
+        let now = Date()
+        let nextVisit = JobFiltering.nextScheduledVisit(store.jobs, customerID: customer.id, now: now)
         let activeJob = JobFiltering.activeCustomerJob(store.jobs, customerID: customer.id)
-        let summaryJob = activeJob ?? nextVisit
+        let overdue = JobFiltering.overdueScheduledVisit(store.jobs, customerID: customer.id, now: now)
+        let summaryJob = activeJob ?? nextVisit ?? overdue
         let jobCount = store.jobs.filter { $0.customerId == customer.id }.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
         return NavigationLink(value: listCustomer) {
@@ -101,8 +103,8 @@ struct CustomersView: View {
                 Avatar(name: customer.name, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
-                    Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: summaryJob))
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: summaryJob, now: now))
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
                 }
                 Spacer(minLength: 4)
                 if let summaryJob { StatusRing(status: summaryJob.status).accessibilityHidden(true) }
@@ -128,10 +130,13 @@ struct CustomersView: View {
         .padding(.horizontal, -8)
     }
 
-    private func rowDetail(jobCount: Int, open: Job?) -> String {
+    private func rowDetail(jobCount: Int, open: Job?, now: Date) -> String {
         let count = "\(jobCount) \(jobCount == 1 ? "job" : "jobs")"
         guard let open else { return count }
         if let date = JobFiltering.date(open.scheduledFor), ["scheduled", "dispatched"].contains(open.status) {
+            if date < now {
+                return "\(count) · Past scheduled time · \(open.status.statusLabel) · \(date.visitLabel(now: now))"
+            }
             // Same words as the Jobs list ("Today 4:00 PM", "In progress"), so a visit reads alike everywhere.
             return "\(count) · \(date.visitLabel())"
         }

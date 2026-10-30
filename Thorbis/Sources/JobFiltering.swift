@@ -25,6 +25,19 @@ enum JobFiltering {
         }?.job
     }
 
+    /// When there is no active or upcoming visit, keep an earlier open appointment visible.
+    static func overdueScheduledVisit(_ jobs: [Job], customerID: String, now: Date = Date()) -> Job? {
+        let candidates: [(job: Job, time: Date)] = jobs.compactMap { job in
+            guard job.customerId == customerID,
+                  ["scheduled", "dispatched"].contains(job.status),
+                  let time = date(job.scheduledFor), time < now else { return nil }
+            return (job, time)
+        }
+        return candidates.min { left, right in
+            left.time == right.time ? left.job.id < right.job.id : left.time < right.time
+        }?.job
+    }
+
     /// Prefer an active job in the list summary; ties use ID so refresh order cannot change it.
     static func activeCustomerJob(_ jobs: [Job], customerID: String) -> Job? {
         let priorities = ["in_progress": 0, "arrived": 1, "en_route": 2, "paused": 3]

@@ -493,7 +493,7 @@ struct JobsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Jobs", subtitle: subtitle) { showDisplay = true }
                 OfflineBanner()
-                PaperSearchField(text: $search, prompt: "Search jobs")
+                PaperSearchField(text: $search, prompt: "Search title or job number")
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 VStack(alignment: .leading, spacing: 14) {

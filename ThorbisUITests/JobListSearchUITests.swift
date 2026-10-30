@@ -6,7 +6,7 @@ final class JobListSearchUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
         app.launch()
-        let search = app.textFields["Search jobs"]
+        let search = app.textFields["Search title or job number"]
         XCTAssertTrue(search.waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["Kitchen sink backup — Petrov"].waitForExistence(timeout: 10))
         search.tap()
