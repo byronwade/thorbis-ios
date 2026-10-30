@@ -22,6 +22,7 @@ struct InvoiceLineEditorView: View {
     @State private var kind = PriceBookKindFilter.all
     @State private var addedLineSelection: InvoiceCatalogLineSelection?
     @State private var editingAddedLine = false
+    @State private var focusedNumber: InvoiceNumericField?
     @FocusState private var focus: EstimateBuilderFocus?
 
     private var searching: Bool { canEdit && (focus == .search || !query.isEmpty || addedLineID != nil) }
@@ -30,6 +31,12 @@ struct InvoiceLineEditorView: View {
         guard canEdit, canUsePriceBook, !editor.hasUnsupportedLineSources,
               invoice.organizationId == catalogContext.organizationID else { return nil }
         return addedLineSelection?.resolvedLineID(in: editor.lines, context: catalogContext)
+    }
+
+    private var activeFocusedNumber: InvoiceNumericField? {
+        guard editingAddedLine, dynamicTypeSize.isAccessibilitySize,
+              let focusedNumber, focusedNumber.lineID == addedLineID else { return nil }
+        return focusedNumber
     }
 
     private var catalogQuery: Binding<String> {
@@ -69,6 +76,7 @@ struct InvoiceLineEditorView: View {
     }
 
     var body: some View {
+        ScrollViewReader { scrollProxy in
         ScrollView {
             if let error {
                 ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12)
@@ -182,6 +190,14 @@ struct InvoiceLineEditorView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: focusedNumber) { _, _ in
+            if let field = activeFocusedNumber { scrollProxy.scrollTo(field, anchor: .center) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+            if let field = activeFocusedNumber {
+                withAnimation { scrollProxy.scrollTo(field, anchor: .center) }
+            }
+        }
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Edit invoice")
@@ -221,7 +237,10 @@ struct InvoiceLineEditorView: View {
         .task(id: catalogContext) { await refreshCatalog() }
         .onChange(of: catalogContext) { _, _ in finishSearch() }
         .onChange(of: editingAddedLine) { _, expanded in
-            if expanded { focus = nil }
+            if expanded { focus = nil } else { focusedNumber = nil }
+        }
+        .onChange(of: addedLineID) { old, new in
+            if old != new { focusedNumber = nil }
         }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) {
@@ -249,6 +268,7 @@ struct InvoiceLineEditorView: View {
                         message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
                         isPresented: $confirmReload,
                         actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+        }
     }
 
     private var invoiceCommitActions: some View {
@@ -308,6 +328,7 @@ struct InvoiceLineEditorView: View {
                             canMoveDown: editor.lines.last?.id != line.id,
                             moveUp: { moveLine(line.id, offset: -1) },
                             moveDown: { moveLine(line.id, offset: 1) },
+                            onNumberFocus: { focusedNumber = $0 },
                             remove: {
                                 do {
                                     try editor.removeLine(id: line.id)
@@ -413,6 +434,7 @@ struct InvoiceLineEditorView: View {
     }
 
     private func finishSearch() {
+        focusedNumber = nil
         addedLineSelection = nil
         editingAddedLine = false
         query = ""
@@ -530,13 +552,27 @@ struct InvoiceLineEditorView: View {
     }
 }
 
+private enum InvoiceNumericField: Hashable {
+    case quantity(UUID)
+    case price(UUID)
+
+    var lineID: UUID {
+        switch self {
+        case .quantity(let id), .price(let id): return id
+        }
+    }
+}
+
 private struct EditableInvoiceLineRow: View {
+    private enum NumericFocus: Hashable { case quantity, price }
+    @FocusState private var numberFocus: NumericFocus?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var line: InvoiceLineDraft
     let canMoveUp: Bool
     let canMoveDown: Bool
     let moveUp: () -> Void
     let moveDown: () -> Void
+    var onNumberFocus: ((InvoiceNumericField?) -> Void)? = nil
     let remove: () -> Void
 
     var body: some View {
@@ -552,7 +588,7 @@ private struct EditableInvoiceLineRow: View {
             }
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 14) {
-                    accessibleNumberField("Quantity", placeholder: "1", text: $line.quantity)
+                    accessibleNumberField("Quantity", placeholder: "1", text: $line.quantity, field: .quantity)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("invoice-line-quantity-\(line.id)")
                     if let unit = line.unitLabel, !unit.isEmpty {
@@ -560,7 +596,7 @@ private struct EditableInvoiceLineRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     accessibleNumberField("Unit price in dollars", placeholder: "0.00", text: $line.unitPrice,
-                                          prefix: "$", decimal: true)
+                                          prefix: "$", decimal: true, field: .price)
                 }
             } else {
             HStack(spacing: 8) {
@@ -588,10 +624,17 @@ private struct EditableInvoiceLineRow: View {
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
+        .onChange(of: numberFocus) { _, field in
+            switch field {
+            case .quantity: onNumberFocus?(.quantity(line.id))
+            case .price: onNumberFocus?(.price(line.id))
+            case nil: onNumberFocus?(nil)
+            }
+        }
     }
 
     private func accessibleNumberField(_ label: String, placeholder: String, text: Binding<String>,
-                                       prefix: String? = nil, decimal: Bool = false) -> some View {
+                                       prefix: String? = nil, decimal: Bool = false, field: NumericFocus) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -600,6 +643,7 @@ private struct EditableInvoiceLineRow: View {
                 TextField(placeholder, text: text, axis: .vertical)
                     .keyboardType(decimal ? .decimalPad : .numberPad)
                     .multilineTextAlignment(.trailing)
+                    .focused($numberFocus, equals: field)
                     .accessibilityLabel(label)
             }
             .font(Theme.monoFont(15, weight: .medium))
@@ -607,6 +651,7 @@ private struct EditableInvoiceLineRow: View {
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         }
+        .id(field == .quantity ? InvoiceNumericField.quantity(line.id) : InvoiceNumericField.price(line.id))
     }
 
 }

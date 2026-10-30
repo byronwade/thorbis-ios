@@ -133,8 +133,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
         revealControl(price, below: searchBar, in: app)
         XCTAssertEqual(price.value as? String, "245.00")
-        price.doubleTap()
-        app.typeText("275.00")
+        replaceVisibleNumber(price, original: "245.00", with: "275.00", in: app)
         XCTAssertEqual(price.value as? String, "275.00", "The unit price must be editable at the largest text size")
         let priceProof = XCTAttachment(screenshot: app.screenshot())
         priceProof.name = "Largest text full unit price above the decimal keyboard"
@@ -143,6 +142,10 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         searchBar.buttons["Back to results"].tap()
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         XCTAssertEqual(search.value as? String, "Camera sewer inspection")
+        XCTAssertTrue(search.isHittable, "Returning to results must leave the search field reachable")
+        search.tap()
+        XCTAssertEqual(search.value as? String, "Camera sewer inspection")
+        XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009999"].waitForExistence(timeout: 5))
         searchBar.buttons["Done"].tap()
         XCTAssertFalse(added.exists)
         XCTAssertTrue(app.buttons["Save draft"].isHittable)
@@ -150,6 +153,8 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertGreaterThan(app.buttons["Save draft"].frame.width, 300, "Save draft must have room for its full label")
         XCTAssertLessThanOrEqual(app.buttons["Save draft"].frame.maxY, app.buttons["Issue invoice"].frame.minY)
         XCTAssertEqual(app.otherElements["invoice-line-quantity-" + identity].textFields.firstMatch.value as? String, "10")
+        let changedPrice = app.textFields.matching(NSPredicate(format: "label == %@ AND value == %@", "Unit price in dollars", "275.00")).firstMatch
+        XCTAssertTrue(changedPrice.exists, "The changed price must remain in invoice review")
         let reviewProof = XCTAttachment(screenshot: app.screenshot())
         reviewProof.name = "Largest text return to invoice review actions"
         reviewProof.lifetime = .keepAlways
@@ -242,10 +247,18 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
     }
 
     private func replaceQuantityWithTen(_ quantity: XCUIElement, in app: XCUIApplication) {
-        // Select the existing single digit using the native touch interaction.
-        // Type through the application so XCTest does not reposition the field caret.
-        quantity.doubleTap()
-        app.typeText("10")
+        replaceVisibleNumber(quantity, original: "1", with: "10", in: app)
+    }
+
+    private func replaceVisibleNumber(_ field: XCUIElement, original: String, with replacement: String, in app: XCUIApplication) {
+        // Use the native text selection menu; touching the right edge can place the
+        // caret before the final digit at accessibility sizes.
+        XCTAssertEqual(field.value as? String, original)
+        field.press(forDuration: 1.2)
+        let selectAll = app.menuItems["Select All"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "The selected value must expose Select All")
+        selectAll.tap()
+        app.typeText(replacement)
     }
 
     func testRepeatedInlineAddsKeepCatalogReachableWithKeyboard() {
