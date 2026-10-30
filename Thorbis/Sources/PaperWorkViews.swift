@@ -239,7 +239,7 @@ struct ScheduleView: View {
             ThorbisMenu(
                 items: [ThorbisMenuItem("On my way", icon: "location.fill") {
                     Task { await progress(job, .enRoute(etaMinutes: nil)) }
-                }] + [15, 30, 45, 60].map { minutes in
+                }] + ([15, 30, 45, 60] as [Int]).map { minutes in
                     ThorbisMenuItem("ETA \(minutes) min", icon: "clock") {
                         Task { await progress(job, .enRoute(etaMinutes: minutes)) }
                     }
