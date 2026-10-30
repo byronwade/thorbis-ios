@@ -29,7 +29,9 @@ struct DescriptionCanvas: View {
     let limit: DescriptionCanvasLimit?
     let scope: DescriptionCanvasScope
     @Binding var accessRetired: Bool
+    @Binding var hasUnappliedChanges: Bool
     let targetAvailable: Bool
+    let temporaryParentUnavailable: Bool
     let apply: ((String, String) -> Bool)?
     @EnvironmentObject private var session: SessionController
     @State private var working: String
@@ -38,7 +40,8 @@ struct DescriptionCanvas: View {
     @Environment(\.dismiss) private var dismiss
 
     init(text: Binding<String>, title: String, applyTitle: String, limit: DescriptionCanvasLimit?,
-         scope: DescriptionCanvasScope, accessRetired: Binding<Bool>, targetAvailable: Bool = true,
+         scope: DescriptionCanvasScope, accessRetired: Binding<Bool>, hasUnappliedChanges: Binding<Bool> = .constant(false),
+         targetAvailable: Bool = true, temporaryParentUnavailable: Bool = false,
          originalText: String? = nil, apply: ((String, String) -> Bool)? = nil) {
         _text = text
         self.title = title
@@ -46,7 +49,9 @@ struct DescriptionCanvas: View {
         self.limit = limit
         self.scope = scope
         _accessRetired = accessRetired
+        _hasUnappliedChanges = hasUnappliedChanges
         self.targetAvailable = targetAvailable
+        self.temporaryParentUnavailable = temporaryParentUnavailable
         self.apply = apply
         _working = State(initialValue: originalText ?? text.wrappedValue)
         _original = State(initialValue: originalText ?? text.wrappedValue)
@@ -54,10 +59,11 @@ struct DescriptionCanvas: View {
 
     private var count: Int { limit?.count(working) ?? 0 }
     private var exceedsLimit: Bool { limit.map { count > $0.maximum } ?? false }
-    private var accessValid: Bool {
-        !accessRetired && targetAvailable && session.phase == .ready && scope.matches(actor: session.user?.id,
+    private var scopeValid: Bool {
+        session.phase == .ready && scope.matches(actor: session.user?.id,
             organization: session.activeOrganization?.id, generation: session.generation, authority: session.authorityRevision)
     }
+    private var accessValid: Bool { !accessRetired && targetAvailable && scopeValid }
 
     var body: some View {
         NavigationStack {
@@ -94,7 +100,7 @@ struct DescriptionCanvas: View {
                 }
             }
                 } else {
-                    ContentUnavailableView("Editor unavailable", systemImage: "lock", description: Text("Access changed. Your unapplied text remains here until you discard it."))
+                    ContentUnavailableView("Editor unavailable", systemImage: "lock", description: Text(temporaryParentUnavailable && scopeValid && !accessRetired ? "Waiting for the current document. Your unapplied text stays here." : "Access changed. Your unapplied text remains here until you discard it."))
                         .padding(20)
                 }
             }
@@ -104,7 +110,7 @@ struct DescriptionCanvas: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 #if DEBUG
-                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-authority") {
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-authority") && !ProcessInfo.processInfo.arguments.contains("--canvas-test-parent-revoke") {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         Button("Test revoke") { session.previewSetEstimateEditing(false) }
                         Button("Test restore") { session.previewSetEstimateEditing(true) }
@@ -115,6 +121,16 @@ struct DescriptionCanvas: View {
                         Button("Test remove") {
                             NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewRemoveCanvasLine"), object: nil)
                         }
+                    }
+                }
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-parent-loss") {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        Button { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewLoseDocumentParent"), object: nil) }
+                            label: { Image(systemName: "pause.circle") }.accessibilityLabel("Test parent loss")
+                        Button { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewReturnDocumentParent"), object: nil) }
+                            label: { Image(systemName: "arrow.uturn.backward.circle") }.accessibilityLabel("Test parent return")
+                        Button { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewReplaceDocumentParent"), object: nil) }
+                            label: { Image(systemName: "arrow.triangle.2.circlepath.circle") }.accessibilityLabel("Test parent replace")
                     }
                 }
                 if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-replacement") {
@@ -152,8 +168,14 @@ struct DescriptionCanvas: View {
                 Text("Your changes in this editor haven't been applied.")
             }
             .onChange(of: accessValid) { _, valid in
-                if !valid { accessRetired = true }
+                if !valid && (!scopeValid || !temporaryParentUnavailable) { accessRetired = true }
             }
+            .onChange(of: scopeValid) { _, valid in if !valid { accessRetired = true } }
+            .onChange(of: temporaryParentUnavailable) { _, temporary in
+                if !temporary && !targetAvailable { accessRetired = true }
+            }
+            .onChange(of: working) { _, value in hasUnappliedChanges = value != original }
+            .onDisappear { hasUnappliedChanges = false }
             .interactiveDismissDisabled(working != original)
         }
     }
@@ -164,6 +186,11 @@ struct DescriptionCanvasScope: Equatable {
     let organization: String
     let generation: UUID
     let authority: UUID
+
+    @MainActor static func current(_ session: SessionController) -> DescriptionCanvasScope? {
+        guard session.phase == .ready, let actor = session.user?.id, let organization = session.activeOrganization?.id else { return nil }
+        return .init(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision)
+    }
 
     func matches(actor: String?, organization: String?, generation: UUID, authority: UUID) -> Bool {
         self.actor == actor && self.organization == organization && self.generation == generation && self.authority == authority

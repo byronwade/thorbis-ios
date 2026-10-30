@@ -3,6 +3,7 @@ import SwiftUI
 struct EstimateRevisionEditorView: View {
     let estimate: EstimateRecord
     let onSaved: (EstimateRecord) -> Void
+    @Binding private var parentRecord: EstimateRecord?
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
@@ -16,6 +17,9 @@ struct EstimateRevisionEditorView: View {
     @State private var confirmDiscard = false
     @State private var descriptionTarget: RevisionDescriptionTarget?
     @State private var descriptionAccessRetired = false
+    @State private var descriptionDirty = false
+    @State private var descriptionOwnerScope: DescriptionCanvasScope?
+    @State private var editorAccessRetired = false
     @State private var documentGeneration = UUID()
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var query = ""
@@ -25,10 +29,19 @@ struct EstimateRevisionEditorView: View {
     @State private var removed: RemovedLine?
     @FocusState private var focus: EstimateBuilderFocus?
 
-    init(estimate: EstimateRecord, onSaved: @escaping (EstimateRecord) -> Void) {
+    init(estimate: EstimateRecord, parentRecord: Binding<EstimateRecord?>? = nil, ownerScope: DescriptionCanvasScope? = nil, onSaved: @escaping (EstimateRecord) -> Void) {
         self.estimate = estimate
+        _parentRecord = parentRecord ?? .constant(estimate)
+        _descriptionOwnerScope = State(initialValue: ownerScope)
         self.onSaved = onSaved
         _editor = State(initialValue: EstimateRevisionEditorState(estimate: estimate))
+    }
+
+    private var editorScopeCurrent: Bool {
+        guard !editorAccessRetired else { return false }
+        guard let scope = descriptionOwnerScope else { return false }
+        return session.phase == .ready && scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
+                                                        generation: session.generation, authority: session.authorityRevision)
     }
 
     private var canRevise: Bool {
@@ -40,7 +53,7 @@ struct EstimateRevisionEditorView: View {
     }
 
     private var canEdit: Bool {
-        canRevise && (optionsFeatureEnabled || editor.options.isEmpty)
+        editorScopeCurrent && parentRecord == estimate && canRevise && (optionsFeatureEnabled || editor.options.isEmpty)
     }
 
     private var canDiscount: Bool {
@@ -83,6 +96,11 @@ struct EstimateRevisionEditorView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
+                if !editorScopeCurrent || parentRecord != estimate || !session.can("estimate.create", feature: "estimates") {
+                    ContentUnavailableView("Estimate unavailable", systemImage: "doc.questionmark",
+                        description: Text("The current estimate changed or could not be loaded. Your edits stay here until you close this editor."))
+                        .padding(20)
+                } else {
                 if let error {
                     ErrorBanner(message: error)
                         .padding(.horizontal, 20)
@@ -144,6 +162,7 @@ struct EstimateRevisionEditorView: View {
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
                 }
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)
@@ -152,17 +171,19 @@ struct EstimateRevisionEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                    Button("Cancel") { if editor.hasChanges || descriptionDirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
             }
             .keyboardDoneButton()
-            .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+            .discardChangesGuard(hasChanges: editor.hasChanges || descriptionDirty, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .sheet(item: $descriptionTarget) { target in
                 DescriptionCanvas(
                     text: Binding(get: { descriptionValue(target) ?? target.original }, set: { _ in }),
                     title: target.title, applyTitle: "Apply to estimate", limit: target.limit,
-                    scope: target.scope, accessRetired: $descriptionAccessRetired,
-                    targetAvailable: descriptionTargetAvailable(target), originalText: target.original,
+                    scope: target.scope, accessRetired: $descriptionAccessRetired, hasUnappliedChanges: $descriptionDirty,
+                    targetAvailable: descriptionTargetAvailable(target),
+                    temporaryParentUnavailable: parentRecord == nil && editorScopeCurrent && canRevise && (optionsFeatureEnabled || editor.options.isEmpty) && !busy && !editor.hasUnsupportedLineSources,
+                    originalText: target.original,
                     apply: { original, value in
                         guard descriptionTargetAvailable(target), !descriptionAccessRetired, session.phase == .ready,
                               target.scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
@@ -177,7 +198,7 @@ struct EstimateRevisionEditorView: View {
                 ).presentationDetents([.large])
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 0) {
+                if editorScopeCurrent && parentRecord == estimate { VStack(spacing: 0) {
                     if canEdit {
                         EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
                                           prompt: searchPrompt, finish: finishSearch)
@@ -192,9 +213,10 @@ struct EstimateRevisionEditorView: View {
                         PaperActionBar(title: reviewTitle, symbol: "list.bullet", busy: busy) { finishSearch() }
                     }
                 }
-                .background(Theme.background)
+                .background(Theme.background) }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
+                if editorScopeCurrent && parentRecord == estimate {
                 VStack(spacing: 0) {
                     if let removed {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
@@ -206,10 +228,18 @@ struct EstimateRevisionEditorView: View {
                         }
                     }
                 }
+                }
             }
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
+            .onAppear {
+                if descriptionOwnerScope == nil { descriptionOwnerScope = DescriptionCanvasScope.current(session) }
+                if descriptionOwnerScope == nil { editorAccessRetired = true }
+            }
+            .onChange(of: session.authorityRevision) { _, _ in
+                if descriptionOwnerScope != nil && !editorScopeCurrent { editorAccessRetired = true }
+            }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewReplaceEstimateDraft"))) { _ in
                 #if DEBUG
@@ -327,7 +357,7 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func descriptionTargetAvailable(_ target: RevisionDescriptionTarget) -> Bool {
-        guard !busy, canEdit, !editor.hasUnsupportedLineSources, documentGeneration == target.documentGeneration,
+        guard !busy, canEdit, parentRecord == estimate, !editor.hasUnsupportedLineSources, documentGeneration == target.documentGeneration,
               estimate.id == target.estimateID, estimate.organizationId == session.activeOrganization?.id,
               estimate.status == target.parentStatus, estimate.currentRevisionNumber == target.parentRevision,
               editor.estimate.status == target.editorStatus, editor.estimate.currentRevisionNumber == target.editorRevision,
@@ -339,10 +369,12 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func showDescription(_ kind: RevisionDescriptionTarget.Kind) {
-        guard !busy, canEdit, !editor.hasUnsupportedLineSources,
+        guard !busy, canEdit, parentRecord == estimate, !editor.hasUnsupportedLineSources,
               estimate.organizationId == session.activeOrganization?.id,
               let actor = session.user?.id, let organization = session.activeOrganization?.id else { return }
         let scope = DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision)
+        if descriptionOwnerScope == nil { descriptionOwnerScope = scope }
+        guard descriptionOwnerScope == scope, !editorAccessRetired else { return }
         let target = RevisionDescriptionTarget(kind: kind, original: "", scope: scope, documentGeneration: documentGeneration,
             estimateID: estimate.id, parentStatus: estimate.status, parentRevision: estimate.currentRevisionNumber,
             editorStatus: editor.estimate.status, editorRevision: editor.estimate.currentRevisionNumber)
@@ -480,8 +512,8 @@ struct EstimateRevisionEditorView: View {
             error = "Draft changes can't be saved yet."
             return
         }
-        guard canRevise else {
-            error = "You no longer have permission to revise this estimate."
+        guard canEdit && editorScopeCurrent && parentRecord == estimate else {
+            error = "The estimate or your access changed. Reopen the current estimate to continue."
             return
         }
         busy = true
@@ -492,6 +524,11 @@ struct EstimateRevisionEditorView: View {
                 editor.estimate.id,
                 request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount)
             )
+            guard canEdit, editorScopeCurrent, revised.id == estimate.id,
+                  revised.organizationId == estimate.organizationId, revised.customerId == estimate.customerId else {
+                error = "The estimate or your access changed. Reopen it to verify the saved revision."
+                return
+            }
             onSaved(revised)
             dismiss()
         } catch is CancellationError {

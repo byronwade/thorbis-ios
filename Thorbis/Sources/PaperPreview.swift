@@ -115,6 +115,9 @@ enum PaperPreview {
     static var invoiceDetailPreviewID: String {
         isPaymentRefundPreview ? refundInvoice.id : issuedInvoice.id
     }
+    static func replacementForCanvasTest(_ estimate: EstimateRecord) -> EstimateRecord {
+        changed(estimate, ["currentRevisionNumber": (estimate.currentRevisionNumber ?? 0) + 1])
+    }
     static var estimate: EstimateRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002218","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","createdByUserId":"00000000-0000-4000-8000-000000000001","status":"sent","currentRevisionNumber":2,"title":"AC repair and compressor replacement","lines":[{"id":"00000000-0000-4000-8000-000000009211","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}},{"id":"00000000-0000-4000-8000-000000009212","description":"Replace compressor","quantity":1,"unitPrice":{"amount":85000,"currency":"USD"},"source":{"kind":"price_book","priceBookItemId":"00000000-0000-4000-8000-000000009201","priceBookRevision":4,"originalDescription":"Replace compressor","originalUnitPrice":{"amount":85000,"currency":"USD"},"addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z","overriddenFields":[]}}],"options":[{"id":"00000000-0000-4000-8000-000000009213","title":"Full system replacement","description":"Includes new compressor and efficiency inspection","lines":[{"id":"00000000-0000-4000-8000-000000009214","description":"System replacement","quantity":1,"unitPrice":{"amount":225000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}}],"totalAmount":225000,"currency":"USD"}],"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z","sentAt":"2026-07-20T12:00:00Z"}"#
         return try! JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
@@ -145,6 +148,12 @@ enum PaperPreview {
                                         option(2, "Repair and protect", "The repair plus a surge protector and a one-year parts warranty.", better),
                                         option(3, "Replace", "A new high-efficiency unit with a ten-year warranty.", replace)],
                               createdAt: estimate.createdAt, updatedAt: estimate.updatedAt, sentAt: estimate.sentAt, approvedAt: nil, declinedAt: nil)
+    }
+    static var canvasSavedInvoice: InvoiceRecord {
+        changed(invoice, ["linesRevision": invoice.linesRevision + 1])
+    }
+    static var canvasIssuedInvoice: InvoiceRecord {
+        changed(canvasSavedInvoice, ["status": "issued", "issuedAt": "2026-10-30T12:00:00Z"])
     }
     static var invoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"draft","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":null,"paidAt":null,"voidedAt":null,"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
@@ -472,6 +481,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let lock = NSLock()
         var setupPaymentReads = 0
         var invoiceReads = 0
+        var canvasIssueAttempts = 0
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
@@ -487,7 +497,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.canvasIssueAttempts = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -553,7 +563,21 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if request.httpMethod != nil && request.httpMethod != "GET" {
+        if PaperPreview.screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--canvas-test-issue-retry"),
+           request.httpMethod == "POST", url.path == "/v2/invoices/\(PaperPreview.invoice.id)/lines" {
+            status = 200
+            payload = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.canvasSavedInvoice))
+        } else if PaperPreview.screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--canvas-test-issue-retry"),
+                  request.httpMethod == "POST", url.path == "/v1/invoices/\(PaperPreview.invoice.id)/issue" {
+            let attempt = Self.scenario.lock.withLock { Self.scenario.canvasIssueAttempts += 1; return Self.scenario.canvasIssueAttempts }
+            if attempt == 1 {
+                status = 503
+                payload = ["status": 503, "title": "Preview issue temporarily unavailable"]
+            } else {
+                status = 200
+                payload = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.canvasIssuedInvoice))
+            }
+        } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
@@ -834,7 +858,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["items": matchingCustomer(item.map { [$0] } ?? [], queryItems: queryItems)]
         }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
-            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
+            let record = PaperPreview.screen == "invoice-detail" && ProcessInfo.processInfo.arguments.contains("--canvas-test-invoice-parent-loss") ? PaperPreview.invoice : PaperPreview.issuedInvoice
+            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(record))
         }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/payments" { return ["items": []] }
         if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-long"),

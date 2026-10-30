@@ -44,6 +44,127 @@ final class DescriptionCanvasUITests: XCTestCase {
         app.navigationBars["Line description"].buttons["Apply to estimate"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "revised")).firstMatch.waitForExistence(timeout: 5) || app.textViews.matching(NSPredicate(format: "value CONTAINS %@", "revised")).firstMatch.exists || app.textFields.matching(NSPredicate(format: "value CONTAINS %@", "revised")).firstMatch.exists)
     }
+    func testParentEstimateRecordLossKeepsUnappliedCanvasUntilExplicitDiscard() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-detail", "--canvas-test-parent-loss"]
+        app.launch()
+        let revise = app.buttons["Revise estimate"]
+        XCTAssertTrue(revise.waitForExistence(timeout: 30)); revise.tap()
+        let open = app.buttons.matching(identifier: "estimate-option-description-more").firstMatch
+        for _ in 0..<8 where !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.isHittable); open.tap()
+        let editor = app.textViews["description-canvas-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10)); editor.tap(); editor.typeText(" unsaved")
+        app.buttons["Test parent loss"].tap()
+        XCTAssertTrue(app.staticTexts["Editor unavailable"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Apply to estimate"].isEnabled)
+        app.buttons["Test parent return"].tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertTrue((editor.value as? String ?? "").contains("unsaved"))
+        XCTAssertTrue(app.buttons["Apply to estimate"].isEnabled)
+        app.navigationBars["Option description"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+    }
+
+    func testReplacedParentEstimateCannotResumeUnappliedCanvas() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-detail", "--canvas-test-parent-loss"]
+        app.launch()
+        let revise = app.buttons["Revise estimate"]
+        XCTAssertTrue(revise.waitForExistence(timeout: 30)); revise.tap()
+        let open = app.buttons.matching(identifier: "estimate-option-description-more").firstMatch
+        for _ in 0..<8 where !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.isHittable); open.tap()
+        let editor = app.textViews["description-canvas-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10)); editor.tap(); editor.typeText(" unsaved")
+        app.buttons["Test parent loss"].tap()
+        XCTAssertTrue(app.staticTexts["Editor unavailable"].waitForExistence(timeout: 5))
+        app.buttons["Test parent replace"].tap()
+        XCTAssertTrue(app.staticTexts["Editor unavailable"].exists)
+        app.buttons["Test parent return"].tap()
+        XCTAssertTrue(app.staticTexts["Editor unavailable"].exists)
+        XCTAssertFalse(editor.exists)
+        XCTAssertFalse(app.buttons["Apply to estimate"].isEnabled)
+        app.navigationBars["Description"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+    }
+
+    func testInvoiceParentRecordLossPreservesCanvasUntilSameInvoiceReturns() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--canvas-test-parent-loss", "--canvas-test-invoice-parent-loss"]
+        app.launch()
+        let edit = app.buttons["Edit line items"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 30))
+        app.swipeUp()
+        XCTAssertTrue(edit.isHittable); edit.tap()
+        let open = app.buttons.matching(identifier: "invoice-line-description-more").firstMatch
+        for _ in 0..<8 where !open.isHittable { app.swipeUp() }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Invoice parent candidate after tapping Edit"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(open.isHittable); open.tap()
+        let editor = app.textViews["description-canvas-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10)); editor.tap(); editor.typeText(" unsaved")
+        app.buttons["Test parent loss"].tap()
+        XCTAssertTrue(app.staticTexts["Editor unavailable"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Apply to invoice"].isEnabled)
+        app.buttons["Test parent return"].tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertTrue((editor.value as? String ?? "").contains("unsaved"))
+        XCTAssertTrue(app.buttons["Apply to invoice"].isEnabled)
+        app.navigationBars["Line item description"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+    }
+
+    func testAuthorityLossDuringParentRefreshPermanentlyRetiresEditor() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-detail", "--canvas-test-parent-loss", "--canvas-test-authority", "--canvas-test-parent-revoke"]
+        app.launch()
+        let revise = app.buttons["Revise estimate"]
+        XCTAssertTrue(revise.waitForExistence(timeout: 30)); revise.tap()
+        let open = app.buttons.matching(identifier: "estimate-option-description-more").firstMatch
+        for _ in 0..<8 where !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.isHittable); open.tap()
+        let editor = app.textViews["description-canvas-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10)); editor.tap(); editor.typeText(" unsaved")
+        app.buttons["Test parent loss"].tap()
+        XCTAssertTrue(app.staticTexts["Editor unavailable"].waitForExistence(timeout: 5))
+        app.buttons["Test parent return"].tap()
+        XCTAssertTrue(app.staticTexts["Editor unavailable"].exists)
+        XCTAssertFalse(editor.exists)
+        XCTAssertFalse(app.buttons["Apply to estimate"].isEnabled)
+        app.navigationBars["Description"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5)); app.buttons["Discard changes"].tap()
+        XCTAssertTrue(app.staticTexts["Estimate unavailable"].waitForExistence(timeout: 5))
+    }
+
+    func testInvoiceIssueFailureAfterSavingLinesCanRetry() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--canvas-test-invoice-parent-loss", "--canvas-test-issue-retry"]
+        app.launch()
+        let edit = app.buttons["Edit line items"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 30)); app.swipeUp(); XCTAssertTrue(edit.isHittable); edit.tap()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+        let field = app.textFields.matching(NSPredicate(format: "label CONTAINS %@", "Line item description")).firstMatch
+        for _ in 0..<5 where !field.isHittable { app.swipeUp() }
+        XCTAssertTrue(field.isHittable); field.tap(); field.typeText(" update")
+        if app.toolbars.buttons["Done"].exists { app.toolbars.buttons["Done"].tap() }
+        let issue = app.buttons["Issue invoice"].firstMatch
+        XCTAssertTrue(issue.waitForExistence(timeout: 5)); issue.tap()
+        let confirm = app.buttons.matching(identifier: "Issue invoice").element(boundBy: app.buttons.matching(identifier: "Issue invoice").count - 1)
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Preview issue temporarily unavailable")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["Edit invoice"].exists)
+        XCTAssertTrue(app.buttons["Issue invoice"].firstMatch.isEnabled)
+        app.buttons["Issue invoice"].firstMatch.tap()
+        app.buttons.matching(identifier: "Issue invoice").element(boundBy: app.buttons.matching(identifier: "Issue invoice").count - 1).tap()
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Edit invoice"])
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 10), .completed)
+    }
+
     func testReplacingEstimateRetiresOpenOptionCanvasEvenIfOptionIDIsReused() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -91,6 +212,8 @@ final class DescriptionCanvasUITests: XCTestCase {
         app.navigationBars["Description"].buttons["Cancel"].tap()
         XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
         app.buttons["Discard changes"].tap()
+        XCTAssertTrue(app.staticTexts["Estimate unavailable"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["Estimate title"].exists)
     }
 
     func testNewEstimateCanvasAppliesToLiveLine() {

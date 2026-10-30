@@ -22,6 +22,9 @@ struct NewEstimateView: View {
     @State private var confirmDiscard = false
     @State private var descriptionTarget: NewEstimateDescriptionTarget?
     @State private var descriptionAccessRetired = false
+    @State private var descriptionDirty = false
+    @State private var descriptionOwnerScope: DescriptionCanvasScope?
+    @State private var editorAccessRetired = false
     @FocusState private var focus: EstimateBuilderFocus?
     /// Set once the server created the estimate, so a retry only links it and never creates a duplicate.
     @State private var created: EstimateRecord?
@@ -35,12 +38,19 @@ struct NewEstimateView: View {
         self.onCreated = onCreated
     }
 
+    private var editorScopeCurrent: Bool {
+        guard !editorAccessRetired else { return false }
+        guard let scope = descriptionOwnerScope else { return false }
+        return session.phase == .ready && scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
+                                                        generation: session.generation, authority: session.authorityRevision)
+    }
+
     private var canUsePriceBook: Bool { session.can("pricebook.view", feature: "price_book") }
     private var searching: Bool { focus == .search || !query.isEmpty }
     private var total: Int? { lines.isEmpty ? nil : lines.subtotal() }
 
     var valid: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
+        editorScopeCurrent && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
         lines.allSatisfy { line in
             !line.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             (Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)).map { (1...100_000).contains($0) } ?? false) &&
@@ -51,7 +61,11 @@ struct NewEstimateView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if searching {
+                if !editorScopeCurrent {
+                    ContentUnavailableView("Estimate unavailable", systemImage: "lock",
+                        description: Text("Access changed. Close this editor to start again."))
+                        .padding(20)
+                } else if searching {
                     PriceBookResultsList(
                         catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
                             query: query, kind: kind, canUsePriceBook: canUsePriceBook,
@@ -74,12 +88,12 @@ struct NewEstimateView: View {
                     Button("Cancel") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
                 }
             }
-            .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+            .discardChangesGuard(hasChanges: (!lines.isEmpty || descriptionDirty) && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .sheet(item: $descriptionTarget) { target in
                 DescriptionCanvas(
                     text: Binding(get: { lines.first(where: { $0.id == target.id })?.description ?? target.original }, set: { _ in }),
                     title: "Line description", applyTitle: "Apply to estimate", limit: .utf16(200),
-                    scope: target.scope, accessRetired: $descriptionAccessRetired,
+                    scope: target.scope, accessRetired: $descriptionAccessRetired, hasUnappliedChanges: $descriptionDirty,
                     targetAvailable: descriptionTargetAvailable(target), originalText: target.original,
                     apply: { original, value in
                         guard descriptionTargetAvailable(target), !descriptionAccessRetired,
@@ -91,18 +105,18 @@ struct NewEstimateView: View {
                 ).presentationDetents([.large])
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 0) {
+                if editorScopeCurrent { VStack(spacing: 0) {
                     EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
                                       prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
                                       finish: finishSearch)
-                        .disabled(busy)
+                        .disabled(busy || !editorScopeCurrent)
                     if searching {
                         PaperActionBar(title: reviewTitle, symbol: "list.bullet", busy: busy) { finishSearch() }
                     }
-                }
+                } }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
+                if editorScopeCurrent { VStack(spacing: 0) {
                     if let removed {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
                     }
@@ -111,7 +125,14 @@ struct NewEstimateView: View {
                         PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
                                        disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
                     }
-                }
+                } }
+            }
+            .onAppear {
+                if descriptionOwnerScope == nil { descriptionOwnerScope = DescriptionCanvasScope.current(session) }
+                if descriptionOwnerScope == nil { editorAccessRetired = true }
+            }
+            .onChange(of: session.authorityRevision) { _, _ in
+                if descriptionOwnerScope != nil && !editorScopeCurrent { editorAccessRetired = true }
             }
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
@@ -125,17 +146,19 @@ struct NewEstimateView: View {
     }
 
     private func descriptionTargetAvailable(_ target: NewEstimateDescriptionTarget) -> Bool {
-        !busy && created == nil && session.can("estimate.create", feature: "estimates") &&
+        !busy && editorScopeCurrent && created == nil && session.can("estimate.create", feature: "estimates") &&
         lines.contains(where: { $0.id == target.id })
     }
 
     private func showDescription(_ id: UUID) {
-        guard !busy, created == nil, session.can("estimate.create", feature: "estimates"),
+        guard !busy, editorScopeCurrent, created == nil, session.can("estimate.create", feature: "estimates"),
               let actor = session.user?.id, let organization = session.activeOrganization?.id,
               let line = lines.first(where: { $0.id == id }) else { return }
+        let scope = DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision)
+        if descriptionOwnerScope == nil { descriptionOwnerScope = scope }
+        guard descriptionOwnerScope == scope, !editorAccessRetired else { return }
         descriptionAccessRetired = false
-        descriptionTarget = NewEstimateDescriptionTarget(id: id, original: line.description,
-            scope: DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision))
+        descriptionTarget = NewEstimateDescriptionTarget(id: id, original: line.description, scope: scope)
     }
 
     private var commitTitle: String {

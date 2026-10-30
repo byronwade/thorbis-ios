@@ -66,6 +66,12 @@ struct EstimatesView: View {
     }
 }
 
+private struct ScopedCommercialEditor<Record>: Identifiable {
+    let id = UUID()
+    let record: Record
+    let scope: DescriptionCanvasScope
+}
+
 struct EstimateDetailView: View {
     let id: String
     /// The job it was opened from; in-person approval stores the signature with that job.
@@ -79,11 +85,14 @@ struct EstimateDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var autoPresented = false
     @State private var record: EstimateRecord?
+    #if DEBUG
+    @State private var previewLostRecord: EstimateRecord?
+    #endif
     @State private var error: String?
     @State private var busy = false
     @State private var confirm = false
     @State private var succeeded = 0
-    @State private var showRevisionEditor = false
+    @State private var revisionSnapshot: ScopedCommercialEditor<EstimateRecord>?
     @State private var action = ""
     @State private var showToCustomer = false
     @State private var memberPricing: MemberPricing?
@@ -164,7 +173,7 @@ struct EstimateDetailView: View {
                     }
                     if record.status == "draft",
                        session.can("estimate.create", feature: "estimates") {
-                        Button { showRevisionEditor = true } label: {
+                        Button { if let scope = DescriptionCanvasScope.current(session) { revisionSnapshot = .init(record: record, scope: scope) } } label: {
                             commercialAction("Edit lines", icon: "square.and.pencil")
                         }
                         .buttonStyle(.plain)
@@ -172,7 +181,7 @@ struct EstimateDetailView: View {
                     }
                     if (record.status == "sent" || record.status == "declined"),
                        session.can("estimate.create", feature: "estimates") {
-                        Button { showRevisionEditor = true } label: {
+                        Button { if let scope = DescriptionCanvasScope.current(session) { revisionSnapshot = .init(record: record, scope: scope) } } label: {
                             commercialAction("Revise estimate", icon: "square.and.pencil")
                         }
                         .buttonStyle(.plain)
@@ -200,13 +209,34 @@ struct EstimateDetailView: View {
         .sensoryFeedback(.success, trigger: succeeded)
         .thorbisConfirm("\(action) this estimate?", isPresented: $confirm,
                         actions: [ThorbisConfirmAction(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }])
-        .sheet(isPresented: $showRevisionEditor) {
-            if let record {
-                EstimateRevisionEditorView(estimate: record) { revised in
-                    self.record = revised
-                    error = nil
-                }
+        .sheet(item: $revisionSnapshot) { snapshot in
+            EstimateRevisionEditorView(estimate: snapshot.record, parentRecord: $record, ownerScope: snapshot.scope) { revised in
+                self.record = revised
+                error = nil
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewLoseDocumentParent"))) { _ in
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-parent-loss") {
+                previewLostRecord = record; record = nil
+                if ProcessInfo.processInfo.arguments.contains("--canvas-test-parent-revoke") { session.previewSetEstimateEditing(false) }
+            }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewReturnDocumentParent"))) { _ in
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-parent-loss") {
+                record = previewLostRecord
+                if ProcessInfo.processInfo.arguments.contains("--canvas-test-parent-revoke") { session.previewSetEstimateEditing(true) }
+            }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewReplaceDocumentParent"))) { _ in
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-parent-loss"), let saved = previewLostRecord {
+                record = PaperPreview.replacementForCanvasTest(saved)
+            }
+            #endif
         }
         .task { await loadAndMaybePresent() }
         .refreshable { await load() }
@@ -374,11 +404,14 @@ struct InvoiceDetailView: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
     @State private var record: InvoiceRecord?
+    #if DEBUG
+    @State private var previewLostRecord: InvoiceRecord?
+    #endif
     @State private var error: String?
     @State private var busy = false
     @State private var confirmIssue = false
     @State private var issued = 0
-    @State private var showEditDraft = false
+    @State private var invoiceEditSnapshot: ScopedCommercialEditor<InvoiceRecord>?
     @State private var showCollectPayment = false
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var showSignature = false
@@ -429,7 +462,7 @@ struct InvoiceDetailView: View {
                         )
                     }
                     if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
-                        Button { showEditDraft = true } label: {
+                        Button { if let scope = DescriptionCanvasScope.current(session) { invoiceEditSnapshot = .init(record: record, scope: scope) } } label: {
                             commercialAction("Edit line items", icon: "pencil")
                         }
                         .buttonStyle(.plain)
@@ -486,20 +519,18 @@ struct InvoiceDetailView: View {
         .sensoryFeedback(.success, trigger: issued)
         .thorbisConfirm("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue,
                         actions: [ThorbisConfirmAction(issueCollects ? "Issue and collect" : "Issue invoice") { Task { await issueThenCollect() } }])
-        .sheet(isPresented: $showEditDraft) {
-            if let record {
-                NavigationStack {
-                    InvoiceLineEditorView(invoice: record) { updated in
-                        guard accept(updated) else { return }
-                        error = nil
-                        Task { await paymentModel?.load() }
-                    }
-                    .environmentObject(api)
-                    .environmentObject(session)
+        .sheet(item: $invoiceEditSnapshot) { snapshot in
+            NavigationStack {
+                InvoiceLineEditorView(invoice: snapshot.record, parentRecord: $record, ownerScope: snapshot.scope) { updated in
+                    guard accept(updated) else { return }
+                    error = nil
+                    Task { await paymentModel?.load() }
                 }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .environmentObject(api)
+                .environmentObject(session)
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
             if collectAfterCustomer { collectAfterCustomer = false; showCollectPayment = true }
@@ -532,6 +563,16 @@ struct InvoiceDetailView: View {
                     .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewLoseDocumentParent"))) { _ in
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-invoice-parent-loss") { previewLostRecord = record; record = nil }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewReturnDocumentParent"))) { _ in
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-invoice-parent-loss") { record = previewLostRecord }
+            #endif
         }
         .task(id: session.generation) {
             paymentModel = nil

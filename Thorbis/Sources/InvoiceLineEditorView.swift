@@ -3,6 +3,9 @@ import SwiftUI
 struct InvoiceLineEditorView: View {
     let invoice: InvoiceRecord
     let onSaved: (InvoiceRecord) -> Void
+    @Binding private var parentRecord: InvoiceRecord?
+    private let tracksParent: Bool
+    @State private var expectedParent: InvoiceRecord
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
@@ -24,6 +27,9 @@ struct InvoiceLineEditorView: View {
     @State private var editingAddedLine = false
     @State private var descriptionTarget: InvoiceDescriptionTarget?
     @State private var descriptionAccessRetired = false
+    @State private var descriptionDirty = false
+    @State private var descriptionOwnerScope: DescriptionCanvasScope?
+    @State private var editorAccessRetired = false
     @FocusState private var focus: EstimateBuilderFocus?
 
     private var searching: Bool { canEdit && (focus == .search || !query.isEmpty || addedLineID != nil) }
@@ -52,14 +58,27 @@ struct InvoiceLineEditorView: View {
         .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
     }
 
-    init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
+    init(invoice: InvoiceRecord, parentRecord: Binding<InvoiceRecord?>? = nil, ownerScope: DescriptionCanvasScope? = nil, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
+        _parentRecord = parentRecord ?? .constant(invoice)
+        tracksParent = parentRecord != nil
+        _expectedParent = State(initialValue: invoice)
+        _descriptionOwnerScope = State(initialValue: ownerScope)
         self.onSaved = onSaved
         _editor = State(initialValue: InvoiceLineEditorState(invoice: invoice))
     }
 
+    private var editorScopeCurrent: Bool {
+        guard !editorAccessRetired else { return false }
+        guard let scope = descriptionOwnerScope else { return false }
+        return session.phase == .ready && scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
+                                                        generation: session.generation, authority: session.authorityRevision)
+    }
+
+    private var parentMatches: Bool { !tracksParent || parentRecord == expectedParent }
+
     private var canEdit: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+        editorScopeCurrent && parentMatches && editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
     }
 
     private var canUsePriceBook: Bool {
@@ -67,11 +86,16 @@ struct InvoiceLineEditorView: View {
     }
 
     private var canIssue: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
+        editorScopeCurrent && parentMatches && editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
     }
 
     var body: some View {
         ScrollView {
+            if !editorScopeCurrent || !parentMatches || !session.can("invoice.edit", feature: "invoicing") {
+                ContentUnavailableView("Invoice unavailable", systemImage: "doc.questionmark",
+                    description: Text("The current invoice changed or could not be loaded. Your edits stay here until you close this editor."))
+                    .padding(20)
+            } else {
             if let error {
                 ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12)
             }
@@ -182,6 +206,7 @@ struct InvoiceLineEditorView: View {
             .frame(maxWidth: 640)
             .frame(maxWidth: .infinity)
             }
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
@@ -190,7 +215,7 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                Button("Cancel") { if editor.hasChanges || descriptionDirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
             }
         }
         .keyboardDoneButton()
@@ -205,6 +230,13 @@ struct InvoiceLineEditorView: View {
         }
         .task(id: catalogContext) { await refreshCatalog() }
         .onChange(of: catalogContext) { _, _ in finishSearch() }
+        .onAppear {
+            if descriptionOwnerScope == nil { descriptionOwnerScope = DescriptionCanvasScope.current(session) }
+            if descriptionOwnerScope == nil { editorAccessRetired = true }
+        }
+        .onChange(of: session.authorityRevision) { _, _ in
+            if descriptionOwnerScope != nil && !editorScopeCurrent { editorAccessRetired = true }
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewRemoveCanvasLine"))) { _ in
             #if DEBUG
             if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-removal"), let target = descriptionTarget {
@@ -215,11 +247,11 @@ struct InvoiceLineEditorView: View {
         .onChange(of: editingAddedLine) { _, expanded in
             if expanded { focus = nil }
         }
-        .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+        .discardChangesGuard(hasChanges: editor.hasChanges || descriptionDirty, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) {
             // The search Done action returns to invoice review and its commit actions.
             // Keeping a second action bar above the keyboard obscures quick-edit fields.
-            if !searching { invoiceCommitActions }
+            if editorScopeCurrent && parentMatches && !searching { invoiceCommitActions }
         }
         .thorbisConfirm("Issue invoice?",
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
@@ -229,8 +261,10 @@ struct InvoiceLineEditorView: View {
             DescriptionCanvas(
                 text: Binding(get: { editor.lines.first(where: { $0.id == target.id })?.description ?? target.original }, set: { _ in }),
                 title: "Line item description", applyTitle: "Apply to invoice", limit: .unicodeScalars(211),
-                scope: target.scope, accessRetired: $descriptionAccessRetired,
-                targetAvailable: descriptionTargetAvailable(target), originalText: target.original,
+                scope: target.scope, accessRetired: $descriptionAccessRetired, hasUnappliedChanges: $descriptionDirty,
+                targetAvailable: descriptionTargetAvailable(target),
+                temporaryParentUnavailable: tracksParent && parentRecord == nil && editorScopeCurrent && editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing") && !busy && !editor.hasUnsupportedLineSources,
+                originalText: target.original,
                 apply: { original, value in
                     guard descriptionTargetAvailable(target), !descriptionAccessRetired,
                           target.scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
@@ -355,22 +389,25 @@ struct InvoiceLineEditorView: View {
     }
 
     private func descriptionTargetAvailable(_ target: InvoiceDescriptionTarget) -> Bool {
-        !busy && canEdit && !editor.hasUnsupportedLineSources &&
+        !busy && canEdit && parentMatches && !editor.hasUnsupportedLineSources &&
         invoice.id == target.invoiceID && invoice.status == "draft" && invoice.organizationId == session.activeOrganization?.id &&
-        invoice.linesRevision == target.parentRevision && invoice.status == target.parentStatus &&
+        expectedParent.linesRevision == target.parentRevision && expectedParent.status == target.parentStatus &&
         editor.invoice.linesRevision == target.editorRevision && editor.invoice.status == target.editorStatus &&
         editor.lines.contains(where: { $0.id == target.id })
     }
 
     private func showDescription(_ line: InvoiceLineDraft) {
-        guard !busy, canEdit, invoice.status == "draft", !editor.hasUnsupportedLineSources,
+        guard !busy, canEdit, parentMatches, invoice.status == "draft", !editor.hasUnsupportedLineSources,
               invoice.organizationId == session.activeOrganization?.id,
               let actor = session.user?.id, let organization = session.activeOrganization?.id,
               let current = editor.lines.first(where: { $0.id == line.id }) else { return }
+        let scope = DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision)
+        if descriptionOwnerScope == nil { descriptionOwnerScope = scope }
+        guard descriptionOwnerScope == scope, !editorAccessRetired else { return }
         descriptionAccessRetired = false
         descriptionTarget = InvoiceDescriptionTarget(id: current.id, invoiceID: invoice.id, original: current.description,
-            parentRevision: invoice.linesRevision, parentStatus: invoice.status,
-            editorRevision: editor.invoice.linesRevision, editorStatus: editor.invoice.status, scope: DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision))
+            parentRevision: expectedParent.linesRevision, parentStatus: expectedParent.status,
+            editorRevision: editor.invoice.linesRevision, editorStatus: editor.invoice.status, scope: scope)
     }
 
     private func invoiceLineBinding(_ snapshot: InvoiceLineDraft) -> Binding<InvoiceLineDraft> {
@@ -484,6 +521,11 @@ struct InvoiceLineEditorView: View {
             commitPrices()
             let request = try editor.makeRequest()
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
+            guard canEdit, editorScopeCurrent, updated.id == invoice.id, updated.organizationId == invoice.organizationId,
+                  updated.customerId == invoice.customerId, updated.jobId == invoice.jobId else {
+                error = "The invoice or your access changed. Reopen it to verify the saved lines."
+                return
+            }
             addedLineSelection = nil
             onSaved(updated)
             dismiss()
@@ -535,10 +577,27 @@ struct InvoiceLineEditorView: View {
             if editor.hasChanges {
                 current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())
                 addedLineSelection = nil
+                guard current.id == invoice.id, current.organizationId == invoice.organizationId,
+                      current.customerId == invoice.customerId, current.jobId == invoice.jobId,
+                      current.status == "draft", editorScopeCurrent, parentMatches else {
+                    error = "The saved invoice could not be verified. Reopen it before issuing."
+                    return
+                }
                 editor = InvoiceLineEditorState(invoice: current)
                 onSaved(current)
+                guard !tracksParent || parentRecord == current else {
+                    error = "The saved invoice could not be verified. Reopen it before issuing."
+                    return
+                }
+                expectedParent = current
             }
+            guard canIssue, canEdit else { error = "The invoice or your access changed. Reopen it before issuing."; return }
             let issued = try await api.issueFieldInvoice(invoice.id, expectedLinesRevision: current.linesRevision)
+            guard editorScopeCurrent, parentMatches, issued.id == invoice.id, issued.organizationId == invoice.organizationId,
+                  issued.customerId == invoice.customerId, issued.jobId == invoice.jobId else {
+                error = "The invoice or your access changed. Reopen it to verify the issue status."
+                return
+            }
             onSaved(issued)
             dismiss()
         } catch is CancellationError {

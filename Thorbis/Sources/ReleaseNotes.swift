@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-keep-description-edits",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.text", title: "Keep description edits",
+                      detail: "Continue your description after the same document finishes refreshing."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-description-canvas",
             date: "2026-10-30",
             highlights: [
