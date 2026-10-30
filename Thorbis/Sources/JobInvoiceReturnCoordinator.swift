@@ -26,6 +26,10 @@ struct JobInvoiceReturnCoordinator {
                                                   context: JobInvoiceReturnContext?,
                                                   invoice: (Route) -> JobInvoiceRoute?) -> UUID? {
         guard let route = JobInvoiceRouteTransition.completedPop(from: old, to: new, invoice: invoice) else { return nil }
+        return begin(route, context: context)
+    }
+
+    mutating func begin(_ route: JobInvoiceRoute, context: JobInvoiceReturnContext?) -> UUID? {
         invalidate()
         guard let context, context.contains(route) else { return nil }
         activeRoute = route
@@ -41,6 +45,11 @@ struct JobInvoiceReturnCoordinator {
         state.finish(requestID: requestID, scopeValid: true, fresh: fresh,
                      actualInvoiceID: actualInvoiceID, canCollect: canCollect)
         activeRequest = nil
+    }
+
+    func visibleInvoiceID(in context: JobInvoiceReturnContext?) -> String? {
+        guard let route = activeRoute, let context, context.contains(route) else { return nil }
+        return state.collectibleInvoiceID
     }
 
     mutating func collectibleInvoiceID(in context: JobInvoiceReturnContext?) -> String? {

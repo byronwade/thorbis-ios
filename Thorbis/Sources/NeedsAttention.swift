@@ -56,7 +56,7 @@ struct NeedsAttentionView: View {
                 if !unpaid.isEmpty {
                     PaperGroupHeader(title: "Unpaid invoices", count: unpaid.count).padding(.horizontal, Theme.gutter).padding(.top, 8)
                     ForEach(unpaid, id: \.0.id) { invoice, balance in
-                        NavigationLink(value: PaperRoute.invoice(invoice.id)) {
+                        PaperCompatibleLink(value: PaperRoute.invoice(invoice.id)) {
                             row(title: store.customerName(invoice.customerId), detail: since("Issued", invoice.issuedAt),
                                 trailing: money(balance, currency: invoice.currency), tint: Theme.foreground)
                         }.buttonStyle(.plain)
@@ -65,7 +65,7 @@ struct NeedsAttentionView: View {
                 if !waiting.isEmpty {
                     PaperGroupHeader(title: "Estimates waiting on the customer", count: waiting.count).padding(.horizontal, Theme.gutter).padding(.top, 16)
                     ForEach(waiting) { estimate in
-                        NavigationLink(value: PaperRoute.estimate(estimate.id)) {
+                        PaperCompatibleLink(value: PaperRoute.estimate(estimate.id)) {
                             row(title: estimate.title, detail: "\(store.customerName(estimate.customerId)) · \(since("Sent", estimate.sentAt))",
                                 trailing: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? "", tint: Theme.foreground)
                         }.buttonStyle(.plain)
@@ -74,7 +74,7 @@ struct NeedsAttentionView: View {
                 if !unscheduled.isEmpty {
                     PaperGroupHeader(title: "Jobs without a time", count: unscheduled.count).padding(.horizontal, Theme.gutter).padding(.top, 16)
                     ForEach(unscheduled) { job in
-                        NavigationLink(value: job) {
+                        PaperCompatibleLink(value: job) {
                             row(title: job.title, detail: "\(job.shortRef) · \(store.customerName(job.customerId))", trailing: "", tint: Theme.muted)
                         }.buttonStyle(.plain)
                     }

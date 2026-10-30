@@ -113,7 +113,7 @@ struct ScheduleMapView: View {
                     .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
             }
             HStack(spacing: 8) {
-                NavigationLink(value: stop.job) {
+                PaperCompatibleLink(value: stop.job) {
                     Text("Open job").inkCommit()
                 }
                 .buttonStyle(PressStyle())
