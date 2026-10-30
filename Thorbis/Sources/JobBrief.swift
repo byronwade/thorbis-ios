@@ -297,7 +297,7 @@ struct JobSiteSection: View {
 struct JobVisitCounts: View {
     let latestNote: String?
     let noteCount: Int
-    let photoCount: Int?
+    let photoCount: String?
     let openFollowUps: Int?
     let openNotes: () -> Void
     let openPhotos: () -> Void
@@ -311,7 +311,7 @@ struct JobVisitCounts: View {
             }
             .buttonStyle(RowPressStyle())
             Button(action: openPhotos) {
-                PaperMenuRow("Photos", symbol: "photo.on.rectangle", value: photoCount.map(String.init))
+                PaperMenuRow("Photos", symbol: "photo.on.rectangle", value: photoCount)
             }
             .buttonStyle(RowPressStyle())
             Button(action: openFollowUpsScreen) {

@@ -72,7 +72,9 @@ struct JobDetailView: View {
     @State private var customerAuthorityID: String?
     /// JS-09/JS-10: this visit in counts, and the customer's other visits. Nil until read.
     @State private var followUps: [FieldFollowUpRecord]?
-    @State private var mediaCount: Int?
+    @State private var mediaCount: String?
+    @State private var mediaCountContext: String?
+    @State private var mediaCountRequest = UUID()
     @State private var visits: [JobVisitRecord] = []
     @State private var bookingCall: BookingCallRecord?
     @State private var showAssign = false
@@ -87,6 +89,14 @@ struct JobDetailView: View {
         return [job.id, job.status, outbox.pendingStatus(for: job.id) ?? "",
                 session.generation.uuidString, session.authorityRevision.uuidString,
                 String(session.can("job.view", feature: "jobs"))].joined(separator: "|")
+    }
+
+    private var liveMediaCountContext: String? {
+        guard session.can("job.view", feature: "jobs"), let actor = session.user?.id,
+              let organization = session.activeOrganization?.id, let job, job.organizationId == organization,
+              let policy = session.policyVersion, let origin = api.normalizedOrigin else { return nil }
+        return [actor, organization, job.id, session.generation.uuidString, session.authorityRevision.uuidString,
+                String(policy), api.requestGeneration.uuidString, origin].map { "\($0.utf8.count):\($0)" }.joined()
     }
 
     var body: some View {
@@ -718,7 +728,7 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 22) {
             JobOfficeNote(notes: job.notes, pauseReason: job.pauseReason, pauseNextAction: job.pauseNextAction)
             JobVisitCounts(latestNote: notes.last?.body, noteCount: notes.count + outbox.pendingNotes(for: job.id).count,
-                           photoCount: mediaCount, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
+                           photoCount: liveMediaCountContext != nil && liveMediaCountContext == mediaCountContext ? mediaCount : nil, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
                            openNotes: { activityFilter = "Notes"; withMotion(.snappy) { selectedTab = "Activity" } },
                            openPhotos: { withMotion(.snappy) { selectedTab = "Photos" } },
                            openFollowUpsScreen: { showFollowUps = true })
@@ -1378,19 +1388,26 @@ struct JobDetailView: View {
     private func loadBrief() async {
         let generation = session.generation
         await loadFollowUps()
-        let loadedMedia = try? await api.fieldMedia(jobId)
+        await loadMediaCount()
         let loadedVisits = try? await api.fieldVisitHistory(jobId)
         let loadedCall = try? await api.fieldBookingCall(jobId)
         guard session.generation == generation else { return }
-        if let loadedMedia { mediaCount = loadedMedia.count }
         if let loadedVisits { visits = loadedVisits }
         if let loadedCall { bookingCall = loadedCall }
     }
 
     private func loadMediaCount() async {
-        let generation = session.generation
-        guard let loaded = try? await api.fieldMedia(jobId), session.generation == generation else { return }
-        mediaCount = loaded.count
+        let request = UUID(); mediaCountRequest = request
+        mediaCount = nil; mediaCountContext = nil
+        guard let context = liveMediaCountContext, let organization = session.activeOrganization?.id else { return }
+        do {
+            let loaded = try await api.fieldMediaPage(jobId, kind: "photo")
+            guard !Task.isCancelled, mediaCountRequest == request, liveMediaCountContext == context,
+                  loaded.items.allSatisfy({ $0.kind == "photo" }) else { return }
+            try JobMediaPageIntegrity.validate(loaded, jobID: jobId, organizationID: organization, seen: [])
+            mediaCount = loaded.nextCursor == nil ? "\(loaded.items.count)" : "\(loaded.items.count) loaded"
+            mediaCountContext = context
+        } catch { }
     }
 
     private func loadFollowUps() async {
