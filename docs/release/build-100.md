@@ -9,3 +9,5 @@ A clean integrated run passed 14 selected unit tests and both setup UI tests on 
 Xcode reports upload succeeded at 07:39 EDT on 30 October 2026 and Apple processing started. **Processing completion, tester group assignment and testing notes are not verified** because local browser control was unavailable. Do not treat this as proof of tester availability.
 
 Live service, workspace-switch/overlapping refresh, cancellation/reappearance, VoiceOver, RTL, iPad and physical-device behavior remain unverified. Customer-history, activity-provenance and backend draft-save candidates are not included. Tap to Pay remains disabled pending qualification. The distribution export was not independently audited; Xcode reported a missing StripeTerminal dSYM.
+
+App Store Connect was rechecked after browser access returned: build 100 is processed and assigned to Internal Testers (2), with What to Test saved. Build page: https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/f4aeb49c-9052-4696-babb-6dda73d1ad1f
