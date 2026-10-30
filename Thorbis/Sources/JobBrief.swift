@@ -14,6 +14,7 @@ enum JobMenuAction: Hashable {
     case wrapUp
     case followUps
     case showToCustomer
+    case customerDetails
     case copyID
 }
 
@@ -32,6 +33,7 @@ enum JobMenu {
         var barIsWrapUp = false
         var canWrapUp = true
         var canShowToCustomer = false
+        var canEditCustomer = false
     }
 
     static func groups(_ inputs: Inputs) -> [[JobMenuAction]] {
@@ -49,6 +51,7 @@ enum JobMenu {
         finish.append(.followUps)
         var record: [JobMenuAction] = []
         if inputs.canShowToCustomer { record.append(.showToCustomer) }
+        if inputs.canEditCustomer { record.append(.customerDetails) }
         record.append(.copyID)
         return [visit, money, finish, record].filter { !$0.isEmpty }
     }
@@ -294,7 +297,7 @@ struct JobSiteSection: View {
 struct JobVisitCounts: View {
     let latestNote: String?
     let noteCount: Int
-    let photoCount: Int?
+    let photoCount: String?
     let openFollowUps: Int?
     let openNotes: () -> Void
     let openPhotos: () -> Void
@@ -308,7 +311,7 @@ struct JobVisitCounts: View {
             }
             .buttonStyle(RowPressStyle())
             Button(action: openPhotos) {
-                PaperMenuRow("Photos", symbol: "photo.on.rectangle", value: photoCount.map(String.init))
+                PaperMenuRow("Photos", symbol: "photo.on.rectangle", value: photoCount)
             }
             .buttonStyle(RowPressStyle())
             Button(action: openFollowUpsScreen) {

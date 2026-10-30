@@ -12,6 +12,9 @@ struct WorkspaceNoticesView: View {
     @State private var error: String?
 
     @State private var filter = "All"
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
 
     private var visible: [StaffNotice] { filter == "Unread" ? items.filter { !$0.read } : items }
 
@@ -31,30 +34,50 @@ struct WorkspaceNoticesView: View {
                     PaperTabs(options: ["All", "Unread"], selection: $filter)
                     if let error { ErrorBanner(message: error) { await refresh() } }
                     if loading && items.isEmpty && error == nil { SkeletonRows(count: 5) }
-                    ForEach(visible) { notice in
+                    let notices = visible
+                    let displayCalendar = calendarWithTimeZone
+                    ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
+                        if let heading = InboxNoticeDay.header(notice.at, after: index > 0 ? notices[index - 1].at : nil,
+                                                               hasPrevious: index > 0, calendar: displayCalendar, locale: locale) {
+                            PaperGroupHeader(title: heading)
+                                .padding(.horizontal, Theme.gutter).padding(.top, 10)
+                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityIdentifier("inbox-day-heading")
+                        }
                         // Each notice opens the job it is about.
                         NavigationLink(value: PaperRoute.job(notice.jobId)) {
-                        // MA-11: what and when, with the unread state as a shape (dot) and weight, not a tinted tile.
                         HStack(alignment: .top, spacing: 12) {
-                            Circle().fill(notice.read ? Color.clear : Theme.brand).frame(width: 8, height: 8).padding(.top, 7)
+                            Image(systemName: notice.read ? "bell" : "bell.badge.fill")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(notice.read ? Theme.muted : Theme.brandText)
+                                .frame(width: 40, height: 40)
+                                .background(notice.read ? Theme.fill : Theme.brandSurface,
+                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                if !notice.read {
+                                    Text("Unread").font(Theme.font(14, weight: .semibold))
+                                        .foregroundStyle(Theme.brandText)
+                                }
                                 Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .medium))
                                     .foregroundStyle(notice.read ? Theme.muted : Theme.foreground)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text([notice.meta, timeLabel(notice.at)].filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: 0)
                             Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Theme.muted).padding(.top, 4).accessibilityHidden(true)
                         }
                         .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                        .frame(minHeight: 52)
+                        .frame(minHeight: 60)
                         .contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityElement(children: .combine)
-                        .accessibilityValue(notice.read ? "" : "Unread")
+                        .accessibilityLabel([notice.title, notice.meta, timeLabel(notice.at), notice.read ? "Read" : "Unread"]
+                            .filter { !$0.isEmpty }.joined(separator: ", "))
                         .accessibilityHint("Opens the job")
                     }
                     if nextCursor != nil {
@@ -101,8 +124,14 @@ struct WorkspaceNoticesView: View {
         }
     }
 
-    private func timeLabel(_ raw: String) -> String {
-        guard let date = JobFiltering.date(raw) else { return raw }
+    private var calendarWithTimeZone: Calendar {
+        var result = calendar
+        result.timeZone = timeZone
+        return result
+    }
+
+    private func timeLabel(_ raw: String?) -> String {
+        guard let raw, let date = JobFiltering.date(raw) else { return "" }
         return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
     }
 
@@ -299,6 +328,7 @@ struct WorkspacePriceBookView: View {
     @ObservedObject var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let canList: Bool
     let canViewDetail: Bool
 
@@ -309,18 +339,38 @@ struct WorkspacePriceBookView: View {
     @State private var search = ""
     @State private var category = "All"
     @State private var creating = false
+    @State private var collapsedGroups: Set<String> = []
+    @State private var localDetail: PriceBookLocalSelection?
+    @State private var displayedScope: PriceBookLocalScope?
+    @State private var requestEpoch = UUID()
     /// pricebook.edit is the server's capability for Price Book changes; organization.settings.edit
     /// covers servers that predate it.
     private var canEdit: Bool {
         session.can("pricebook.edit", feature: "price_book") || session.can("organization.settings.edit", feature: "price_book")
     }
 
+    private var localScope: PriceBookLocalScope? {
+        guard canList, session.can("pricebook.view", feature: "price_book"),
+              let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let origin = api.normalizedOrigin else { return nil }
+        return PriceBookLocalScope(actor: actor, organization: organization, origin: origin,
+                                   generation: session.generation, authorityRevision: session.authorityRevision)
+    }
+
+    private var hasCurrentOwner: Bool {
+        guard let displayedScope, let localScope else { return false }
+        return displayedScope.sameOwner(as: localScope)
+    }
+    private var showingPreviousItems: Bool { hasCurrentOwner && displayedScope != localScope }
+    private var currentItems: [PriceBookListItem] { hasCurrentOwner ? items : [] }
+    private var currentCursor: String? { hasCurrentOwner ? nextCursor : nil }
+
     private var categories: [String] {
-        ["All"] + Array(Set(items.map { $0.kind.capitalized })).sorted()
+        ["All"] + Array(Set(currentItems.map { $0.kind.capitalized })).sorted()
     }
 
     private var visibleItems: [PriceBookListItem] {
-        items.filter { item in
+        currentItems.filter { item in
             (category == "All" || item.kind.capitalized == category) &&
             (search.isEmpty || item.description.localizedCaseInsensitiveContains(search) ||
              item.kind.localizedCaseInsensitiveContains(search) ||
@@ -330,14 +380,14 @@ struct WorkspacePriceBookView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !canList {
+            if !canList || localScope == nil {
                 PaperEmptyState(symbol: "book.closed", title: "Price book is off for your role",
                                 message: "Viewing prices needs the price book permission. An owner can turn it on in Team.")
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Price book").font(Theme.font(30, weight: .medium)).tracking(-0.6).foregroundStyle(Theme.foreground)
                         .accessibilityAddTraits(.isHeader)
-                    Text("\(items.count) item\(items.count == 1 ? "" : "s")\(nextCursor == nil ? "" : " loaded")")
+                    Text("\(currentItems.count) item\(currentItems.count == 1 ? "" : "s")\(currentCursor == nil ? "" : " loaded")")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -346,8 +396,12 @@ struct WorkspacePriceBookView: View {
                 ScrollView(.horizontal) {
                     HStack(spacing: 4) {
                         ForEach(categories, id: \.self) { option in
-                            Button { category = option } label: {
-                                Text(option == "All" ? "All · \(items.count)" : option)
+                            Button {
+                                category = option
+                                if option == "All" { collapsedGroups.removeAll() }
+                                else { collapsedGroups.remove(option) }
+                            } label: {
+                                Text(option == "All" ? "All · \(currentItems.count)\(currentCursor == nil ? "" : " loaded")" : option)
                                     .font(Theme.font(13, weight: .medium))
                                     .foregroundStyle(category == option ? Theme.foreground : Theme.muted)
                                     .padding(.horizontal, 14).frame(height: Theme.chipHeight)
@@ -363,31 +417,62 @@ struct WorkspacePriceBookView: View {
                 }
                 .scrollIndicators(.hidden)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if let error { ErrorBanner(message: error) { await refresh() }.padding(.horizontal, -Theme.gutter) }
-                        if loading && items.isEmpty && error == nil { SkeletonRows(count: 6, leading: false, inset: 0) }
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() }.padding(.horizontal, -Theme.gutter) }
+                        if showingPreviousItems {
+                            HStack {
+                                Text("Showing previously loaded items. Refresh to update.")
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                Spacer()
+                                Button("Refresh") { Task { await refresh() } }
+                                    .disabled(loading)
+                            }.frame(minHeight: 44)
+                        }
+                        if (loading || !hasCurrentOwner) && currentItems.isEmpty && error == nil { SkeletonRows(count: 6, leading: false, inset: 0) }
                         ForEach(categories.filter { $0 != "All" && (category == "All" || category == $0) }, id: \.self) { groupName in
                             let grouped = visibleItems.filter { $0.kind.capitalized == groupName }
                             if !grouped.isEmpty {
-                                HStack(spacing: 8) {
-                                    Text(groupName).font(Theme.font(13, weight: .medium))
-                                    Text("\(grouped.count)").font(Theme.monoFont(12))
-                                    Spacer()
-                                }.foregroundStyle(Theme.muted)
-                                VStack(spacing: 0) {
-                                    ForEach(grouped) { item in
-                                        if canViewDetail {
-                                            NavigationLink {
-                                                WorkspacePriceBookDetailView(api: api, id: item.id, canEdit: canEdit)
-                                            } label: { row(item) }
-                                            .buttonStyle(.plain)
-                                        } else { row(item) }
+                                Button {
+                                    if collapsedGroups.contains(groupName) { collapsedGroups.remove(groupName) }
+                                    else { collapsedGroups.insert(groupName) }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: collapsedGroups.contains(groupName) ? "chevron.right" : "chevron.down")
+                                            .frame(width: 16)
+                                        Text(groupName).font(Theme.font(13, weight: .medium))
+                                        Spacer()
+                                        Text("\(grouped.count)\(currentCursor == nil ? "" : " loaded")").font(Theme.monoFont(12))
+                                    }
+                                    .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(groupName), \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
+                                .accessibilityValue(collapsedGroups.contains(groupName) ? "Collapsed" : "Expanded")
+                                if !collapsedGroups.contains(groupName) {
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(grouped) { item in
+                                            if canViewDetail {
+                                                NavigationLink {
+                                                    WorkspacePriceBookDetailView(api: api, id: item.id, canEdit: canEdit)
+                                                } label: { row(item, showFullDescription: showingPreviousItems) }
+                                                .buttonStyle(.plain)
+                                            } else if showingPreviousItems {
+                                                // Preserve the previously visible description without opening new detail under stale authority.
+                                                row(item, showFullDescription: true)
+                                            } else {
+                                                Button {
+                                                    if let scope = localScope { localDetail = PriceBookLocalSelection(item: item, scope: scope) }
+                                                } label: { row(item) }.buttonStyle(.plain)
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
-                        if nextCursor != nil {
-                            Button("Load more items") { Task { await loadMore() } }
+                        if currentCursor != nil {
+                            Button("Load more items") {
+                                Task { await loadMore() }
+                            }
                                 .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .frame(maxWidth: .infinity).frame(minHeight: 44)
                                 .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
@@ -395,15 +480,15 @@ struct WorkspacePriceBookView: View {
                                 .buttonStyle(PressStyle())
                                 .disabled(loading)
                         }
-                        if visibleItems.isEmpty && !loading && error == nil {
-                            if items.isEmpty {
+                        if hasCurrentOwner && visibleItems.isEmpty && !loading && error == nil {
+                            if currentItems.isEmpty {
                                 PaperEmptyState(symbol: "book.closed", title: "No price book items yet",
                                                 message: "Services, parts and fees you add here show up when building estimates and invoices.",
                                                 actionTitle: canEdit ? "Add an item" : nil,
                                                 action: canEdit ? { creating = true } : nil)
                             } else {
                                 PaperEmptyState(symbol: "magnifyingglass", title: "No matching items",
-                                                message: "Nothing in \(category == "All" ? "the price book" : category.lowercased()) matches that search.",
+                                                message: showingPreviousItems ? "No previously loaded items match. Refresh to search the current price book." : (currentCursor == nil ? "Nothing in \(category == "All" ? "the price book" : category.lowercased()) matches that search." : "No loaded items match. Load more items to search the rest."),
                                                 actionTitle: "Clear filters") { search = ""; category = "All" }
                             }
                         }
@@ -411,68 +496,217 @@ struct WorkspacePriceBookView: View {
                     .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 100)
                 }
                 .refreshable { await refresh() }
-                .task { await refresh() }
-                .toolbar {
+                .task(id: localScope) {
+                    guard let scope = localScope else { return }
+                    await activate(scope: scope)
+                }
+                .onChange(of: search) { _, _ in collapsedGroups.removeAll() }
+                .onChange(of: localScope) { _, _ in localDetail = nil }
+                .safeAreaInset(edge: .bottom) {
                     if canEdit {
+                        Button { creating = true } label: {
+                            Label("Add price book item", systemImage: "plus").inkCommit()
+                        }
+                        .buttonStyle(PressStyle()).padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+                        .background(Theme.background)
+                    }
+                }
+                #if DEBUG
+                .toolbar {
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-authority") {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button { creating = true } label: { Image(systemName: "plus") }.accessibilityLabel("New price book item")
+                            Button("Change sample access shortly") {
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .seconds(5))
+                                    guard !Task.isCancelled else { return }
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-switch") {
+                                        PaperPreviewProtocol.switchSavedWorkWorkspace()
+                                    } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
+                                        PaperPreviewProtocol.revokePriceBookView()
+                                    }
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-refresh-failure") {
+                                        PaperPreviewProtocol.failPriceBookQuery()
+                                    }
+                                    await session.revalidate()
+                                }
+                            }
                         }
                     }
                 }
+                #endif
                 .sheet(isPresented: $creating) { PriceBookItemEditor(api: api) { Task { await refresh() } } }
+                .sheet(item: $localDetail) { selection in
+                    if localScope == selection.scope {
+                        PriceBookLocalDetail(item: selection.item)
+                    } else {
+                        Text("Price book access changed.")
+                    }
+                }
             }
         }
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func row(_ item: PriceBookListItem) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.description).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                Text(([item.kind.capitalized, item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · "))
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+    private func row(_ item: PriceBookListItem, showFullDescription: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: priceBookSymbol(for: item.kind))
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Theme.brandText)
+                .frame(width: 36, height: 36)
+                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityHidden(true)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    itemTitle(item, showFullDescription: showFullDescription)
+                    itemUnit(item)
+                    itemPrice(item)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    itemTitle(item, showFullDescription: showFullDescription)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        itemUnit(item)
+                        Spacer(minLength: 6)
+                        itemPrice(item).fixedSize(horizontal: true, vertical: false)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 6)
-            Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                .moneyStyle(.row).foregroundStyle(Theme.foreground)
         }
-        .frame(minHeight: 50)
+        .padding(.vertical, 8).frame(minHeight: 52)
         .contentShape(Rectangle())
         // MA-12: the quick copies people reach for while quoting on the phone.
         .contextMenu {
             Button { UIPasteboard.general.string = money(item.sellPrice.amount, currency: item.sellPrice.currency) } label: {
                 Label("Copy price", systemImage: "dollarsign")
             }
-            Button { UIPasteboard.general.string = item.description } label: { Label("Copy name", systemImage: "doc.on.doc") }
+            Button { UIPasteboard.general.string = PriceBookPresentation.title(item.description) } label: { Label("Copy name", systemImage: "doc.on.doc") }
+            Button { UIPasteboard.general.string = PriceBookPresentation.readableDescription(item.description) } label: { Label("Copy full description", systemImage: "doc.text") }
+            Button { UIPasteboard.general.string = item.description } label: { Label("Copy stored text", systemImage: "doc.on.doc") }
         }
     }
 
+    private func itemTitle(_ item: PriceBookListItem, showFullDescription: Bool) -> some View {
+        Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
+            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+            .lineLimit(showFullDescription || dynamicTypeSize.isAccessibilitySize ? nil : 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func itemUnit(_ item: PriceBookListItem) -> some View {
+        Text(([item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · "))
+            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+    }
+
+    private func itemPrice(_ item: PriceBookListItem) -> some View {
+        Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
+            .moneyStyle(.row).foregroundStyle(Theme.foreground)
+    }
+
+    private func priceBookSymbol(for kind: String) -> String {
+        switch kind.lowercased() {
+        case "service": "wrench.and.screwdriver"
+        case "material": "shippingbox"
+        case "labor": "person"
+        case "assembly": "square.stack.3d.up"
+        default: "tag"
+        }
+    }
+
+    private func activate(scope: PriceBookLocalScope) async {
+        guard localScope == scope else { return }
+        requestEpoch = UUID()
+        if let displayedScope, displayedScope.sameOwner(as: scope), !items.isEmpty {
+            // The existing screen allowed these already-loaded rows offline. Keep them
+            // clearly stale and fully readable, but require a fresh fetch for local detail.
+            loading = false
+            error = nil
+            return
+        }
+        displayedScope = scope
+        items = []
+        nextCursor = nil
+        error = nil
+        loading = false
+        await refresh()
+    }
+
     private func refresh() async {
-        guard canList, !loading else { return }
+        guard let scope = localScope, let oldScope = displayedScope, oldScope.sameOwner(as: scope), !loading else { return }
+        let epoch = UUID()
+        requestEpoch = epoch
         loading = true
-        defer { loading = false }
+        defer { if requestEpoch == epoch { loading = false } }
         do {
-            let page = try await api.priceBookItems()
+            let page = try await api.priceBookItems(requireFresh: oldScope != scope)
+            guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch else { return }
             items = page.items
             nextCursor = page.nextCursor
+            displayedScope = scope
             error = nil
-        } catch { self.error = PriceBookLoadError.message(for: error) }
+        } catch {
+            guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch else { return }
+            self.error = PriceBookLoadError.message(for: error)
+        }
     }
 
     private func loadMore() async {
-        guard canList, !loading, let cursor = nextCursor else { return }
+        guard let scope = localScope, let oldScope = displayedScope, oldScope.sameOwner(as: scope), !loading, let cursor = currentCursor else { return }
+        let epoch = UUID()
+        requestEpoch = epoch
         loading = true
-        defer { loading = false }
+        defer { if requestEpoch == epoch { loading = false } }
         do {
             let page = try await api.priceBookItems(cursor: cursor)
+            guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch else { return }
             guard page.nextCursor != cursor else {
                 throw Problem(title: "Price Book pagination stopped", status: nil, detail: "The server repeated its cursor.")
             }
             items.append(contentsOf: page.items)
             nextCursor = page.nextCursor
             error = nil
-        } catch { self.error = PriceBookLoadError.message(for: error) }
+        } catch {
+            guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch else { return }
+            self.error = PriceBookLoadError.message(for: error)
+        }
+    }
+}
+
+private struct PriceBookLocalScope: Equatable {
+    let actor: String
+    let organization: String
+    let origin: String
+    let generation: UUID
+    let authorityRevision: UUID
+
+    func sameOwner(as other: Self) -> Bool {
+        actor == other.actor && organization == other.organization && origin == other.origin && generation == other.generation
+    }
+}
+
+private struct PriceBookLocalSelection: Identifiable {
+    let item: PriceBookListItem
+    let scope: PriceBookLocalScope
+    var id: String { item.id }
+}
+
+/// Uses only data already returned by the list when the role cannot open the server detail.
+private struct PriceBookLocalDetail: View {
+    let item: PriceBookListItem
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Description") { Text(PriceBookPresentation.readableDescription(item.description)).textSelection(.enabled) }
+                LabeledContent("Price") { Text(money(item.sellPrice.amount, currency: item.sellPrice.currency)) }
+                LabeledContent("Unit", value: item.unit)
+                LabeledContent("Kind", value: item.kind.capitalized)
+                if item.archivedAt != nil { LabeledContent("Status", value: "Archived") }
+            }
+            .navigationTitle("Price book item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
     }
 }
 
@@ -490,6 +724,10 @@ private struct WorkspacePriceBookDetailView: View {
         List {
             if let error { Text(error).foregroundStyle(Theme.destructive) }
             if let detail {
+                Section("Description") {
+                    Text(PriceBookPresentation.readableDescription(detail.revision.description))
+                        .textSelection(.enabled)
+                }
                 LabeledContent("Price") { Text(money(detail.revision.sellPrice.amount, currency: detail.revision.sellPrice.currency)).moneyStyle(.total) }
                 LabeledContent("Unit", value: detail.revision.unit)
                 LabeledContent("Kind", value: detail.revision.kind.capitalized)
@@ -506,7 +744,7 @@ private struct WorkspacePriceBookDetailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background)
-        .navigationTitle(detail?.revision.description ?? "Price Book item")
+        .navigationTitle("Price book item")
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
             if canEdit, detail?.item.status == "active" {
@@ -616,5 +854,25 @@ struct PriceBookItemEditor: View {
         } catch {
             self.error = error.isConnectivityFailure ? "Saving needs a connection." : error.localizedDescription
         }
+    }
+}
+
+// Presentation-only grouping of an already-ordered notice feed.
+enum InboxNoticeDay {
+    static func header(_ raw: String?, after previous: String?, hasPrevious: Bool, calendar: Calendar, locale: Locale) -> String? {
+        let date = JobFiltering.date(raw)
+        let prior = JobFiltering.date(previous)
+        if hasPrevious {
+            if let date, let prior, calendar.isDate(date, inSameDayAs: prior) { return nil }
+            if date == nil && prior == nil { return nil }
+        }
+        guard let date else { return "Date unavailable" }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = locale
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
     }
 }

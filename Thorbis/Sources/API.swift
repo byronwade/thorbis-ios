@@ -72,6 +72,7 @@ final class APIClient: ObservableObject {
 
     @Published var baseURL: String {
         didSet {
+            if baseURL != oldValue { invalidateRequests() }
             #if DEBUG
             if Self.validatedOrigin(baseURL) != nil {
                 UserDefaults.standard.set(baseURL, forKey: "thorbis.apiBaseURL")
@@ -83,7 +84,7 @@ final class APIClient: ObservableObject {
     @Published var displayName = ""
 
     private let session: URLSession
-    private(set) var requestGeneration = UUID()
+    @Published private(set) var requestGeneration = UUID()
     var onUnauthorized: (() -> Void)?
 
     func invalidateRequests() { requestGeneration = UUID() }
@@ -129,6 +130,16 @@ final class APIClient: ObservableObject {
         #endif
         return nil
     }
+
+    /// Canonical origin identity, using the same trust rules as every API request.
+    static func normalizedOrigin(_ raw: String) -> String? {
+        guard var origin = validatedOrigin(raw) else { return nil }
+        origin.host = origin.host?.lowercased()
+        origin.path = ""
+        return origin.string
+    }
+
+    var normalizedOrigin: String? { Self.normalizedOrigin(baseURL) }
 
     var isLoopback: Bool {
         #if DEBUG
@@ -191,8 +202,10 @@ final class APIClient: ObservableObject {
         return all
     }
 
-    func send<T: Decodable>(_ method: String, _ path: String, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
-        try await send(method, path, body: Optional<String>.none, queryItems: queryItems, cursor: cursor, authed: authed)
+    func send<T: Decodable>(_ method: String, _ path: String, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, requireFresh: Bool = false) async throws -> T {
+        let response = try await sendData(method, path, body: Optional<String>.none, queryItems: queryItems,
+                                          cursor: cursor, authed: authed, requireFresh: requireFresh)
+        return try decodeResponse(response)
     }
 
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
@@ -223,6 +236,90 @@ final class APIClient: ObservableObject {
         catch { throw Problem(title: "Invalid API response", status: response.status, detail: error.localizedDescription) }
     }
 
+    /// Read a single authorized historical photo without materializing an unbounded response.
+    func legacyJobPhotoData(_ photo: JobPhotoRecord, organizationID: String, jobID: String) async throws -> Data {
+        let maxBytes = 15 * 1024 * 1024
+        let allowed = Set(["image/jpeg", "image/png", "image/webp", "image/heic"])
+        guard photo.organizationId == organizationID, photo.jobId == jobID,
+              UUID(uuidString: organizationID) != nil, UUID(uuidString: jobID) != nil,
+              UUID(uuidString: photo.id) != nil, allowed.contains(photo.contentType),
+              (1...maxBytes).contains(photo.byteSize),
+              var origin = Self.validatedOrigin(baseURL) else {
+            throw Problem(title: "Invalid photo", status: nil, detail: "The photo metadata is not supported.")
+        }
+        origin.path = "/v1/jobs/\(jobID)/photos/\(photo.id)"
+        guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: nil) }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.httpMethod = "GET"
+        request.setValue(photo.contentType, forHTTPHeaderField: "Accept")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        #if DEBUG
+        if isLoopback, case let .devHeaders(user, org, roles) = auth {
+            request.setValue(user, forHTTPHeaderField: "x-thorbis-user")
+            request.setValue(org, forHTTPHeaderField: "x-thorbis-org")
+            request.setValue(roles, forHTTPHeaderField: "x-thorbis-roles")
+        }
+        #endif
+        let generation = requestGeneration
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            defer { bytes.task.cancel() }
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { throw CancellationError() }
+            guard let http = response as? HTTPURLResponse else {
+                throw Problem(title: "Invalid photo", status: nil, detail: "The server response was invalid.")
+            }
+            if http.statusCode == 401 { onUnauthorized?() }
+            guard (200..<300).contains(http.statusCode) else {
+                throw Problem(title: "Photo unavailable", status: http.statusCode, detail: "Try again when the photo is available.")
+            }
+            let actualType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased().split(separator: ";").first.map(String.init)
+            guard actualType == photo.contentType,
+                  response.expectedContentLength < 0 || response.expectedContentLength == Int64(photo.byteSize) else {
+                throw Problem(title: "Invalid photo", status: http.statusCode, detail: "The photo response did not match its metadata.")
+            }
+            let data = try await Self.readLegacyPhotoBytes(bytes, expectedSize: photo.byteSize, status: http.statusCode) { [weak self] in
+                await self?.requestGeneration == generation
+            }
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { throw CancellationError() }
+            guard data.count == photo.byteSize else {
+                throw Problem(title: "Invalid photo", status: http.statusCode, detail: "The photo response was incomplete.")
+            }
+            return data
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let problem as Problem {
+            throw problem
+        } catch {
+            throw Problem(title: "Photo unavailable", status: nil, detail: error.localizedDescription)
+        }
+    }
+
+    // AsyncBytes yields individual bytes. Buffer them on the generic executor so a
+    // large photo does not monopolize the main actor; check the actor-owned session
+    // generation periodically and again before returning the result to the caller.
+    nonisolated private static func readLegacyPhotoBytes(
+        _ bytes: URLSession.AsyncBytes, expectedSize: Int, status: Int,
+        isCurrent: @Sendable () async -> Bool
+    ) async throws -> Data {
+        var data = Data()
+        data.reserveCapacity(expectedSize)
+        for try await byte in bytes {
+            guard data.count < expectedSize else {
+                throw Problem(title: "Invalid photo", status: status, detail: "The photo response exceeded its declared size.")
+            }
+            data.append(byte)
+            if data.count.isMultiple(of: 8192) {
+                try Task.checkCancellation()
+                guard await isCurrent() else { throw CancellationError() }
+            }
+        }
+        return data
+    }
+
     func documentData(_ path: String) async throws -> Data {
         let response = try await sendData("GET", path, body: Optional<String>.none, accept: "application/pdf")
         guard response.contentType?.lowercased().split(separator: ";").first == "application/pdf",
@@ -251,7 +348,7 @@ final class APIClient: ObservableObject {
         let contentType: String?
     }
 
-    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true) async throws -> DataResponse {
+    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false) async throws -> DataResponse {
         let generation = requestGeneration
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
@@ -264,7 +361,8 @@ final class APIClient: ObservableObject {
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: url, cachePolicy: requireFresh ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
+        if requireFresh { req.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
         req.httpMethod = method
         req.httpShouldHandleCookies = handleCookies
         req.setValue(accept, forHTTPHeaderField: "accept")

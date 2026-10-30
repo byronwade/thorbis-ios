@@ -8,6 +8,12 @@ struct MediaDownloadTarget: Sendable {
 
 @MainActor
 final class MediaTransfer {
+    static let storageUploadFailureTitle = "Storage upload failed"
+    static func isRetryableStorageUploadFailure(_ error: Error) -> Bool {
+        guard let problem = error as? Problem, problem.title == storageUploadFailureTitle else { return false }
+        guard let status = problem.status else { return true }
+        return (500...599).contains(status)
+    }
     private static let maxSinglePUTBytes = 8 * 1024 * 1024
     private static let maxPreviewBytes = 50 * 1024 * 1024
 
@@ -37,7 +43,8 @@ final class MediaTransfer {
     }
 
     func upload(jobID: String, clientAssetID: String, kind: String, mime: String,
-                originalFilename: String, data: Data, tags: [String] = []) async throws -> MediaAssetRecord {
+                originalFilename: String, data: Data, tags: [String] = [], capturedAt: Date? = nil,
+                expectedOrganizationID: String? = nil, currentAuthority: @MainActor () -> Bool = { true }) async throws -> MediaAssetRecord {
         guard UUID(uuidString: clientAssetID) != nil else {
             throw Problem(title: "Invalid client asset ID", status: nil, detail: clientAssetID)
         }
@@ -45,17 +52,23 @@ final class MediaTransfer {
             throw Problem(title: "Single PUT upload unavailable", status: nil,
                           detail: "Media must be between 1 byte and 8 MiB until multipart confirmation is supported.")
         }
+        guard currentAuthority() else { throw CancellationError() }
         let generation = api.requestGeneration
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let request = FieldMediaRegistrationRequest(clientAssetId: clientAssetID, kind: kind,
                                                     mime: mime, sizeBytes: data.count,
                                                     originalFilename: originalFilename, contentHash: hash,
-                                                    capturedAt: ISO8601DateFormatter().string(from: Date()),
+                                                    capturedAt: ISO8601DateFormatter().string(from: capturedAt ?? Date()),
                                                     tags: tags.isEmpty ? nil : tags)
+        try verify(generation)
+        guard currentAuthority() else { throw CancellationError() }
         let registration = try await api.registerFieldMedia(jobID, request: request)
         try verify(generation)
+        guard currentAuthority() else { throw CancellationError() }
         guard registration.asset.contentHash == hash, registration.asset.sizeBytes == data.count,
-              registration.asset.mime == mime else {
+              registration.asset.mime == mime, registration.asset.kind == kind,
+              registration.asset.jobId == jobID, UUID(uuidString: registration.asset.id) != nil,
+              expectedOrganizationID.map({ registration.asset.organizationId == $0 }) ?? true else {
             throw Problem(title: "Client asset ID collision", status: nil,
                           detail: "The existing media record belongs to different bytes.")
         }
@@ -79,6 +92,7 @@ final class MediaTransfer {
         upload.httpBody = data
         for (name, value) in target.headers { upload.setValue(value, forHTTPHeaderField: name) }
         try verify(generation)
+        guard currentAuthority() else { throw CancellationError() }
         let response: URLResponse
         do {
             (_, response) = try await storageSession.data(for: upload)
@@ -87,15 +101,26 @@ final class MediaTransfer {
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch {
-            throw Problem(title: "Storage upload failed", status: nil, detail: error.localizedDescription)
+            throw Problem(title: Self.storageUploadFailureTitle, status: nil, detail: error.localizedDescription)
         }
         try verify(generation)
+        guard currentAuthority() else { throw CancellationError() }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw Problem(title: "Storage upload failed",
+            throw Problem(title: Self.storageUploadFailureTitle,
                           status: (response as? HTTPURLResponse)?.statusCode, detail: nil)
         }
+        guard currentAuthority() else { throw CancellationError() }
         let confirmed = try await api.confirmFieldMedia(registration.asset.id)
         try verify(generation)
+        guard currentAuthority() else { throw CancellationError() }
+        guard confirmed.id == registration.asset.id, confirmed.jobId == jobID,
+              confirmed.organizationId == registration.asset.organizationId,
+              expectedOrganizationID.map({ confirmed.organizationId == $0 }) ?? true,
+              confirmed.kind == kind, confirmed.mime == mime, confirmed.contentHash == hash,
+              confirmed.sizeBytes == data.count, confirmed.uploadState == "stored" else {
+            throw Problem(title: "Media not confirmed", status: nil,
+                          detail: "The server has not confirmed this exact media. The saved copy remains on this phone.")
+        }
         return confirmed
     }
 

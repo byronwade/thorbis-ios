@@ -46,6 +46,7 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
         let headers: [String: String]
         let body: Data?
         let handlesCookies: Bool
+        let cachePolicy: URLRequest.CachePolicy
 
         func header(_ name: String) -> String? {
             headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
@@ -98,7 +99,8 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
                                        method: request.httpMethod,
                                        headers: request.allHTTPHeaderFields ?? [:],
                                        body: body,
-                                       handlesCookies: request.httpShouldHandleCookies)
+                                       handlesCookies: request.httpShouldHandleCookies,
+                                       cachePolicy: request.cachePolicy)
         let reply = Self.storage.lock.withLock { () -> Reply in
             Self.storage.requests.append(recorded)
             return Self.storage.replies.isEmpty ? Reply(599) : Self.storage.replies.removeFirst()

@@ -17,6 +17,8 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>ThorbisTapToPayEnabled</key>
+	<false/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Thorbis uses Bluetooth to connect to supported card readers for in-person payments.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

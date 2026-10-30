@@ -1,0 +1,9 @@
+Build 80 — map and payment SDK privacy descriptions
+
+This build adds the required Bluetooth and foreground-location purpose descriptions and strengthens signed-app validation so they cannot be omitted while Tap to Pay is disabled.
+
+Please test the schedule map’s current-location control, including the system’s permission explanation and behavior when location access is declined. Runtime permission/denial behavior still needs physical-iPhone testing. No new payment method or reader capability is enabled.
+
+All build79 estimate improvements remain: present every estimate for one job together, select multiple independent estimates, review exact terms/discounts and sign each in one protected handoff. Test Back, interrupted connectivity and returning the device to the technician. Report any selection, Continue or Approve tap that does not respond.
+
+The larger edit-first technician canvas, long paragraph contracts, customer appearance settings and shop/cart checkout are the next work and are not claimed complete in this metadata fix.

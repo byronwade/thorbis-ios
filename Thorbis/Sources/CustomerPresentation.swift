@@ -29,6 +29,7 @@ struct CustomerEstimateFlow: Equatable {
     let estimate: EstimateRecord
     var step: Step
     var selectedOptionID: String?
+    private(set) var issuedRevision: CustomerIssuedEstimateRevision?
 
     init(estimate: EstimateRecord) {
         self.estimate = estimate
@@ -38,21 +39,21 @@ struct CustomerEstimateFlow: Equatable {
 
     static func options(_ estimate: EstimateRecord) -> [FieldEstimateOption] { estimate.options ?? [] }
 
-    var options: [FieldEstimateOption] { Self.options(estimate) }
+    var options: [FieldEstimateOption] { issuedRevision.map { $0.options ?? [] } ?? Self.options(estimate) }
     var hasOptions: Bool { !options.isEmpty }
     var selectedOption: FieldEstimateOption? { options.first { $0.id == selectedOptionID } }
 
     /// The lines and total being approved: the chosen option's, or the estimate's own.
-    var lines: [FieldLine] { hasOptions ? selectedOption?.lines ?? [] : estimate.lines }
-    var currency: String { selectedOption?.currency ?? estimate.lines.first?.unitPrice.currency ?? "USD" }
+    var lines: [FieldLine] { hasOptions ? selectedOption?.lines ?? [] : issuedRevision?.lines ?? estimate.lines }
+    var currency: String { selectedOption?.currency ?? issuedRevision?.currency ?? estimate.lines.first?.unitPrice.currency ?? "USD" }
     var total: Int? {
         if hasOptions { return selectedOption?.totalAmount }
-        return paperLinesTotal(estimate.lines)
+        return issuedRevision?.totalAmount ?? paperLinesTotal(estimate.lines)
     }
     var totalText: String { total.map { money($0, currency: currency) } ?? "" }
 
     /// The name of what is being approved, said the way the tech says it.
-    var choiceName: String { selectedOption?.title ?? estimate.title }
+    var choiceName: String { selectedOption?.title ?? issuedRevision?.title ?? estimate.title }
 
     var canReview: Bool { !hasOptions || selectedOption != nil }
 
@@ -66,6 +67,12 @@ struct CustomerEstimateFlow: Equatable {
 
     mutating func choose(_ optionID: String) { selectedOptionID = optionID }
     mutating func review() { if canReview { step = .review } }
+    mutating func useIssuedRevision(_ revision: CustomerIssuedEstimateRevision) throws {
+        try revision.validate(for: estimate)
+        issuedRevision = revision
+        if !options.contains(where: { $0.id == selectedOptionID }) { selectedOptionID = nil }
+        step = canReview ? (hasOptions && step == .choose ? .choose : .review) : .choose
+    }
     mutating func back() {
         switch step {
         case .review: if hasOptions { step = .choose }
@@ -86,26 +93,6 @@ func customerSignatureHint(name: String, hasInk: Bool) -> String? {
     }
 }
 
-// MARK: - In-person approval with options
-
-private struct IssuedPaper: Decodable { let contentHash: String }
-private struct InPersonLink: Decodable { let token: String }
-
-@MainActor
-extension APIClient {
-    /// Options are chosen and signed through the same customer action the emailed link uses, so
-    /// the server records which option and whose name. Issuing is content-addressed (a repeat
-    /// returns the same paper); minting replaces any earlier link for this revision.
-    func openInPersonEstimateApproval(_ id: String, revisionNumber: Int) async throws -> (token: String, action: PublicEstimateAction) {
-        struct Empty: Encodable {}
-        struct Mint: Encodable { let revisionNumber: Int; let contentHash: String }
-        let paper: IssuedPaper = try await send("POST", financialPath("/v1/estimates", id: id, suffix: "/commercial-documents"), body: Empty())
-        let link: InPersonLink = try await send("POST", financialPath("/v1/estimates", id: id, suffix: "/action-tokens"),
-                                                body: Mint(revisionNumber: revisionNumber, contentHash: paper.contentHash))
-        return (link.token, try await publicDocumentAction(token: link.token))
-    }
-}
-
 // MARK: - Estimate
 
 /// "Show to customer" for an estimate: choose an option, review it, sign, done.
@@ -114,6 +101,7 @@ struct CustomerEstimatePresentation: View {
     let customerName: String
     let onApproved: (EstimateRecord?) -> Void
     let onDone: () -> Void
+    let returnToDocuments: (() -> Void)?
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -127,36 +115,72 @@ struct CustomerEstimatePresentation: View {
     @State private var error: String?
     @State private var signedAt: Date?
     @State private var signedName = ""
+    @State private var openingReview = false
+    @State private var openingError: String?
+    @State private var reviewGeneration: UUID?
+    @State private var reviewRequestID = UUID()
+    @StateObject private var handoffObservation: CustomerEstimateHandoffObservation
+    private var handoff: CustomerEstimateHandoffContext? { handoffObservation.context }
+    private var actionBusy: Bool { busy || handoff?.running == true }
 
     init(estimate: EstimateRecord, jobID: String?, customerName: String, preselectedOptionID: String? = nil,
+         handoff: CustomerEstimateHandoffContext? = nil, returnToDocuments: (() -> Void)? = nil,
          onApproved: @escaping (EstimateRecord?) -> Void, onDone: @escaping () -> Void) {
         self.jobID = jobID
         self.customerName = customerName
         self.onApproved = onApproved
         self.onDone = onDone
+        self.returnToDocuments = returnToDocuments
+        _handoffObservation = StateObject(wrappedValue: CustomerEstimateHandoffObservation(handoff))
         var flow = CustomerEstimateFlow(estimate: estimate)
         if let preselectedOptionID {
             flow.choose(preselectedOptionID)
             flow.review()
         }
         _flow = State(initialValue: flow)
-        _name = State(initialValue: customerName)
+        _name = State(initialValue: handoff?.signature?.signerName ?? handoff?.initialSignerName ?? customerName)
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
     /// The proven drawn-signature approval needs a job and a single scope; options go through
     /// the customer action, which records the chosen option with the typed name.
     private var drawnApproval: Bool { jobID != nil && !flow.hasOptions }
+    private var reviewReady: Bool {
+        !openingReview && flow.issuedRevision != nil && reviewGeneration == api.requestGeneration
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    switch flow.step {
-                    case .choose: chooseScreen
-                    case .review: reviewScreen
-                    case .sign: signScreen
-                    case .done: doneScreen
+                    if let handoff, !handoff.current() {
+                        Text("Return the device to your technician to reopen this job.").font(Theme.font(type.body))
+                    } else if handoff?.outcome == .unknown {
+                        unknownScreen
+                    } else if case .retryable(let reason)? = handoff?.outcome {
+                        header(eyebrow: "Connection interrupted", title: flow.choiceName)
+                        Text(reason).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                    } else if case .needsReview(let reason)? = handoff?.outcome {
+                        header(eyebrow: "This estimate needs review", title: flow.choiceName)
+                        Text(reason).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                    } else if handoff?.outcome?.isApproved == true {
+                        doneScreen
+                    } else if flow.step == .done || reviewReady {
+                        switch flow.step {
+                        case .choose: chooseScreen
+                        case .review: reviewScreen
+                        case .sign: signScreen
+                        case .done: doneScreen
+                        }
+                    } else if let openingError {
+                        header(eyebrow: "Your estimate", title: "Couldn't open your estimate")
+                        Text(openingError).font(Theme.font(type.body))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ProgressView("Opening your estimate…")
+                            .font(Theme.font(type.body))
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                            .accessibilityIdentifier("customer-estimate-opening")
                     }
                 }
                 .padding(.horizontal, Theme.gutter)
@@ -166,9 +190,14 @@ struct CustomerEstimatePresentation: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            .accessibilityIdentifier("customer-estimate-presentation-\(flow.estimate.id)")
             bottomBar
         }
         .foregroundStyle(Theme.foreground)
+        .task(id: api.requestGeneration) {
+            await openReview()
+            if handoff != nil, handoff?.signature == nil, handoff?.outcome == nil, reviewReady { await startSigning() }
+        }
         .animation(.easeOut(duration: 0.2), value: flow.step)
         .sheet(item: $detailsFor) { option in includedSheet(option) }
         .thorbisConfirm("Not ready to decide?",
@@ -291,6 +320,9 @@ struct CustomerEstimatePresentation: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
                 .accessibilityLabel("Signature box. Sign with your finger.")
+                .accessibilityIdentifier("customer-estimate-signature-pad")
+                .accessibilityValue(handoff?.signature != nil ? "Signature saved for this estimate" : SignatureInk.hasInk(strokes) ? "Signature entered" : "Signature required")
+                .allowsHitTesting(handoff?.submissionStarted != true)
             }
             if let error {
                 Text(error).font(Theme.font(type.body)).foregroundStyle(Theme.destructive)
@@ -309,7 +341,7 @@ struct CustomerEstimatePresentation: View {
             if flow.total != nil {
                 Text(flow.totalText).font(Theme.monoFont(type.total, weight: .medium))
             }
-            Text("Thank you. Please hand the device back to your technician.")
+            Text(handoff == nil && returnToDocuments == nil ? "Thank you. Please hand the device back to your technician." : "This estimate is approved. Continue when you're ready.")
                 .font(Theme.font(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -318,6 +350,10 @@ struct CustomerEstimatePresentation: View {
 
     private var doneSentence: String {
         let what = flow.choiceName
+        if let handoff {
+            if let signer = handoff.approvedSignerName { return "\(what), signed by \(signer)." }
+            return "\(what) is approved."
+        }
         if let signedAt {
             return "\(what), signed by \(signedName) at \(signedAt.formatted(date: .omitted, time: .shortened))."
         }
@@ -331,25 +367,73 @@ struct CustomerEstimatePresentation: View {
 
     @ViewBuilder private var bottomBar: some View {
         VStack(spacing: 10) {
+            if let handoff, handoff.outcome != nil {
+                if handoff.outcome?.isApproved == true {
+                    CustomerPresentationCommit(title: handoff.continueTitle, enabled: true, busy: false, type: type, action: onDone)
+                } else if case .retryable? = handoff.outcome {
+                    CustomerPresentationCommit(title: "Try again", enabled: handoff.canApprove(), busy: actionBusy, type: type) {
+                        handoff.run {
+                            await handoff.recoverPreparation()
+                            guard handoff.outcome == nil else { return }
+                            await approve()
+                        }
+                    }
+                } else if handoff.outcome == .unknown, handoff.retryVerified {
+                    CustomerPresentationCommit(title: "Retry exact approval", enabled: handoff.canApprove(), busy: actionBusy, type: type) {
+                        handoff.run { await approve() }
+                    }
+                }
+                CustomerSecondaryButton(title: "Back to selected work", type: type, action: handoff.backToReview)
+            } else if flow.step == .done || reviewReady {
             switch flow.step {
             case .choose:
                 CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
                 if let error { hint(error, danger: true) } else if !flow.canReview { hint("Choose an option above to continue.") }
                 CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
+                if let returnToDocuments {
+                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                        .disabled(actionBusy || openingReview)
+                }
             case .review:
-                CustomerPresentationCommit(title: flow.approveTitle, enabled: true, busy: busy, type: type) { Task { await startSigning() } }
+                CustomerPresentationCommit(title: flow.approveTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
                 if let error { hint(error, danger: true) }
                 HStack(spacing: 10) {
                     if flow.hasOptions { CustomerSecondaryButton(title: "Back", type: type) { flow.back() } }
                     CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
                 }
+                if let returnToDocuments {
+                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                        .disabled(actionBusy || openingReview)
+                }
             case .sign:
                 let reason = customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(strokes))
-                CustomerPresentationCommit(title: flow.signTitle, enabled: reason == nil, busy: busy, type: type) { Task { await approve() } }
+                CustomerPresentationCommit(title: flow.signTitle, enabled: reason == nil || handoff?.signature != nil, busy: actionBusy, type: type) {
+                    if let handoff { handoff.run { await approve() } } else { Task { await approve() } }
+                }
+                .accessibilityIdentifier(handoff == nil ? "customer-estimate-submit-approval" : "handoff-submit-approval")
                 if let reason { hint(reason) }
-                CustomerSecondaryButton(title: "Back", type: type) { flow.back(); error = nil }
+                CustomerSecondaryButton(title: "Back", type: type) {
+                    if let handoff { handoff.backToReview() } else { flow.back(); error = nil }
+                }
             case .done:
-                CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
+                if let returnToDocuments {
+                    CustomerPresentationCommit(title: "Back to job documents", enabled: true, busy: false, type: type, action: returnToDocuments)
+                        .disabled(actionBusy)
+                    CustomerSecondaryButton(title: "Hand back to the technician", type: type, action: onDone)
+                        .disabled(actionBusy)
+                } else {
+                    CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type, action: onDone)
+                }
+            }
+            } else {
+                if openingError != nil {
+                    CustomerPresentationCommit(title: "Try again", enabled: true, busy: openingReview, type: type) { Task { await openReview() } }
+                }
+                CustomerSecondaryButton(title: "Not today", type: type) { onDone() }
+                if let returnToDocuments {
+                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                        .disabled(actionBusy || openingReview)
+                }
             }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
@@ -357,7 +441,18 @@ struct CustomerEstimatePresentation: View {
         .frame(maxWidth: .infinity)
         .background(Theme.background)
         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
-        .disabled(busy)
+        .disabled(actionBusy && handoff == nil)
+    }
+
+    private var unknownScreen: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header(eyebrow: "Approval needs confirmation", title: flow.choiceName)
+            Text("Your approval may have been received. Check its current state before trying again.")
+                .font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+            CustomerSecondaryButton(title: "Check approval", type: type) {
+                if let handoff { Task { await handoff.checkOutcome() } }
+            }
+        }
     }
 
     private func hint(_ text: String, danger: Bool = false) -> some View {
@@ -406,23 +501,73 @@ struct CustomerEstimatePresentation: View {
 
     // MARK: Actions
 
-    @State private var link: (token: String, action: PublicEstimateAction)?
+    @State private var standaloneLink: (token: String, action: PublicEstimateAction)?
+    private var link: (token: String, action: PublicEstimateAction)? {
+        get { handoff?.link ?? standaloneLink }
+        nonmutating set { if let handoff { handoff.link = newValue } else { standaloneLink = newValue } }
+    }
+
+    private func openReview() async {
+        guard flow.estimate.status != "approved" else { return }
+        if let handoff {
+            guard handoff.current() else { return }
+            if handoff.signature != nil || handoff.outcome != nil || handoff.running {
+                try? flow.useIssuedRevision(handoff.reviewed.revision)
+                flow.selectedOptionID = handoff.reviewed.optionID
+                flow.step = handoff.outcome?.isApproved == true ? .done : .sign
+                reviewGeneration = api.requestGeneration
+                return
+            }
+        }
+        let requestID = UUID(), generation = api.requestGeneration
+        reviewRequestID = requestID
+        reviewGeneration = nil
+        openingReview = true
+        openingError = nil
+        error = nil
+        if handoff == nil { link = nil; uploadedSignature = nil }
+        consentText = handoff?.link?.action.consentText
+        strokes = []
+        defer { if reviewRequestID == requestID { openingReview = false } }
+        do {
+            if let handoff { try await handoff.validate() }
+            let revision = try await api.customerIssuedEstimateRevision(for: flow.estimate, currentAuthority: { handoff?.current() != false })
+            try Task.checkCancellation()
+            if let handoff {
+                guard handoff.current(), handoff.canApprove(), revision == handoff.reviewed.revision else {
+                    throw Problem(title: "This estimate changed. Review its current terms again.", status: 409, detail: nil)
+                }
+            }
+            guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
+            try flow.useIssuedRevision(revision)
+            reviewGeneration = generation
+        } catch is CancellationError {
+        } catch {
+            guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
+            openingError = error.isConnectivityFailure
+                ? "Opening this estimate needs a connection. Try again when you have signal."
+                : error.localizedDescription
+        }
+    }
 
     private func startSigning() async {
         error = nil
-        guard !drawnApproval else { flow.step = .sign; return }
-        guard let revision = flow.estimate.currentRevisionNumber else {
-            error = "This estimate can't be signed yet. Ask your technician."
+        guard handoff?.current() != false, handoff?.canApprove() != false, reviewReady, let revision = flow.issuedRevision else {
+            openingError = "Ask your technician to reopen the current estimate."
+            reviewGeneration = nil
             return
         }
+        guard !drawnApproval else { flow.step = .sign; return }
+        let generation = api.requestGeneration
         busy = true
         defer { busy = false }
         do {
-            let opened = try await api.openInPersonEstimateApproval(flow.estimate.id, revisionNumber: revision)
-            guard opened.action.signingOffered else {
-                error = "This estimate can't be signed here. Ask your technician."
-                return
-            }
+            let opened: (token: String, action: PublicEstimateAction)
+            if let retained = handoff?.link { opened = retained }
+            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) }
+            try Task.checkCancellation()
+            guard generation == api.requestGeneration else { return }
+            guard handoff?.current() != false, handoff?.canApprove() != false else { return }
             link = opened
             consentText = opened.action.consentText
             flow.step = .sign
@@ -433,37 +578,71 @@ struct CustomerEstimatePresentation: View {
     }
 
     private func approve() async {
-        let signer = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) else { return }
+        guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
+        let signer = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) || handoff?.signature != nil else { return }
+        guard handoff?.current() != false, handoff?.canApprove() != false else { return }
         busy = true
         defer { busy = false }
         error = nil
         do {
-            if drawnApproval, let jobID, let revision = flow.estimate.currentRevisionNumber {
+            if let handoff, handoff.signature == nil {
+                guard let data = SignatureInk.png(strokes) else { return }
+                _ = try handoff.freezeSignature(signerName: signer, png: data, signedAt: ISO8601DateFormatter().string(from: Date()))
+            }
+            if let handoff { try await handoff.validate() }
+            if drawnApproval, let jobID {
                 let mediaID = try await uploadSignature(jobID: jobID)
-                let input = FieldSignatureInput(signerName: signer, signedAt: ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
-                let approved = try await api.approveFieldEstimate(flow.estimate.id, revisionNumber: revision, signature: input)
-                onApproved(approved)
+                try Task.checkCancellation()
+                guard generation == api.requestGeneration else { return }
+                guard handoff?.current() != false, handoff?.canApprove() != false else { return }
+                let input = FieldSignatureInput(signerName: signer, signedAt: handoff?.signature?.signedAt ?? ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
+                handoff?.submissionStarted = true; handoff?.retryVerified = false
+                let approved = try await api.approveFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber, signature: input)
+                guard generation == api.requestGeneration else { return }
+                if let handoff {
+                    guard handoff.current() else { return }
+                    guard handoff.canApprove() else { handoff.report(.unknown); return }
+                    handoff.report(await handoff.confirmed(approved))
+                } else { onApproved(approved) }
             } else if let link {
                 let action = link.action
-                guard let nonce = action.nonce, let consentVersion = action.consentVersion else {
+                guard let nonce = action.nonce, let consentVersion = action.consentVersion,
+                      action.canApprove(signerName: signer, consent: true, selectedOptionID: flow.selectedOptionID) else {
                     error = "This estimate can't be signed here. Ask your technician."
                     return
                 }
                 // The drawing is kept with the job; the server records the typed name and option.
                 if let jobID { _ = try? await uploadSignature(jobID: jobID) }
-                _ = try await api.decidePublicDocumentAction(token: link.token, decision: .approve(
+                try Task.checkCancellation()
+                guard generation == api.requestGeneration else { return }
+                guard handoff?.current() != false, handoff?.canApprove() != false else { return }
+                let decision = handoff?.publicDecision ?? PublicEstimateActionDecision.approve(
                     revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
-                    signerName: signer, consentVersion: consentVersion, consent: true, optionID: flow.selectedOptionID))
-                onApproved(nil)
+                    signerName: signer, consentVersion: consentVersion, consent: true, optionID: flow.selectedOptionID)
+                handoff?.publicDecision = decision
+                handoff?.submissionStarted = true; handoff?.retryVerified = false
+                let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)
+                guard generation == api.requestGeneration else { return }
+                if let handoff {
+                    guard handoff.current() else { return }
+                    guard handoff.canApprove() else { handoff.report(.unknown); return }
+                    handoff.report(await handoff.publicConfirmed(patch))
+                } else { onApproved(nil) }
             } else {
                 return
             }
             signedName = signer
             signedAt = Date()
-            flow.step = .done
+            if handoff == nil || handoff?.outcome?.isApproved == true { flow.step = .done }
         } catch is CancellationError {
         } catch {
+            if let handoff, handoff.current() {
+                handoff.report(handoff.submissionStarted ? .unknown :
+                    customerEstimatePreparationCanRetry(error)
+                    ? .retryable("Preparing this approval was interrupted. Try again when connected.")
+                    : .needsReview(error.localizedDescription))
+            }
             self.error = error.isConnectivityFailure ? "Approving needs a connection. Try again when you have signal." : error.localizedDescription
         }
     }
@@ -471,22 +650,42 @@ struct CustomerEstimatePresentation: View {
     @State private var uploadedSignature: (strokes: [[CGPoint]], mediaID: String)?
 
     private func uploadSignature(jobID: String) async throws -> String {
+        if let handoff {
+            guard handoff.current(), handoff.canApprove(), let intent = handoff.signature else { throw CancellationError() }
+            if let id = handoff.uploadedMediaID { return id }
+            let asset = try await handoff.transfer.upload(jobID: jobID, clientAssetID: intent.clientAssetID, kind: "photo", mime: "image/png",
+                originalFilename: "signature.png", data: intent.png, tags: ["signature"],
+                expectedOrganizationID: handoff.reviewed.estimate.organizationId,
+                currentAuthority: { handoff.current() && handoff.canApprove() })
+            guard handoff.current(), handoff.canApprove() else { throw CancellationError() }
+            handoff.uploadedMediaID = asset.id
+            return asset.id
+        }
         if let uploadedSignature, uploadedSignature.strokes == strokes { return uploadedSignature.mediaID }
         guard let data = SignatureInk.png(strokes) else {
             throw Problem(title: "The signature could not be saved. Try again.", status: nil, detail: nil)
         }
-        let asset = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
+        let transfer: MediaTransfer
+        #if DEBUG
+        if PaperPreview.isJobEstimateHandoff {
+            transfer = MediaTransfer(api: api, storageSession: PaperPreview.handoffStorageTransport())
+        } else { transfer = MediaTransfer(api: api) }
+        #else
+        transfer = MediaTransfer(api: api)
+        #endif
+        let asset = try await transfer.upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
                                                              originalFilename: "signature.png", data: data, tags: ["signature"])
         uploadedSignature = (strokes, asset.id)
         return asset.id
     }
 
     private func decline() async {
-        guard let revision = flow.estimate.currentRevisionNumber else { onDone(); return }
+        guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
         busy = true
         defer { busy = false }
         do {
-            let declined = try await api.declineFieldEstimate(flow.estimate.id, revisionNumber: revision)
+            let declined = try await api.declineFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber)
+            guard generation == api.requestGeneration else { return }
             onApproved(declined)
             onDone()
         } catch is CancellationError {
@@ -519,7 +718,7 @@ struct CustomerInvoicePresentation: View {
     @State private var error: String?
     @State private var signedBy: String?
 
-    init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?,
+    init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?, initiallySigning: Bool = false,
          onSigned: @escaping (InvoiceRecord) -> Void, onDone: @escaping () -> Void) {
         self.invoice = invoice
         self.customerName = customerName
@@ -528,6 +727,7 @@ struct CustomerInvoicePresentation: View {
         self.onSigned = onSigned
         self.onDone = onDone
         _name = State(initialValue: customerName)
+        _signing = State(initialValue: initiallySigning)
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
@@ -577,12 +777,8 @@ struct CustomerInvoicePresentation: View {
 
     /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest.
     private var amountRows: [CustomerAmountRow] {
-        var rows = [CustomerAmountRow(label: "Total", amount: money(total, currency: invoice.currency), emphasis: invoice.amountPaid == 0)]
-        if invoice.amountPaid > 0 {
-            rows.append(CustomerAmountRow(label: "Paid", amount: money(invoice.amountPaid, currency: invoice.currency), emphasis: false))
-            rows.append(CustomerAmountRow(label: "Amount due", amount: dueText, emphasis: true))
-        }
-        return rows
+        CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
+            .map { customerAmountRows($0, currency: invoice.currency) } ?? []
     }
 
     private var signScreen: some View {
@@ -685,29 +881,35 @@ struct CustomerAmountRow: Hashable {
     let emphasis: Bool
 }
 
-/// Lines as name, then "Qty × Each" under it, amount on the right; no truncation (CP-06).
+/// Lines, quantity and amount; consent screens keep the full description inline.
 struct CustomerLinesCard: View {
     let lines: [FieldLine]
     let currency: String
     let type: CustomerType
     let rows: [CustomerAmountRow]
+    var readingAccess: DocumentDescriptionAccess? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(lines) { line in
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(line.description).font(Theme.font(type.body))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
-                            .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            lineDetails(line).frame(maxWidth: .infinity, alignment: .leading)
+                            lineValue(line).minimumScaleFactor(0.6).lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 16) {
+                            lineDetails(line)
+                            Spacer(minLength: 8)
+                            lineValue(line).fixedSize()
+                        }
                     }
-                    Spacer(minLength: 8)
-                    Text(money(line.quantity * line.unitPrice.amount, currency: line.unitPrice.currency))
-                        .font(Theme.monoFont(type.body)).fixedSize()
                 }
                 .padding(.vertical, 14)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
                 Rectangle().fill(Theme.border).frame(height: 1)
             }
             if lines.isEmpty {
@@ -715,12 +917,19 @@ struct CustomerLinesCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             ForEach(rows, id: \.self) { row in
-                HStack(alignment: .firstTextBaseline) {
-                    Text(row.label).font(Theme.font(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
-                    Spacer(minLength: 8)
-                    Text(row.amount)
-                        .font(Theme.monoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
-                        .minimumScaleFactor(0.6).lineLimit(1)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            amountLabel(row)
+                            amountValue(row).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline) {
+                            amountLabel(row)
+                            Spacer(minLength: 8)
+                            amountValue(row)
+                        }
+                    }
                 }
                 .padding(.vertical, row.emphasis ? 16 : 10)
                 .accessibilityElement(children: .combine)
@@ -730,6 +939,50 @@ struct CustomerLinesCard: View {
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
     }
+
+    private func lineDetails(_ line: FieldLine) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let readingAccess {
+                ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+            } else {
+                Text(line.description).font(Theme.font(type.body))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
+                .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func lineValue(_ line: FieldLine) -> some View {
+        Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
+            .font(Theme.monoFont(type.body))
+    }
+
+    private func amountLabel(_ row: CustomerAmountRow) -> some View {
+        Text(row.label).font(Theme.font(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func amountValue(_ row: CustomerAmountRow) -> some View {
+        Text(row.amount)
+            .font(Theme.monoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
+            .minimumScaleFactor(0.6).lineLimit(1)
+    }
+}
+
+func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, invoice: Bool = true) -> [CustomerAmountRow] {
+    var rows: [CustomerAmountRow] = []
+    if amounts.credits < 0 {
+        rows.append(.init(label: "Subtotal", amount: money(amounts.subtotal, currency: currency), emphasis: false))
+        rows.append(.init(label: "Discounts and credits", amount: money(amounts.credits, currency: currency), emphasis: false))
+    }
+    rows.append(.init(label: "Total", amount: money(amounts.total, currency: currency), emphasis: !invoice))
+    if invoice {
+        if amounts.paid > 0 { rows.append(.init(label: "Paid", amount: money(amounts.paid, currency: currency), emphasis: false)) }
+        rows.append(.init(label: "Amount due", amount: money(amounts.due, currency: currency), emphasis: true))
+    }
+    return rows
 }
 
 /// The one commit on a customer screen. Same ink, radius and heights as CustomerCommitButton,

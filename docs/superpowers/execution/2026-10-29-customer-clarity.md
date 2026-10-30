@@ -1,0 +1,9 @@
+# Customer overview clarity — in progress
+
+Paper source: Thorbis Mobile, “48 · Customer detail” artboard. Kept the prominent name, quick contact actions, tabs, and grouped contact/location rows; used native adaptive actions and a disclosure for secondary account fields. Overview shows the next visit once, while the existing Jobs tab owns the full list; Records and Activity remain separate. Job titles wrap, job rows show a disclosure indicator, and the compact customer handoff label now says Customer view or Customer.
+
+Before/after feature inventory: call/text/email/directions, next-job navigation, job creation, customer self-edit, contact/location add/edit/remove, membership, equipment, SMS consent, customer account details, full Jobs list, Records and Activity are retained. Account details now need one disclosure tap; the Jobs tab replaces the duplicate Overview job list. API, authorization, job/customer relationships, and offline paths are unchanged.
+
+Evidence: the original disclosure UI regression failed as intended. A combined simulator run passed 6/6 at `/private/tmp/thorbis-customer-clarity-final2.xcresult`, covering customer navigation/details/records, no jobs, long title at largest text, and normal/large-text long-location menus. Earlier largest-text location failures were reproduced against this branch but not unchanged build 85; stacking the two bottom actions fixed the short and long cases. After making the customer-since label wrap, the exact final source passed 4/4 affected checks at `/private/tmp/thorbis-customer-clarity-final3.xcresult`; the prior long-list and normal-size checks were not repeated after that single text-wrap change. Final captures are in `/private/tmp/customer-clarity-final3-images/`.
+
+Not yet verified: loading and error UI journeys for this change, real-device VoiceOver/focus, iPad, dark mode, and full-screen Paper fidelity. No release or TestFlight upload is claimed.

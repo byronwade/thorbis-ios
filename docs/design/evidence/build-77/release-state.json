@@ -1,0 +1,18 @@
+{
+  "build": 77,
+  "version": "1.0",
+  "runtimeSource": "0ffd5773bfd2ebca99f7abbed7d5b34c561e920c",
+  "sourceReviewPR": "https://github.com/byronwade/thorbis-ios/pull/80",
+  "archiveSucceeded": true,
+  "signedAuditPassed": true,
+  "uploadSucceeded": true,
+  "appleDashboardStatus": "Processed; Ready to Submit for external review",
+  "uploadedAt": "2026-10-29T01:04:26-04:00",
+  "buildID": "96d08acb-84d1-4e95-81da-9d6d00883343",
+  "buildURL": "https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/96d08acb-84d1-4e95-81da-9d6d00883343",
+  "internalTesterGroup": "Internal Testers",
+  "internalTesterCount": 2,
+  "whatToTestSaved": true,
+  "whatToTestExactTextVerified": true,
+  "screenshotSHA256": "56b34fd6f55a3623dd0927392b3c06f20522f3174d3ba553e9caef9cfe221f44"
+}

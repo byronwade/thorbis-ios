@@ -110,7 +110,18 @@ struct FieldInvoiceLineInput: Encodable, Hashable {
 
 /// Tender already collected from the customer. Card/ACH here record the
 /// tender type; processor-backed collection uses separate endpoints.
-enum FieldPaymentMethod: String, Codable, CaseIterable, Hashable { case card, ach, cash, check }
+enum FieldPaymentMethod: String, Codable, CaseIterable, Hashable {
+    case card, ach, cash, check
+
+    var displayName: String {
+        switch self {
+        case .card: "Card"
+        case .ach: "Bank transfer (ACH)"
+        case .cash: "Cash"
+        case .check: "Check"
+        }
+    }
+}
 enum FieldPaymentStatus: String, Codable { case recorded, refunded }
 
 enum FieldPaymentRefundOutcome: String, Decodable, Equatable {

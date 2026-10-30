@@ -113,6 +113,18 @@ final class FieldOutbox: ObservableObject {
 
     private let directory: URL
     private var identity: (actorID: String, organizationID: String)?
+    private var binding = UUID()
+    private var activeDrain: UUID?
+    /// Opaque read-only proof of the current verified queue binding.
+    struct CaptureContext: Equatable {
+        fileprivate let actorID: String
+        fileprivate let organizationID: String
+        fileprivate let binding: UUID
+    }
+    func captureContext(matchingActorID actorID: String, organizationID: String) -> CaptureContext? {
+        guard identity?.actorID == actorID, identity?.organizationID == organizationID else { return nil }
+        return .init(actorID: actorID, organizationID: organizationID, binding: binding)
+    }
     private let deviceID: String
     private let defaults: UserDefaults
     /// Server-served legal moves seen per status, so an offline chain (On my way, then
@@ -153,17 +165,20 @@ final class FieldOutbox: ObservableObject {
     /// Bound to the verified actor and workspace; another identity never sees these changes.
     func bind(actorID: String?, organizationID: String?) {
         guard let actorID, let organizationID else {
+            binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
             identity = nil
             entries = []
             return
         }
         guard identity?.actorID != actorID || identity?.organizationID != organizationID else { return }
+        binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = (actorID, organizationID)
         entries = file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) } ?? []
     }
 
     /// Sign-out: unsent changes for this phone are deleted with the session.
     func clearAll() {
+        binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = nil
         entries = []
         try? FileManager.default.removeItem(at: directory)
@@ -223,10 +238,10 @@ final class FieldOutbox: ObservableObject {
 
     /// A step that timed out on the phone may still have reached the server. If the job is
     /// already at or past that step, the change is done, not refused.
-    private func alreadyApplied(_ entry: OutboxEntry, api: APIClient) async -> Bool {
-        guard case .progress(let payload) = entry.action, let target = Self.lifecycleRank[payload.to],
-              let job = try? await api.fieldJob(payload.jobId), let current = Self.lifecycleRank[job.status] else { return false }
-        return current >= target
+    private func alreadyApplied(_ entry: OutboxEntry, api: APIClient, current: @MainActor () -> Bool) async -> Bool {
+        guard current(), case .progress(let payload) = entry.action, let target = Self.lifecycleRank[payload.to] else { return false }
+        guard let job = try? await api.fieldJob(payload.jobId), current(), let rank = Self.lifecycleRank[job.status] else { return false }
+        return rank >= target
     }
 
     /// The status this phone expects a job to have once its queued changes land.
@@ -241,22 +256,31 @@ final class FieldOutbox: ObservableObject {
 
     /// Sends queued changes oldest first. Uses the offline command endpoint when the
     /// workspace has it, otherwise the same REST routes the app uses online.
-    func drain(api: APIClient, useCommandEndpoint: Bool) async {
-        guard !syncing, !pending.isEmpty else { return }
-        syncing = true
-        defer { syncing = false }
+    func drain(api: APIClient, useCommandEndpoint: Bool, canSend: @MainActor () -> Bool = { true }) async {
+        guard !syncing, !pending.isEmpty, let owner = identity, let origin = api.normalizedOrigin, canSend(), !Task.isCancelled else { return }
+        let token = binding, generation = api.requestGeneration, operation = UUID()
+        func current() -> Bool {
+            binding == token && identity?.actorID == owner.actorID && identity?.organizationID == owner.organizationID &&
+            api.requestGeneration == generation && api.normalizedOrigin == origin && canSend() && !Task.isCancelled
+        }
+        activeDrain = operation; syncing = true
+        defer { if activeDrain == operation { activeDrain = nil; syncing = false } }
         var sent = 0
         if useCommandEndpoint {
-            sent = await drainCommands(api: api)
-            // Changes the command endpoint refused only for a stale permission snapshot.
-            if pending.contains(where: { $0.restOnly == true }) { sent += await drainREST(api: api, onlyRestFallback: true) }
+            sent = await drainCommands(api: api, current: current)
+            guard current() else { return }
+            // Only permission-snapshot refusals use the existing REST fallback.
+            if pending.contains(where: { $0.restOnly == true }) {
+                sent += await drainREST(api: api, onlyRestFallback: true, current: current)
+            }
         } else {
-            sent = await drainREST(api: api)
+            sent = await drainREST(api: api, current: current)
         }
+        guard current() else { return }
         lastSyncSent = sent
     }
 
-    private func drainCommands(api: APIClient) async -> Int {
+    private func drainCommands(api: APIClient, current: @MainActor () -> Bool) async -> Int {
         struct Envelope: Encodable {
             let commandId, deviceId, actorId, organizationId: String
             let policyVersion: Int
@@ -278,7 +302,7 @@ final class FieldOutbox: ObservableObject {
         var sent = 0
         let stamp = ISO8601DateFormatter()
         stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        while true {
+        while current() {
             let batch = Array(pending.filter { $0.restOnly != true }.prefix(50))
             guard !batch.isEmpty else { break }
             let envelopes = batch.map {
@@ -287,22 +311,31 @@ final class FieldOutbox: ObservableObject {
                          payload: AnyPayload(action: $0.action))
             }
             do {
+                guard current() else { return sent }
                 let result: Result = try await api.send("POST", "/v1/commands", body: Batch(commands: envelopes))
+                guard current() else { return sent }
                 for outcome in result.outcomes {
+                    guard current() else { return sent }
                     if outcome.status == "applied" || outcome.status == "duplicate" {
                         entries.removeAll { $0.id == outcome.commandId }
                         sent += 1
                     } else if outcome.category == "policy_superseded",
                               let index = entries.firstIndex(where: { $0.id == outcome.commandId }) {
                         entries[index].restOnly = true
-                    } else if let entry = entries.first(where: { $0.id == outcome.commandId }), outcome.category == "conflict",
-                              await alreadyApplied(entry, api: api) {
-                        entries.removeAll { $0.id == outcome.commandId }
-                        sent += 1
+                    } else if let entry = entries.first(where: { $0.id == outcome.commandId }), outcome.category == "conflict" {
+                        let applied = await alreadyApplied(entry, api: api, current: current)
+                        guard current() else { return sent }
+                        if applied {
+                            entries.removeAll { $0.id == outcome.commandId }
+                            sent += 1
+                        } else {
+                            reject(outcome.commandId, reason: outcome.detail ?? outcome.category ?? "The server refused this change.")
+                        }
                     } else {
                         reject(outcome.commandId, reason: outcome.detail ?? outcome.category ?? "The server refused this change.")
                     }
                 }
+                guard current() else { return sent }
                 persist()
                 // A batch the server did not fully answer stops the loop rather than spinning.
                 if result.outcomes.count < batch.count { break }
@@ -313,9 +346,10 @@ final class FieldOutbox: ObservableObject {
         return sent
     }
 
-    private func drainREST(api: APIClient, onlyRestFallback: Bool = false) async -> Int {
+    private func drainREST(api: APIClient, onlyRestFallback: Bool = false, current: @MainActor () -> Bool) async -> Int {
         var sent = 0
         for entry in pending where !onlyRestFallback || entry.restOnly == true {
+            guard current() else { return sent }
             guard entries.first(where: { $0.id == entry.id })?.state == .pending else { continue }
             do {
                 switch entry.action {
@@ -331,15 +365,19 @@ final class FieldOutbox: ObservableObject {
                 case .note(let payload):
                     _ = try await api.addFieldNote(payload.jobId, body: payload.body)
                 }
+                guard current() else { return sent }
                 entries.removeAll { $0.id == entry.id }
                 sent += 1
                 persist()
             } catch is CancellationError {
                 break
             } catch {
+                guard current() else { return sent }
                 if error.isConnectivityFailure { break }
                 if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status), status != 401, status != 429 {
-                    if status == 409, await alreadyApplied(entry, api: api) {
+                    let applied = status == 409 ? await alreadyApplied(entry, api: api, current: current) : false
+                    guard current() else { return sent }
+                    if applied {
                         entries.removeAll { $0.id == entry.id }
                         sent += 1
                     } else {

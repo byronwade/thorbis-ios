@@ -1,0 +1,58 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "FA43B63E-98C9-4336-B1F7-A55E9D4B4B0A",
+        "deviceName" : "Thorbis Job Documents 2026-10-28",
+        "modelName" : "iPhone 17 Pro",
+        "osBuildNumber" : "23A343",
+        "osVersion" : "26.0",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 1,
+      "passedTests" : 9,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "Thorbis · Built with macOS 26.7.1",
+  "expectedFailures" : 0,
+  "failedTests" : 1,
+  "finishTime" : 1793251352.157,
+  "passedTests" : 9,
+  "result" : "Failed",
+  "skippedTests" : 0,
+  "startTime" : 1793251270.751,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "XCTAssertEqual failed: (\"[]\") is not equal to (\"[\"33333333-3333-4333-8333-333333333333\"]\")",
+      "targetName" : "ThorbisTests",
+      "testIdentifier" : 1,
+      "testIdentifierString" : "LegacyMediaRecoveryTests/testInaccessibleLegacyParentRetainsProofUntilStoredReplayCanFinishCleanup()",
+      "testIdentifierURL" : "test://com.apple.xcode/Thorbis/ThorbisTests/LegacyMediaRecoveryTests/testInaccessibleLegacyParentRetainsProofUntilStoredReplayCanFinishCleanup",
+      "testName" : "testInaccessibleLegacyParentRetainsProofUntilStoredReplayCanFinishCleanup()"
+    }
+  ],
+  "title" : "Test - Thorbis",
+  "topInsights" : [
+    {
+      "category" : "Common Failures",
+      "impact" : "100% of failures",
+      "text" : "2 runs of 1 test failed with XCTAssertEqual failed: (\"[]\") is not equal to (\"[\"33333333-3333-4333-8333-333333333333\"]\")"
+    },
+    {
+      "category" : "Common Failures",
+      "impact" : "100% of failures",
+      "text" : "2 runs of 1 test failed with XCTAssertEqual failed: (\"1\") is not equal to (\"0\")"
+    }
+  ],
+  "totalTestCount" : 10
+}

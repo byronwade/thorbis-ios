@@ -33,12 +33,41 @@ struct PriceBookSearchResult: Identifiable, Equatable {
     }
 }
 
+struct PriceBookSearchPage {
+    let results: [PriceBookSearchResult]
+    let total: Int
+    let offset: Int
+}
+
 struct PriceBookSearchIndex {
     private struct Entry {
         let item: PriceBookListItem
         let normalizedDescription: String
         /// Searchable words: description, unit and kind (with its plural), normalized.
         let words: [String]
+    }
+
+    // Each immutable index owns a single bounded result cache. Catalog refreshes build a
+    // new index, so cached prices and revisions cannot outlive the snapshot they came from.
+    private struct CacheKey: Equatable {
+        let query: String
+        let kind: PriceBookKindFilter
+        let usage: [String: PriceBookUsage]
+        let now: Date
+        let excluded: Set<String>
+    }
+
+    private final class Cache {
+        private let lock = NSLock()
+        private var value: (CacheKey, [Entry])?
+
+        func get(_ key: CacheKey) -> [Entry]? {
+            lock.withLock { value?.0 == key ? value?.1 : nil }
+        }
+
+        func put(_ key: CacheKey, entries: [Entry]) {
+            lock.withLock { value = (key, entries) }
+        }
     }
 
     /// Quality of one typed word against one item word. Higher is better.
@@ -51,6 +80,7 @@ struct PriceBookSearchIndex {
     static let recentLimit = 12
 
     private let entries: [Entry]
+    private let cache = Cache()
 
     /// Archived items and other currencies never appear (EB-08).
     init(items: [PriceBookListItem], currency: String = "USD") {
@@ -73,13 +103,36 @@ struct PriceBookSearchIndex {
     /// Ranked results for `query` (EB-02, EB-03). An empty query lists the filter's items A to Z.
     func search(_ query: String, kind: PriceBookKindFilter = .all,
                 usage: [String: PriceBookUsage] = [:], now: Date = Date()) -> [PriceBookSearchResult] {
+        page(query, kind: kind, usage: usage, now: now).results
+    }
+
+    /// Counts all locally loaded matches while only formatting the requested visible prefix.
+    func page(_ query: String, kind: PriceBookKindFilter = .all,
+              usage: [String: PriceBookUsage] = [:], now: Date = Date(),
+              excludingIDs: Set<String> = [], limit: Int? = nil, offset: Int = 0) -> PriceBookSearchPage {
         let queryWords = Self.words(query)
-        let candidates = entries.filter { kind.includes($0.item) }
+        let key = CacheKey(query: query, kind: kind, usage: usage, now: now, excluded: excludingIDs)
+        let ordered: [Entry]
+        if let cached = cache.get(key) {
+            ordered = cached
+        } else {
+            ordered = orderedEntries(queryWords: queryWords, kind: kind, usage: usage, now: now, excludingIDs: excludingIDs)
+            cache.put(key, entries: ordered)
+        }
+        let pageSize = max(1, limit ?? max(1, ordered.count))
+        let start = min(max(0, offset), ordered.isEmpty ? 0 : ((ordered.count - 1) / pageSize) * pageSize)
+        let results = ordered.dropFirst(start).prefix(pageSize).map {
+            PriceBookSearchResult(item: $0.item, highlights: Self.highlights(in: $0.item.description, words: queryWords))
+        }
+        return PriceBookSearchPage(results: results, total: ordered.count, offset: start)
+    }
+
+    private func orderedEntries(queryWords: [String], kind: PriceBookKindFilter,
+                                usage: [String: PriceBookUsage], now: Date,
+                                excludingIDs: Set<String>) -> [Entry] {
+        let candidates = entries.filter { kind.includes($0.item) && !excludingIDs.contains($0.item.id) }
         guard !queryWords.isEmpty else {
-            return candidates
-                .sorted { $0.item.description.localizedStandardCompare($1.item.description) == .orderedAscending }
-                .prefix(Self.resultLimit)
-                .map { PriceBookSearchResult(item: $0.item, highlights: []) }
+            return candidates.sorted { $0.item.description.localizedStandardCompare($1.item.description) == .orderedAscending }
         }
         // "R-410A" typed against a book that writes "R410A": try the query with each letter word
         // joined to its neighbouring number too, the same join the index makes.
@@ -97,9 +150,7 @@ struct PriceBookSearchIndex {
             if lhsLength != rhsLength { return lhsLength < rhsLength }
             return lhs.entry.item.description.localizedStandardCompare(rhs.entry.item.description) == .orderedAscending
         }
-        return scored.prefix(Self.resultLimit).map {
-            PriceBookSearchResult(item: $0.entry.item, highlights: Self.highlights(in: $0.entry.item.description, words: queryWords))
-        }
+        return scored.map(\.entry)
     }
 
     /// EB-04: the items this device adds most often and most recently.
@@ -263,6 +314,11 @@ struct PriceBookUsageStore {
 /// The whole active price book for the signed-in organization, kept on the device so search is
 /// instant and works offline (EB-01). Opening a builder shows the cached copy at once and
 /// refreshes it in the background.
+struct PriceBookCatalogContext: Hashable {
+    let organizationID: String?
+    let sessionGeneration: UUID
+}
+
 @MainActor
 final class PriceBookCatalog: ObservableObject {
     static let shared = PriceBookCatalog()
@@ -276,26 +332,54 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var usage: [String: PriceBookUsage] = [:]
     private(set) var organizationID: String?
     private var lastRefresh: Date?
-    private var loadingOrganizationID: String?
+    private(set) var context: PriceBookCatalogContext?
+    private var loadingRequest: (context: PriceBookCatalogContext, apiGeneration: UUID, id: UUID, task: Task<Void, Never>)?
 
     /// Shows the cached catalog for `organizationID` right away, then reloads every page.
-    func refresh(api: APIClient, organizationID: String?, force: Bool = false) async {
-        guard let organizationID else { return }
-        if self.organizationID != organizationID {
+    func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID, force: Bool = false) async {
+        guard !Task.isCancelled else { return }
+        let apiGeneration = api.requestGeneration
+        let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration)
+        if context != requested {
+            context = requested
             self.organizationID = organizationID
-            apply(Self.readCache(organizationID) ?? [])
-            usage = PriceBookUsageStore(organizationID: organizationID).load()
+            apply(organizationID.flatMap(Self.readCache) ?? [])
+            usage = organizationID.map { PriceBookUsageStore(organizationID: $0).load() } ?? [:]
             lastRefresh = nil
+            error = nil
+        }
+        guard let organizationID else {
+            loadingRequest?.task.cancel()
+            loadingRequest = nil
+            loading = false
+            return
         }
         if !force, let lastRefresh, Date().timeIntervalSince(lastRefresh) < 60 { return }
-        // One load per organization: switching workspaces starts the new one's load, and the
-        // old load's result is dropped below because the organization no longer matches.
-        guard loadingOrganizationID != organizationID else { return }
-        loadingOrganizationID = organizationID
+        if let pending = loadingRequest, pending.context == requested, pending.apiGeneration == apiGeneration {
+            await pending.task.value
+            return
+        }
+        loadingRequest?.task.cancel()
+        let request = UUID()
         loading = true
+        // The catalog owns this work so closing its initiating view cannot strand other callers.
+        let task = Task {
+            await self.load(api: api, organizationID: organizationID, context: requested,
+                            apiGeneration: apiGeneration, request: request)
+        }
+        loadingRequest = (requested, apiGeneration, request, task)
+        await task.value
+    }
+
+    private func load(api: APIClient, organizationID: String, context requested: PriceBookCatalogContext,
+                      apiGeneration: UUID, request: UUID) async {
+        let current: @MainActor () -> Bool = {
+            self.context == requested && self.loadingRequest?.id == request &&
+                api.requestGeneration == apiGeneration && !Task.isCancelled
+        }
         defer {
-            if loadingOrganizationID == organizationID {
-                loadingOrganizationID = nil
+            if loadingRequest?.id == request {
+                loadingRequest = nil
                 loading = false
             }
         }
@@ -305,19 +389,25 @@ final class PriceBookCatalog: ObservableObject {
             var cursor: String?
             var pages = 0
             repeat {
+                guard current() else { return }
                 let page = try await api.priceBookItems(limit: 200, cursor: cursor)
+                guard current() else { return }
                 for item in page.items where seen.insert(item.id).inserted { all.append(item) }
                 cursor = page.nextCursor
                 pages += 1
             } while cursor != nil && pages < Self.maximumPages
-            guard self.organizationID == organizationID else { return }
+            guard current() else { return }
+            guard cursor == nil else {
+                throw Problem(title: "Couldn't load the whole price book", status: nil,
+                              detail: "Refresh the catalog before using items that are missing.")
+            }
             apply(all)
             lastRefresh = Date()
             error = nil
             Self.writeCache(all, organizationID: organizationID)
         } catch is CancellationError {
         } catch {
-            guard self.organizationID == organizationID else { return }
+            guard current() else { return }
             self.error = PriceBookLoadError.message(for: error)
         }
     }
@@ -379,7 +469,10 @@ final class PriceBookCatalog: ObservableObject {
     func clear() {
         organizationID = nil
         lastRefresh = nil
-        loadingOrganizationID = nil
+        context = nil
+        loadingRequest?.task.cancel()
+        loadingRequest = nil
+        error = nil
         loading = false
         usage = [:]
         apply([])

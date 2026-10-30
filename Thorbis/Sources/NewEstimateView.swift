@@ -51,9 +51,12 @@ struct NewEstimateView: View {
             ScrollView {
                 if searching {
                     PriceBookResultsList(
-                        catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                        quantityOnEstimate: { lines.quantity(ofPriceBookItem: $0) },
-                        addItem: add, addCustom: addCustom, retry: { Task { await refreshCatalog(force: true) } }
+                        catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
+                            query: query, kind: kind, canUsePriceBook: canUsePriceBook,
+                        quantityInCurrentDraft: { id in
+                            (addGroup.map { lines.lines(in: $0) } ?? lines).quantity(ofPriceBookItem: id)
+                        },
+                        secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom, retry: { Task { await refreshCatalog(force: true) } }
                     )
                 } else {
                     builder
@@ -71,17 +74,22 @@ struct NewEstimateView: View {
             }
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .safeAreaInset(edge: .top, spacing: 0) {
-                EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
-                                  prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
-                                  finish: finishSearch)
-                    .disabled(busy)
+                VStack(spacing: 0) {
+                    EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
+                                      prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
+                                      finish: finishSearch)
+                        .disabled(busy)
+                    if searching {
+                        PaperActionBar(title: reviewTitle, symbol: "list.bullet", busy: busy) { finishSearch() }
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if let removed {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
                     }
-                    if focus != .search {
+                    if !searching {
                         EstimateBuilderTotal(total: total)
                         PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
                                        disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
@@ -90,7 +98,7 @@ struct NewEstimateView: View {
             }
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
-            .task { await refreshCatalog() }
+            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .task {
                 guard lines.isEmpty else { return }
                 try? await Task.sleep(for: .milliseconds(450))
@@ -103,6 +111,10 @@ struct NewEstimateView: View {
         if created != nil { return "Retry adding to job" }
         guard let total else { return "Save estimate" }
         return "Save estimate · \(money(total, currency: "USD"))"
+    }
+
+    private var reviewTitle: String {
+        "Review estimate · \(lines.count) \(lines.count == 1 ? "item" : "items")"
     }
 
     private var builder: some View {
@@ -143,7 +155,10 @@ struct NewEstimateView: View {
 
     private func refreshCatalog(force: Bool = false) async {
         guard canUsePriceBook else { return }
-        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
+        let org = session.activeOrganization?.id
+        let generation = session.generation
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: force)
+        guard !Task.isCancelled, session.generation == generation, session.activeOrganization?.id == org else { return }
     }
 
     private func add(_ item: PriceBookListItem) {

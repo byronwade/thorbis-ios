@@ -69,7 +69,7 @@ struct EstimateRevisionEditorView: View {
     private var editingDraft: Bool { editor.estimate.status == "draft" }
 
     private var revisionReady: Bool {
-        editingDraft || (editor.estimate.currentRevisionNumber ?? 0) > 0
+        !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) > 0
     }
 
     private var canSave: Bool {
@@ -97,9 +97,12 @@ struct EstimateRevisionEditorView: View {
                 }
                 if searching {
                     PriceBookResultsList(
-                        catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                        quantityOnEstimate: { targetLines.quantity(ofPriceBookItem: $0) },
-                        addItem: add, addCustom: addCustom,
+                        catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
+                            query: query, kind: kind, canUsePriceBook: canUsePriceBook,
+                        quantityInCurrentDraft: { id in
+                            (target.group.map { targetLines.lines(in: $0) } ?? targetLines).quantity(ofPriceBookItem: id)
+                        },
+                        secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom,
                         retry: { Task { await refreshCatalog(force: true) } }
                     )
                     .disabled(busy)
@@ -107,10 +110,10 @@ struct EstimateRevisionEditorView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if !editor.canRevise {
                         ErrorBanner(message: "This estimate cannot be revised from its current status.")
-                    } else if !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) <= 0 {
-                        ErrorBanner(message: EstimateRevisionEditorError.missingRevision.localizedDescription)
                     } else if !session.can("estimate.create", feature: "estimates") {
                         ErrorBanner(message: "Your account cannot create estimate revisions.")
+                    } else if !editingDraft && (editor.estimate.currentRevisionNumber ?? 0) <= 0 {
+                        ErrorBanner(message: EstimateRevisionEditorError.missingRevision.localizedDescription)
                     }
                     if editor.hasUnsupportedLineSources {
                         ErrorBanner(message: EstimateRevisionEditorError.unsupportedLineSource.localizedDescription)
@@ -127,7 +130,7 @@ struct EstimateRevisionEditorView: View {
                     lineSection
                     optionSection
                     Text(editingDraft
-                         ? "Saving updates this draft. It will not be sent automatically."
+                         ? "Changes aren't saved when you close this screen."
                          : "Saving creates a replacement draft for the current estimate revision. It will not be sent automatically.")
                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 2)
@@ -152,18 +155,29 @@ struct EstimateRevisionEditorView: View {
             .keyboardDoneButton()
             .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if canEdit {
-                    EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
-                                      prompt: searchPrompt, finish: finishSearch)
-                        .disabled(busy)
+                VStack(spacing: 0) {
+                    if canEdit {
+                        EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
+                                          prompt: searchPrompt, finish: finishSearch)
+                            .disabled(busy)
+                    }
+                    if editingDraft && canRevise {
+                        ErrorBanner(message: "Draft changes can't be saved yet.")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 8)
+                    }
+                    if searching {
+                        PaperActionBar(title: reviewTitle, symbol: "list.bullet", busy: busy) { finishSearch() }
+                    }
                 }
+                .background(Theme.background)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if let removed {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
                     }
-                    if focus != .search {
+                    if !searching {
                         if editor.options.isEmpty { EstimateBuilderTotal(total: editor.lines.subtotal()) }
                         PaperActionBar(title: saveTitle, symbol: "doc.badge.plus", busy: busy, disabled: !canSave) {
                             Task { await save() }
@@ -173,7 +187,7 @@ struct EstimateRevisionEditorView: View {
             }
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
-            .task { await refreshCatalog() }
+            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
@@ -293,9 +307,17 @@ struct EstimateRevisionEditorView: View {
         return "\(verb) · \(money(total, currency: "USD"))"
     }
 
+    private var reviewTitle: String {
+        let count = editor.lines.count + editor.options.reduce(0) { $0 + $1.lines.count }
+        return "Review estimate · \(count) \(count == 1 ? "item" : "items")"
+    }
+
     private func refreshCatalog(force: Bool = false) async {
         guard canUsePriceBook else { return }
-        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
+        let org = session.activeOrganization?.id
+        let generation = session.generation
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: force)
+        guard !Task.isCancelled, session.generation == generation, session.activeOrganization?.id == org else { return }
         classifyLines()
     }
 
@@ -379,6 +401,10 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func save() async {
+        guard !editingDraft else {
+            error = "Draft changes can't be saved yet."
+            return
+        }
         guard canRevise else {
             error = "You no longer have permission to revise this estimate."
             return

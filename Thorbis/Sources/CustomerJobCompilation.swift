@@ -14,7 +14,7 @@ struct CustomerJobGroup<Item: Equatable>: Equatable {
 struct CustomerJobCompilation: Equatable {
     let contacts: [CustomerContactRecord]
     let locations: [ServiceLocationRecord]
-    let photos: [CustomerJobGroup<MediaAssetRecord>]
+    let photos: [CustomerJobGroup<JobPhotoSource>]
     let notes: [CustomerJobGroup<JobNoteRecord>]
     let documents: [CustomerJobGroup<MediaAssetRecord>]
     let estimates: [CustomerJobGroup<EstimateRecord>]
@@ -25,6 +25,18 @@ struct CustomerJobCompilation: Equatable {
     let accountActivity: [CustomerHistoryEntry]
     let estimatesOffJob: [EstimateRecord]
     let invoicesOffJob: [InvoiceRecord]
+
+    /// A job media read failed or returned an asset outside that job/workspace.
+    let mediaIncompleteJobIDs: Set<String>
+    let documentIncompleteJobIDs: Set<String>
+    let jobsAccessible: Bool
+    let estimatesAccessible: Bool
+    let invoicesAccessible: Bool
+    let identityIncomplete: Bool
+    let notesIncomplete: Bool
+    let estimatesIncomplete: Bool
+    let invoicesIncomplete: Bool
+    let activityIncomplete: Bool
 
     var photoCount: Int { photos.reduce(0) { $0 + $1.count } }
     var noteCount: Int { notes.reduce(0) { $0 + $1.count } }
@@ -42,9 +54,38 @@ struct CustomerJobCompilation: Equatable {
         estimates: [EstimateRecord],
         linksByJob: [String: [JobEstimateLink]],
         invoices: [InvoiceRecord],
-        history: [CustomerHistoryEntry]
+        history: [CustomerHistoryEntry],
+        legacyPhotosByJob: [String: [JobPhotoRecord]] = [:],
+        mediaIncompleteJobIDs: Set<String> = [],
+        documentIncompleteJobIDs: Set<String> = [],
+        jobsAccessible: Bool = true,
+        estimatesAccessible: Bool = true,
+        invoicesAccessible: Bool = true,
+        identityIncomplete: Bool = false,
+        notesIncomplete: Bool = false,
+        estimatesIncomplete: Bool = false,
+        invoicesIncomplete: Bool = false,
+        activityIncomplete: Bool = false
     ) -> CustomerJobCompilation {
         let jobIDs = Set(jobs.map(\.id))
+        var incomplete = mediaIncompleteJobIDs
+        var documentsIncomplete = documentIncompleteJobIDs
+        var verifiedMedia: [String: [MediaAssetRecord]] = [:]
+        var verifiedLegacy: [String: [JobPhotoRecord]] = [:]
+        for job in jobs {
+            let received = mediaByJob[job.id] ?? []
+            let verified = received.filter { $0.jobId == job.id && $0.organizationId == job.organizationId }
+            if verified.count != received.count { incomplete.insert(job.id); documentsIncomplete.insert(job.id) }
+            verifiedMedia[job.id] = verified
+            let receivedLegacy = legacyPhotosByJob[job.id] ?? []
+            let legacy = verified.count == received.count ? receivedLegacy.filter { $0.jobId == job.id && $0.organizationId == job.organizationId } : []
+            if legacy.count != receivedLegacy.count { incomplete.insert(job.id) }
+            verifiedLegacy[job.id] = legacy
+            if JobPhotoMerge.hasConflictingMetadata(modern: verified, legacy: legacy,
+                                                   organizationID: job.organizationId, jobID: job.id) {
+                incomplete.insert(job.id)
+            }
+        }
         var estimateJob: [String: String] = [:]
         for job in jobs {
             if let estimateID = job.estimateId, estimateJob[estimateID] == nil {
@@ -93,15 +134,28 @@ struct CustomerJobCompilation: Equatable {
         return CustomerJobCompilation(
             contacts: contacts,
             locations: locations,
-            photos: groups { (mediaByJob[$0.id] ?? []).filter { $0.kind == "photo" && !$0.archived } },
+            photos: groups { job in
+                JobPhotoMerge.combine(modern: verifiedMedia[job.id] ?? [], legacy: verifiedLegacy[job.id] ?? [],
+                                      organizationID: job.organizationId, jobID: job.id)
+            },
             notes: groups { notesByJob[$0.id] ?? [] },
-            documents: groups { (mediaByJob[$0.id] ?? []).filter { $0.kind != "photo" && !$0.archived } },
+            documents: groups { (verifiedMedia[$0.id] ?? []).filter { $0.kind != "photo" && !$0.archived } },
             estimates: groups { estimatesOn[$0.id] ?? [] },
             invoices: groups { invoicesOn[$0.id] ?? [] },
             activity: groups { activityOn[$0.id] ?? [] },
             accountActivity: account,
             estimatesOffJob: estimatesOff,
-            invoicesOffJob: invoicesOff
+            invoicesOffJob: invoicesOff,
+            mediaIncompleteJobIDs: incomplete,
+            documentIncompleteJobIDs: documentsIncomplete,
+            jobsAccessible: jobsAccessible,
+            estimatesAccessible: estimatesAccessible,
+            invoicesAccessible: invoicesAccessible,
+            identityIncomplete: identityIncomplete,
+            notesIncomplete: notesIncomplete,
+            estimatesIncomplete: estimatesIncomplete,
+            invoicesIncomplete: invoicesIncomplete,
+            activityIncomplete: activityIncomplete
         )
     }
 
@@ -153,37 +207,86 @@ enum CustomerRecordLabel {
 enum CustomerJobCompilationLoader {
     /// Loads the customer's jobs, then each job's notes, media, and the estimate links and invoices
     /// this person can read. There is no customer-wide media or notes route; the groups are built from the job routes.
-    static func load(customerID: String, api: APIClient, access: CustomerRecordAccess = .all) async throws -> CustomerJobCompilation {
-        let jobs = access.jobs ? try await api.fieldJobs(customerID: customerID) : []
-        let contacts = try await api.fieldContacts(customerID)
-        let locations = try await api.fieldLocations(customerID)
-        let estimates = access.estimates ? try await api.fieldEstimates(customerID: customerID) : []
-        var invoices = access.invoices ? try await api.fieldInvoices(customerID: customerID) : []
+    static func load(customerID: String, organizationID: String, api: APIClient, access: CustomerRecordAccess = .all) async throws -> CustomerJobCompilation {
+        let receivedJobs = access.jobs ? try await api.fieldJobs(customerID: customerID) : []
+        let jobs = receivedJobs.filter { $0.customerId == customerID && $0.organizationId == organizationID }
+        let receivedContacts = try await api.fieldContacts(customerID)
+        let contacts = receivedContacts.filter { $0.customerId == customerID && $0.organizationId == organizationID }
+        let receivedLocations = try await api.fieldLocations(customerID)
+        let locations = receivedLocations.filter { $0.customerId == customerID && $0.organizationId == organizationID }
+        let identityIncomplete = jobs.count != receivedJobs.count || contacts.count != receivedContacts.count || locations.count != receivedLocations.count
+        let receivedEstimates = access.estimates ? try await api.fieldEstimates(customerID: customerID) : []
+        let estimates = receivedEstimates.filter { $0.customerId == customerID && $0.organizationId == organizationID }
+        var estimatesIncomplete = estimates.count != receivedEstimates.count
+        let receivedInvoices = access.invoices ? try await api.fieldInvoices(customerID: customerID) : []
+        var invoices = receivedInvoices.filter { $0.customerId == customerID && $0.organizationId == organizationID }
+        var invoicesIncomplete = invoices.count != receivedInvoices.count
+        var notesIncomplete = false
+        let estimateIDs = Set(estimates.map(\.id))
         var seenInvoices = Set(invoices.map(\.id))
         var notesByJob: [String: [JobNoteRecord]] = [:]
         var mediaByJob: [String: [MediaAssetRecord]] = [:]
         var linksByJob: [String: [JobEstimateLink]] = [:]
+        var mediaIncompleteJobIDs = Set<String>()
+        var documentIncompleteJobIDs = Set<String>()
         for job in jobs {
-            notesByJob[job.id] = try await api.fieldNotes(job.id)
-            mediaByJob[job.id] = try await api.fieldMedia(job.id)
+            let receivedNotes = try await api.fieldNotes(job.id)
+            let notes = receivedNotes.filter { $0.organizationId == organizationID && $0.jobId == job.id }
+            if notes.count != receivedNotes.count { notesIncomplete = true }
+            notesByJob[job.id] = notes
+            do {
+                mediaByJob[job.id] = try await api.fieldMedia(job.id, includeArchived: true)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let problem as Problem where problem.status == 401 {
+                throw problem
+            } catch {
+                mediaIncompleteJobIDs.insert(job.id)
+                documentIncompleteJobIDs.insert(job.id)
+            }
             if access.estimates {
-                linksByJob[job.id] = try await api.fieldJobEstimateLinks(job.id)
+                let receivedLinks = try await api.fieldJobEstimateLinks(job.id)
+                let links = receivedLinks.filter { $0.jobId == job.id && estimateIDs.contains($0.estimateId) }
+                if links.count != receivedLinks.count { estimatesIncomplete = true }
+                linksByJob[job.id] = links
             }
             if access.invoices {
-                for invoice in try await jobInvoices(job.id, api: api) where seenInvoices.insert(invoice.id).inserted {
-                    invoices.append(invoice)
+                for invoice in try await jobInvoices(job.id, api: api) {
+                    guard invoice.organizationId == organizationID && invoice.customerId == customerID && invoice.jobId == job.id else {
+                        invoicesIncomplete = true
+                        continue
+                    }
+                    if seenInvoices.insert(invoice.id).inserted { invoices.append(invoice) }
                 }
             }
         }
         var history: [CustomerHistoryEntry] = []
         var cursor: String?
         var seen = Set<String>()
+        var activityIncomplete = false
         repeat {
             let page = try await api.fieldCustomerHistory(customerID, cursor: cursor)
             history.append(contentsOf: page.items)
             cursor = page.nextCursor
-            if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted { break }
+            if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
+                activityIncomplete = true
+                break
+            }
         } while cursor != nil
+        var legacyPhotosByJob: [String: [JobPhotoRecord]] = [:]
+        for job in jobs {
+            // Without the archived-inclusive list, a legacy row could resurrect an archived photo.
+            guard mediaByJob[job.id] != nil else { continue }
+            do {
+                legacyPhotosByJob[job.id] = try await api.fieldPhotos(job.id)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let problem as Problem where problem.status == 401 {
+                throw problem
+            } catch {
+                mediaIncompleteJobIDs.insert(job.id)
+            }
+        }
         return CustomerJobCompilation.assemble(
             jobs: jobs,
             contacts: contacts,
@@ -193,7 +296,18 @@ enum CustomerJobCompilationLoader {
             estimates: estimates,
             linksByJob: linksByJob,
             invoices: invoices,
-            history: history
+            history: history,
+            legacyPhotosByJob: legacyPhotosByJob,
+            mediaIncompleteJobIDs: mediaIncompleteJobIDs,
+            documentIncompleteJobIDs: documentIncompleteJobIDs,
+            jobsAccessible: access.jobs,
+            estimatesAccessible: access.estimates,
+            invoicesAccessible: access.invoices,
+            identityIncomplete: identityIncomplete,
+            notesIncomplete: notesIncomplete,
+            estimatesIncomplete: estimatesIncomplete,
+            invoicesIncomplete: invoicesIncomplete,
+            activityIncomplete: activityIncomplete
         )
     }
 

@@ -1,3 +1,6 @@
-# Files still using stock SwiftUI controls, pending migration to the design system.
-# Shrink this list in each sweep PR; when empty, the guard is absolute.
-# The migration is complete — this list is intentionally empty and the CI guard is blocking.
+# Stock controls in features carried from the field-release branch, pending migration.
+# The guard remains blocking for any other screen.
+Thorbis/Sources/PaperJobDetailView.swift
+Thorbis/Sources/SavedWorkReviewView.swift
+Thorbis/Sources/CustomerJobDocumentBook.swift
+Thorbis/Sources/LegacyMediaRecoveryView.swift

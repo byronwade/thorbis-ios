@@ -1,0 +1,16 @@
+{
+  "build": 80,
+  "runtimeSource": "d6e638594414b749ef8d513a2911a918a9a6f73e",
+  "archive": "succeeded",
+  "upload": "succeeded",
+  "testFlight": "processed and assigned to Internal Testers",
+  "signedAudit": "passed",
+  "uploadTime": "2026-10-29 11:38:40 EDT",
+  "buildID": "d44022bf-0e05-4581-84ec-6855eb852061",
+  "buildURL": "https://appstoreconnect.apple.com/teams/1f7ffdae-c53e-4d57-a97b-cc8cbc4760a8/apps/6827337706/testflight/ios/d44022bf-0e05-4581-84ec-6855eb852061",
+  "internalTesters": 2,
+  "whatToTest": "Saved",
+  "verifiedAt": "2026-10-29T15:57:00.314212+00:00",
+  "confirmationSHA256": "fce35acbc6acad2fcc3e8c27db22b5ba940237f55d7adeee2b7c24e902b9f616",
+  "appleUploadObservation": "Complete displayed without a warning-detail control for build80; build79 retains that control"
+}

@@ -13,6 +13,117 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-faster-lists",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "list.bullet", title: "Move through lists faster",
+                      detail: "Customer lists and repeated price book searches do less work as you browse."),
+                .init(symbol: "photo.on.rectangle", title: "Browse job photos sooner",
+                      detail: "Open photos sooner and load more as you browse."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-document-description-reading",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "text.alignleft", title: "Read full document details",
+                      detail: "Open long estimate and invoice descriptions in a clear reading view."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-job-document-clarity",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.text", title: "Find job documents faster",
+                      detail: "Recognize estimates and invoices in the job and open each for its details."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-setup-check-retry",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "arrow.clockwise", title: "Retry setup checks",
+                      detail: "See when a setup step couldn't be checked and try again."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-inbox-day-groups",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "calendar", title: "Find notices by day",
+                      detail: "Inbox notices are grouped by date, with unread notices clearly marked."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-pricebook-visual-cues",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "book.closed", title: "Recognize price book items",
+                      detail: "See material and service markers with clearer names and prices."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-photo-date-groups",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "photo.on.rectangle", title: "Find job photos by date",
+                      detail: "Browse photos by capture date, with undated photos kept together."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-customer-action-text",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Clearer customer actions",
+                      detail: "Customer action labels have room to wrap at larger text sizes."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-invoice-balance-wording",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.text", title: "Clearer invoice balances",
+                      detail: "See when an invoice is a draft, has no balance due, or is paid."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-readonly-handback",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "hand.wave", title: "Hand back reviewed documents",
+                      detail: "Return the phone to your technician after viewing a changed document."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-estimate-documents-return",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.on.doc", title: "Keep reviewing job documents",
+                      detail: "Return to the job's documents after reviewing or approving an estimate."),
+                .init(symbol: "hand.wave", title: "Hand back after invoice review",
+                      detail: "Return the phone to your technician after reviewing an invoice."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-inbox",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "bell", title: "See new notices clearly",
+                      detail: "Unread inbox items are easier to spot and open."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-visual-cues",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "calendar", title: "Scan your schedule faster",
+                      detail: "Visit markers show each job's status alongside its time and details."),
+                .init(symbol: "doc.text", title: "Recognize documents at a glance",
+                      detail: "Estimates, invoices and billing schedules have clearer visual markers."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
             id: "2026-10-30-bottom-search",
             date: "2026-10-30",
             highlights: [
@@ -46,6 +157,73 @@ enum ReleaseNotes {
                 .init(symbol: "magnifyingglass", title: "Search in one tap",
                       detail: "Search sits next to New job at the bottom and opens ready to type."),
             ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-customer-visual",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "person.crop.square", title: "See the next visit clearly",
+                      detail: "Customer profiles make the next visit easier to find and open."),
+                .init(symbol: "briefcase", title: "Find your work faster",
+                      detail: "Search jobs from the list and see job sections more clearly."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-pricebook-at-a-glance",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "book.closed", title: "Scan the price book faster",
+                      detail: "See clear item names and prices, then open an item for its full details."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-job-glance",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "briefcase", title: "Find visit details faster",
+                      detail: "Find notes, photos and follow-ups near the top of a job."),
+                .init(symbol: "person.crop.circle", title: "See customers at a glance",
+                      detail: "Find the next visit and contact actions, with all jobs in one place."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-pricebook-pages",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "book.closed", title: "Browse more price book items",
+                      detail: "Move through all loaded matching items when building an estimate or editing an invoice."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-customer-job-history",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "photo.on.rectangle", title: "See customer photos by job",
+                      detail: "Browse photos from each job together on the customer profile."),
+                .init(symbol: "map", title: "Choose a customer location",
+                      detail: "Pick the right location for directions instead of assuming a job site."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
+            id: "2026-10-29-catalog-editing",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "book.closed", title: "Edit while adding invoice items",
+                      detail: "Adjust the last added line without leaving the price book."),
+                .init(symbol: "list.bullet", title: "Review estimates from the catalog",
+                      detail: "Return to your estimate and its items directly from search."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-10-29-job-estimate-layout",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "doc.text", title: "Scan job estimates faster",
+                      detail: "See the work, price and status first, with totals and actions close at hand."),
+            ],
+            fixes: 0
         ),
         ReleaseNote(
             id: "2026-10-29-menu-layout",
@@ -99,8 +277,8 @@ enum ReleaseNotes {
             id: "2026-10-29-draft-lines",
             date: "2026-10-29",
             highlights: [
-                .init(symbol: "book.closed", title: "Edit draft lines in the price book",
-                      detail: "Search the price book on a draft estimate or invoice, then change the quantity, price, or remove the line."),
+                .init(symbol: "book.closed", title: "Edit invoice lines in the price book",
+                      detail: "Search the price book on an invoice draft, then adjust or remove items."),
             ]
         ),
         ReleaseNote(
@@ -118,6 +296,121 @@ enum ReleaseNotes {
                 .init(symbol: "magnifyingglass", title: "Search sits at the top of the menu",
                       detail: "Search has its own row under the company, and the account opens Settings with room to tap."),
             ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-job-estimate-handoff",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "doc.on.doc", title: "Present every job estimate",
+                      detail: "Show the job's estimates together, with each price and status clearly visible."),
+                .init(symbol: "signature", title: "Approve several estimates",
+                      detail: "Choose separate estimates in one handoff, then review and sign each without starting over."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-10-29-saved-work-review",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "arrow.triangle.2.circlepath", title: "Review saved work in one place",
+                      detail: "See waiting changes, photos and scans by job, then open the job or retry from one review."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
+            id: "2026-10-29-photo-recovery-cleanup",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "arrow.clockwise", title: "Finish older photo recovery",
+                      detail: "Completed uploads clean up matching older files without leaving an unnecessary recovery warning."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-durable-job-media",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "doc.viewfinder", title: "Keep scans when you're offline",
+                      detail: "Scanned job documents and photos stay on this phone until their upload is confirmed."),
+                .init(symbol: "photo.on.rectangle", title: "Keep saved work in its workspace",
+                      detail: "Switch workspaces without mixing waiting files, and see which uploads need attention."),
+                .init(symbol: "arrow.clockwise", title: "Recover older saved photos",
+                      detail: "Review older photos for this job, confirm the destination, then retry their upload."),
+            ],
+            fixes: 4
+        ),
+        ReleaseNote(
+            id: "2026-10-28-job-document-book",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "doc.on.doc", title: "Swipe through the job's documents",
+                      detail: "Browse every estimate and invoice, or use Previous, Next and All documents to choose one."),
+                .init(symbol: "banknote", title: "See discounts, payments and refunds",
+                      detail: "Each invoice shows its own discounts, dated payments, refunds and remaining balance."),
+                .init(symbol: "signature", title: "Keep your place while reviewing",
+                      detail: "Open a separate review or signature, then return to the document you were reading."),
+            ],
+            fixes: 8
+        ),
+        ReleaseNote(
+            id: "2026-10-28-customer-review",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "doc.text.magnifyingglass", title: "Review the exact estimate",
+                      detail: "Customers see the issued work and price before signing, with a clear retry if it can't be opened."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-28-invoice-catalog",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Search your full catalog on invoices",
+                      detail: "Find services and materials as you type, with recent items and category filters close by."),
+                .init(symbol: "plus.circle", title: "Add several items without going back",
+                      detail: "Keep searching and adding, see the quantity in your draft, then tap Done when you're ready."),
+            ],
+            fixes: 5
+        ),
+        ReleaseNote(
+            id: "2026-10-28-job-documents",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "doc.on.doc", title: "Every document for the job",
+                      detail: "See each estimate and invoice for this job, with its own price, status and details."),
+                .init(symbol: "person.crop.rectangle", title: "Show customers their job documents",
+                      detail: "Browse estimates and invoices together, then unlock to return to the technician's tools."),
+                .init(symbol: "sum", title: "See estimate totals at a glance",
+                      detail: "Expand totals for approved work and estimates awaiting approval, with pricing options kept separate."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-10-28-invoice-scan-to-pay",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "qrcode", title: "Let customers scan to pay",
+                      detail: "Show a QR code for secure card checkout, or share the link with the customer."),
+                .init(symbol: "banknote", title: "Record money already received",
+                      detail: "Cash and check stay close. Find bank transfers and cards collected elsewhere in one menu."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-28-tap-readiness",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "creditcard", title: "Payment choices that are ready to use",
+                      detail: "Collection starts with a secure link when Tap to Pay is not ready for this version."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-28-readable-controls",
+            date: "2026-10-28",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Read buttons at your text size",
+                      detail: "Buttons, tabs and job labels grow with your text, and contact shortcuts stack at larger sizes."),
+                .init(symbol: "phone", title: "Listen to the booking call",
+                      detail: "Play the booking call, read its summary, or open the transcript from the job."),
+            ],
+            fixes: 3
         ),
         ReleaseNote(
             id: "2026-10-28-job-hours",
