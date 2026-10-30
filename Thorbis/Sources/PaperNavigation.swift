@@ -32,6 +32,9 @@ struct RootView: View {
     @State private var barQuery = ""
     @State private var newCustomer = false
     @State private var newEstimate = false
+    /// The bar's create menu, and the choice that runs once it has closed.
+    @State private var createMenuOpen = false
+    @State private var pendingCreate: (() -> Void)?
     @State private var reviewScope: SavedWorkScope?
     @ObservedObject private var recents = RecentItems.shared
     /// The phone's width, which sizes the pop-up menu against the bar.
@@ -282,6 +285,11 @@ struct RootView: View {
                 .onChange(of: geometry.size.width, initial: true) { phoneWidth = geometry.size.width }
                 .onChange(of: geometry.size.width) { if menuOpen { closeMenu() } }
         }
+        .sheet(isPresented: $createMenuOpen, onDismiss: {
+            let run = pendingCreate
+            pendingCreate = nil
+            run?()
+        }) { createMenu }
     }
 
     /// Recent records and results in a card that rises from the bar. Drag its handle down to close.
@@ -386,22 +394,8 @@ struct RootView: View {
         return [Array(recent), sync].filter { !$0.isEmpty }
     }
 
-    /// The bar's +: the record the screen showing is about, else a job.
-    private var barCreate: (label: String, run: () -> Void)? {
-        let canCustomer = session.can("customer.create", feature: "core_crm")
-        let canEstimate = session.can("estimate.create", feature: "estimates")
-        switch selectedTab {
-        case MenuItem.customers.rawValue where canCustomer: return ("New customer", { closeMenu(); newCustomer = true })
-        case MenuItem.estimates.rawValue where canEstimate: return ("New estimate", { closeMenu(); newEstimate = true })
-        default:
-            if session.can("job.create", feature: "jobs") { return ("New job", { closeMenu(); createJob = true }) }
-            if canCustomer { return ("New customer", { closeMenu(); newCustomer = true }) }
-            return nil
-        }
-    }
-
-    /// Long-press +: the other things people start from the field.
-    private var newActions: [[AppBottomBar.QuickAction]] {
+    /// What this person may start from the bar, in a fixed order so + means the same on every screen.
+    private var createChoices: [AppBottomBar.QuickAction] {
         var create: [AppBottomBar.QuickAction] = []
         if session.can("job.create", feature: "jobs") {
             create.append(.init(title: "New job", symbol: "briefcase") { createJob = true })
@@ -412,7 +406,32 @@ struct RootView: View {
         if session.can("customer.create", feature: "core_crm") {
             create.append(.init(title: "New customer", symbol: "person.badge.plus") { newCustomer = true })
         }
-        return [create]
+        return create
+    }
+
+    /// The bar's +: a small create menu. With one choice it starts that directly; with none it hides.
+    private var barCreate: (label: String, run: () -> Void)? {
+        let choices = createChoices
+        if choices.count == 1, let only = choices.first { return (only.title, { closeMenu(); only.run() }) }
+        guard !choices.isEmpty else { return nil }
+        return ("Create", { closeMenu(); createMenuOpen = true })
+    }
+
+    /// Long-press +: the same creates, straight from the press (a shortcut, never the only way).
+    private var newActions: [[AppBottomBar.QuickAction]] {
+        let choices = createChoices
+        return choices.count > 1 ? [choices] : []
+    }
+
+    /// The create menu's card. The picked sheet opens once this one has closed; presenting both in
+    /// one pass would drop the second.
+    private var createMenu: some View {
+        ThorbisMenuCard(items: createChoices.map { choice in
+            ThorbisMenuItem(choice.title, icon: choice.symbol, action: choice.run)
+        }, title: "Create") { item in
+            pendingCreate = item.action
+            createMenuOpen = false
+        }
     }
 
     private func openRecent(_ item: RecentItems.Item) {
@@ -569,6 +588,8 @@ struct RootView: View {
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
             case "new-job": createJob = true
+            case "create-menu": primaryTab = .jobs; createMenuOpen = true
+            case "schedule-unscheduled": primaryTab = .schedule
             case "settings": showSettings = true
             case "app-menu", "app-menu-edit", "side-menu", "side-menu-search": menuOpen = true
             case "bar-live", "bar-syncing":

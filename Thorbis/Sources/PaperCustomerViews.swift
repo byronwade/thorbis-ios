@@ -9,8 +9,6 @@ struct CustomersView: View {
     @State private var showNew = false
     @State private var newJobFor: Customer?
     @Environment(\.openURL) private var openURL
-    @State private var showSearch = false
-    @State private var search = ""
     @State private var newName = ""
     @State private var selectedView = CustomerListScope.recent.rawValue
     @State private var stateFilter = "Any state"
@@ -26,7 +24,7 @@ struct CustomersView: View {
         scope.customers(from: records).filter { customer in
             let matchesState = stateFilter == "Any state"
                 || (stateFilter == "Archived") == customer.archived
-            return matchesState && (search.isEmpty || customer.name.localizedCaseInsensitiveContains(search))
+            return matchesState
         }
     }
     private var activeJobs: Int { store.jobs.filter { !["completed", "canceled"].contains($0.status) }.count }
@@ -48,8 +46,8 @@ struct CustomersView: View {
         let jobGroups = CustomerJobGroups(jobs: store.jobs)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withMotion { showSearch.toggle() } })
-                if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
+                // Finding a customer is the bar's Search; Recent / All / Archived narrow the book.
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs")
                 PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
                 if let error = error ?? store.error {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
@@ -68,9 +66,7 @@ struct CustomersView: View {
                 }
                 if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
-                        PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: search.isEmpty ? "Archived customers will appear here." : "Try a different search.")
-                    } else if !search.isEmpty {
-                        PaperEmptyState.search(search)
+                        PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: "Archived customers will appear here.")
                     } else {
                         PaperEmptyState(symbol: "person.2", title: "No customers yet", message: "Customers you add appear here, A to Z.",
                                         actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,

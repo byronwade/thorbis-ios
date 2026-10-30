@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-search-create",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "plus.magnifyingglass", title: "One search, one + and quicker booking",
+                      detail: "Search from the bar, start a job, estimate or customer from +, and book unscheduled jobs right from the list.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-visual-rollout",
             date: "2026-10-30",
             highlights: [

@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "side-menu", "side-menu-search", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "side-menu", "side-menu-search", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -1255,7 +1255,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2224", "0416", "AC recheck — Nakamura", "scheduled", 16, 0),
             ("2201", "0412", "Drain cleaning", "completed", 8, 30)
         ]
-        return rows.filter { !arguments.contains("--paper-preview-customer-no-jobs") || $0.1 != "0412" }.map { ref, customer, title, status, hour, minute in
+        var listed = rows.filter { !arguments.contains("--paper-preview-customer-no-jobs") || $0.1 != "0412" }.map { ref, customer, title, status, hour, minute in
             ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
              "customerId": "00000000-0000-4000-8000-00000000\(customer)", "title": title, "status": status,
              "assignedToUserId": PaperPreview.actorID, "scheduledFor": today(hour: hour, minute: minute),
@@ -1263,6 +1263,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
              "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
         }
+        // Booked work with no time and no tech yet, only where the Unscheduled queue is the subject.
+        if PaperPreview.screen == "schedule-unscheduled" {
+            listed += [("2231", "0414", "Furnace not igniting — Chen", "2026-10-27T15:00:00Z"),
+                       ("2232", "0415", "Garbage disposal jammed — Alvarez", "2026-10-30T09:00:00Z")].map { ref, customer, title, created in
+                ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
+                 "customerId": "00000000-0000-4000-8000-00000000\(customer)", "title": title, "status": "open",
+                 "createdAt": created, "updatedAt": created, "allowedTransitions": [String]()] as [String: Any]
+            }
+        }
+        return listed
     }
     private static func customers() -> [[String: Any]] {
         let shortName = ProcessInfo.processInfo.arguments.contains("--paper-preview-short-customer-name")

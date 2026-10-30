@@ -71,9 +71,9 @@ struct ScheduleView: View {
     @State private var tab = "Today"
     /// Nil until the person picks; until then the role decides (technicians: Mine).
     @State private var pickedScope: ScheduleScope?
-    @State private var search = ""
-    @State private var searchVisible = false
     @State private var showNew = false
+    /// A job without a time whose Schedule button was tapped; the sheet reads it fresh.
+    @State private var scheduling: Job?
     @State private var busyJobID: String?
     @State private var progressError: String?
     /// The Next up job as GET /v1/jobs/{id} returns it: list items carry no allowed transitions,
@@ -97,20 +97,17 @@ struct ScheduleView: View {
     }
     /// Mine/Everyone applies to a day, week or map; Unscheduled is everyone's queue.
     private var showsScope: Bool { range != .unscheduled && session.user?.id != nil }
+    /// Finding a job is the bar's Search; this screen narrows by range and whose jobs only.
     private var jobs: [Job] {
-        let filtered = JobFiltering.schedule(store.jobs, range: range, assignedTo: scope.assignee(session.user?.id, range: range))
-        guard !search.isEmpty else { return filtered }
-        return filtered.filter { $0.title.localizedCaseInsensitiveContains(search)
-            || $0.shortRef.localizedCaseInsensitiveContains(search)
-            || store.customerName($0.customerId).localizedCaseInsensitiveContains(search) }
+        JobFiltering.schedule(store.jobs, range: range, assignedTo: scope.assignee(session.user?.id, range: range))
     }
+    private var canSchedule: Bool { session.can("job.assign", feature: "jobs") }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Schedule", subtitle: subtitle) { withMotion { searchVisible.toggle() } }
+                PaperHeader(title: "Schedule", subtitle: subtitle)
                 OfflineBanner()
-                if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
                 if showsScope {
                     ThorbisSegmented(options: [(ScheduleScope.mine, "My jobs"), (ScheduleScope.everyone, "Everyone")],
@@ -138,11 +135,13 @@ struct ScheduleView: View {
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showNew) { NewJobSheet() }
+        .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
         .sensoryFeedback(.success, trigger: committed)
         #if DEBUG
         .onAppear {
             if PaperPreview.enabled && PaperPreview.screen == "schedule-map" { tab = "Map" }
             if PaperPreview.enabled && PaperPreview.screen == "schedule-week" { tab = "Week" }
+            if PaperPreview.enabled && PaperPreview.screen == "schedule-unscheduled" { tab = "Unscheduled" }
         }
         #endif
     }
@@ -210,7 +209,8 @@ struct ScheduleView: View {
     private func jobCard(_ list: [Job], timeStyle: ScheduleCompactRow.TimeStyle = .time) -> some View {
         VStack(spacing: 0) {
             PaperCardList(data: list) { job in
-                ScheduleCompactRow(job: job, customer: store.customerName(job.customerId), timeStyle: timeStyle)
+                ScheduleCompactRow(job: job, customer: store.customerName(job.customerId), timeStyle: timeStyle,
+                                   schedule: job.scheduledFor == nil && canSchedule ? { scheduling = job } : nil)
             }
         }
         .paperCardMargin()
@@ -237,11 +237,11 @@ struct ScheduleView: View {
     }
 
     @ViewBuilder private var emptyState: some View {
-        let boardEmpty = store.jobs.isEmpty && search.isEmpty
+        let boardEmpty = store.jobs.isEmpty
         let mine = showsScope && scope == .mine
         PaperEmptyState(
             symbol: "calendar",
-            title: boardEmpty ? "Nothing on the board yet" : search.isEmpty ? (range == .unscheduled ? "Everything has a time" : "No jobs \(mine ? "for you " : "")\(range == .today ? "today" : "this week")") : "No matching jobs",
+            title: boardEmpty ? "Nothing on the board yet" : range == .unscheduled ? "Everything has a time" : "No jobs \(mine ? "for you " : "")\(range == .today ? "today" : "this week")",
             message: boardEmpty ? "Your workspace is live. New jobs will land here."
                 : range == .unscheduled ? "Jobs without a scheduled time appear here."
                 : mine ? "Choose Everyone to see the whole team's jobs." : "Try another range, or check Jobs for everything open.",
@@ -278,6 +278,21 @@ struct ScheduleView: View {
     }
 
     @ViewBuilder private func commit(for job: Job) -> some View {
+        if job.scheduledFor == nil, canSchedule, !ScheduleLead.activeStatuses.contains(job.status) {
+            // Needs a time: booking it is the one next step, straight to the schedule sheet.
+            Button { scheduling = job } label: {
+                commitLabel("Schedule", symbol: "calendar.badge.plus", busy: false)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Schedule \(job.title)")
+            .accessibilityHint("Choose a day and arrival window")
+            .accessibilityIdentifier("schedule-row-\(job.id)")
+        } else {
+            stepCommit(for: job)
+        }
+    }
+
+    @ViewBuilder private func stepCommit(for job: Job) -> some View {
         switch nextStep(for: job) {
         case "en_route":
             ThorbisMenu(
@@ -446,6 +461,8 @@ struct ScheduleCompactRow: View {
     let job: Job
     let customer: String
     var timeStyle: TimeStyle = .time
+    /// Set on a row with no time for someone who may schedule: a trailing Schedule button.
+    var schedule: (() -> Void)? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
 
@@ -475,25 +492,31 @@ struct ScheduleCompactRow: View {
     }
 
     var body: some View {
-        NavigationLink(value: job) {
-            HStack(alignment: .center, spacing: 12) {
-                StatusTile(status: job.status)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                    // When, then the status as a word, then who: two lines at most.
-                    (time + Text(" · \(job.status.statusLabel) · \(customer)").font(Theme.font(13)).foregroundStyle(Theme.muted))
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+        // The Schedule button sits beside the row's link, not inside it, so each is its own target.
+        HStack(alignment: .center, spacing: 8) {
+            NavigationLink(value: job) {
+                HStack(alignment: .center, spacing: 12) {
+                    StatusTile(status: job.status)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                        // When, then the status as a word, then who: two lines at most.
+                        (time + Text(" · \(job.status.statusLabel) · \(customer)").font(Theme.font(13)).foregroundStyle(Theme.muted))
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    }
+                    Spacer(minLength: 0)
+                    if schedule == nil { PaperDisclosure() }
                 }
-                Spacer(minLength: 0)
-                PaperDisclosure()
+                .padding(.leading, inset).padding(.trailing, schedule == nil ? inset : 0).padding(.vertical, 10)
+                .frame(minHeight: 60)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, inset).padding(.vertical, 10)
-            .frame(minHeight: 60)
-            .contentShape(Rectangle())
+            .buttonStyle(RowPressStyle())
+            .jobContextMenu(job, customer: customer)
+            if let schedule {
+                ScheduleRowButton(job: job, action: schedule).padding(.trailing, inset)
+            }
         }
-        .buttonStyle(RowPressStyle())
-        .jobContextMenu(job, customer: customer)
     }
 }
 
@@ -503,8 +526,8 @@ struct JobsView: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
     @State private var tab = "Assigned"
-    @State private var search = ""
     @State private var showDisplay = false
+    @State private var scheduling: Job?
     @State private var display = DisplayOptions()
     /// Empty means every status; otherwise only the ticked ones.
     @State private var statusFilter: Set<String> = []
@@ -518,7 +541,8 @@ struct JobsView: View {
 
     private var jobs: [Job] {
         let assigned = tab == "Assigned" ? (session.user?.id ?? "") : nil
-        return JobFiltering.board(store.jobs, assignedTo: assigned, search: search,
+        // Finding a job by name or number is the bar's Search; the board narrows with Filters.
+        return JobFiltering.board(store.jobs, assignedTo: assigned, search: "",
                                   showCompleted: display.showCompleted, statuses: statusFilter,
                                   ordering: display.ordering)
     }
@@ -527,14 +551,25 @@ struct JobsView: View {
     private var subtitle: String {
         attentionCount > 0 ? "\(activeCount) active · \(attentionCount) paused" : "\(activeCount) active"
     }
+    private var canSchedule: Bool { session.can("job.assign", feature: "jobs") }
+    /// What the Filters sheet is doing to the board, in words, so a narrowed list never looks empty by accident.
+    private var filterSummary: String {
+        var parts: [String] = []
+        if !statusFilter.isEmpty {
+            parts.append(statusChips.filter { statusFilter.contains($0) }.map(\.statusLabel).joined(separator: ", "))
+        }
+        if !display.showCompleted { parts.append("Hiding completed") }
+        if display.ordering != .recent { parts.append("By \(display.ordering.label.lowercased())") }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Jobs", subtitle: subtitle) { showDisplay = true }
                 OfflineBanner()
-                PaperSearchField(text: $search, prompt: "Search title or job number")
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
+                if filterActive { filterBar }
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 VStack(alignment: .leading, spacing: 14) {
                     if store.loading && store.jobs.isEmpty {
@@ -550,9 +585,9 @@ struct JobsView: View {
                     if MyDayRules.shouldShowEmptyState(isEmpty: jobs.isEmpty, isLoading: store.loading, hasError: store.error != nil) {
                         PaperEmptyState(
                             symbol: "briefcase",
-                            title: !search.isEmpty ? "No matching jobs" : tab == "Assigned" ? "Nothing assigned to you" : "No jobs yet",
-                            message: !search.isEmpty ? "Try another title or job number." : tab == "Assigned" ? "Jobs dispatched to you appear here. All jobs shows the whole board." : "New jobs appear here as soon as they are created.",
-                            actionTitle: session.can("job.create", feature: "jobs") && search.isEmpty ? "New job" : nil,
+                            title: filterActive ? "No jobs match these filters" : tab == "Assigned" ? "Nothing assigned to you" : "No jobs yet",
+                            message: filterActive ? "Clear the filters to see the whole board." : tab == "Assigned" ? "Jobs dispatched to you appear here. All jobs shows the whole board." : "New jobs appear here as soon as they are created.",
+                            actionTitle: session.can("job.create", feature: "jobs") && !filterActive ? "New job" : nil,
                             action: { showNew = true }
                         )
                     }
@@ -571,25 +606,33 @@ struct JobsView: View {
         }
         .sheet(isPresented: $showNew) { NewJobSheet() }
         .sheet(isPresented: $showDisplay) { displaySheet }
+        .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
     }
 
-    /// Ordering and status filters remain available alongside the direct list search.
-    private var displaySheet: some View {
-        ThorbisSheetScaffold(title: "Display", onClose: { showDisplay = false }) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
-                TextField("Title or job number", text: $search)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                if !search.isEmpty {
-                    Button { search = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
-                    }.accessibilityLabel("Clear search")
-                }
+    /// The active filters in one quiet line under the tabs, with a way back to the whole board.
+    private var filterBar: some View {
+        HStack(spacing: 8) {
+            Button { showDisplay = true } label: {
+                Label(filterSummary, systemImage: "line.3.horizontal.decrease")
+                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
             }
-            .font(Theme.font(16)).padding(.horizontal, 12).frame(minHeight: 44)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Filtered: \(filterSummary)")
+            .accessibilityHint("Opens the filters")
+            Button("Clear") { withMotion { statusFilter = []; display = DisplayOptions() } }
+                .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("Clear filters")
+        }
+        .padding(.horizontal, Theme.gutter)
+    }
 
+    /// Ordering, completed work and status: the real ways to narrow the board.
+    private var displaySheet: some View {
+        ThorbisSheetScaffold(title: "Filters", onClose: { showDisplay = false }) {
             ThorbisSheetGroup {
                 ThorbisSheetRow(label: "Ordering", value: display.ordering.label,
                                 options: DisplayOptions.Ordering.allCases.map(\.label)) { picked in
@@ -632,6 +675,9 @@ struct JobsView: View {
                 PaperGroupHeader(title: title, count: jobs.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 PaperCardList(data: jobs) { job in
                     let customer = store.customerName(job.customerId)
+                    let needsTime = canSchedule && job.scheduledFor == nil && !["completed", "canceled"].contains(job.status)
+                        && !ScheduleLead.activeStatuses.contains(job.status)
+                    HStack(spacing: 8) {
                     NavigationLink(value: job) {
                         // MA-11: what, then its status, who and when; same record, same row.
                         HStack(spacing: 12) {
@@ -655,14 +701,20 @@ struct JobsView: View {
                                     .dynamicTypeSize(...DynamicTypeSize.large)
                                     .accessibilityLabel("Assigned to you")
                             }
-                            PaperDisclosure()
+                            if !needsTime { PaperDisclosure() }
                         }
-                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                        .padding(.leading, PaperCardMetrics.inset).padding(.trailing, needsTime ? 0 : PaperCardMetrics.inset)
+                        .padding(.vertical, 10)
                         .frame(minHeight: 60)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(RowPressStyle())
                     .jobContextMenu(job, customer: customer)
+                    // No time yet: book it from the row (beside the link, so each is its own target).
+                    if needsTime {
+                        ScheduleRowButton(job: job) { scheduling = job }.padding(.trailing, PaperCardMetrics.inset)
+                    }
+                    }
                 }
             }
         }

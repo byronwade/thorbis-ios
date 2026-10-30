@@ -28,7 +28,8 @@ struct PaperHeader: View {
     let title: String
     var icon: String = ""
     let subtitle: String
-    var search: (() -> Void)? = nil
+    /// Opens this list's real filters (status, ordering). Never a search: that is the bar's Search.
+    var filter: (() -> Void)? = nil
     @EnvironmentObject private var session: SessionController
     @Environment(\.paperShowMenu) private var openAccount
     @Environment(\.paperMenuButton) private var showsMenuButton
@@ -64,8 +65,8 @@ struct PaperHeader: View {
 
     /// Filters this list; the bar's Search finds anything. Different glyphs, different jobs.
     @ViewBuilder private var filterButton: some View {
-        if let search {
-            PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: search)
+        if let filter {
+            PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: filter)
         }
     }
 }
@@ -730,7 +731,7 @@ struct FloatingCreateButton: View {
     let title: String
     var disabled = false
     let action: () -> Void
-    /// On iPhone the bottom bar's + creates for the screen showing, so this pill steps aside.
+    /// On iPhone the bottom bar's + holds every create, so this pill steps aside.
     @Environment(\.paperMenuButton) private var visible
 
     var body: some View {

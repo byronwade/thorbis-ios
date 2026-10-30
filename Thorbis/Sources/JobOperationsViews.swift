@@ -219,6 +219,83 @@ struct JobCloseoutView: View {
     }
 }
 
+/// "Schedule" on a list row that has no time yet: one tap to the schedule sheet instead of
+/// row → job → ••• → Schedule. Only for people who may schedule (`job.assign`).
+struct ScheduleRowButton: View {
+    let job: Job
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label("Schedule", systemImage: "calendar.badge.plus")
+                .font(Theme.font(13, weight: .medium))
+                .foregroundStyle(Theme.foreground)
+                .padding(.horizontal, 12)
+                .frame(height: Theme.chipHeight + 4)
+                .background(Theme.fill, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Schedule \(job.title)")
+        .accessibilityIdentifier("schedule-row-\(job.id)")
+    }
+}
+
+/// The schedule sheet opened from a list. Rows carry a list item, so the sheet reads the job as
+/// the server has it now (its current time is the change's expected prior) before offering times.
+struct QuickScheduleSheet: View {
+    let jobID: String
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @Environment(\.dismiss) private var dismiss
+    @State private var record: JobRecord?
+    @State private var error: String?
+
+    var body: some View {
+        if let record {
+            JobScheduleView(job: record)
+        } else {
+            VStack(spacing: 12) {
+                if let error {
+                    ErrorBanner(message: error) { await load() }
+                    Button("Close") { dismiss() }
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                } else {
+                    ProgressView("Opening the schedule…").font(Theme.font(15)).tint(Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                }
+            }
+            .padding(20)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .background(Theme.card)
+            .presentationDetents([.height(430), .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(Theme.cardRadius)
+            .presentationBackground(Theme.card)
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        let generation = session.generation
+        let organizationID = session.activeOrganization?.id
+        do {
+            let loaded = try await api.fieldJob(jobID)
+            guard session.generation == generation, session.activeOrganization?.id == organizationID else { return }
+            guard loaded.id == jobID, loaded.organizationId == organizationID else {
+                throw Problem(title: "Job could not be verified", status: nil, detail: nil)
+            }
+            error = nil
+            record = loaded
+        } catch is CancellationError {
+        } catch {
+            self.error = "Could not open this job's schedule. \(error.localizedDescription)"
+        }
+    }
+}
+
 struct JobScheduleView: View {
     let job: JobRecord
     var onSaved: (JobRecord) -> Void = { _ in }
@@ -544,8 +621,8 @@ struct JobFollowUpsView: View {
                         (FieldFollowUpRequest.Kind.officeScheduling, "Schedule a return visit"),
                     ], selection: $kind)
                     .padding(.bottom, 10)
-                    followUpField("What happened?", text: $reason)
-                    followUpField("What needs to happen next?", text: $nextAction).padding(.top, 8)
+                    followUpField("What happened?", example: "Part on order, customer away until Friday…", text: $reason)
+                    followUpField("What needs to happen next?", example: "Book a return visit to fit the part…", text: $nextAction).padding(.top, 12)
                     Text("A return-visit request goes to the office to book; it doesn't reserve a time.")
                         .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
                 }
@@ -573,12 +650,18 @@ struct JobFollowUpsView: View {
         .refreshable { await load() }
     }
 
-    private func followUpField(_ prompt: String, text: Binding<String>) -> some View {
-        TextField(prompt, text: text, axis: .vertical)
-            .font(Theme.font(16)).lineLimit(2...5)
-            .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+    /// The question stays above the field once typing starts (GR-26); the placeholder is only an example.
+    private func followUpField(_ label: String, example: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                .accessibilityHidden(true)
+            TextField(example, text: text, axis: .vertical)
+                .font(Theme.font(16)).lineLimit(2...5)
+                .padding(12)
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+                .accessibilityLabel(label)
+        }
     }
 
     private func load() async {
