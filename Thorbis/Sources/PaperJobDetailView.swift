@@ -79,6 +79,7 @@ struct JobDetailView: View {
     @State private var bookingCall: BookingCallRecord?
     @State private var showAssign = false
     @State private var showFollowUps = false
+    @State private var handoff: DeviceHandoff?
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -167,6 +168,7 @@ struct JobDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
+        .deviceHandoffs($handoff)
         .sensoryFeedback(.success, trigger: committed)
         // The customer may have changed a phone, an email or a contact in their own hands.
         .fullScreenCover(isPresented: $showCustomerMode, onDismiss: {
@@ -376,7 +378,16 @@ struct JobDetailView: View {
             // The bar shows only on Overview; on the other tabs Wrap up stays in the menu.
             barIsWrapUp: selectedTab == "Overview" && nextStep == .wrapUp,
             canShowToCustomer: session.can("estimate.view", feature: "estimates") || session.can("invoice.view", feature: "invoicing"),
-            canEditCustomer: session.can("customer.edit", feature: "core_crm")))
+            canEditCustomer: session.can("customer.edit", feature: "core_crm"),
+            canAddToCalendar: JobFiltering.date(job.scheduledFor) != nil,
+            canEmail: customerEmail(job) != nil))
+    }
+
+    /// The primary contact's email, else the account's, only while this customer's contacts are current.
+    private func customerEmail(_ job: JobRecord) -> MailDraft? {
+        guard customerContext(job) == contactsContext, contactsContext != nil else { return nil }
+        let email = contacts.first(where: \.primary)?.email ?? contacts.first(where: { $0.email != nil })?.email ?? customerRecord?.email
+        return MailDraft(recipient: email, subject: job.title)
     }
 
     private func menuActionItem(_ action: JobMenuAction, job: JobRecord) -> ThorbisMenuItem {
@@ -385,6 +396,12 @@ struct JobDetailView: View {
             return ThorbisMenuItem(transitionTitle(target), icon: transitionSymbol(target), isDisabled: busy) { runTransition(target) }
         case .schedule:
             return ThorbisMenuItem(job.scheduledFor == nil ? "Schedule" : "Reschedule", icon: "calendar") { showSchedule = true }
+        case .addToCalendar:
+            return ThorbisMenuItem("Add to Calendar", icon: "calendar.badge.plus") {
+                handoff = JobCalendarDraft.make(job: job, customerName: store.customers.first { $0.id == job.customerId }?.name, locations: customerLocations).map(DeviceHandoff.calendar)
+            }
+        case .email:
+            return ThorbisMenuItem("Email customer", icon: "envelope") { handoff = customerEmail(job).map(DeviceHandoff.mail) }
         case .assign:
             return ThorbisMenuItem(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", icon: "person.crop.circle.badge.plus") { showAssign = true }
         case .billWithoutEstimate:

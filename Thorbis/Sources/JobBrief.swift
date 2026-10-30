@@ -8,6 +8,7 @@ import UIKit
 enum JobMenuAction: Hashable {
     case transition(String)
     case schedule
+    case addToCalendar
     case assign
     case billWithoutEstimate
     case deposit
@@ -15,6 +16,7 @@ enum JobMenuAction: Hashable {
     case followUps
     case showToCustomer
     case customerDetails
+    case email
     case copyID
 }
 
@@ -34,6 +36,10 @@ enum JobMenu {
         var canWrapUp = true
         var canShowToCustomer = false
         var canEditCustomer = false
+        /// The visit has a time, so it can go on the person's own calendar.
+        var canAddToCalendar = false
+        /// A verified customer or contact email is loaded.
+        var canEmail = false
     }
 
     static func groups(_ inputs: Inputs) -> [[JobMenuAction]] {
@@ -42,6 +48,7 @@ enum JobMenu {
             + (inputs.transitions.contains("paused") ? [.transition("paused")] : [])
         var visit = moves
         if inputs.canSchedule { visit.append(.schedule) }
+        if inputs.canAddToCalendar { visit.append(.addToCalendar) }
         if inputs.canAssign { visit.append(.assign) }
         var money: [JobMenuAction] = []
         if inputs.canBillWithoutEstimate { money.append(.billWithoutEstimate) }
@@ -52,6 +59,7 @@ enum JobMenu {
         var record: [JobMenuAction] = []
         if inputs.canShowToCustomer { record.append(.showToCustomer) }
         if inputs.canEditCustomer { record.append(.customerDetails) }
+        if inputs.canEmail { record.append(.email) }
         record.append(.copyID)
         return [visit, money, finish, record].filter { !$0.isEmpty }
     }
