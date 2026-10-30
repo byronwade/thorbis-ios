@@ -333,8 +333,37 @@ struct CustomerMembershipSection: View {
 }
 
 /// "Member · 10% off" — shown wherever a customer's price matters.
+/// The job's membership as a card row (star tile, "Membership", the plan's discount). Shows nothing
+/// for non-members, including its divider.
+struct MemberFactRow: View {
+    let customerID: String
+    @EnvironmentObject private var api: APIClient
+    @State private var pricing: MemberPricing?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let pricing, pricing.isMember {
+                PaperCardDivider()
+                HStack(spacing: 12) {
+                    IconTile(symbol: "star", tint: Theme.brandText)
+                    Text("Membership").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Text(pricing.discountPercent > 0 ? "\(pricing.discountPercent)% off" : "Member")
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
+                }
+                .padding(.horizontal, PaperCard<EmptyView>.inset).padding(.vertical, 8)
+                .frame(minHeight: 56)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .task(id: customerID) { pricing = try? await api.memberPricing(customerID) }
+    }
+}
+
 struct MemberChip: View {
     let customerID: String
+    /// A plain fact (star and words) rather than a pill, beside a status pill.
+    var plain = false
     @EnvironmentObject private var api: APIClient
     @State private var pricing: MemberPricing?
 
@@ -342,8 +371,12 @@ struct MemberChip: View {
         HStack(spacing: 0) {
             Color.clear.frame(width: 0, height: 0)
             if let pricing, pricing.isMember {
-                Chip(text: pricing.discountPercent > 0 ? "Member · \(pricing.discountPercent)% off" : "Member", icon: "star",
-                     tint: Theme.brandText, bg: Theme.brandSurface)
+                let label = pricing.discountPercent > 0 ? "Member · \(pricing.discountPercent)% off" : "Member"
+                if plain {
+                    Fact(text: label, icon: "star", tint: Theme.brandText)
+                } else {
+                    Chip(text: label, icon: "star", tint: Theme.brandText, bg: Theme.brandSurface)
+                }
             }
         }
         .task(id: customerID) { pricing = try? await api.memberPricing(customerID) }

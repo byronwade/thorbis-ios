@@ -332,53 +332,73 @@ struct JobDetailView: View {
                 .lineLimit(compact ? 2 : nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            // One wrapping row of chips instead of two fixed rows (chips are pills).
-            FlowRow(spacing: 6, lineSpacing: 6) {
+            if compact {
+                HStack(spacing: 10) {
                     statusControl(job)
-                    // Only status is a pill; time and technician read as plain facts beside it.
-                    if let date = JobFiltering.date(job.scheduledFor) {
-                        Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
-                            Label(date.visitLabel(), systemImage: "clock")
-                                .font(Theme.font(13, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                                .frame(height: Theme.chipHeight)
-                                .padding(.vertical, 8).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        // Without scheduling rights the chip is a label, not a button that does nothing.
-                        .allowsHitTesting(session.can("job.assign", feature: "jobs"))
-                        .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
-                    }
-                    if let assignedName = assignedDisplayName(for: job) {
-                        Label(shortName(assignedName), systemImage: "person")
-                            .font(Theme.font(13, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .frame(height: Theme.chipHeight)
-                            .padding(.vertical, 8)
-                    }
-                    MemberChip(customerID: job.customerId)
-            }
-            if let balance = invoiceBalanceCents {
-                // MF-01/MF-03: what's owed on the job is a labelled figure, not a chip. It jumps to
-                // the Invoice tab, where it can be collected.
-                Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 12)
-                        Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
-                    }
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                    if let date = JobFiltering.date(job.scheduledFor) { Fact(text: date.visitLabel(), icon: "clock") }
                 }
-                .buttonStyle(PressStyle())
-                .padding(.top, 8)
-                .accessibilityElement(children: .combine)
-                .accessibilityHint("Opens the invoice")
+            } else {
+                factsCard(job).padding(.top, 10)
             }
             if !compact { quickActions }
         }
-        .padding(.horizontal, Theme.gutter)
+        .padding(.horizontal, 16)
         .padding(.top, 4)
         .padding(.bottom, 10)
+    }
+
+    /// The job's facts as labelled rows in one card: status (tap to change), when (tap to
+    /// reschedule), who, membership and what is owed (tap for the invoice).
+    private func factsCard(_ job: JobRecord) -> some View {
+        let canSchedule = session.can("job.assign", feature: "jobs")
+        let (statusSymbol, statusTint) = statusIcon(outbox.pendingStatus(for: job.id) ?? job.status)
+        return PaperCard {
+            factRow(icon: statusSymbol, tint: statusTint, label: "Status") { statusControl(job) }
+            if let date = JobFiltering.date(job.scheduledFor) {
+                PaperCardDivider()
+                Button { if canSchedule { showSchedule = true } } label: {
+                    factRow(icon: "clock", label: "When", chevron: canSchedule) {
+                        Text(date.visitLabel()).font(Theme.font(15, weight: .medium))
+                    }
+                }
+                .buttonStyle(RowPressStyle())
+                .allowsHitTesting(canSchedule)
+                .accessibilityHint(canSchedule ? "Change the scheduled time" : "")
+            }
+            if let assignedName = assignedDisplayName(for: job) {
+                PaperCardDivider()
+                factRow(icon: "person", label: "Technician") {
+                    Text(shortName(assignedName)).font(Theme.font(15, weight: .medium))
+                }
+            }
+            MemberFactRow(customerID: job.customerId)
+            if let balance = invoiceBalanceCents {
+                PaperCardDivider()
+                // MF-01/MF-03: what's owed is a labelled figure; it opens the Invoice tab.
+                Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
+                    factRow(icon: "dollarsign", tint: balance > 0 ? Theme.warning : Theme.success, label: "Balance due", chevron: true) {
+                        Text(money(balance, currency: "USD")).moneyStyle(.row)
+                    }
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityHint("Opens the invoice")
+            }
+        }
+    }
+
+    private func factRow<Value: View>(icon: String, tint: Color = Theme.foreground, label: String, chevron: Bool = false,
+                                      @ViewBuilder value: () -> Value) -> some View {
+        HStack(spacing: 12) {
+            IconTile(symbol: icon, tint: tint == Theme.muted ? Theme.foreground : tint)
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 8)
+            value().foregroundStyle(Theme.foreground)
+            if chevron { PaperDisclosure() }
+        }
+        .padding(.horizontal, PaperCard<EmptyView>.inset).padding(.vertical, 8)
+        .frame(minHeight: 56)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     /// Everything a tech reaches for on arrival, without leaving the job: call, text, drive.

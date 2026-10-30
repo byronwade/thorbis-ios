@@ -749,3 +749,107 @@ extension PaperEmptyState {
                         message: "Check the spelling or try a different word.")
     }
 }
+
+// MARK: - Cards (modern pass v2)
+
+/// Rows inside a `PaperCard` pad by this instead of the screen gutter, so their text lines up with
+/// the card's edge rather than the screen's.
+private struct PaperRowInsetKey: EnvironmentKey { static let defaultValue: CGFloat = Theme.gutter }
+extension EnvironmentValues {
+    var paperRowInset: CGFloat {
+        get { self[PaperRowInsetKey.self] }
+        set { self[PaperRowInsetKey.self] = newValue }
+    }
+}
+
+/// A white rounded card that holds a group of rows or one block of content. Content sits on cards,
+/// not on the bare background (docs/design/2026-10-30-modern-pass.md, v2).
+struct PaperCard<Content: View>: View {
+    /// Inner padding for free-form content; rows pass 0 and pad themselves by `paperRowInset`.
+    var padding: CGFloat = 0
+    @ViewBuilder var content: Content
+
+    static var radius: CGFloat { 18 }
+    static var inset: CGFloat { 14 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Self.radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Self.radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.04), radius: 10, y: 3)
+            .environment(\.paperRowInset, Self.inset)
+    }
+}
+
+extension View {
+    /// A label-and-value row inside a `PaperCard`: padded to the card's edge, 48 tall.
+    func cardRow() -> some View {
+        padding(.horizontal, PaperCard<EmptyView>.inset).frame(minHeight: 48)
+    }
+}
+
+/// The hairline between rows in a card, starting after the row's icon tile.
+struct PaperCardDivider: View {
+    var leading: CGFloat = PaperCard<EmptyView>.inset + IconTile.size + 12
+    var body: some View {
+        Rectangle().fill(Theme.border).frame(height: 0.5).padding(.leading, leading)
+    }
+}
+
+/// A rounded square holding a symbol: the leading mark on a row, so rows scan by shape and colour.
+struct IconTile: View {
+    let symbol: String
+    var tint: Color = Theme.foreground
+    var fill: Color? = nil
+    static let size: CGFloat = 36
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(tint)
+            .frame(width: Self.size, height: Self.size)
+            .background(fill ?? (tint == Theme.foreground || tint == Theme.muted ? Theme.fill : tint.opacity(0.13)),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+/// A job's status as a tinted tile.
+struct StatusTile: View {
+    let status: String
+    var body: some View {
+        let (symbol, color) = statusIcon(status)
+        IconTile(symbol: symbol, tint: color == Theme.muted ? Theme.foreground : color)
+    }
+}
+
+/// Headline numbers at the top of a screen: two to four tiles in one card, label over value.
+struct PaperStatRow: View {
+    struct Stat: Identifiable {
+        let label: String
+        let value: String
+        var tint: Color = Theme.foreground
+        var id: String { label }
+    }
+    let stats: [Stat]
+
+    var body: some View {
+        PaperCard {
+            HStack(spacing: 0) {
+                ForEach(Array(stats.enumerated()), id: \.element.id) { index, stat in
+                    if index > 0 { Rectangle().fill(Theme.border).frame(width: 0.5).padding(.vertical, 12) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(stat.label).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted).lineLimit(1)
+                        Text(stat.value).font(Theme.font(20, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(stat.tint).lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .padding(.horizontal, PaperCard<EmptyView>.inset).padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+}

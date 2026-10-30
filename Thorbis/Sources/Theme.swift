@@ -151,6 +151,23 @@ struct Chip: View {
     }
 }
 
+/// A plain fact beside a status pill: a small icon and muted words, no pill. Only what you can
+/// tap or what carries state is a pill (docs/design/2026-10-30-modern-pass.md, rule 3).
+struct Fact: View {
+    let text: String
+    var icon: String? = nil
+    var tint: Color = Theme.muted
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)).foregroundStyle(tint) }
+            Text(text).font(Theme.font(13, weight: .medium)).lineLimit(1).fixedSize()
+                .foregroundStyle(tint == Theme.muted ? Theme.muted : tint)
+        }
+        .frame(minHeight: Theme.chipHeight)
+    }
+}
+
 struct Avatar: View {
     let name: String
     var size: CGFloat = 24

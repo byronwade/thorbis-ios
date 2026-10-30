@@ -56,13 +56,17 @@ struct CustomersView: View {
                 if recordsLoading && records.isEmpty { SkeletonRows() }
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(sections, id: \.0) { letter, customers in
-                        PaperGroupHeader(title: letter).padding(.top, 6)
-                        ForEach(customers) { customer in
-                            customerRow(customer)
+                        PaperGroupHeader(title: letter).padding(.top, 6).padding(.horizontal, 4)
+                        PaperCard {
+                            ForEach(Array(customers.enumerated()), id: \.element.id) { index, customer in
+                                if index > 0 { PaperCardDivider() }
+                                customerRow(customer)
+                            }
                         }
+                        .padding(.bottom, 12)
                     }
                 }
-                .padding(.horizontal, Theme.gutter)
+                .padding(.horizontal, 16)
                 if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
                         PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: search.isEmpty ? "Archived customers will appear here." : "Try a different search.")
@@ -96,7 +100,7 @@ struct CustomersView: View {
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
         return NavigationLink(value: listCustomer) {
             HStack(spacing: 12) {
-                Avatar(name: customer.name, size: 28)
+                Avatar(name: customer.name, size: IconTile.size)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                     // The open job's state as a word next to the count (a mark alone was a guess).
@@ -105,9 +109,10 @@ struct CustomersView: View {
                 }
                 Spacer(minLength: 4)
                 if let open { StatusRing(status: open.status).accessibilityHidden(true) }
+                PaperDisclosure()
             }
-            .padding(.horizontal, 8)
-            .frame(minHeight: 56).contentShape(Rectangle())
+            .padding(.horizontal, PaperCard<EmptyView>.inset).padding(.vertical, 10)
+            .frame(minHeight: 60).contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         // MA-12: the common actions on long-press; each also exists on the customer.
@@ -124,7 +129,6 @@ struct CustomersView: View {
             }
             Button("Copy name", systemImage: "doc.on.doc") { UIPasteboard.general.string = customer.name }
         }
-        .padding(.horizontal, -8)
     }
 
     private func rowDetail(jobCount: Int, open: Job?) -> String {
@@ -387,27 +391,30 @@ struct CustomerDetailView: View {
         })
     }
     @ViewBuilder private var metadataChips: some View {
+        // State is a pill (archived, a job under way); the rest are plain facts beside it.
         if record?.archived == true { Chip(text: "Archived", icon: "archivebox") }
         if jobs.contains(where: { $0.status == "in_progress" }) { Chip(text: "Job in progress", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface) }
-        if session.can("job.view", feature: "jobs") { Chip(text: "\(jobs.count) jobs", icon: "clock") }
-        if let type = record?.accountType { Chip(text: type.statusLabel) }
-        MemberChip(customerID: customer.id)
+        if session.can("job.view", feature: "jobs") { Fact(text: "\(jobs.count) job\(jobs.count == 1 ? "" : "s")", icon: "briefcase") }
+        if let type = record?.accountType { Fact(text: type.statusLabel, icon: type == "commercial" ? "building.2" : "house") }
+        MemberChip(customerID: customer.id, plain: true)
     }
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionTitle("Details")
             if let record {
-                if let phone = record.phone { detailRow("Phone", value: phone) }
-                if let email = record.email {
-                    HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(15)).frame(minHeight: 44)
+                PaperCard {
+                    if let phone = record.phone { detailRow("Phone", value: phone) }
+                    if let email = record.email {
+                        HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(15)).cardRow()
+                    }
+                    if let address = record.address {
+                        HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(15)).cardRow()
+                    }
+                    if let industry = record.industry { detailRow("Industry", value: industry) }
+                    if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel) }
+                    if let terms = record.billingTerms { detailRow("Billing terms", value: terms) }
+                    if smsConsentLoaded { smsConsentRow.cardRow() }
                 }
-                if let address = record.address {
-                    HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(15)).frame(minHeight: 44)
-                }
-                if let industry = record.industry { detailRow("Industry", value: industry) }
-                if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel) }
-                if let terms = record.billingTerms { detailRow("Billing terms", value: terms) }
-                if smsConsentLoaded { smsConsentRow }
             }
         }
     }
@@ -418,9 +425,10 @@ struct CustomerDetailView: View {
         if let job = open.first {
             VStack(alignment: .leading, spacing: 0) {
                 PaperGroupHeader(title: open.count > 1 ? "Next visit · \(open.count) open" : "Next visit")
+                PaperCard {
                 NavigationLink(value: job) {
                     HStack(spacing: 12) {
-                        StatusRing(status: job.status).accessibilityHidden(true)
+                        StatusTile(status: job.status)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                             Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
@@ -430,9 +438,11 @@ struct CustomerDetailView: View {
                         Spacer(minLength: 8)
                         PaperDisclosure()
                     }
-                    .frame(minHeight: 52).contentShape(Rectangle())
+                    .padding(.horizontal, PaperCard<EmptyView>.inset).padding(.vertical, 10)
+                    .frame(minHeight: 60).contentShape(Rectangle())
                 }
                 .buttonStyle(RowPressStyle())
+                }
             }
         }
     }
@@ -808,7 +818,7 @@ struct CustomerDetailView: View {
         }
     }
     private func detailRow(_ title: String, value: String) -> some View {
-        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(15)).frame(minHeight: 44)
+        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(15)).cardRow()
     }
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
