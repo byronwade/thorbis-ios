@@ -84,13 +84,12 @@ struct JobCloseoutView: View {
                     }
                     if mayRecordUnpaidDisposition {
                         PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
-                        Picker("Reason", selection: $unpaidReasonCode) {
-                            Text("Customer will pay later").tag("customer_will_pay_later")
-                            Text("Office collection required").tag("office_collection_required")
-                            Text("Payment attempt failed").tag("payment_attempt_failed")
-                            Text("Other").tag("other")
-                        }
-                        .pickerStyle(.menu).frame(minHeight: 44)
+                        ThorbisSelect(options: [
+                            ("customer_will_pay_later", "Customer will pay later"),
+                            ("office_collection_required", "Office collection required"),
+                            ("payment_attempt_failed", "Payment attempt failed"),
+                            ("other", "Other"),
+                        ], selection: $unpaidReasonCode, label: "Reason")
                         wellField("Explain the unpaid balance", text: $unpaidReason)
                         wellField("Office follow-up action", text: $unpaidNextAction).padding(.top, 8)
                         Text("Completing with this leaves payment outstanding and creates an office follow-up.")
@@ -133,12 +132,10 @@ struct JobCloseoutView: View {
         .navigationDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0) }
         .navigationDestination(isPresented: $openBilling) { BillingSchedulesView() }
         .sensoryFeedback(.success, trigger: completed)
-        .confirmationDialog("Complete this job?", isPresented: $confirmComplete, titleVisibility: .visible) {
-            Button("Complete job") { Task { await complete() } }
-        }
-        .confirmationDialog("Cancel this job?", isPresented: $confirmCancel, titleVisibility: .visible) {
-            Button("Cancel job", role: .destructive) { Task { await cancel() } }
-        }
+        .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
+                        actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
+        .thorbisConfirm("Cancel this job?", isPresented: $confirmCancel,
+                        actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancel() } }])
     }
     private func checklistRow(done: Bool, title: String, detail: String?) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -542,11 +539,10 @@ struct JobFollowUpsView: View {
                 }
                 if session.can("job.edit", feature: "jobs") {
                     PaperGroupHeader(title: "New follow-up").padding(.top, 10)
-                    Picker("Request", selection: $kind) {
-                        Text("Notify office").tag(FieldFollowUpRequest.Kind.notifyOffice)
-                        Text("Schedule a return visit").tag(FieldFollowUpRequest.Kind.officeScheduling)
-                    }
-                    .pickerStyle(.segmented)
+                    ThorbisSegmented(options: [
+                        (FieldFollowUpRequest.Kind.notifyOffice, "Notify office"),
+                        (FieldFollowUpRequest.Kind.officeScheduling, "Schedule a return visit"),
+                    ], selection: $kind)
                     .padding(.bottom, 10)
                     followUpField("What happened?", text: $reason)
                     followUpField("What needs to happen next?", text: $nextAction).padding(.top, 8)

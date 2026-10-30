@@ -63,10 +63,12 @@ struct PendingOrganizationFacts {
         store(all)
     }
 
-    func remove(_ factKey: String, actorID: String, organizationID: String) {
+    /// Removes the change only while it is still the queued value, so a newer value saved during
+    /// the send stays queued.
+    func remove(_ change: Change, actorID: String, organizationID: String) {
         var all = load()
         let key = scope(actorID: actorID, organizationID: organizationID)
-        let list = (all[key] ?? []).filter { $0.key != factKey }
+        let list = (all[key] ?? []).filter { $0 != change }
         all[key] = list.isEmpty ? nil : list
         store(all)
     }
@@ -85,6 +87,10 @@ final class ReviewRequestsModel: ObservableObject {
     @Published private(set) var waitingToSync = false
     @Published var linkError: String?
     @Published var loadError: String?
+    @Published private(set) var switchError: String?
+
+    /// One flush at a time: a second caller waits for the running one, then sends what is left.
+    private var flushing: Task<Void, Never>?
 
     private let pending: PendingOrganizationFacts
     private let cacheKey = "thorbis.reviewRequests.lastLoaded.v1"
@@ -107,10 +113,23 @@ final class ReviewRequestsModel: ObservableObject {
 
     private struct Cached: Codable { let organizationID: String; let link: String?; let on: Bool }
 
+    private func remember(organizationID: String, link: String?, on: Bool) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(
+            Cached(organizationID: organizationID.lowercased(), link: link, on: on)), forKey: cacheKey)
+    }
+
+    private func cached(organizationID: String) -> Cached? {
+        UserDefaults.standard.data(forKey: cacheKey)
+            .flatMap { try? JSONDecoder().decode(Cached.self, from: $0) }
+            .flatMap { $0.organizationID == organizationID.lowercased() ? $0 : nil }
+    }
+
     /// Sends anything queued, then reads the server's facts. Offline it shows the last values
     /// it loaded with queued changes applied.
     func load(api: APIClient, actorID: String?, organizationID: String?) async {
         guard let actorID, let organizationID else { return }
+        // A reload (say, when signal returns) keeps what the owner is still editing.
+        let keepDrafts = loaded && dirty
         await flush(api: api, actorID: actorID, organizationID: organizationID)
         do {
             let profile = try await api.organizationProfile()
@@ -120,17 +139,14 @@ final class ReviewRequestsModel: ObservableObject {
             }
             savedLink = profile.value("review_link")
             savedOn = profile.value("review_requests") != "off"
-            UserDefaults.standard.set(try? JSONEncoder().encode(
-                Cached(organizationID: organizationID.lowercased(), link: savedLink, on: savedOn)), forKey: cacheKey)
+            remember(organizationID: organizationID, link: savedLink, on: savedOn)
             loadError = nil
         } catch is CancellationError {
             return
         } catch let problem as Problem where problem.status == 403 {
             loadError = "Review requests need the company settings permission. Ask an owner for access."
         } catch {
-            if let cached = UserDefaults.standard.data(forKey: cacheKey)
-                .flatMap({ try? JSONDecoder().decode(Cached.self, from: $0) }),
-               cached.organizationID == organizationID.lowercased() {
+            if let cached = cached(organizationID: organizationID) {
                 savedLink = cached.link
                 savedOn = cached.on
             } else if !error.isTransientServerFailure {
@@ -144,8 +160,10 @@ final class ReviewRequestsModel: ObservableObject {
             if change.key == "review_requests" { savedOn = change.value != "off" }
         }
         waitingToSync = !queued.isEmpty
-        linkDraft = savedLink ?? ""
-        askForReviews = savedOn
+        if !keepDrafts {
+            linkDraft = savedLink ?? ""
+            askForReviews = savedOn
+        }
         loaded = true
     }
 
@@ -154,6 +172,7 @@ final class ReviewRequestsModel: ObservableObject {
     func save(api: APIClient, actorID: String?, organizationID: String?) async -> Bool {
         guard let actorID, let organizationID else { return false }
         linkError = nil
+        switchError = nil
         var changes: [PendingOrganizationFacts.Change] = []
         let typed = linkDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !typed.isEmpty, typed != (savedLink ?? "") {
@@ -175,28 +194,46 @@ final class ReviewRequestsModel: ObservableObject {
             if change.key == "review_requests" { savedOn = change.value != "off" }
         }
         await flush(api: api, actorID: actorID, organizationID: organizationID)
-        return linkError == nil
+        return linkError == nil && switchError == nil
     }
 
-    /// Sends queued changes in order. A connection failure keeps the rest queued; a refusal drops
-    /// that change and shows why, since resending it would be refused again.
+    /// Sends queued changes in order, one flush at a time. A connection failure keeps the rest
+    /// queued; a refusal drops that change, puts back the last confirmed value and says why, since
+    /// resending it would be refused again. Each confirmed value is remembered for offline opens.
     func flush(api: APIClient, actorID: String, organizationID: String) async {
+        let previous = flushing
+        let run = Task { [weak self] in
+            await previous?.value
+            await self?.sendQueued(api: api, actorID: actorID, organizationID: organizationID)
+        }
+        flushing = run
+        await run.value
+    }
+
+    private func sendQueued(api: APIClient, actorID: String, organizationID: String) async {
+        var confirmed = cached(organizationID: organizationID)
         for change in pending.changes(actorID: actorID, organizationID: organizationID) {
             do {
                 try await api.confirmOrganizationFact(change.key, value: change.value,
                                                       actorID: actorID, organizationID: organizationID)
-                pending.remove(change.key, actorID: actorID, organizationID: organizationID)
+                pending.remove(change, actorID: actorID, organizationID: organizationID)
+                let link = change.key == "review_link" ? change.value : (confirmed?.link ?? savedLink)
+                let on = change.key == "review_requests" ? change.value != "off" : (confirmed?.on ?? savedOn)
+                remember(organizationID: organizationID, link: link, on: on)
+                confirmed = Cached(organizationID: organizationID.lowercased(), link: link, on: on)
             } catch is CancellationError {
                 break
             } catch where error.isTransientServerFailure {
                 break
             } catch {
-                pending.remove(change.key, actorID: actorID, organizationID: organizationID)
+                pending.remove(change, actorID: actorID, organizationID: organizationID)
                 if change.key == "review_link" {
                     linkError = error.localizedDescription
-                    savedLink = nil
+                    savedLink = confirmed?.link
                 } else {
-                    loadError = error.localizedDescription
+                    switchError = error.localizedDescription
+                    savedOn = confirmed?.on ?? true
+                    askForReviews = savedOn
                 }
             }
         }
@@ -226,6 +263,9 @@ struct ReviewRequestsView: View {
                     }
                 }
                 .tint(Theme.markAccent)
+                if let error = model.switchError {
+                    InlineProblem(message: error).font(Theme.font(13))
+                }
             } footer: {
                 Text("When an invoice is paid in full, Thorbis texts the customer your review link once. Only with their SMS consent, between 8 AM and 8 PM their time, and never twice in 90 days.")
             }

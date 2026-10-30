@@ -1,7 +1,7 @@
 import SwiftUI
 import UserNotifications
 
-/// Settings as grouped lists with the person on top, opened from the side menu's gear.
+/// Settings as grouped lists with the person on top, opened from Settings in the bottom bar's menu.
 /// Native grouped lists per D-025 (Apple HIG for settings), Thorbis tokens for color.
 struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
@@ -38,7 +38,17 @@ struct SettingsView: View {
                     NavigationLink { CustomizeMenuView() } label: {
                         row("Customize menu", symbol: "slider.horizontal.3", value: nil)
                     }
+                    // Owners reach the business screens here, now that the More screen is off the menu.
                     if session.can("organization.settings.edit") {
+                        NavigationLink(value: PaperRoute.businessSetup) {
+                            row("Set up your business", symbol: "checklist", value: nil)
+                        }
+                        NavigationLink(value: PaperRoute.companyDetails) {
+                            row("Company details", symbol: "building.2", value: nil)
+                        }
+                        NavigationLink(value: PaperRoute.payments) {
+                            row("Payments", symbol: "creditcard", value: nil)
+                        }
                         NavigationLink { ReviewRequestsView() } label: {
                             row("Review requests", symbol: "star.bubble", value: nil)
                         }
@@ -46,11 +56,14 @@ struct SettingsView: View {
                 }
 
                 Section("This phone") {
-                    Picker(selection: $appearance) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
-                    } label: { row("Appearance", symbol: "circle.lefthalf.filled", value: nil) }
+                    ThorbisMenu(items: [
+                        ThorbisMenuItem("System", isSelected: appearance == "system") { appearance = "system" },
+                        ThorbisMenuItem("Light", isSelected: appearance == "light") { appearance = "light" },
+                        ThorbisMenuItem("Dark", isSelected: appearance == "dark") { appearance = "dark" },
+                    ], title: "Appearance") {
+                        row("Appearance", symbol: "circle.lefthalf.filled",
+                            value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System", opens: true)
+                    }
                     Button {
                         Task { await notificationsTapped() }
                     } label: {
@@ -79,13 +92,13 @@ struct SettingsView: View {
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .paperDestinations()
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
-            .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                Button("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }
-            } message: {
-                Text(outbox.signOutWarning)
-            }
+            .thorbisConfirm("Sign out of Thorbis?",
+                            message: outbox.signOutWarning,
+                            isPresented: $confirmSignOut,
+                            actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }])
             .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
         }
     }

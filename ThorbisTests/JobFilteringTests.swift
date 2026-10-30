@@ -88,6 +88,42 @@ final class JobFilteringTests: XCTestCase {
         XCTAssertFalse(MyDayRules.canStartDriving(canceled, canEdit: true))
     }
 
+    // MARK: board (Display sheet)
+
+    func testBoardHidesCompletedAndCanceledWhenAsked() {
+        let open = makeJob("open", time: nil, status: "scheduled")
+        let done = makeJob("done", time: nil, status: "completed")
+        let canceled = makeJob("canceled", time: nil, status: "canceled")
+        let hidden = JobFiltering.board([open, done, canceled], assignedTo: nil, search: "",
+                                        showCompleted: false, statuses: [], ordering: .recent).map(\.id)
+        XCTAssertEqual(Set(hidden), ["open"])
+        let shown = JobFiltering.board([open, done, canceled], assignedTo: nil, search: "",
+                                       showCompleted: true, statuses: [], ordering: .recent).map(\.id)
+        XCTAssertEqual(Set(shown), ["open", "done", "canceled"])
+    }
+
+    func testBoardKeepsOnlyTickedStatuses() {
+        let a = makeJob("a", time: nil, status: "scheduled")
+        let b = makeJob("b", time: nil, status: "paused")
+        let c = makeJob("c", time: nil, status: "en_route")
+        let filtered = JobFiltering.board([a, b, c], assignedTo: nil, search: "",
+                                          showCompleted: true, statuses: ["paused", "en_route"], ordering: .recent).map(\.id)
+        XCTAssertEqual(Set(filtered), ["b", "c"])
+        // An empty status set means every status, not none.
+        let all = JobFiltering.board([a, b, c], assignedTo: nil, search: "",
+                                     showCompleted: true, statuses: [], ordering: .recent).map(\.id)
+        XCTAssertEqual(Set(all), ["a", "b", "c"])
+    }
+
+    func testBoardOrdersByNameThenByScheduledTime() {
+        let zulu = makeJob("z", time: "2026-10-27T09:00:00Z")
+        let alpha = makeJob("a", time: "2026-10-27T11:00:00Z")
+        XCTAssertEqual(JobFiltering.board([zulu, alpha], assignedTo: nil, search: "",
+                                          showCompleted: true, statuses: [], ordering: .name).map(\.id), ["a", "z"])
+        XCTAssertEqual(JobFiltering.board([alpha, zulu], assignedTo: nil, search: "",
+                                          showCompleted: true, statuses: [], ordering: .scheduled).map(\.id), ["z", "a"])
+    }
+
     private func makeJob(_ id: String, time: String?, assignedTo: String? = nil, status: String = "scheduled", transitions: [String]? = nil) -> Job {
         var job = Job(id: id, customerId: nil, title: id, status: status, createdAt: nil, updatedAt: nil, allowedTransitions: transitions)
         job.scheduledFor = time

@@ -25,8 +25,19 @@ final class ReviewRequestsTests: XCTestCase {
             .init(key: "review_link", value: "https://g.page/r/x"),
             .init(key: "review_requests", value: "on"),
         ])
-        store.remove("review_link", actorID: "A", organizationID: "O")
+        store.remove(.init(key: "review_link", value: "https://g.page/r/x"), actorID: "A", organizationID: "O")
         XCTAssertEqual(store.changes(actorID: "A", organizationID: "O").map(\.key), ["review_requests"])
+    }
+
+    func testRemovingASentValueKeepsANewerOneSavedMeanwhile() {
+        let defaults = UserDefaults(suiteName: "ReviewRequestsTests.\(UUID().uuidString)")!
+        let store = PendingOrganizationFacts(defaults: defaults)
+        let sent = PendingOrganizationFacts.Change(key: "review_link", value: "https://g.page/r/a")
+        store.put(sent, actorID: "A", organizationID: "O")
+        store.put(.init(key: "review_link", value: "https://g.page/r/b"), actorID: "A", organizationID: "O")
+        store.remove(sent, actorID: "A", organizationID: "O")
+        XCTAssertEqual(store.changes(actorID: "A", organizationID: "O"),
+                       [.init(key: "review_link", value: "https://g.page/r/b")])
     }
 
     func testPendingFactsNeverCrossActorsOrCompanies() {

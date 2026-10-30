@@ -31,6 +31,25 @@ enum JobFiltering {
         }.sorted { (date($0.updatedAt) ?? .distantPast) > (date($1.updatedAt) ?? .distantPast) }
     }
 
+    /// The jobs board with the Display sheet applied: the `jobs(_:assignedTo:search:)` base, then
+    /// hide completed/canceled when asked, keep only ticked statuses, and re-order. Pure so the
+    /// Display sheet's filtering is unit-tested without the view.
+    static func board(_ jobs: [Job], assignedTo: String?, search: String,
+                      showCompleted: Bool, statuses: Set<String>,
+                      ordering: DisplayOptions.Ordering) -> [Job] {
+        var result = self.jobs(jobs, assignedTo: assignedTo, search: search)
+        if !showCompleted { result = result.filter { !["completed", "canceled"].contains($0.status) } }
+        if !statuses.isEmpty { result = result.filter { statuses.contains($0.status) } }
+        switch ordering {
+        case .recent: break // base is already most-recently-updated first
+        case .scheduled:
+            result.sort { (date($0.scheduledFor) ?? .distantFuture) < (date($1.scheduledFor) ?? .distantFuture) }
+        case .name:
+            result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        }
+        return result
+    }
+
     static func myDay(_ jobs: [Job], actorID: String?, now: Date = Date(), calendar: Calendar = .current) -> [Job] {
         guard let actorID, !actorID.isEmpty else { return [] }
         return jobs.filter { job in

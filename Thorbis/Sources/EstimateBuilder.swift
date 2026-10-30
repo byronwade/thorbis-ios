@@ -577,21 +577,19 @@ struct EstimateBuilderLineRow: View {
     }
 
     private var menu: some View {
-        Menu {
-            if canMoveUp { Button(action: moveUp) { Label("Move up", systemImage: "arrow.up") } }
-            if canMoveDown { Button(action: moveDown) { Label("Move down", systemImage: "arrow.down") } }
-            Button(action: moveToOtherGroup) {
-                Label(moveLabel, systemImage: line.group == .work ? "shippingbox" : "wrench.and.screwdriver")
-            }
-            Button(action: duplicate) { Label("Duplicate", systemImage: "plus.square.on.square") }
-            if line.isEditedPriceBookLine { Button(action: reset) { Label("Reset to price book", systemImage: "arrow.uturn.backward") } }
-            Button(role: .destructive, action: remove) { Label("Remove line", systemImage: "trash") }
-        } label: {
+        var items: [ThorbisMenuItem] = []
+        if canMoveUp { items.append(ThorbisMenuItem("Move up", icon: "arrow.up") { moveUp() }) }
+        if canMoveDown { items.append(ThorbisMenuItem("Move down", icon: "arrow.down") { moveDown() }) }
+        items.append(ThorbisMenuItem(moveLabel, icon: line.group == .work ? "shippingbox" : "wrench.and.screwdriver") { moveToOtherGroup() })
+        items.append(ThorbisMenuItem("Duplicate", icon: "plus.square.on.square") { duplicate() })
+        if line.isEditedPriceBookLine { items.append(ThorbisMenuItem("Reset to price book", icon: "arrow.uturn.backward") { reset() }) }
+        items.append(ThorbisMenuItem("Remove line", icon: "trash", role: .destructive) { remove() })
+        return ThorbisMenu(items: items,
+                           accessibilityLabel: "Actions for \(line.description.isEmpty ? "line" : line.description)") {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
-        .accessibilityLabel("Actions for \(line.description.isEmpty ? "line" : line.description)")
     }
 
     private func stepButton(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
