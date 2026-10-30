@@ -170,6 +170,7 @@ struct NewJobSheet: View {
                 }
                 .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
                 .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
+                .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
         }
         // A swipe never throws away a typed title (MA-16).
         .interactiveDismissDisabled(busy || (savedJobID == nil && !draft.title.isEmpty))
@@ -187,17 +188,16 @@ struct NewJobSheet: View {
     }
 
     private var techPicker: some View {
-        Menu {
-            Button { tech = nil } label: { Label("No technician yet", systemImage: "person.crop.circle.badge.xmark") }
-            ForEach(people) { person in
-                Button { tech = person; techSaved = false } label: {
-                    if person == tech { Label(person.displayName, systemImage: "checkmark") } else { Text(person.displayName) }
-                }
-            }
-        } label: {
+        var items: [ThorbisMenuItem] = [
+            ThorbisMenuItem("No technician yet", icon: "person.crop.circle.badge.xmark", isSelected: tech == nil) { tech = nil }
+        ]
+        items.append(contentsOf: people.map { person in
+            ThorbisMenuItem(person.displayName, isSelected: person == tech) { tech = person; techSaved = false }
+        })
+        return ThorbisMenu(items: items, title: "Technician",
+                           accessibilityLabel: "Technician: \(tech?.displayName ?? "none")") {
             pill(tech?.displayName ?? "Tech", symbol: "person.badge.clock", set: tech != nil)
         }
-        .accessibilityLabel("Technician: \(tech?.displayName ?? "none")")
         .disabled(busy || techSaved)
         .task { if people.isEmpty { people = (try? await api.fieldAssignees()) ?? [] } }
     }
@@ -740,12 +740,8 @@ struct MoreView: View {
                     .frame(minHeight: 56)
                     .accessibilityElement(children: .combine)
                     PaperMenuRow(title: "Appearance", symbol: "circle.lefthalf.filled") {
-                        Picker("Appearance", selection: $appearance) {
-                            Text("System").tag("system")
-                            Text("Light").tag("light")
-                            Text("Dark").tag("dark")
-                        }
-                        .pickerStyle(.menu).labelsHidden().tint(Theme.muted)
+                        ThorbisSelect(options: [("system", "System"), ("light", "Light"), ("dark", "Dark")],
+                                      selection: $appearance, menuTitle: "Appearance")
                     }
                     Button { confirmSignOut = true } label: {
                         PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
@@ -761,15 +757,14 @@ struct MoreView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
         .sheet(isPresented: $showNewJob) { NewJobSheet() }
-        .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
-        } message: {
-            Text(outbox.signOutWarning)
-        }
+        .thorbisConfirm("Sign out of Thorbis?",
+                        message: outbox.signOutWarning,
+                        isPresented: $confirmSignOut,
+                        actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
     }
 
-    /// MA-05: the same header as every tab root (menu button, 30/500 title). Switching
-    /// workspace and New job live in the side menu, so they are not repeated here.
+    /// MA-05: the same header as every tab root (30/500 title). Switching business lives in the
+    /// bottom bar's menu and New job on the bar's round button, so they are not repeated here.
     private var workspaceHeader: some View {
         PaperHeader(title: "More", subtitle: session.activeOrganization?.name ?? "Workspace")
     }

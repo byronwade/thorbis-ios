@@ -117,10 +117,9 @@ struct EquipmentEditor: View {
                 }
                 if !locations.isEmpty {
                     Section {
-                        Picker("Location", selection: $input.locationId) {
-                            Text("Not set").tag(String?.none)
-                            ForEach(locations) { Text($0.label.isEmpty ? $0.address : "\($0.label) · \($0.address)").tag(Optional($0.id)) }
-                        }
+                        ThorbisSelect(options: [(String?.none, "Not set")]
+                                        + locations.map { (Optional($0.id), $0.label.isEmpty ? $0.address : "\($0.label) · \($0.address)") },
+                                      selection: $input.locationId, label: "Location")
                     }
                 }
                 Section {
@@ -144,9 +143,8 @@ struct EquipmentEditor: View {
                         .disabled(busy || input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .confirmationDialog("Remove this equipment?", isPresented: $confirmRemove, titleVisibility: .visible) {
-                Button("Remove", role: .destructive) { Task { await remove() } }
-            }
+            .thorbisConfirm("Remove this equipment?", isPresented: $confirmRemove,
+                            actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await remove() } }])
             .onAppear(perform: fill)
         }
     }
@@ -240,10 +238,11 @@ struct CustomerMembershipSection: View {
                             }
                             Spacer(minLength: 0)
                             if canEdit {
-                                Menu {
-                                    Button("Cancel membership", role: .destructive) { cancelling = membership }
-                                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                                .accessibilityLabel("Membership actions")
+                                ThorbisMenu(items: [
+                                    ThorbisMenuItem("Cancel membership", icon: "xmark.circle", role: .destructive) { cancelling = membership },
+                                ], accessibilityLabel: "Membership actions") {
+                                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                                }
                             }
                         }
                         .padding(.vertical, 6)
@@ -259,10 +258,12 @@ struct CustomerMembershipSection: View {
         }
         .task(id: customerID) { await load() }
         .sheet(isPresented: $choosing) { planPicker }
-        .confirmationDialog("Cancel this membership?", isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } }),
-                            titleVisibility: .visible, presenting: cancelling) { membership in
-            Button("Cancel membership", role: .destructive) { Task { await cancel(membership) } }
-        } message: { _ in Text("Member pricing ends for this customer.") }
+        .thorbisConfirm(item: $cancelling,
+                        title: { _ in "Cancel this membership?" },
+                        message: { _ in "Member pricing ends for this customer." },
+                        actions: { membership in
+            [ThorbisConfirmAction("Cancel membership", role: .destructive) { Task { await cancel(membership) } }]
+        })
     }
 
     private func membershipDetail(_ membership: MembershipRecord) -> String {

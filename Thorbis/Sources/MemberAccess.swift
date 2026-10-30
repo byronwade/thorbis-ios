@@ -131,18 +131,15 @@ struct MemberAccessView: View {
     @ViewBuilder private func row(_ capability: RoleBuilderCatalog.Capability) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(capability.label).font(Theme.font(15, weight: .medium))
-            Picker(capability.label, selection: Binding(get: { choices[capability.id] ?? .role }, set: { value in
+            ThorbisSegmented(options: Choice.allCases.map { ($0, $0.rawValue) },
+                             selection: Binding(get: { choices[capability.id] ?? .role }, set: { value in
                 choices[capability.id] = value
                 if value == .allow, scopes[capability.id] == nil { scopes[capability.id] = capability.allowedScopes.first?.id ?? "organization" }
-            })) {
-                ForEach(Choice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
+            }))
             if choices[capability.id] == .allow, capability.allowedScopes.count > 1 {
-                Picker("Whose", selection: Binding(get: { scopes[capability.id] ?? "" }, set: { scopes[capability.id] = $0 })) {
-                    ForEach(capability.allowedScopes, id: \.id) { Text($0.label).tag($0.id) }
-                }
-                .font(Theme.font(13))
+                ThorbisSelect(options: capability.allowedScopes.map { ($0.id, $0.label) },
+                              selection: Binding(get: { scopes[capability.id] ?? "" }, set: { scopes[capability.id] = $0 }),
+                              label: "Whose")
             }
         }
         .padding(.vertical, 2)

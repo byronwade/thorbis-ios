@@ -31,4 +31,11 @@ final class MediaCaptureTests: XCTestCase {
         let plain = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(untagged)) as? [String: Any])
         XCTAssertNil(plain["tags"])
     }
+
+    func testStageChangeKeepsOtherTagsAndReplacesBeforeOrAfter() {
+        XCTAssertEqual(MediaStageTags.applying(.after, to: ["Warranty", "Before", " Before "]), ["Warranty", "After"])
+        XCTAssertEqual(MediaStageTags.applying(.before, to: ["After", "Warranty"]), ["Warranty", "Before"])
+        XCTAssertEqual(MediaStageTags.applying(.other, to: ["Before", "Serial", "After", ""]), ["Serial"])
+        XCTAssertEqual(MediaStageTags.applying(.before, to: ["Before", "Before"]), ["Before"])
+    }
 }

@@ -19,14 +19,16 @@ enum EstimateRevisionEditorError: Error, LocalizedError, Equatable {
     case optionTitleRequired
     case optionTitleTooLong
     case optionDescriptionTooLong
+    case missingLine
     case unsupportedLineSource
     case optionFeatureRequired
     case discountCapabilityRequired
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedStatus: "Only sent or declined estimates can be revised here."
+        case .unsupportedStatus: "Only a draft, sent, or declined estimate can be edited here."
         case .missingRevision: "This estimate has no current revision to revise. Refresh it and try again."
+        case .missingLine: "That line is no longer on this estimate."
         case .titleRequired: "Enter a title for the estimate."
         case .titleTooLong: "Estimate titles can contain up to 200 characters."
         case .noLines: "An estimate needs at least one line item."
@@ -109,7 +111,7 @@ struct EstimateRevisionEditorState: Equatable {
     }
 
     var canRevise: Bool {
-        estimate.status == "sent" || estimate.status == "declined"
+        estimate.status == "draft" || estimate.status == "sent" || estimate.status == "declined"
     }
 
     var hasUnsupportedLineSources: Bool {
@@ -140,8 +142,30 @@ struct EstimateRevisionEditorState: Equatable {
         lines.append(Self.blankLine())
     }
 
-    mutating func removeLine(id: UUID) {
-        lines.removeAll { $0.id == id }
+    mutating func removeLine(id: UUID) throws {
+        guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
+        guard let index = lines.firstIndex(where: { $0.id == id }) else {
+            throw EstimateRevisionEditorError.missingLine
+        }
+        lines.remove(at: index)
+    }
+
+    mutating func setQuantity(_ id: UUID, _ quantity: Int) throws {
+        guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
+        guard (1...100_000).contains(quantity) else { throw EstimateRevisionEditorError.invalidQuantity }
+        guard let index = lines.firstIndex(where: { $0.id == id }) else {
+            throw EstimateRevisionEditorError.missingLine
+        }
+        lines[index].quantity = String(quantity)
+    }
+
+    mutating func setUnitPrice(_ id: UUID, cents: Int) throws {
+        guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
+        guard cents.magnitude <= 100_000_000 else { throw EstimateRevisionEditorError.invalidPrice }
+        guard let index = lines.firstIndex(where: { $0.id == id }) else {
+            throw EstimateRevisionEditorError.missingLine
+        }
+        lines[index].unitPrice = Self.priceText(cents)
     }
 
     mutating func moveLine(id: UUID, to destinationIndex: Int) {
@@ -180,6 +204,7 @@ struct EstimateRevisionEditorState: Equatable {
     }
 
     mutating func addPriceBookItem(_ item: PriceBookListItem, optionID: String? = nil) throws {
+        guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
         guard item.archivedAt == nil else { throw EstimateRevisionEditorError.archivedPriceBookItem }
         guard UUID(uuidString: item.id) != nil, (1...Int(Int32.max)).contains(item.revision),
               item.sellPrice.currency == "USD", item.sellPrice.amount.magnitude <= 100_000_000 else {
@@ -203,7 +228,12 @@ struct EstimateRevisionEditorState: Equatable {
 
     func makeRequest(optionsFeatureEnabled: Bool, canDiscount: Bool) throws -> FieldEstimateReviseRequest {
         guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
-        guard let revision = estimate.currentRevisionNumber, revision > 0 else {
+        let revision: Int
+        if estimate.status == "draft" {
+            revision = estimate.currentRevisionNumber ?? 0
+        } else if let current = estimate.currentRevisionNumber, current > 0 {
+            revision = current
+        } else {
             throw EstimateRevisionEditorError.missingRevision
         }
         guard !hasUnsupportedLineSources else { throw EstimateRevisionEditorError.unsupportedLineSource }

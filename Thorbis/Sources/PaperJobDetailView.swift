@@ -79,7 +79,8 @@ struct JobDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
-            if let error { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
+            // Offline already says so above; a second "no connection" banner would only repeat it.
+            if let error, !session.isOffline { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
             if let job {
                 if selectedTab == "Photos" {
                     header(job, compact: true)
@@ -274,14 +275,10 @@ struct JobDetailView: View {
                 .accessibilityLabel("Share job")
                 let groups = menuGroups(job)
                 if !groups.isEmpty {
-                    Menu {
-                        ForEach(groups.indices, id: \.self) { index in
-                            Section { ForEach(groups[index], id: \.self) { menuItem($0, job: job) } }
-                        }
-                    } label: {
+                    ThorbisMenu(items: groups.flatMap { $0 }.map { menuActionItem($0, job: job) },
+                                title: "Job actions", accessibilityLabel: "Job actions") {
                         Image(systemName: "ellipsis")
                     }
-                    .accessibilityLabel("Job actions")
                 }
             }
         }
@@ -302,34 +299,26 @@ struct JobDetailView: View {
             canShowToCustomer: session.can("customer.edit", feature: "core_crm")))
     }
 
-    @ViewBuilder
-    private func menuItem(_ action: JobMenuAction, job: JobRecord) -> some View {
+    private func menuActionItem(_ action: JobMenuAction, job: JobRecord) -> ThorbisMenuItem {
         switch action {
         case .transition(let target):
-            Button(transitionTitle(target), systemImage: transitionSymbol(target)) { runTransition(target) }.disabled(busy)
+            return ThorbisMenuItem(transitionTitle(target), icon: transitionSymbol(target), isDisabled: busy) { runTransition(target) }
         case .schedule:
-            Button(job.scheduledFor == nil ? "Schedule" : "Reschedule", systemImage: "calendar") { showSchedule = true }
+            return ThorbisMenuItem(job.scheduledFor == nil ? "Schedule" : "Reschedule", icon: "calendar") { showSchedule = true }
         case .assign:
-            Button(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", systemImage: "person.crop.circle.badge.plus") { showAssign = true }
+            return ThorbisMenuItem(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", icon: "person.crop.circle.badge.plus") { showAssign = true }
         case .billWithoutEstimate:
-            Button { run(.createInvoice) } label: {
-                Label { Text("Create invoice"); Text("Bill without an estimate") } icon: { Image(systemName: "doc.plaintext") }
-            }
-            .disabled(creatingInvoice)
+            return ThorbisMenuItem("Create invoice", icon: "doc.plaintext", subtitle: "Bill without an estimate", isDisabled: creatingInvoice) { run(.createInvoice) }
         case .deposit:
-            Button { showDeposit = true } label: {
-                Label { Text("Request a deposit"); Text("Bill part up front") } icon: { Image(systemName: "banknote") }
-            }
+            return ThorbisMenuItem("Request a deposit", icon: "banknote", subtitle: "Bill part up front") { showDeposit = true }
         case .wrapUp:
-            Button { showWrapUp = true } label: {
-                Label { Text("Wrap up"); Text("Closeout checklist") } icon: { Image(systemName: "checkmark.seal") }
-            }
+            return ThorbisMenuItem("Wrap up", icon: "checkmark.seal", subtitle: "Closeout checklist") { showWrapUp = true }
         case .followUps:
-            Button("Follow-ups", systemImage: "list.bullet") { showFollowUps = true }
+            return ThorbisMenuItem("Follow-ups", icon: "list.bullet") { showFollowUps = true }
         case .showToCustomer:
-            Button("Show to customer", systemImage: "person.crop.rectangle") { showCustomerMode = true }
+            return ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCustomerMode = true }
         case .copyID:
-            Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
+            return ThorbisMenuItem("Copy job ID", icon: "doc.on.doc") { UIPasteboard.general.string = job.id }
         }
     }
 
@@ -346,14 +335,13 @@ struct JobDetailView: View {
             // One wrapping row of chips instead of two fixed rows (chips are pills).
             FlowRow(spacing: 6, lineSpacing: 6) {
                     statusControl(job)
+                    // Only status is a pill; time and technician read as plain facts beside it.
                     if let date = JobFiltering.date(job.scheduledFor) {
                         Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
                             Label(date.visitLabel(), systemImage: "clock")
-                                .font(Theme.font(12, weight: .medium))
+                                .font(Theme.font(13, weight: .medium))
                                 .foregroundStyle(Theme.muted)
-                                .padding(.horizontal, 10)
                                 .frame(height: Theme.chipHeight)
-                                .background(Theme.fill, in: Capsule())
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
@@ -362,20 +350,11 @@ struct JobDetailView: View {
                         .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
                     }
                     if let assignedName = assignedDisplayName(for: job) {
-                        HStack(spacing: 6) {
-                            Text(nameInitials(assignedName))
-                                .font(Theme.font(12, weight: .medium))
-                                .foregroundStyle(Theme.brandText)
-                                .frame(width: 22, height: 22)
-                                .dynamicTypeSize(...DynamicTypeSize.large)
-                                .background(Theme.brandSurface, in: Circle())
-                            Text(shortName(assignedName))
-                                .font(Theme.font(12, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                        }
-                        .padding(.leading, 3).padding(.trailing, 10)
-                        .frame(height: Theme.chipHeight)
-                        .background(Theme.fill, in: Capsule())
+                        Label(shortName(assignedName), systemImage: "person")
+                            .font(Theme.font(13, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                            .frame(height: Theme.chipHeight)
+                            .padding(.vertical, 8)
                     }
                     MemberChip(customerID: job.customerId)
             }
@@ -395,10 +374,7 @@ struct JobDetailView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityHint("Opens the invoice")
             }
-            if !compact {
-                JobProgressTrack(status: outbox.pendingStatus(for: job.id) ?? job.status).padding(.top, 10)
-                quickActions
-            }
+            if !compact { quickActions }
         }
         .padding(.horizontal, Theme.gutter)
         .padding(.top, 4)
@@ -424,14 +400,11 @@ struct JobDetailView: View {
         if transitions.isEmpty {
             statusChip(job, tint: tint, showsMenu: false)
         } else {
-            Menu {
-                ForEach(transitions, id: \.self) { target in
-                    Button(transitionTitle(target)) { runTransition(target) }
-                }
-            } label: {
+            ThorbisMenu(items: transitions.map { target in
+                ThorbisMenuItem(transitionTitle(target)) { runTransition(target) }
+            }, title: "Change status") {
                 statusChip(job, tint: tint, showsMenu: true)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -464,10 +437,6 @@ struct JobDetailView: View {
         guard let first = parts.first else { return name }
         guard let last = parts.dropFirst().last else { return String(first) }
         return "\(first) \(last.prefix(1))."
-    }
-
-    private func nameInitials(_ name: String) -> String {
-        String(name.split(whereSeparator: \.isWhitespace).prefix(2).compactMap(\.first))
     }
 
     private var invoiceBalanceCents: Int? {
@@ -670,13 +639,12 @@ struct JobDetailView: View {
                 }
             } else {
                 if invoices.count > 1 {
-                    Menu {
-                        ForEach(invoices) { invoice in
-                            Button("INV-\(invoice.id.suffix(4).uppercased()) · \(invoice.status.statusLabel)") {
-                                selectedInvoiceID = invoice.id
-                            }
+                    ThorbisMenu(items: invoices.map { invoice in
+                        ThorbisMenuItem("INV-\(invoice.id.suffix(4).uppercased()) · \(invoice.status.statusLabel)",
+                                        isSelected: invoice.id == (selectedInvoice?.id ?? invoices[0].id)) {
+                            selectedInvoiceID = invoice.id
                         }
-                    } label: {
+                    }, title: "Choose invoice", accessibilityLabel: "Choose invoice") {
                         HStack(spacing: 7) {
                             Text("INV-\((selectedInvoice?.id ?? invoices[0].id).suffix(4).uppercased())")
                                 .font(Theme.monoFont(12, weight: .medium))
@@ -689,7 +657,6 @@ struct JobDetailView: View {
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
-                    .accessibilityLabel("Choose invoice")
                 }
                 if let invoice = selectedInvoice {
                     if let model = invoicePaymentModel, loadedInvoiceModelID == invoice.id {
@@ -738,6 +705,7 @@ struct JobDetailView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(timeline(job)) { entry in
+                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
                             Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
@@ -764,6 +732,7 @@ struct JobDetailView: View {
                         .padding(.bottom, 16)
                     }
                     .accessibilityElement(children: .combine)
+                    }
                 }
             }
             if timeline(job).isEmpty {
@@ -800,6 +769,7 @@ struct JobDetailView: View {
         let body: String?
         let date: Date
         let symbol: String
+        let subject: ActivityFeedSubject
         var isNote: Bool { body != nil }
     }
 
@@ -809,14 +779,14 @@ struct JobDetailView: View {
             entries += outbox.pendingNotes(for: job.id).compactMap { entry in
                 guard case .note(let payload) = entry.action else { return nil }
                 let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
-                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath")
+                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath", subject: ActivityFeedSubject(kind: "note", jobID: job.id))
             }
             entries += notes.compactMap { record in
-                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble") }
+                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble", subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
             }
         }
         if activityFilter != "Notes" {
-            entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill") }
+            entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill", subject: ActivityFeedSubject(kind: "status", jobID: job.id)) }
         }
         return entries.sorted { $0.date > $1.date }
     }
@@ -1206,43 +1176,6 @@ struct JobDetailView: View {
 struct OpenedEstimate: Identifiable, Hashable {
     let id: String
     let present: Bool
-}
-
-struct JobProgressTrack: View {
-    let status: String
-    private static let steps = ["Booked", "On the way", "On site", "Working", "Done"]
-
-    private var current: Int? {
-        switch status {
-        case "scheduled", "dispatched": 0
-        case "en_route": 1
-        case "arrived": 2
-        case "in_progress", "paused": 3
-        case "completed": 4
-        default: nil
-        }
-    }
-
-    var body: some View {
-        if let current {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 4) {
-                    ForEach(Self.steps.indices, id: \.self) { index in
-                        Capsule()
-                            .fill(index <= current ? tint : Theme.fill)
-                            .frame(height: 5)
-                    }
-                }
-                // The status chip above names the step and the bottom bar names the next one,
-                // so the track stays a quiet bar without a second line of words.
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Step \(current + 1) of 5, \(Self.steps[current])")
-        }
-    }
-
-    /// One accent for progress; status is the word, not a rainbow (design.thorbis.com Color).
-    private var tint: Color { status == "completed" ? Theme.success : Theme.brandText }
 }
 
 /// Invoice ids this phone has seen per job, so a technician (whose invoice list is empty by

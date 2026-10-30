@@ -196,10 +196,11 @@ struct TeamView: View {
                                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
                                 }
                                 Spacer(minLength: 8)
-                                Menu {
-                                    Button("Cancel invite", role: .destructive) { Task { await cancel(invitation) } }
-                                } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                                .accessibilityLabel("Invite actions")
+                                ThorbisMenu(items: [
+                                    ThorbisMenuItem("Cancel invite", role: .destructive) { Task { await cancel(invitation) } }
+                                ], accessibilityLabel: "Invite actions") {
+                                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                                }
                             }
                             .frame(minHeight: 56)
                         }
