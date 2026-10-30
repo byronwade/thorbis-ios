@@ -3,7 +3,6 @@ import UIKit
 
 /// Native translation of Paper's Customers and Customer detail artboards.
 struct CustomersView: View {
-    @Environment(\.dynamicTypeSize) private var typeSize
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
@@ -96,18 +95,36 @@ struct CustomersView: View {
         let jobCount = store.jobs.filter { $0.customerId == customer.id }.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
         return NavigationLink(value: listCustomer) {
-            HStack(spacing: 12) {
-                Avatar(name: customer.name, size: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
-                    Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: summaryJob, now: now))
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+            HStack(alignment: .center, spacing: 12) {
+                Text(initials(customer.name))
+                    .font(Theme.font(16, weight: .semibold))
+                    .foregroundStyle(customer.archived ? Theme.muted : Theme.brandText)
+                    .frame(width: 42, height: 42)
+                    .background(customer.archived ? Theme.fill : Theme.brandSurface,
+                                in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .dynamicTypeSize(...DynamicTypeSize.large)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(customer.name)
+                        .font(Theme.font(16, weight: .semibold))
+                        .foregroundStyle(customer.archived ? Theme.muted : Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .top, spacing: 5) {
+                        if let summaryJob, !customer.archived {
+                            StatusRing(status: summaryJob.status, size: 12).accessibilityHidden(true)
+                        }
+                        Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: summaryJob, now: now))
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 4)
-                if let summaryJob { StatusRing(status: summaryJob.status).accessibilityHidden(true) }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
             }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .frame(minHeight: 56).contentShape(Rectangle())
+            .padding(.horizontal, 8).padding(.vertical, 10)
+            .frame(minHeight: 64).contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         // MA-12: the common actions on long-press; each also exists on the customer.
@@ -135,7 +152,7 @@ struct CustomersView: View {
                 return "\(count) · Past scheduled time · \(open.status.statusLabel) · \(date.visitLabel(now: now))"
             }
             // Same words as the Jobs list ("Today 4:00 PM", "In progress"), so a visit reads alike everywhere.
-            return "\(count) · \(date.visitLabel(now: now))"
+            return "\(count) · \(open.status.statusLabel) · \(date.visitLabel(now: now))"
         }
         return "\(count) · \(open.status.statusLabel)"
     }

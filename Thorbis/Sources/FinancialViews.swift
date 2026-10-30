@@ -29,7 +29,7 @@ struct EstimatesView: View {
                     PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 6)
                     ForEach(group) { record in
                         NavigationLink { EstimateDetailView(id: record.id) } label: {
-                            PaperDocumentRow(reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
+                            PaperDocumentRow(kind: .estimate, reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
                                              subtitle: store.customerName(record.customerId), status: record.status,
                                              amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") },
                                              showsStatus: false)
@@ -331,7 +331,7 @@ struct InvoicesView: View {
                         NavigationLink { InvoiceDetailView(id: record.id) } label: {
                             let total = paperLinesTotal(record.lines)
                             let due = total.map { max(0, $0 - record.amountPaid) }
-                            PaperDocumentRow(reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
+                            PaperDocumentRow(kind: .invoice, reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
                                              subtitle: record.status == "issued" ? (record.amountPaid > 0 ? "Balance due · part paid" : "Balance due") : record.status == "paid" ? "Paid" : record.status.statusLabel,
                                              status: record.status,
                                              // MF-04: an unpaid invoice's row shows what's owed now.
@@ -739,6 +739,19 @@ func paperDocumentGroups<T>(_ records: [T], status: KeyPath<T, String>, order: [
 /// ("customer · EST-1A2B", reference in mono), the amount on the right. Lists grouped by
 /// status pass `showsStatus: false`, since the group header already says it.
 struct PaperDocumentRow: View {
+    enum Kind {
+        case estimate, invoice, billingSchedule
+
+        var symbol: String {
+            switch self {
+            case .estimate: "doc.text"
+            case .invoice: "doc.plaintext"
+            case .billingSchedule: "list.bullet.rectangle"
+            }
+        }
+    }
+
+    let kind: Kind
     let reference: String
     let title: String
     let subtitle: String
@@ -748,26 +761,75 @@ struct PaperDocumentRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
-                HStack(spacing: 6) {
-                    Text(subtitle).font(Theme.font(13)).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
-                    Text("·").font(Theme.font(13))
-                    Text(reference).font(Theme.monoFont(12, weight: .medium)).fixedSize()
+        HStack(alignment: typeSize.isAccessibilitySize ? .top : .center, spacing: 12) {
+            Image(systemName: kind.symbol)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Theme.brandText)
+                .frame(width: 38, height: 38)
+                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .accessibilityHidden(true)
+            if typeSize.isAccessibilitySize {
+                stackedContent
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 8) {
+                        documentIdentity.frame(minWidth: 170, alignment: .leading)
+                        Spacer(minLength: 0)
+                        amountAndStatus(alignment: .trailing)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    stackedContent
                 }
-                .foregroundStyle(Theme.muted)
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 6) {
-                if let amount { Text(amount).moneyStyle(.row).foregroundStyle(Theme.foreground) }
-                if showsStatus { PaperStatusChip(status: status) }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(minHeight: 56)
-        .padding(.vertical, 6)
+        .frame(minHeight: 64)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+
+    private var documentIdentity: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            if typeSize.isAccessibilitySize {
+                stackedMetadata
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        Text(subtitle).font(Theme.font(13))
+                        Text("·").font(Theme.font(13))
+                        Text(reference).font(Theme.monoFont(12, weight: .medium))
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    stackedMetadata
+                }
+            }
+        }
+        .foregroundStyle(Theme.muted)
+    }
+
+    private var stackedContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            documentIdentity
+            amountAndStatus(alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var stackedMetadata: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(subtitle).font(Theme.font(13)).fixedSize(horizontal: false, vertical: true)
+            Text(reference).font(Theme.monoFont(12, weight: .medium))
+        }
+    }
+
+    private func amountAndStatus(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 6) {
+            if let amount { Text(amount).moneyStyle(.row).foregroundStyle(Theme.foreground) }
+            if showsStatus { PaperStatusChip(status: status) }
+        }
     }
 }
 
