@@ -68,6 +68,12 @@ struct JobMediaView: View {
     @State private var showCamera = false
     @State private var showScanner = false
     @State private var showLegacyRecovery = false
+    /// Markup opened from a photo's preview (drawn over that sheet) or right after capture.
+    @State private var previewMarkup: PhotoMarkupTarget?
+    @State private var captureMarkup: PhotoMarkupTarget?
+    /// The bounded JPEG just saved from the camera or library, offered for markup.
+    @State private var justCaptured: PhotoMarkupTarget?
+    @State private var showMeasure = false
     /// Paper 21C: the stage a new photo is filed under (server tags "Before" / "After").
     @State private var stage = "Before"
     @State private var filter = "All"
@@ -210,6 +216,25 @@ struct JobMediaView: View {
                 }
                 if canAdd && dynamicTypeSize.isAccessibilitySize {
                     photoCaptureControls.padding(.top, 10)
+                }
+                if let justCaptured, canAdd {
+                    HStack(spacing: 12) {
+                        Button { captureMarkup = justCaptured } label: {
+                            Label("Mark up the photo you just took", systemImage: "pencil.tip.crop.circle")
+                                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("markup-just-captured")
+                        Button { self.justCaptured = nil } label: {
+                            Image(systemName: "xmark").foregroundStyle(Theme.muted).frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Dismiss markup suggestion")
+                    }
+                    .padding(.horizontal, 12)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 }
                 if !waiting.isEmpty {
                     PaperGroupHeader(title: "Waiting to upload", count: waiting.count) {
@@ -411,11 +436,39 @@ struct JobMediaView: View {
             } catch { self.error = error.localizedDescription }
         }
         .sheet(isPresented: Binding(get: { previewIsCurrent && preview.url != nil }, set: { if !$0 { preview.clear(); previewScope = nil; previewRecord = nil } })) {
-            if previewIsCurrent, let file = preview.url { NativeDocumentPreview(url: file).accessibilityIdentifier("job-media-preview") }
+            if previewIsCurrent, let file = preview.url {
+                NativeDocumentPreview(url: file).accessibilityIdentifier("job-media-preview")
+                    .safeAreaInset(edge: .bottom) {
+                        if canAdd, let record = previewRecord, record.kind == "photo" {
+                            Button { openPreviewMarkup(file: file, record: record) } label: {
+                                Label("Mark up a copy", systemImage: "pencil.tip.crop.circle").inkCommit()
+                            }
+                            .buttonStyle(PressStyle())
+                            .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
+                            .background(Theme.background)
+                            .accessibilityIdentifier("job-media-markup")
+                        }
+                    }
+                    .fullScreenCover(item: $previewMarkup) { target in
+                        markupCover(target, cancel: { previewMarkup = nil }) {
+                            previewMarkup = nil
+                            preview.clear(); previewScope = nil; previewRecord = nil
+                        }
+                    }
+            }
         }
-        .onChange(of: readScope) { _, _ in preview.clear(); previewScope = nil; previewRecord = nil; busy = false }
+        .fullScreenCover(item: $captureMarkup) { target in
+            markupCover(target, cancel: { captureMarkup = nil }) { captureMarkup = nil; justCaptured = nil }
+        }
+        .fullScreenCover(isPresented: $showMeasure) {
+            SiteMeasureView(onSave: { image, caption in
+                try enqueueDerived(image, tags: stageTags, caption: caption, prefix: "measure")
+                showMeasure = false
+            }, onClose: { showMeasure = false })
+        }
+        .onChange(of: readScope) { _, _ in preview.clear(); previewScope = nil; previewRecord = nil; busy = false; justCaptured = nil; previewMarkup = nil; captureMarkup = nil }
         .onChange(of: records) { _, _ in if !previewIsCurrent { preview.clear(); previewScope = nil; previewRecord = nil } }
-        .onDisappear { selectedData = nil; preview.clear() }
+        .onDisappear { selectedData = nil; justCaptured = nil; preview.clear() }
     }
     private func select(_ data: Data, mime: String, filename: String) throws {
         guard !data.isEmpty, data.count <= 8 * 1024 * 1024 else { throw MediaSelectionError.tooLarge }
@@ -463,6 +516,19 @@ struct JobMediaView: View {
                 }
                 .disabled(busy)
                 .accessibilityLabel("Choose from library")
+                if SiteMeasure.isSupported {
+                    Button { showMeasure = true } label: {
+                        Image(systemName: "ruler").font(.system(size: 17)).foregroundStyle(Theme.foreground)
+                            .frame(width: 46, height: 46)
+                            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy)
+                    .accessibilityLabel("Measure")
+                    .accessibilityHint("Measure a distance with the camera and add it to this job as a photo.")
+                    .accessibilityIdentifier("job-media-measure")
+                }
                 ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
                     ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
                     : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }],
@@ -594,8 +660,51 @@ struct JobMediaView: View {
         let stamp = capturedAt.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
         do {
             try select(data, mime: "image/jpeg", filename: "\(stage.lowercased())-\(stamp).jpg")
+            let tags = stageTags
             enqueueSelection()
+            if selectedData == nil, error == nil {
+                justCaptured = PhotoMarkupTarget(data: data, tags: tags)
+            }
         } catch { self.error = error.localizedDescription }
+    }
+
+    private func markupCover(_ target: PhotoMarkupTarget, cancel: @escaping () -> Void, saved close: @escaping () -> Void) -> some View {
+        Group {
+            if let image = UIImage(data: target.data) {
+                PhotoMarkupView(image: image, onSave: { flattened in
+                    try enqueueDerived(flattened, tags: target.tags, caption: "Marked up", prefix: "markup")
+                    close()
+                }, onCancel: cancel)
+            } else {
+                PaperEmptyState(symbol: "photo", title: "Photo unavailable", message: "This photo could not be opened for markup.")
+                    .onTapGesture(perform: cancel)
+            }
+        }
+    }
+
+    /// Reads the previewed photo's bytes now; the preview file is deleted when the sheet closes.
+    private func openPreviewMarkup(file: URL, record: MediaAssetRecord) {
+        guard let data = try? Data(contentsOf: file), UIImage(data: data) != nil else {
+            error = "This photo could not be opened for markup."
+            return
+        }
+        previewMarkup = PhotoMarkupTarget(data: data, tags: record.tags.filter { $0 == "Before" || $0 == "After" })
+    }
+
+    /// Files a new image (markup or measurement) through the same on-phone queue as a captured
+    /// photo, with a fresh ID. The source photo is never changed.
+    private func enqueueDerived(_ image: UIImage, tags: [String], caption: String, prefix: String) throws {
+        guard canAdd, captureGeneration == api.requestGeneration, captureOrigin == api.normalizedOrigin,
+              let captureContext else { throw MediaSelectionError.workspaceChanged }
+        guard let data = Self.jpeg(image) else { throw MediaSelectionError.tooLarge }
+        let capturedAt = Date()
+        let stamp = capturedAt.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
+        let media = PendingMedia(id: UUID().uuidString, jobID: jobID, filename: "\(prefix)-\(stamp).jpg", tags: tags,
+                                 capturedAt: capturedAt, kind: "photo", mime: "image/jpeg", caption: caption)
+        try pendingMedia.save(media, data: data, context: captureContext)
+        error = nil
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Task { await retryWaiting() }
     }
 
     private func retryWaiting() async {
@@ -652,10 +761,17 @@ struct JobMediaView: View {
     }
 }
 
+struct PhotoMarkupTarget: Identifiable {
+    let id = UUID()
+    let data: Data
+    let tags: [String]
+}
+
 private enum MediaSelectionError: LocalizedError {
-    case tooLarge, unsupported
+    case tooLarge, unsupported, workspaceChanged
     var errorDescription: String? {
         switch self {
+        case .workspaceChanged: return "Your workspace changed. Return to the original job before adding media."
         case .tooLarge: return "Choose a nonempty file no larger than 8 MB."
         case .unsupported: return "Choose a JPEG, PNG, HEIC, WebP photo or a PDF."
         }

@@ -43,7 +43,7 @@ final class MediaTransfer {
     }
 
     func upload(jobID: String, clientAssetID: String, kind: String, mime: String,
-                originalFilename: String, data: Data, tags: [String] = [], capturedAt: Date? = nil,
+                originalFilename: String, data: Data, tags: [String] = [], caption: String? = nil, capturedAt: Date? = nil,
                 expectedOrganizationID: String? = nil, currentAuthority: @MainActor () -> Bool = { true }) async throws -> MediaAssetRecord {
         guard UUID(uuidString: clientAssetID) != nil else {
             throw Problem(title: "Invalid client asset ID", status: nil, detail: clientAssetID)
@@ -59,7 +59,7 @@ final class MediaTransfer {
                                                     mime: mime, sizeBytes: data.count,
                                                     originalFilename: originalFilename, contentHash: hash,
                                                     capturedAt: ISO8601DateFormatter().string(from: capturedAt ?? Date()),
-                                                    tags: tags.isEmpty ? nil : tags)
+                                                    tags: tags.isEmpty ? nil : tags, caption: caption)
         try verify(generation)
         guard currentAuthority() else { throw CancellationError() }
         let registration = try await api.registerFieldMedia(jobID, request: request)

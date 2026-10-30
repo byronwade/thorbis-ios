@@ -13,6 +13,16 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-photo-markup-measure",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "pencil.tip.crop.circle", title: "Mark up job photos",
+                      detail: "Draw on a copy of a job photo; the marked-up copy is added to the job and the original stays."),
+                .init(symbol: "ruler", title: "Measure on site",
+                      detail: "Tap two points with the camera to measure, then save the photo with the distance to the job."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-tablet-invoice",
             date: "2026-10-30",
             highlights: [
