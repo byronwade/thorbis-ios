@@ -2,6 +2,23 @@ import Foundation
 
 enum ScheduleRange: String, CaseIterable { case today = "Today", week = "Week", unscheduled = "Unscheduled" }
 
+/// Whose day Schedule shows. Technicians start on their own; office staff and owners on everyone's.
+/// Either can switch, so nothing on the board is hidden from someone who could see it before.
+enum ScheduleScope: String, CaseIterable {
+    case mine = "Mine", everyone = "Everyone"
+
+    static func initial(schedulesOwnDay: Bool, actorID: String?) -> ScheduleScope {
+        guard let actorID, !actorID.isEmpty else { return .everyone }
+        return schedulesOwnDay ? .mine : .everyone
+    }
+
+    /// The assignee to filter on. Unscheduled work is the office's queue, so it always shows everyone's.
+    func assignee(_ actorID: String?, range: ScheduleRange) -> String? {
+        guard self == .mine, range != .unscheduled, let actorID, !actorID.isEmpty else { return nil }
+        return actorID
+    }
+}
+
 /// One snapshot for customer rows, so each row only examines that customer's jobs.
 struct CustomerJobGroups {
     private let groups: [String: [Job]]
@@ -79,9 +96,11 @@ enum JobFiltering {
         return (fallback, "Open job", open.count)
     }
 
-    static func schedule(_ jobs: [Job], range: ScheduleRange, now: Date = Date(), calendar: Calendar = .current) -> [Job] {
+    static func schedule(_ jobs: [Job], range: ScheduleRange, assignedTo: String? = nil,
+                         now: Date = Date(), calendar: Calendar = .current) -> [Job] {
         jobs.filter { job in
             guard !["completed", "canceled"].contains(job.status) else { return false }
+            if let assignedTo, job.assignedToUserId != assignedTo { return false }
             guard let scheduled = date(job.scheduledFor) else { return range == .unscheduled }
             switch range {
             case .today: return calendar.isDate(scheduled, inSameDayAs: now)

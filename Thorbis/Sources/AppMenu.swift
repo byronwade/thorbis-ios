@@ -67,7 +67,8 @@ enum AppMenuContent {
     static func menu(tabs: [MenuItem], hidden: Set<MenuItem>, order: [MenuItem],
                      permitted: (MenuItem) -> Bool) -> [MenuItem] {
         (order + MenuItem.allCases).reduce(into: [MenuItem]()) { list, item in
-            guard !list.contains(item), !tabs.contains(item), !hidden.contains(item), permitted(item) else { return }
+            guard !list.contains(item), !tabs.contains(item), !hidden.contains(item),
+                  MenuItem.listed(item, permitted: permitted) else { return }
             list.append(item)
         }
     }
@@ -431,7 +432,7 @@ struct CurrentJobChip: View {
 }
 
 /// The pop-up menu over the bar (Linear's): the business on top with its switcher and an edit
-/// button, then every place, then Settings and Search. Edit turns the menu into `AppMenuEditor`.
+/// button, then every place, then Settings. Edit turns the menu into `AppMenuEditor`.
 struct AppMenu: View {
     /// The screen width; the menu matches the bar's capsule, and editing widens it to the gutters.
     let width: CGFloat
@@ -445,7 +446,6 @@ struct AppMenu: View {
     let openLocal: (LocalWorkspaceSection) -> Void
     let manageBusinesses: () -> Void
     let settings: () -> Void
-    let search: () -> Void
     let close: () -> Void
     @EnvironmentObject private var session: SessionController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -511,8 +511,8 @@ struct AppMenu: View {
             ForEach(local, id: \.self) { section in
                 row(section.title, symbol: section.moreSymbol, here: false) { openLocal(section) }
             }
+            // Search is the round button beside the bar, so it is not repeated here.
             row("Settings", symbol: "gearshape", here: false, action: settings)
-            row("Search", symbol: "magnifyingglass", here: false, action: search)
         }
         .padding(8)
     }

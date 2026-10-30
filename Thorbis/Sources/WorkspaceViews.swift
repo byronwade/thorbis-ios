@@ -29,7 +29,7 @@ struct WorkspaceNoticesView: View {
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 if !available {
                     PaperEmptyState(symbol: "bell.slash", title: "Inbox is off for your role",
-                                    message: "Job notices need the notices permission. An owner can turn it on in Team.")
+                                    message: "The Inbox needs the notices permission. An owner can turn it on in Team.")
                 } else {
                     PaperTabs(options: ["All", "Unread"], selection: $filter)
                     if let error { ErrorBanner(message: error) { await refresh() } }
@@ -116,10 +116,10 @@ struct WorkspaceNoticesView: View {
     }
 
     private var subtitle: String {
-        if !available { return "Job notices" }
+        if !available { return "Job updates" }
         switch unreadState {
         case .present: return "Unread notices waiting"
-        case .unknown: return loading ? "Checking for new notices…" : "Job notices"
+        case .unknown: return loading ? "Checking for new notices…" : "Job updates"
         default: return "All caught up"
         }
     }
@@ -186,41 +186,53 @@ struct WorkspaceNoticesView: View {
 struct WorkspaceRevenueView: View {
     @ObservedObject var api: APIClient
     let available: Bool
+    /// Shown as the Revenue section of Money, under Money's own header and scroll.
+    var embedded = false
 
     @State private var report: RevenueReport?
     @State private var error: String?
 
     /// Paper 59/60: the month's number large, receivables beside it, six months as bars.
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Money").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text("Revenue and receivables · live").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.bottom, 16)
-                if !available {
-                    PaperEmptyState(symbol: "chart.bar.xaxis", title: "Money unavailable", message: "This account cannot view invoice and payment reports.")
-                } else if let error {
-                    ErrorBanner(message: error).padding(.horizontal, -Theme.gutter)
-                } else if let report {
-                    if report.truncated {
-                        PaperEmptyState(symbol: "exclamationmark.triangle", title: "Report incomplete",
-                                        message: "The server reached its scan limit, so these totals would understate the ledger. Open the full report on the web.")
-                    } else {
-                        content(report)
+        if embedded {
+            sections.task { await load() }
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Money").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
+                        Text("Revenue and receivables · live").font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
-                } else {
-                    SkeletonRows(count: 4, leading: false, inset: 0)
+                    .padding(.bottom, 16)
+                    sections
                 }
+                .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
             }
-            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+            .foregroundStyle(Theme.foreground)
+            .background(Theme.background)
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable { await load() }
+            .task { await load() }
         }
-        .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
-        .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await load() }
-        .task { await load() }
+    }
+
+    @ViewBuilder private var sections: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !available {
+                PaperEmptyState(symbol: "chart.bar.xaxis", title: "Money unavailable", message: "This account cannot view invoice and payment reports.")
+            } else if let error {
+                ErrorBanner(message: error).padding(.horizontal, -Theme.gutter)
+            } else if let report {
+                if report.truncated {
+                    PaperEmptyState(symbol: "exclamationmark.triangle", title: "Report incomplete",
+                                    message: "The server reached its scan limit, so these totals would understate the ledger. Open the full report on the web.")
+                } else {
+                    content(report)
+                }
+            } else {
+                SkeletonRows(count: 4, leading: false, inset: 0)
+            }
+        }
     }
 
     @ViewBuilder private func content(_ report: RevenueReport) -> some View {

@@ -49,8 +49,6 @@ struct RootView: View {
     @State private var settings = false
     @State private var workspace = false
     @State private var createJob = false
-    @State private var priceBook = false
-    @State private var drafts = false
     #if DEBUG
     @State private var previewInvoiceEditor = false
     @State private var previewInvoiceDetail = false
@@ -78,6 +76,8 @@ struct RootView: View {
             #endif
             await layout.refreshCompanyLayout(api: api)
         }
+        // With no company or saved phone layout, the bar starts from the person's role.
+        .onChange(of: session.capabilities, initial: true) { applyRoleDefaults() }
         // MA-19: once after an update, risen over the home screen rather than during launch.
         .task {
             #if DEBUG
@@ -93,6 +93,15 @@ struct RootView: View {
         .sheet(item: $whatsNew.showing, onDismiss: { whatsNew.dismissed() }) { content in
             WhatsNewSheet(content: content) { whatsNew.dismissed() }
         }
+    }
+
+    private func applyRoleDefaults() {
+        #if DEBUG
+        // Screenshots and UI tests keep the standard bar.
+        if PaperPreview.enabled { return }
+        #endif
+        guard session.phase == .ready else { return }
+        layout.applyRoleDefaults(WorkRole(session), permitted: { $0.permitted(session) })
     }
 
     private func writeTodaySnapshot() {
@@ -117,22 +126,17 @@ struct RootView: View {
                 case .jobs: JobsView()
                 case .customers: CustomersView()
                 case .more: MoreView()
+                case .place(let item): if let route = item.route { PaperRouteView(route: route) }
+                case .local(let section): PaperRouteView(route: .local(section))
                 }
             }
             .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
             .background(Theme.background)
             .paperDestinations()
-            .navigationDestination(isPresented: $priceBook) {
-                WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
-            }
-            .navigationDestination(isPresented: $drafts) {
-                if let actor = session.user?.id, let org = session.activeOrganization?.id {
-                    InboxLocalDraftView(actorID: actor, organizationID: org)
-                }
-            }
         }
         .sheet(isPresented: $search, onDismiss: { searchSeed = "" }) { PaperGlobalSearch(initialQuery: searchSeed) }
-        .sheet(isPresented: $settings) { NavigationStack { MoreView().paperDestinations().safeAreaInset(edge: .top) { HStack { Spacer(); Button("Done") { settings = false }.font(Theme.font(15, weight: .medium)).frame(minWidth: 44, minHeight: 44) }.padding(.horizontal, Theme.gutter) } } }
+        // The same one Settings as the phone.
+        .sheet(isPresented: $settings) { SettingsView() }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
         #if DEBUG
@@ -459,7 +463,6 @@ struct RootView: View {
             },
             manageBusinesses: { closeMenu(); workspace = true },
             settings: { closeMenu(); showSettings = true },
-            search: { openBarSearch() },
             close: closeMenu
         )
     }
@@ -744,6 +747,7 @@ struct RootView: View {
         }
     }
 
+    /// The same places as the phone menu, in the person's Customize menu order, grouped like More.
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { workspace = true } label: {
@@ -758,20 +762,51 @@ struct RootView: View {
                 }.padding(.horizontal, 8).frame(minHeight: 44)
             }.padding(.bottom, 10)
             SidebarSearchButton { search = true }.padding(.bottom, 12)
-            if session.can("job.view", feature: "jobs") {
-                sidebarRow("Schedule", icon: "calendar", target: .schedule, count: JobFiltering.schedule(store.jobs, range: .today).count)
-                sidebarRow("Jobs", icon: "briefcase", target: .jobs, count: store.jobs.count)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(MenuItem.Group.allCases, id: \.self) { group in
+                        let items = menuPlaces.filter { $0.group == group }
+                        let local = group == .phone ? localSections : []
+                        if !items.isEmpty || !local.isEmpty {
+                            if group != .work {
+                                Text(group.rawValue).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                    .padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 4)
+                                    .accessibilityAddTraits(.isHeader)
+                            }
+                            ForEach(items) { item in
+                                sidebarRow(item.title, icon: item.symbol, target: tabletSection(item), count: sidebarCount(item))
+                            }
+                            ForEach(local, id: \.self) { section in
+                                sidebarRow(section.title, icon: section.moreSymbol, target: .local(section))
+                            }
+                        }
+                    }
+                    menuRow("Settings", icon: "gearshape") { settings = true }.padding(.top, 14)
+                }
             }
-            if session.can("customer.view", feature: "core_crm") { sidebarRow("Customers", icon: "person.2", target: .customers) }
-            menuRow("Message drafts", icon: "bubble.left") { drafts = true }
-            if session.can("pricebook.view", feature: "price_book") { menuRow("Price book", icon: "book.closed") { priceBook = true } }
-            menuRow("Workspace tools", icon: "slider.horizontal.3") { settings = true }
-            Spacer()
+            .scrollIndicators(.hidden)
             SidebarAccountButton(name: session.user?.name ?? "") { settings = true }
                 .padding(.top, 12)
         }.padding(.vertical, 14).padding(.horizontal, 10).frame(width: 244)
             .foregroundStyle(Theme.foreground).buttonStyle(.plain)
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
+    }
+
+    private func tabletSection(_ item: MenuItem) -> TabletSection {
+        switch item {
+        case .schedule: .schedule
+        case .jobs: .jobs
+        case .customers: .customers
+        default: .place(item)
+        }
+    }
+
+    private func sidebarCount(_ item: MenuItem) -> Int? {
+        switch item {
+        case .schedule: JobFiltering.schedule(store.jobs, range: .today).count
+        case .jobs: store.jobs.count
+        default: nil
+        }
     }
 
     private func sidebarRow(_ title: String, icon: String, target: TabletSection, count: Int? = nil) -> some View {
@@ -849,14 +884,15 @@ struct PaperRouteView: View {
         case .invoices: InvoicesView()
         case .priceBook:
             WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
-        case .revenue: WorkspaceRevenueView(api: api, available: true).id(session.generation)
+        // Money and Reports are one place: Revenue first, then the reports.
+        case .revenue: ReportsView(includesRevenue: true).id(session.generation)
         case .drafts:
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 InboxLocalDraftView(actorID: actor, organizationID: org)
             }
         case .closeout(let jobID): JobCloseoutView(jobID: jobID)
         case .team: TeamView()
-        case .reports: ReportsView()
+        case .reports: ReportsView(includesRevenue: MenuItem.money.permitted(session), initialTab: "Operations")
         case .assign(let jobID): JobAssignmentView(jobID: jobID)
         case .billing: BillingSchedulesView()
         case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)

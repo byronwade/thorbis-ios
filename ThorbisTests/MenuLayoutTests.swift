@@ -93,16 +93,16 @@ final class MenuLayoutTests: XCTestCase {
         let store = defaults()
         let layout = MenuLayout(defaults: store)
         // Customers dragged below the divider, Invoices and Estimates dragged up into the bar.
-        layout.arrange(bar: [.jobs, .invoices, .schedule, .estimates, .reports],
+        layout.arrange(bar: [.jobs, .invoices, .schedule, .estimates, .billing],
                        menu: [.customers, .priceBook], permitted: { _ in true })
         XCTAssertEqual(layout.tabs, [.jobs, .invoices, .schedule, .estimates], "The bar keeps at most four")
-        XCTAssertEqual(Array(layout.menuOrder.prefix(3)), [.reports, .customers, .priceBook],
+        XCTAssertEqual(Array(layout.menuOrder.prefix(3)), [.billing, .customers, .priceBook],
                        "What does not fit spills to the top of the menu")
         let reloaded = MenuLayout(defaults: store)
         XCTAssertEqual(reloaded.tabs, layout.tabs)
         XCTAssertEqual(reloaded.menuOrder, layout.menuOrder)
         let menu = AppMenuContent.menu(tabs: reloaded.tabs, hidden: [], order: reloaded.menuOrder, permitted: { _ in true })
-        XCTAssertEqual(Array(menu.prefix(3)), [.reports, .customers, .priceBook])
+        XCTAssertEqual(Array(menu.prefix(3)), [.billing, .customers, .priceBook])
         XCTAssertEqual(Set(menu).count, menu.count)
         XCTAssertTrue(menu.contains(.attention), "Places not yet arranged still show")
     }

@@ -69,6 +69,8 @@ struct ScheduleView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
     @State private var tab = "Today"
+    /// Nil until the person picks; until then the role decides (technicians: Mine).
+    @State private var pickedScope: ScheduleScope?
     @State private var search = ""
     @State private var searchVisible = false
     @State private var showNew = false
@@ -87,8 +89,16 @@ struct ScheduleView: View {
         default: .today
         }
     }
+    private var scope: ScheduleScope {
+        pickedScope ?? .initial(schedulesOwnDay: WorkRole(session).schedulesOwnDay, actorID: session.user?.id)
+    }
+    private var scopeBinding: Binding<ScheduleScope> {
+        Binding(get: { scope }, set: { pickedScope = $0 })
+    }
+    /// Mine/Everyone applies to a day, week or map; Unscheduled is everyone's queue.
+    private var showsScope: Bool { range != .unscheduled && session.user?.id != nil }
     private var jobs: [Job] {
-        let filtered = JobFiltering.schedule(store.jobs, range: range)
+        let filtered = JobFiltering.schedule(store.jobs, range: range, assignedTo: scope.assignee(session.user?.id, range: range))
         guard !search.isEmpty else { return filtered }
         return filtered.filter { $0.title.localizedCaseInsensitiveContains(search)
             || $0.shortRef.localizedCaseInsensitiveContains(search)
@@ -102,6 +112,12 @@ struct ScheduleView: View {
                 OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
+                if showsScope {
+                    ThorbisSegmented(options: [(ScheduleScope.mine, "My jobs"), (ScheduleScope.everyone, "Everyone")],
+                                     selection: scopeBinding)
+                        .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 8)
+                        .accessibilityLabel("Whose jobs")
+                }
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if store.loading && store.jobs.isEmpty {
@@ -196,11 +212,13 @@ struct ScheduleView: View {
 
     @ViewBuilder private var emptyState: some View {
         let boardEmpty = store.jobs.isEmpty && search.isEmpty
+        let mine = showsScope && scope == .mine
         PaperEmptyState(
             symbol: "calendar",
-            title: boardEmpty ? "Nothing on the board yet" : search.isEmpty ? (range == .unscheduled ? "Everything has a time" : "No jobs \(range == .today ? "today" : "this week")") : "No matching jobs",
+            title: boardEmpty ? "Nothing on the board yet" : search.isEmpty ? (range == .unscheduled ? "Everything has a time" : "No jobs \(mine ? "for you " : "")\(range == .today ? "today" : "this week")") : "No matching jobs",
             message: boardEmpty ? "Your workspace is live. New jobs will land here."
-                : range == .unscheduled ? "Jobs without a scheduled time appear here." : "Try another range, or check Jobs for everything open.",
+                : range == .unscheduled ? "Jobs without a scheduled time appear here."
+                : mine ? "Choose Everyone to see the whole team's jobs." : "Try another range, or check Jobs for everything open.",
             actionTitle: boardEmpty && session.can("job.create", feature: "jobs") ? "Create your first job" : nil,
             action: { showNew = true }
         )

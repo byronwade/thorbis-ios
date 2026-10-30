@@ -669,17 +669,13 @@ extension LocalWorkspaceSection {
 
 /// Paper 29 and 65 together: every destination that is not a tab, then account settings.
 struct MoreView: View {
-    @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject var api: APIClient
-    @EnvironmentObject private var outbox: FieldOutbox
-    @EnvironmentObject private var pendingMedia: PendingMediaStore
-    @State private var showWorkspaces = false
-    @State private var showNewJob = false
-    @State private var confirmSignOut = false
+    @State private var showSettings = false
 
-
+    /// More holds places only. Account, company, payments, menu, appearance, What's new and
+    /// sign-out all live in the one Settings.
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -703,44 +699,9 @@ struct MoreView: View {
                     }
                 }
                 group("Account") {
-                    if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.businessSetup) {
-                            PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Company details, payments, services and team", tile: Theme.markAccent)
-                        }
-                        NavigationLink(value: PaperRoute.companyDetails) {
-                            PaperMenuRow("Company details", symbol: "building.2", subtitle: "Name, address and phone customers see", tile: Theme.markOlive)
-                        }
-                    }
-                    if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.payments) {
-                            PaperMenuRow("Payments", symbol: "creditcard", subtitle: "Stripe setup, card payments and payouts", tile: Theme.markForest)
-                        }
-                    }
-                    NavigationLink(value: PaperRoute.customizeMenu) {
-                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
-                    }
-                    // MA-19: the notes stay one tap away on iPad too, where the gear opens More.
-                    NavigationLink(value: PaperRoute.whatsNew) {
-                        PaperMenuRow("What's new", symbol: "sparkles", subtitle: "What changed in recent updates", tile: Theme.markAccent)
-                    }
-                    HStack(spacing: 12) {
-                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(15, weight: .medium)).foregroundStyle(.white)
-                            .frame(width: 40, height: 40).background(Theme.brandText, in: Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.user?.name ?? "Account").font(Theme.font(15, weight: .medium))
-                            if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
-                        }
-                        Spacer()
-                    }
-                    .frame(minHeight: 56)
-                    .accessibilityElement(children: .combine)
-                    PaperMenuRow(title: "Appearance", symbol: "circle.lefthalf.filled") {
-                        ThorbisSelect(options: [("system", "System"), ("light", "Light"), ("dark", "Dark")],
-                                      selection: $appearance, menuTitle: "Appearance")
-                    }
-                    Button { confirmSignOut = true } label: {
-                        PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
+                    Button { showSettings = true } label: {
+                        PaperMenuRow("Settings", symbol: "gearshape",
+                                     subtitle: "Account, company, payments, menu and appearance", tile: Theme.markAccent)
                     }
                 }
                 Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
@@ -751,12 +712,7 @@ struct MoreView: View {
         }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
-        .sheet(isPresented: $showNewJob) { NewJobSheet() }
-        .thorbisConfirm("Sign out of Thorbis?",
-                        message: pendingMedia.signOutWarning(outboxWarning: outbox.signOutWarning),
-                        isPresented: $confirmSignOut,
-                        actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
+        .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
     /// MA-05: the same header as every tab root (30/500 title). Switching business lives in the

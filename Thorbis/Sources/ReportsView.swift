@@ -50,17 +50,28 @@ extension APIClient {
 }
 
 /// Paper 60: the numbers an owner checks, as words and mono figures; each report says when it's incomplete.
+/// For anyone who can see revenue this is the one Money place: Revenue first, then the reports, so
+/// every figure from the old Money and Reports screens is one tab away.
 struct ReportsView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
-    @State private var tab = "Operations"
+    /// Money: Revenue leads the tabs and the header reads Money.
+    var includesRevenue = false
+    @State private var tab: String
+    @State private var refreshes = 0
     @State private var operations: OperationsReport?
     @State private var schedule: ScheduleReport?
     @State private var payments: PaymentActivityReport?
     @State private var error: String?
 
+    init(includesRevenue: Bool = false, initialTab: String? = nil) {
+        self.includesRevenue = includesRevenue
+        _tab = State(initialValue: initialTab ?? (includesRevenue ? "Revenue" : "Operations"))
+    }
+
     private var tabs: [String] {
         var result: [String] = []
+        if includesRevenue && MenuItem.money.permitted(session) { result.append("Revenue") }
         if session.can("estimate.view", feature: "estimates") { result.append("Operations") }
         if session.can("job.view", feature: "jobs") { result.append("Schedule") }
         if session.can("invoice.view", feature: "invoicing") { result.append("Payments") }
@@ -71,8 +82,9 @@ struct ReportsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Reports").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text("How work and money are moving").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text(includesRevenue ? "Money" : "Reports").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
+                    Text(includesRevenue ? "Revenue, receivables and how work is moving" : "How work and money are moving")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
                 if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab) }
@@ -80,6 +92,9 @@ struct ReportsView: View {
                 Group {
                     if tabs.isEmpty {
                         PaperEmptyState(symbol: "chart.bar", title: "Reports unavailable", message: "Your role can't view estimate, job or payment reports.")
+                    } else if (tabs.contains(tab) ? tab : tabs[0]) == "Revenue" {
+                        // Rebuilt on pull to refresh, so its figures reload with the rest.
+                        WorkspaceRevenueView(api: api, available: true, embedded: true).id(refreshes)
                     } else if (tabs.contains(tab) ? tab : tabs[0]) == "Operations" {
                         if let operations { operationsContent(operations) } else { loadingState }
                     } else if (tabs.contains(tab) ? tab : tabs[0]) == "Payments" {
@@ -95,7 +110,7 @@ struct ReportsView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await load() }
+        .refreshable { refreshes += 1; await load() }
         .task { await load() }
     }
 
