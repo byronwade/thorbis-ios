@@ -35,8 +35,14 @@ final class JobOverviewUITests: XCTestCase {
     func testAllJobTabsRemainReachableAtStandardAndLargeText() {
         for accessible in [false, true] {
             let app = preview("job", accessibleText: accessible, working: true)
+            if accessible {
+                let chooser = app.buttons["job-section-chooser"]
+                for _ in 0..<4 where !chooser.isHittable { app.swipeUp() }
+                XCTAssertTrue(chooser.isHittable)
+                chooser.tap()
+            }
             let activity = app.buttons["Activity"]
-            for _ in 0..<4 where !activity.isHittable { app.swipeUp() }
+            if !accessible { for _ in 0..<4 where !activity.isHittable { app.swipeUp() } }
             XCTAssertTrue(activity.waitForExistence(timeout: 10))
             XCTAssertTrue(activity.isHittable, "Activity should be visible without horizontal scrolling")
             XCTAssertLessThanOrEqual(activity.frame.maxX, app.frame.maxX)
@@ -185,6 +191,24 @@ final class JobOverviewUITests: XCTestCase {
         content.swipeUp()
         XCTAssertTrue(!collect.exists || collect.frame.minY < initialY - 20,
                       "At large text the collection action must scroll away with the job")
+    }
+
+    func testAccessibleSectionChooserKeepsPhotosAndActivityReachable() {
+        continueAfterFailure = false
+        let app = preview("job", accessibleText: true, working: true)
+        let chooser = app.buttons["job-section-chooser"]
+        let content = app.scrollViews.firstMatch
+        for _ in 0..<5 where !chooser.isHittable { content.swipeUp() }
+        XCTAssertTrue(chooser.isHittable)
+        XCTAssertTrue(chooser.label.contains("Overview"))
+        chooser.tap()
+        app.buttons["Photos"].tap()
+        XCTAssertTrue(chooser.waitForExistence(timeout: 10))
+        XCTAssertTrue(chooser.isHittable, "The chooser must remain reachable on Photos")
+        XCTAssertTrue(chooser.label.contains("Photos"))
+        chooser.tap()
+        app.buttons["Activity"].tap()
+        XCTAssertTrue(app.buttons["Notes"].waitForExistence(timeout: 10))
     }
 
     private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false) -> XCUIApplication {

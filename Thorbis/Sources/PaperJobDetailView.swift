@@ -98,7 +98,9 @@ struct JobDetailView: View {
             }
             if let job {
                 if selectedTab == "Photos" {
-                    header(job, compact: true, showActions: false)
+                    // At larger text sizes the full fixed header can crowd the media viewport.
+                    // Job details and actions remain available on Overview.
+                    if !typeSize.isAccessibilitySize { header(job, compact: true, showActions: false) }
                     tabBar
                     JobMediaView(jobID: jobId)
                 } else {
@@ -631,7 +633,37 @@ struct JobDetailView: View {
     }
 
     private var tabBar: some View {
-        PaperTabs(options: tabs, selection: $selectedTab, wrapOverflow: true).padding(.bottom, 4)
+        Group {
+            if typeSize.isAccessibilitySize {
+                Menu {
+                    ForEach(tabs, id: \.self) { tab in
+                        Button { selectedTab = tab } label: {
+                            if tab == selectedTab { Label(tab, systemImage: "checkmark") }
+                            else { Text(tab) }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(selectedTab).font(Theme.font(15, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(Theme.foreground)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                }
+                .padding(.horizontal, Theme.gutter)
+                .accessibilityLabel("Job sections, \(selectedTab)")
+                .accessibilityHint("Choose a job section")
+                .accessibilityIdentifier("job-section-chooser")
+            } else {
+                PaperTabs(options: tabs, selection: $selectedTab, wrapOverflow: true)
+            }
+        }
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder private var primaryAction: some View {
