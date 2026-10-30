@@ -7,10 +7,23 @@ final class JobOverviewUITests: XCTestCase {
         let customer = app.buttons["job-customer-link"]
         XCTAssertTrue(customer.waitForExistence(timeout: 20))
         XCTAssertGreaterThanOrEqual(customer.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(customer.frame.width, 44)
         XCTAssertTrue(customer.label.contains("Danielle Marlowe"))
         customer.tap()
         XCTAssertTrue(app.buttons["Customer actions"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Records"].exists)
+    }
+
+    func testShortCustomerNameStillHasComfortableTapTarget() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job",
+                               "--paper-preview-short-customer-name"]
+        app.launch()
+        let customer = app.buttons["job-customer-link"]
+        XCTAssertTrue(customer.waitForExistence(timeout: 20))
+        XCTAssertEqual(customer.label, "I")
+        XCTAssertGreaterThanOrEqual(customer.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(customer.frame.height, 44)
     }
 
     func testJobOverviewKeepsVisitActionsBeforeCustomerDetails() {

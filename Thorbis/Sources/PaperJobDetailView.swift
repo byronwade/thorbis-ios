@@ -423,7 +423,7 @@ struct JobDetailView: View {
                     }
                     .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.muted)
-                    .frame(minHeight: 44, alignment: .leading)
+                    .frame(minWidth: 44, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("job-customer-link")

@@ -1084,7 +1084,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     private static func customers() -> [[String: Any]] {
-        let rows = [("0412", "Danielle Marlowe", "412 Birchwood Ln"), ("0413", "Alex Petrov", "88 Larch Ave"), ("0414", "David Chen", "245 Rosemont Dr"), ("0415", "Elena Alvarez", "19 Fenwick Ct"), ("0416", "Mei Nakamura", "731 Cassia Way")]
+        let shortName = ProcessInfo.processInfo.arguments.contains("--paper-preview-short-customer-name")
+        let rows = [("0412", shortName ? "I" : "Danielle Marlowe", "412 Birchwood Ln"), ("0413", "Alex Petrov", "88 Larch Ave"), ("0414", "David Chen", "245 Rosemont Dr"), ("0415", "Elena Alvarez", "19 Fenwick Ct"), ("0416", "Mei Nakamura", "731 Cassia Way")]
         return rows.map { ref, name, address in
             ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID, "name": name, "address": address,
              "accountType": "residential", "archived": false, "createdAt": "2022-03-01T12:00:00Z", "updatedAt": "2026-07-20T12:00:00Z", "billingTerms": "Due on receipt"] as [String: Any]
