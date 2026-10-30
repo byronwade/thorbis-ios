@@ -34,6 +34,8 @@ struct NewEstimateView: View {
     }
 
     private var canUsePriceBook: Bool { session.can("pricebook.view", feature: "price_book") }
+    /// EB-13: the workspace stores line groups and the materials switch.
+    private var storesLineGroups: Bool { session.isFeatureOn("estimate_line_groups") }
     private var searching: Bool { focus == .search || !query.isEmpty }
     private var total: Int? { lines.isEmpty ? nil : lines.subtotal() }
 
@@ -126,7 +128,8 @@ struct NewEstimateView: View {
             }
             .padding(.bottom, 14)
 
-            EstimateLineGroupsEditor(lines: $lines, disabled: busy, focus: $focus, addTo: startAdding) { line, index in
+            EstimateLineGroupsEditor(lines: $lines, disabled: busy, focus: $focus,
+                                     materialsSwitch: storesLineGroups, addTo: startAdding) { line, index in
                 withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) }
             }
             if lines.isEmpty {
@@ -205,11 +208,13 @@ struct NewEstimateView: View {
                 estimate = try await api.createFieldEstimate(.init(
                     customerId: customerID,
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                    lines: lines.map {
-                        .init(description: $0.description.trimmingCharacters(in: .whitespacesAndNewlines),
-                              quantity: Int($0.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1,
-                              unitPrice: .init(amount: MoneyInput.cents($0.unitPrice) ?? 0, currency: "USD"),
-                              source: $0.source ?? .manual)
+                    lines: lines.map { line in
+                        let presentation = lines.storedPresentation(of: line, storesGroups: storesLineGroups)
+                        return .init(description: line.description.trimmingCharacters(in: .whitespacesAndNewlines),
+                                     quantity: Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1,
+                                     unitPrice: .init(amount: MoneyInput.cents(line.unitPrice) ?? 0, currency: "USD"),
+                                     source: line.source ?? .manual,
+                                     group: presentation.group, showToCustomer: presentation.showToCustomer)
                     }))
                 created = estimate
                 // On a job, the estimate opens only once it's attached; an unattached one in job
