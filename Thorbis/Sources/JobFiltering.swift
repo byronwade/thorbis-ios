@@ -2,6 +2,20 @@ import Foundation
 
 enum ScheduleRange: String, CaseIterable { case today = "Today", week = "Week", unscheduled = "Unscheduled" }
 
+/// One snapshot for customer rows, so each row only examines that customer's jobs.
+struct CustomerJobGroups {
+    private let groups: [String: [Job]]
+
+    init(jobs: [Job]) {
+        groups = jobs.reduce(into: [:]) { result, job in
+            guard let customerID = job.customerId else { return }
+            result[customerID, default: []].append(job)
+        }
+    }
+
+    func jobs(for customerID: String) -> [Job] { groups[customerID] ?? [] }
+}
+
 enum JobFiltering {
     static func date(_ raw: String?) -> Date? {
         guard let raw else { return nil }

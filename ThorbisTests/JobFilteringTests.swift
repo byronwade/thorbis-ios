@@ -2,6 +2,35 @@ import XCTest
 @testable import Thorbis
 
 final class JobFilteringTests: XCTestCase {
+    func testGroupedCustomerJobsPreserveCountsAndSummarySelection() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
+        let jobs = [
+            Job(id: "one", customerId: "a", title: "one", status: "scheduled", createdAt: nil, updatedAt: nil, allowedTransitions: nil, scheduledFor: "2026-10-30T12:00:00Z"),
+            Job(id: "done", customerId: "a", title: "done", status: "completed", createdAt: nil, updatedAt: nil, allowedTransitions: nil),
+            Job(id: "two", customerId: "b", title: "two", status: "in_progress", createdAt: nil, updatedAt: nil, allowedTransitions: nil),
+            Job(id: "none", customerId: nil, title: "none", status: "in_progress", createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+        ]
+        let grouped = CustomerJobGroups(jobs: jobs)
+        for customer in ["a", "b", "missing"] {
+            let original = jobs.filter { $0.customerId == customer }
+            let subset = grouped.jobs(for: customer)
+            XCTAssertEqual(subset, original)
+            XCTAssertEqual(JobFiltering.customerJobSummary(subset, customerID: customer, now: now)?.job.id,
+                           JobFiltering.customerJobSummary(jobs, customerID: customer, now: now)?.job.id)
+        }
+        XCTAssertEqual(grouped.jobs(for: "a").count, 2)
+    }
+
+    func testLargeCustomerJobGroupsKeepEveryJobWithItsCustomer() {
+        let jobs = (0..<1_200).map { index in
+            Job(id: "job-\(index)", customerId: "customer-\(index % 600)", title: "Service",
+                status: "completed", createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+        }
+        let grouped = CustomerJobGroups(jobs: jobs)
+        XCTAssertEqual((0..<600).reduce(0) { $0 + grouped.jobs(for: "customer-\($1)").count }, jobs.count)
+        XCTAssertEqual(grouped.jobs(for: "customer-599").map(\.id), ["job-599", "job-1199"])
+        XCTAssertTrue(grouped.jobs(for: "missing").isEmpty)
+    }
     func testCustomerSummaryUsesSamePriorityAndHonestHeading() {
         let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
         func job(_ id: String, _ status: String, _ time: String?, customer: String = "c") -> Job {
