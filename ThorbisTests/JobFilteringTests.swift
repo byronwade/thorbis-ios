@@ -2,6 +2,35 @@ import XCTest
 @testable import Thorbis
 
 final class JobFilteringTests: XCTestCase {
+    func testCustomerSummaryUsesSamePriorityAndHonestHeading() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
+        func job(_ id: String, _ status: String, _ time: String?, customer: String = "c") -> Job {
+            Job(id: id, customerId: customer, title: id, status: status,
+                createdAt: nil, updatedAt: nil, allowedTransitions: nil, scheduledFor: time)
+        }
+        let active = job("active", "in_progress", nil)
+        let next = job("next", "scheduled", "2026-10-30T12:00:00Z")
+        let past = job("past", "dispatched", "2026-10-28T12:00:00Z")
+        let unscheduled = job("unscheduled", "scheduled", nil)
+        let completed = job("completed", "completed", "2026-10-27T12:00:00Z")
+        let other = job("other", "in_progress", nil, customer: "other")
+        let all = [unscheduled, past, next, active, completed, other]
+        let summary = JobFiltering.customerJobSummary(all, customerID: "c", now: now)
+        XCTAssertEqual(summary?.job.id, "active")
+        XCTAssertEqual(summary?.heading, "Open job")
+        XCTAssertEqual(summary?.openCount, 4)
+        let upcoming = JobFiltering.customerJobSummary([past, unscheduled, next], customerID: "c", now: now)
+        XCTAssertEqual(upcoming?.job.id, "next")
+        XCTAssertEqual(upcoming?.heading, "Next visit")
+        let earlier = JobFiltering.customerJobSummary([past, unscheduled], customerID: "c", now: now)
+        XCTAssertEqual(earlier?.job.id, "past")
+        XCTAssertEqual(earlier?.heading, "Past scheduled time")
+        let noTime = JobFiltering.customerJobSummary([unscheduled], customerID: "c", now: now)
+        XCTAssertEqual(noTime?.job.id, "unscheduled")
+        XCTAssertEqual(noTime?.heading, "Open job")
+        XCTAssertNil(JobFiltering.customerJobSummary([completed, other], customerID: "c", now: now))
+    }
+
     func testNextCustomerVisitUsesEarliestUpcomingScheduledJobForThatCustomer() {
         let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
         func customerJob(_ id: String, customer: String, time: String?, status: String = "scheduled") -> Job {

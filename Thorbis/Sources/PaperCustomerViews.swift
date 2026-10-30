@@ -92,10 +92,7 @@ struct CustomersView: View {
     }
     private func customerRow(_ customer: CustomerRecord) -> some View {
         let now = Date()
-        let nextVisit = JobFiltering.nextScheduledVisit(store.jobs, customerID: customer.id, now: now)
-        let activeJob = JobFiltering.activeCustomerJob(store.jobs, customerID: customer.id)
-        let overdue = JobFiltering.overdueScheduledVisit(store.jobs, customerID: customer.id, now: now)
-        let summaryJob = activeJob ?? nextVisit ?? overdue
+        let summaryJob = JobFiltering.customerJobSummary(store.jobs, customerID: customer.id, now: now)?.job
         let jobCount = store.jobs.filter { $0.customerId == customer.id }.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
         return NavigationLink(value: listCustomer) {
@@ -138,7 +135,7 @@ struct CustomersView: View {
                 return "\(count) · Past scheduled time · \(open.status.statusLabel) · \(date.visitLabel(now: now))"
             }
             // Same words as the Jobs list ("Today 4:00 PM", "In progress"), so a visit reads alike everywhere.
-            return "\(count) · \(date.visitLabel())"
+            return "\(count) · \(date.visitLabel(now: now))"
         }
         return "\(count) · \(open.status.statusLabel)"
     }
@@ -505,11 +502,10 @@ struct CustomerDetailView: View {
     }
     /// The customer's open job first: what a dispatcher or tech opens a customer to find.
     @ViewBuilder private var nextVisit: some View {
-        let open = jobs.filter { !["completed", "canceled"].contains($0.status) }
-            .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
-        if let job = open.first {
+        if let summary = JobFiltering.customerJobSummary(jobs, customerID: customer.id) {
+            let job = summary.job
             VStack(alignment: .leading, spacing: 8) {
-                PaperGroupHeader(title: open.count > 1 ? "Next visit · \(open.count) open" : "Next visit")
+                PaperGroupHeader(title: summary.openCount > 1 ? "\(summary.heading) · \(summary.openCount) open" : summary.heading)
                 NavigationLink(value: job) {
                     HStack(alignment: .top, spacing: 12) {
                         StatusRing(status: job.status).accessibilityHidden(true)
