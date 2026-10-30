@@ -27,8 +27,6 @@ struct RootView: View {
     @State private var menuOpen = false
     /// The last place opened from the menu that is not pinned; the bar's switcher slot shows it.
     @State private var lastPlace: MenuItem?
-    /// Places opened at least once this launch. They stay alive so each keeps its scroll and stack.
-    @State private var visited: Set<String> = []
     /// iPhone search: the bar turns into a field and results rise in a drawer above it.
     @State private var barSearching = false
     @State private var barQuery = ""
@@ -476,26 +474,18 @@ struct RootView: View {
 
     private func closeMenu() { setMenu(open: false) }
 
-    private func placeStack(_ ids: [String]) -> some View {
-        ZStack {
-            ForEach(ids, id: \.self) { id in
-                let here = id == selectedTab
-                place(id)
-                    .opacity(here ? 1 : 0)
-                    .allowsHitTesting(here)
-                    .accessibilityHidden(!here)
-                    .zIndex(here ? 1 : 0)
-            }
-        }
+    /// Only the selected place is mounted. Each place's stack lives in RootView state, so its
+    /// pushed screens survive a switch. Hidden-but-mounted places leaked into VoiceOver: a
+    /// NavigationStack's UIKit tree ignores SwiftUI's accessibilityHidden.
+    private func placeStack() -> some View {
+        place(selectedTab).id(selectedTab)
         // Kept off phonePlaces' long modifier chain, which is at the type checker's limit.
         .onChange(of: store.requestedSearch, initial: true) { openRequestedSearch(phone: true) }
     }
 
-    /// Every place this launch has opened, kept alive and stacked; only the selected one shows.
+    /// The selected place, with the sheets and request handlers every place shares.
     private func phonePlaces() -> some View {
-        let ids = (menuPlaces.map(\.rawValue) + [PrimaryTab.more.rawValue]).filter { visited.contains($0) || $0 == selectedTab }
-        return placeStack(ids)
-        .onChange(of: selectedTab, initial: true) { visited.insert(selectedTab) }
+        placeStack()
         // The bottom bar is the way around; screens drop their top-left menu button.
         .environment(\.paperShowMenu, { Task { @MainActor in setMenu(open: true) } })
         .environment(\.paperMenuButton, false)
