@@ -35,28 +35,38 @@ struct PaperHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // The menu button sits top-left on iPad; on iPhone the bottom bar opens the menu.
-            HStack(alignment: .center, spacing: 8) {
-                if showsMenuButton {
+            // The menu button sits top-left on iPad. On iPhone the bottom bar opens the menu, so the
+            // filter joins the title's line and no near-empty row sits above it.
+            if showsMenuButton {
+                HStack(alignment: .center, spacing: 8) {
                     PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
+                    Spacer(minLength: 0)
+                    filterButton
                 }
-                Spacer(minLength: 0)
-                if let search {
-                    // Filters this list; the tab bar's search finds anything. Different glyphs, different jobs.
-                    PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: search)
-                }
+                .frame(minHeight: 44)
             }
-            .frame(minHeight: 44)
-            Text(title)
-                .font(Theme.font(30, weight: .medium)).tracking(-0.6)
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .center, spacing: 12) {
+                Text(title)
+                    .font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                if !showsMenuButton { filterButton }
+            }
             Text(subtitle)
                 .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .lineLimit(2)
                 .frame(minHeight: 20, alignment: .leading)
         }
         .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, Theme.gutter).padding(.top, 2).padding(.bottom, 12)
+        .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 12)
+    }
+
+    /// Filters this list; the bar's Search finds anything. Different glyphs, different jobs.
+    @ViewBuilder private var filterButton: some View {
+        if let search {
+            PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: search)
+        }
     }
 }
 

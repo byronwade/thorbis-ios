@@ -235,15 +235,18 @@ struct WorkspaceRevenueView: View {
 
         PaperGroupHeader(title: "By month", count: months.count)
         ForEach(months.reversed()) { month in
-            HStack {
-                Text(monthName(month.month, long: true)).font(Theme.font(15, weight: .medium))
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(money(month.collected, currency: "USD")).moneyStyle(.row)
-                    Text("Invoiced \(money(month.revenue, currency: "USD"))").font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+            // Month and what was invoiced on the left, what came in on the right: one amount per side.
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(monthName(month.month, long: true)).font(Theme.font(15, weight: .medium))
+                    Text("Invoiced \(money(month.revenue, currency: "USD"))")
+                        .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
+                Spacer(minLength: 12)
+                Text(money(month.collected, currency: "USD")).moneyStyle(.row)
             }
-            .frame(minHeight: 48)
+            .padding(.vertical, 8)
+            .frame(minHeight: 56)
             .accessibilityElement(children: .combine)
         }
     }
