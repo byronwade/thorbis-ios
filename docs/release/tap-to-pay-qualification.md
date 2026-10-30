@@ -56,3 +56,24 @@ and unaccepted-terms message, but were not executed: the initial simulator
 test build stalled during asset compilation and was stopped. Repeat those tests
 and test the fail-closed connection on an authorized physical development
 device before treating the behavior as qualified.
+
+### Existing reader and credential scope
+
+Review found that `TerminalSetup.connect` returns for any existing reader,
+before checking its location or the merchant and environment for the new
+invoice. In Stripe Terminal 5.8.1, `Reader.locationId` is the last location
+registered at connection, and does not establish the connected merchant or
+environment. The SDK's `clearCachedCredentials` documentation says to disconnect
+the reader, clear cached credentials, configure the token provider for the new
+account, then discover and connect; the SDK can otherwise reuse a saved reader
+session. See `SCPTerminal.h` and `SCPReader.h` in the pinned SDK. The current
+API token response has no merchant identity, so matching location alone is not
+evidence that a reused connection belongs to the requested merchant.
+
+Before enabling Tap, establish server-authoritative merchant, environment and
+workspace identity, serialize the complete collection lifecycle to prevent a
+scope switch while a charge is underway, and disconnect/clear credentials and
+obtain a freshly scoped token whenever the verified binding changes or cannot
+be established. Test same-scope reuse, account and environment changes,
+logout/workspace changes, reconnect errors and concurrent attempts. This
+report does not claim those protections are implemented.

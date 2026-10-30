@@ -15,6 +15,12 @@ final class TapToPayReadinessTests: XCTestCase {
                        "Tap to Pay needs setup. Ask your business administrator to complete the merchant terms, or use another payment method.")
     }
 
+    func testTermsICloudRequirementDirectsTechnicianToAdministrator() {
+        let error = NSError(domain: ErrorDomain, code: ErrorCode.Code.tapToPayReaderTOSAcceptanceRequiresiCloudSignIn.rawValue)
+        XCTAssertEqual(TapToPayController.message(for: error),
+                       "Tap to Pay needs setup. Ask your business administrator to complete the merchant terms, or use another payment method.")
+    }
+
     func testUnqualifiedBuildOverridesAnOtherwiseEligibleWorkspaceAndPhone() {
         XCTAssertFalse(TapToPayReadiness.allows(
             buildEnabled: false, deviceSupported: true, featureEnabled: true, canCollect: true
