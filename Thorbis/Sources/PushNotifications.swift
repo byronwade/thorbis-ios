@@ -92,7 +92,7 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         let digest = Self.isMorningDigest(userInfo)
         await MainActor.run {
             // TG-11: the digest opens Today.
-            if digest { store?.requestedSchedule += 1 }
+            if digest { store?.openedForRecord = true; store?.requestedSchedule += 1 }
             else if let jobID { store?.requestedJobID = jobID } else if let record { store?.requestedRecord = record }
         }
     }
