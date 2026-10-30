@@ -13,6 +13,32 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-bar-live",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "record.circle", title: "Your current job, one tap away",
+                      detail: "The job you are on floats above the bar on every screen. Tap it to open the job."),
+                .init(symbol: "arrow.triangle.2.circlepath", title: "See what is still syncing",
+                      detail: "Search shows how many changes are waiting on this phone, and turns red if one needs a look."),
+                .init(symbol: "hand.tap", title: "Hold + or Search for shortcuts",
+                      detail: "Hold + to start a job, estimate or customer. Hold Search for what you opened last."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-bottom-bar-menu",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "dock.rectangle", title: "Get around from the bottom bar",
+                      detail: "Your places sit in a bar at the bottom. Tap the last one again to open every place."),
+                .init(symbol: "building.2", title: "Switch business from the menu",
+                      detail: "Your business name sits on top of the menu. Tap it to switch to another business or add one."),
+                .init(symbol: "arrow.up.arrow.down", title: "Arrange your bar and menu",
+                      detail: "Tap the sliders in the menu, then drag places to reorder them or move them into the bar."),
+                .init(symbol: "magnifyingglass", title: "Search in one tap",
+                      detail: "Search sits next to New job at the bottom and opens ready to type."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-menu-layout",
             date: "2026-10-29",
             highlights: [

@@ -31,19 +31,22 @@ struct PaperHeader: View {
     var search: (() -> Void)? = nil
     @EnvironmentObject private var session: SessionController
     @Environment(\.paperShowMenu) private var openAccount
+    @Environment(\.paperMenuButton) private var showsMenuButton
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // ChatGPT-style top row: the menu button sits top-left on every main screen.
+            // The menu button sits top-left on iPad; on iPhone the bottom bar opens the menu.
             HStack(alignment: .center, spacing: 8) {
-                PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
+                if showsMenuButton {
+                    PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
+                }
                 Spacer(minLength: 0)
                 if let search {
                     // Filters this list; the tab bar's search finds anything. Different glyphs, different jobs.
                     PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: search)
                 }
-                // One way in: the menu button. The account lives at the bottom of the menu.
             }
+            .frame(minHeight: 44)
             Text(title)
                 .font(Theme.font(30, weight: .medium)).tracking(-0.6)
                 .lineLimit(1).minimumScaleFactor(0.7)
@@ -396,6 +399,17 @@ enum PaperChrome {
     }
 }
 
+private struct PaperMenuButtonKey: EnvironmentKey {
+    static let defaultValue = true
+}
+extension EnvironmentValues {
+    /// Whether tab-root headers show the top-left menu button. iPhone turns it off for the bottom bar.
+    var paperMenuButton: Bool {
+        get { self[PaperMenuButtonKey.self] }
+        set { self[PaperMenuButtonKey.self] = newValue }
+    }
+}
+
 private struct PaperShowMenuKey: EnvironmentKey {
     static let defaultValue: @Sendable () -> Void = {}
 }
@@ -686,8 +700,14 @@ struct FloatingCreateButton: View {
     let title: String
     var disabled = false
     let action: () -> Void
+    /// On iPhone the bottom bar's + creates for the screen showing, so this pill steps aside.
+    @Environment(\.paperMenuButton) private var visible
 
     var body: some View {
+        if visible { pill }
+    }
+
+    private var pill: some View {
         HStack {
             Spacer()
             Button(action: action) {
