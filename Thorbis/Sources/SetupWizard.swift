@@ -292,16 +292,22 @@ struct SetupWizardView: View {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     fieldTitle("Business type")
-                    Picker("Business type", selection: draft("entity_type")) {
-                        Text("Choose").tag("")
-                        ForEach(SetupEntityTypes.all, id: \.self) { Text($0).tag($0) }
-                        let current = facts.drafts["entity_type"] ?? ""
-                        if !current.isEmpty && !SetupEntityTypes.all.contains(current) { Text(current).tag(current) }
+                    let current = facts.drafts["entity_type"] ?? ""
+                    let options = SetupEntityTypes.all + (current.isEmpty || SetupEntityTypes.all.contains(current) ? [] : [current])
+                    ThorbisMenu(items: options.map { option in
+                        ThorbisMenuItem(option, isSelected: option == current) { draft("entity_type").wrappedValue = option }
+                    }, title: "Business type", accessibilityLabel: "Business type") {
+                        HStack {
+                            Text(current.isEmpty ? "Choose" : current).font(Theme.font(16))
+                                .foregroundStyle(current.isEmpty ? Theme.muted : Theme.foreground)
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 13)).foregroundStyle(Theme.muted)
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                        .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
                     }
-                    .pickerStyle(.menu).tint(Theme.foreground)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 }
                 factField("formation_jurisdiction", "State where it was formed", placeholder: "Texas")
                 VStack(alignment: .leading, spacing: 6) {

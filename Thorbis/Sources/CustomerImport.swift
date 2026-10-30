@@ -435,14 +435,20 @@ struct CustomerImportPanel: View {
         HStack {
             Text(label).font(Theme.font(15))
             Spacer()
-            Picker(label, selection: Binding(get: { model.mapping[field] ?? -1 },
-                                             set: { model.mapping[field] = $0 < 0 ? nil : $0 })) {
-                Text("Not in file").tag(-1)
-                ForEach(model.headers.indices, id: \.self) { index in
-                    Text(model.headers[index].isEmpty ? "Column \(index + 1)" : model.headers[index]).tag(index)
+            let chosen = model.mapping[field]
+            let names = model.headers.indices.map { model.headers[$0].isEmpty ? "Column \($0 + 1)" : model.headers[$0] }
+            ThorbisMenu(items: [ThorbisMenuItem("Not in file", isSelected: chosen == nil) { model.mapping[field] = nil }]
+                        + names.indices.map { index in
+                            ThorbisMenuItem(names[index], isSelected: chosen == index) { model.mapping[field] = index }
+                        },
+                        title: label, accessibilityLabel: "\(label) column") {
+                HStack(spacing: 4) {
+                    Text(chosen.flatMap { names.indices.contains($0) ? names[$0] : nil } ?? "Not in file")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 12)).foregroundStyle(Theme.muted)
                 }
+                .frame(minHeight: 44)
             }
-            .pickerStyle(.menu).labelsHidden().tint(Theme.muted)
         }
         .frame(minHeight: 44)
     }

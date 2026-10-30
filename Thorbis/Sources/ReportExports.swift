@@ -47,13 +47,9 @@ private struct ReportExportMenu: ViewModifier {
             .toolbar {
                 if !exports.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Section("Download as Excel") {
-                                ForEach(exports) { export in
-                                    Button(export.label) { open(export) }
-                                }
-                            }
-                        } label: {
+                        ThorbisMenu(items: exports.map { export in
+                            ThorbisMenuItem(export.label, icon: "tablecells") { open(export) }
+                        }, title: "Download as Excel", accessibilityLabel: "Download as Excel") {
                             if preview.loading {
                                 ProgressView()
                             } else {
@@ -61,7 +57,6 @@ private struct ReportExportMenu: ViewModifier {
                                     .frame(width: 44, height: 44).contentShape(Rectangle())
                             }
                         }
-                        .accessibilityLabel("Download as Excel")
                     }
                 }
             }
