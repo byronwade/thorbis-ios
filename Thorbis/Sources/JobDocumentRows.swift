@@ -103,7 +103,7 @@ extension JobDocumentRow {
         // Whole alternatives are never added together or presented as add-ons.
         if let options = estimate.options, !options.isEmpty, estimate.status != "approved" {
             amount = nil
-            detail = "\(options.count) options"
+            detail = "\(options.count) \(options.count == 1 ? "option" : "options")"
         } else {
             amount = paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") }
             detail = nil

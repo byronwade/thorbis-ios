@@ -97,7 +97,7 @@ struct JobDetailView: View {
             }
             if let job {
                 if selectedTab == "Photos" {
-                    header(job, compact: true)
+                    header(job, compact: true, showActions: false)
                     tabBar
                     JobMediaView(jobID: jobId)
                 } else {
@@ -105,7 +105,7 @@ struct JobDetailView: View {
                     // The tabs pin under the nav bar, so switching Overview, Invoice or Activity
                     // never means scrolling back to the top first.
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    header(job)
+                    header(job, compact: selectedTab != "Overview")
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedTab {
@@ -409,14 +409,26 @@ struct JobDetailView: View {
         }
     }
 
-    private func header(_ job: JobRecord, compact: Bool = false) -> some View {
+    private func header(_ job: JobRecord, compact: Bool = false, showActions: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            // The reference is mono so its digits line up; the customer's name reads as a name.
-            PaperEyebrow(reference: "JOB-\(job.id.suffix(4).uppercased())", text: store.customerName(job.customerId))
+            if let customer = store.customers.first(where: { $0.id == job.customerId }),
+               session.can("customer.view", feature: "core_crm") {
+                NavigationLink(value: customer) {
+                    Label(customer.name, systemImage: "person.crop.circle")
+                        .font(Theme.font(15, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityHint("Opens the customer")
+            } else {
+                Text(store.customerName(job.customerId))
+                    .font(Theme.font(15, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(job.title)
                 .font(Theme.font(24, weight: .medium))
                 .tracking(-0.36)
-                .lineLimit(compact ? 2 : nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             // One wrapping row of chips instead of two fixed rows (chips are pills).
@@ -473,6 +485,8 @@ struct JobDetailView: View {
             }
             if !compact {
                 JobProgressTrack(status: outbox.pendingStatus(for: job.id) ?? job.status).padding(.top, 10)
+            }
+            if showActions {
                 quickActions
             }
         }
@@ -616,6 +630,11 @@ struct JobDetailView: View {
     private func overviewContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 22) {
             JobOfficeNote(notes: job.notes, pauseReason: job.pauseReason, pauseNextAction: job.pauseNextAction)
+            JobVisitCounts(latestNote: notes.last?.body, noteCount: notes.count + outbox.pendingNotes(for: job.id).count,
+                           photoCount: mediaCount, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
+                           openNotes: { activityFilter = "Notes"; withMotion(.snappy) { selectedTab = "Activity" } },
+                           openPhotos: { withMotion(.snappy) { selectedTab = "Photos" } },
+                           openFollowUpsScreen: { showFollowUps = true })
             // JS-05: only when the platform recorded the call that booked this job.
             if let bookingCall { JobBookingCallSection(call: bookingCall) }
             if session.can("customer.view", feature: "core_crm") {
@@ -647,11 +666,6 @@ struct JobDetailView: View {
             // No account location is assumed to be this job's site; keep all equipment visible.
             CustomerEquipmentSection(customerID: job.customerId, locations: customerLocations)
             CustomerMembershipSection(customerID: job.customerId, editable: false)
-            JobVisitCounts(latestNote: notes.last?.body, noteCount: notes.count + outbox.pendingNotes(for: job.id).count,
-                           photoCount: mediaCount, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
-                           openNotes: { activityFilter = "Notes"; withMotion(.snappy) { selectedTab = "Activity" } },
-                           openPhotos: { withMotion(.snappy) { selectedTab = "Photos" } },
-                           openFollowUpsScreen: { showFollowUps = true })
             JobPastVisitsSection(visits: visits, currentUserID: session.user?.id)
             detailsGroup(job)
         }
@@ -659,41 +673,29 @@ struct JobDetailView: View {
 
     private func detailsGroup(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: "Details")
-            if let customer = store.customers.first(where: { $0.id == job.customerId }),
-               session.can("customer.view", feature: "core_crm") {
-                // The customer opens from the job: history, contacts and equipment in one tap.
-                NavigationLink(value: customer) {
-                    PaperDetailRow(label: "Customer") {
-                        HStack(spacing: 4) {
-                            Text(customer.name).foregroundStyle(Theme.foreground)
-                            PaperDisclosure()
+            if JobFiltering.date(job.scheduledFor) == nil {
+                PaperDetailRow("Scheduled", value: "Not scheduled")
+            }
+            DisclosureGroup("More job details") {
+                if let date = JobFiltering.date(job.scheduledFor) {
+                    PaperDetailRow("Scheduled", value: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                }
+                if let created = JobFiltering.date(job.createdAt) {
+                    PaperDetailRow("Booked", value: created.formatted(.dateTime.month(.abbreviated).day().year()))
+                }
+                // JH-02: drive and on-site time from the visit steps, live each minute while open (JH-04).
+                TimelineView(.everyMinute) { context in
+                    if let hours = JobHours.make(job, now: context.date) {
+                        PaperDetailRow(label: "Time") {
+                            Text(hours.line).font(hours.hasDuration ? Theme.monoFont(15, weight: .medium) : Theme.font(15, weight: .medium))
                         }
                     }
                 }
-                .buttonStyle(RowPressStyle())
-                .accessibilityHint("Opens the customer")
-            } else {
-                PaperDetailRow("Customer", value: store.customerName(job.customerId))
+                PaperDetailRow(label: "Job ID") { Text("JOB-\(job.id.suffix(4).uppercased())").font(Theme.monoFont(15, weight: .medium)) }
+                    .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
             }
-            if let date = JobFiltering.date(job.scheduledFor) {
-                PaperDetailRow("Scheduled", value: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
-            } else {
-                PaperDetailRow("Scheduled", value: "Not scheduled")
-            }
-            if let created = JobFiltering.date(job.createdAt) {
-                PaperDetailRow("Booked", value: created.formatted(.dateTime.month(.abbreviated).day().year()))
-            }
-            // JH-02: drive and on-site time from the visit steps, live each minute while open (JH-04).
-            TimelineView(.everyMinute) { context in
-                if let hours = JobHours.make(job, now: context.date) {
-                    PaperDetailRow(label: "Time") {
-                        Text(hours.line).font(hours.hasDuration ? Theme.monoFont(15, weight: .medium) : Theme.font(15, weight: .medium))
-                    }
-                }
-            }
-            PaperDetailRow(label: "Job ID") { Text("JOB-\(job.id.suffix(4).uppercased())").font(Theme.monoFont(15, weight: .medium)) }
-                .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
+            .font(Theme.font(15, weight: .medium))
+            .frame(minHeight: 44)
         }
     }
 

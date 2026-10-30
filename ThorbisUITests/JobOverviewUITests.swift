@@ -2,6 +2,52 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testJobOverviewKeepsVisitActionsBeforeCustomerDetails() {
+        let app = preview("job", working: true)
+        let visit = app.staticTexts["On this visit"]
+        let locations = app.staticTexts["Customer locations"]
+        XCTAssertTrue(visit.waitForExistence(timeout: 20))
+        XCTAssertTrue(locations.waitForExistence(timeout: 20))
+        XCTAssertLessThan(visit.frame.minY, locations.frame.minY)
+        XCTAssertTrue(button(startingWith: "Notes", in: app).exists)
+        XCTAssertTrue(button(startingWith: "Photos", in: app).exists)
+        let details = app.buttons["More job details"]
+        for _ in 0..<8 where !details.isHittable { app.swipeUp() }
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        details.tap()
+        let jobID = app.staticTexts["Job ID"]
+        for _ in 0..<4 where !jobID.isHittable { app.swipeUp() }
+        XCTAssertTrue(jobID.waitForExistence(timeout: 5))
+        XCTAssertTrue(jobID.isHittable)
+    }
+
+    func testDocumentTabsKeepJobNameWithoutRepeatingOverviewActions() {
+        let app = preview("job", working: true)
+        XCTAssertTrue(app.buttons["Estimates"].waitForExistence(timeout: 20))
+        app.buttons["Estimates"].tap()
+        XCTAssertTrue(app.buttons["Call"].exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Step ")).firstMatch.exists)
+        XCTAssertTrue(app.buttons["Overview"].exists)
+        app.buttons["Overview"].tap()
+        XCTAssertTrue(app.buttons["Call"].waitForExistence(timeout: 5))
+    }
+
+    func testSingleEstimateOptionUsesSingularLabel() {
+        let app = preview("job-estimates", working: true)
+        XCTAssertTrue(app.staticTexts["1 option"].waitForExistence(timeout: 20))
+    }
+
+    func testLongJobTitleWrapsOnEstimateTab() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates",
+                               "--paper-preview-working-job", "--paper-preview-long-job-title"]
+        app.launch()
+        let title = app.staticTexts["Diagnose the upstairs air conditioner and replace the damaged compressor at the back of the property"]
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        XCTAssertGreaterThan(title.frame.height, 70, "The complete job title should wrap beyond two lines")
+        XCTAssertTrue(app.buttons["Job actions"].exists)
+    }
+
     func testMoreKeepsEverySecondaryActionAndOpensScheduling() {
         continueAfterFailure = false
         let app = preview("job", working: true)
