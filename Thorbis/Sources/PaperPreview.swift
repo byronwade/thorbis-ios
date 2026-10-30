@@ -748,10 +748,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["items": [["subjectKind": "role", "subjectKey": "technician", "channel": "email", "enabled": false]]]
         }
         if path == "/v1/staff/notices", PaperPreview.screen == "inbox" {
-            return ["items": [
+            var notices: [[String: Any]] = [
                 ["id": "preview-notice-new", "jobId": PaperPreview.jobID, "title": "A visit is ready", "meta": "Water heater install", "at": now, "read": false],
                 ["id": "preview-notice-read", "jobId": PaperPreview.jobID, "title": "A visit was updated", "meta": "Water heater install", "at": now, "read": true]
-            ], "unreadState": "present", "nextCursor": NSNull()] as [String: Any]
+            ]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-day-groups") {
+                let older = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-172_800))
+                notices.append(["id": "preview-notice-older", "jobId": PaperPreview.jobID, "title": "An earlier visit", "meta": "Drain cleaning", "at": older, "read": true])
+                notices.append(["id": "preview-notice-unknown", "jobId": PaperPreview.jobID, "title": "A visit without a date", "meta": "Service visit", "read": false])
+                notices.append(["id": "preview-notice-invalid", "jobId": PaperPreview.jobID, "title": "A visit with an invalid date", "meta": "Service visit", "at": "not-a-date", "read": true])
+            }
+            return ["items": notices, "unreadState": "present", "nextCursor": NSNull()] as [String: Any]
         }
         if path == "/v1/billing-schedules/00000000-0000-4000-8000-000000009501",
            let list = fixture(path: "/v1/billing-schedules") as? [String: Any], let schedule = (list["items"] as? [[String: Any]])?.first {

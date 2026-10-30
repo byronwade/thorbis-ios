@@ -12,6 +12,9 @@ struct WorkspaceNoticesView: View {
     @State private var error: String?
 
     @State private var filter = "All"
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
 
     private var visible: [StaffNotice] { filter == "Unread" ? items.filter { !$0.read } : items }
 
@@ -31,7 +34,16 @@ struct WorkspaceNoticesView: View {
                     PaperTabs(options: ["All", "Unread"], selection: $filter)
                     if let error { ErrorBanner(message: error) { await refresh() } }
                     if loading && items.isEmpty && error == nil { SkeletonRows(count: 5) }
-                    ForEach(visible) { notice in
+                    let notices = visible
+                    let displayCalendar = calendarWithTimeZone
+                    ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
+                        if let heading = InboxNoticeDay.header(notice.at, after: index > 0 ? notices[index - 1].at : nil,
+                                                               hasPrevious: index > 0, calendar: displayCalendar, locale: locale) {
+                            PaperGroupHeader(title: heading)
+                                .padding(.horizontal, Theme.gutter).padding(.top, 10)
+                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityIdentifier("inbox-day-heading")
+                        }
                         // Each notice opens the job it is about.
                         NavigationLink(value: PaperRoute.job(notice.jobId)) {
                         HStack(alignment: .top, spacing: 12) {
@@ -112,8 +124,14 @@ struct WorkspaceNoticesView: View {
         }
     }
 
-    private func timeLabel(_ raw: String) -> String {
-        guard let date = JobFiltering.date(raw) else { return raw }
+    private var calendarWithTimeZone: Calendar {
+        var result = calendar
+        result.timeZone = timeZone
+        return result
+    }
+
+    private func timeLabel(_ raw: String?) -> String {
+        guard let raw, let date = JobFiltering.date(raw) else { return "" }
         return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
     }
 
@@ -836,5 +854,25 @@ struct PriceBookItemEditor: View {
         } catch {
             self.error = error.isConnectivityFailure ? "Saving needs a connection." : error.localizedDescription
         }
+    }
+}
+
+// Presentation-only grouping of an already-ordered notice feed.
+enum InboxNoticeDay {
+    static func header(_ raw: String?, after previous: String?, hasPrevious: Bool, calendar: Calendar, locale: Locale) -> String? {
+        let date = JobFiltering.date(raw)
+        let prior = JobFiltering.date(previous)
+        if hasPrevious {
+            if let date, let prior, calendar.isDate(date, inSameDayAs: prior) { return nil }
+            if date == nil && prior == nil { return nil }
+        }
+        guard let date else { return "Date unavailable" }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = locale
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
     }
 }
