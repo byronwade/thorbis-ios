@@ -302,6 +302,8 @@ struct RootView: View {
                 .accessibilityHidden(true)
             PaperGlobalSearch(externalQuery: $barQuery, openResult: openSearchResult)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("bar-search-results")
         .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .modifier(FloatingSurface(shape: RoundedRectangle(cornerRadius: 28, style: .continuous)))

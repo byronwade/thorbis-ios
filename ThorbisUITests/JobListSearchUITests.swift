@@ -14,8 +14,10 @@ final class JobListSearchUITests: XCTestCase {
         let field = app.textFields["Jobs, customers, invoices"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.typeText("Kitchen")
-        XCTAssertTrue(app.staticTexts["Kitchen sink backup — Petrov"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["AC not cooling"].exists)
+        let results = app.otherElements["bar-search-results"]
+        XCTAssertTrue(results.waitForExistence(timeout: 10))
+        XCTAssertTrue(results.staticTexts["Kitchen sink backup — Petrov"].waitForExistence(timeout: 10))
+        XCTAssertFalse(results.staticTexts["AC not cooling"].exists)
         app.buttons["Close search"].tap()
         XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 10))
         app.buttons["Filter jobs"].tap()
