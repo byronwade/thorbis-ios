@@ -5,7 +5,7 @@ struct StaffNotice: Decodable, Identifiable {
     let jobId: String
     let title: String
     let meta: String
-    let at: String
+    let at: String?
     let read: Bool
 }
 
