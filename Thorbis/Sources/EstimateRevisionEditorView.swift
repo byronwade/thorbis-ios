@@ -211,6 +211,14 @@ struct EstimateRevisionEditorView: View {
             .animation(EstimateLineGroupsEditor.spring, value: searching)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewReplaceEstimateDraft"))) { _ in
+                #if DEBUG
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-replacement") {
+                    documentGeneration = UUID()
+                    editor = EstimateRevisionEditorState(estimate: editor.estimate)
+                }
+                #endif
+            }
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
                             isPresented: $confirmReload,

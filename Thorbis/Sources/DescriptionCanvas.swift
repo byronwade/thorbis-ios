@@ -117,6 +117,13 @@ struct DescriptionCanvas: View {
                         }
                     }
                 }
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-replacement") {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Test replace") {
+                            NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewReplaceEstimateDraft"), object: nil)
+                        }
+                    }
+                }
                 #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

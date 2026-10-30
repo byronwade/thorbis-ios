@@ -44,6 +44,29 @@ final class DescriptionCanvasUITests: XCTestCase {
         app.navigationBars["Line description"].buttons["Apply to estimate"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "revised")).firstMatch.waitForExistence(timeout: 5) || app.textViews.matching(NSPredicate(format: "value CONTAINS %@", "revised")).firstMatch.exists || app.textFields.matching(NSPredicate(format: "value CONTAINS %@", "revised")).firstMatch.exists)
     }
+    func testReplacingEstimateRetiresOpenOptionCanvasEvenIfOptionIDIsReused() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision", "--canvas-test-replacement"]
+        app.launch()
+        XCTAssertTrue(app.textFields["Option package title"].waitForExistence(timeout: 30))
+        let open = app.buttons.matching(identifier: "estimate-option-description-more").firstMatch
+        for _ in 0..<8 where !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.isHittable)
+        open.tap()
+        let editor = app.textViews["description-canvas-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        editor.tap()
+        editor.typeText(" unsaved")
+        app.buttons["Test replace"].tap()
+        XCTAssertTrue(app.staticTexts["Editor unavailable"].waitForExistence(timeout: 5))
+        XCTAssertFalse(editor.exists)
+        XCTAssertFalse(app.buttons["Apply to estimate"].isEnabled)
+        app.navigationBars["Description"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+        app.buttons["Discard changes"].tap()
+    }
+
     func testRevokedAuthorityRetiresUnappliedCanvasEvenAfterRestore() {
         continueAfterFailure = false
         let app = XCUIApplication()
