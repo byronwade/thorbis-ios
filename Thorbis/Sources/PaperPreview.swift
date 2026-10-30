@@ -881,11 +881,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     Thread.sleep(forTimeInterval: 8)
                 }
                 let renewed = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") && !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-stable") && readNumber > 1 && (!ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-cache-test") || isFresh)
-                let description = renewed ? "Updated PEX rings. Latest catalog details. [thorbis-plumbing-demo-v1:material-049]" : "PEX copper crimp ring pack: 1-in. Ten rings for matching-size PEX; tool calibration remains required. [thorbis-plumbing-demo-v1:material-049]"
+                let extreme = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-extreme")
+                let description = extreme ? "Commercial plumbing system inspection and complete replacement.\n\nAssess the existing supply and drainage equipment, document each issue, and explain the recommended work to the customer.\n\nProtect the surrounding area, complete the installation, test all connections, and clean the work area before leaving. Final paragraph of the complete description." : (renewed ? "Updated PEX rings. Latest catalog details. [thorbis-plumbing-demo-v1:material-049]" : "PEX copper crimp ring pack: 1-in. Ten rings for matching-size PEX; tool calibration remains required. [thorbis-plumbing-demo-v1:material-049]")
                 let later = queryItems.contains { $0.name == "cursor" }
                 let pages = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-pages")
                 let firstRow = pages && later ? "Second loaded item. Additional details. [thorbis-plumbing-demo-v1:material-050]" : description
-                let rows: [(String, String, String, Int)] = [(firstRow, "10-pack", "material", 1513)] +
+                let rows: [(String, String, String, Int)] = [(firstRow, "10-pack", "material", extreme ? 123456789 : 1513)] +
                     (pages && !later ? (1...49).map { ("Sample material \($0). Details for item \($0).", "each", "material", 1000 + $0) } : []) +
                     (ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-many") ? [
                         ("Copper reducer: 1-1/4 × 1-in. Reduces a copper pressure-line diameter. [thorbis-plumbing-demo-v1:material-024]", "each", "material", 1056),

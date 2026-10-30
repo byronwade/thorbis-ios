@@ -310,6 +310,7 @@ struct WorkspacePriceBookView: View {
     @ObservedObject var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let canList: Bool
     let canViewDetail: Bool
 
@@ -530,19 +531,31 @@ struct WorkspacePriceBookView: View {
     }
 
     private func row(_ item: PriceBookListItem, showFullDescription: Bool = false) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
-                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .lineLimit(showFullDescription ? nil : 2)
-                Text(([item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · "))
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: priceBookSymbol(for: item.kind))
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Theme.brandText)
+                .frame(width: 36, height: 36)
+                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityHidden(true)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    itemTitle(item, showFullDescription: showFullDescription)
+                    itemUnit(item)
+                    itemPrice(item)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    itemTitle(item, showFullDescription: showFullDescription)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        itemUnit(item)
+                        Spacer(minLength: 6)
+                        itemPrice(item).fixedSize(horizontal: true, vertical: false)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 6)
-            Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                .moneyStyle(.row).foregroundStyle(Theme.foreground)
         }
-        .padding(.vertical, 6).frame(minHeight: 50)
+        .padding(.vertical, 8).frame(minHeight: 52)
         .contentShape(Rectangle())
         // MA-12: the quick copies people reach for while quoting on the phone.
         .contextMenu {
@@ -552,6 +565,33 @@ struct WorkspacePriceBookView: View {
             Button { UIPasteboard.general.string = PriceBookPresentation.title(item.description) } label: { Label("Copy name", systemImage: "doc.on.doc") }
             Button { UIPasteboard.general.string = PriceBookPresentation.readableDescription(item.description) } label: { Label("Copy full description", systemImage: "doc.text") }
             Button { UIPasteboard.general.string = item.description } label: { Label("Copy stored text", systemImage: "doc.on.doc") }
+        }
+    }
+
+    private func itemTitle(_ item: PriceBookListItem, showFullDescription: Bool) -> some View {
+        Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
+            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+            .lineLimit(showFullDescription || dynamicTypeSize.isAccessibilitySize ? nil : 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func itemUnit(_ item: PriceBookListItem) -> some View {
+        Text(([item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · "))
+            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+    }
+
+    private func itemPrice(_ item: PriceBookListItem) -> some View {
+        Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
+            .moneyStyle(.row).foregroundStyle(Theme.foreground)
+    }
+
+    private func priceBookSymbol(for kind: String) -> String {
+        switch kind.lowercased() {
+        case "service": "wrench.and.screwdriver"
+        case "material": "shippingbox"
+        case "labor": "person"
+        case "assembly": "square.stack.3d.up"
+        default: "tag"
         }
     }
 
