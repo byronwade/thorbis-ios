@@ -30,4 +30,20 @@ final class PriceBookPresentationTests: XCTestCase {
     func testMarkerOnlyUsesAnHonestFallback() {
         XCTAssertEqual(PriceBookPresentation.title("[thorbis-plumbing-demo-v1:material-049]"), "Untitled item")
     }
+
+    func testCatalogHighlightsRemainMappedWhenKnownDemoSuffixIsHidden() {
+        let raw = "PEX copper rings. Use with compatible fittings. [thorbis-plumbing-demo-v1:material-049]"
+        let visibleMatch = raw.range(of: "copper")!
+        let metadataMatch = raw.range(of: "material")!
+        let result = PriceBookResultsList.highlighted(raw, [visibleMatch, metadataMatch])
+        XCTAssertEqual(String(result.characters), "PEX copper rings. Use with compatible fittings.")
+        XCTAssertGreaterThan(result.runs.count, 1, "A visible search match should retain its emphasis")
+        XCTAssertTrue(raw.hasSuffix("[thorbis-plumbing-demo-v1:material-049]"))
+    }
+
+    func testCatalogKeepsOtherMarkersAndHandlesMarkerOnly() {
+        let ordinary = "Valve. [Customer requested brass fittings]"
+        XCTAssertEqual(String(PriceBookResultsList.highlighted(ordinary, []).characters), ordinary)
+        XCTAssertEqual(String(PriceBookResultsList.highlighted("[thorbis-plumbing-demo-v1:service-001]", []).characters), "Untitled item")
+    }
 }

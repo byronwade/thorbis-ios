@@ -422,10 +422,20 @@ struct PriceBookResultsList: View {
     }
 
     static func highlighted(_ text: String, _ ranges: [Range<String.Index>]) -> AttributedString {
+        let readable = PriceBookPresentation.readableDescription(text)
+        guard !readable.isEmpty else { return AttributedString("Untitled item") }
         var attributed = AttributedString(text)
         for range in ranges {
             guard let attributedRange = Range(range, in: attributed) else { continue }
             attributed[attributedRange].font = Theme.font(17, weight: .medium)
+        }
+        // Search ranges refer to the original text. Apply them before removing the known
+        // demo-only suffix so match positions remain correct and the stored value is untouched.
+        if readable != text {
+            let end = text.index(text.startIndex, offsetBy: readable.count)
+            if let suffix = Range(end..<text.endIndex, in: attributed) {
+                attributed.removeSubrange(suffix)
+            }
         }
         return attributed
     }
@@ -453,7 +463,7 @@ private struct PriceBookCatalogResultRow: View {
                         .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(PriceBookResultsList.highlighted(item.description, result.highlights))
-                        .font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .font(Theme.font(17)).foregroundStyle(Theme.foreground)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     ViewThatFits(in: .horizontal) {
