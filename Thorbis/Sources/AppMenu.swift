@@ -81,7 +81,7 @@ enum AppMenuContent {
 }
 
 /// Shared look for the floating bar, its action button and the menu: a frosted card with a hairline rim.
-private struct FloatingSurface<S: InsettableShape>: ViewModifier {
+struct FloatingSurface<S: InsettableShape>: ViewModifier {
     let shape: S
     func body(content: Content) -> some View {
         content
@@ -130,12 +130,71 @@ struct AppBottomBar: View {
     /// Long-press menus, in sections: recent records on Search, quick creates on New job.
     var searchActions: [[QuickAction]] = []
     var newActions: [[QuickAction]] = []
+    /// Search lives in the bar: when active the places and + give way to a field and a close button.
+    var searchActive = false
+    var searchQuery: Binding<String> = .constant("")
+    var closeSearch: () -> Void = {}
+    @FocusState private var fieldFocused: Bool
     @Namespace private var pill
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Bumped per place on each tap, so only the tapped icon bounces.
     @State private var taps: [String: Int] = [:]
 
     var body: some View {
+        Group {
+            if searchActive { searchRow } else { placesRow }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    /// The Search circle widens into this field; + becomes the close button.
+    private var searchRow: some View {
+        HStack(alignment: .center, spacing: AppBottomBar.gap) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                TextField("Jobs, customers, invoices", text: searchQuery)
+                    .font(Theme.font(16))
+                    .focused($fieldFocused)
+                    .submitLabel(.search)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                if !searchQuery.wrappedValue.isEmpty {
+                    Button { searchQuery.wrappedValue = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 17))
+                            .foregroundStyle(Theme.muted)
+                            .frame(width: 32, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .foregroundStyle(Theme.foreground)
+            .padding(.leading, 16)
+            .padding(.trailing, 8)
+            .frame(height: AppBottomBar.circle)
+            .frame(maxWidth: .infinity)
+            .modifier(FloatingSurface(shape: Capsule()))
+            .matchedGeometryEffect(id: "search", in: pill)
+            .onAppear { fieldFocused = true }
+            Button(action: closeSearch) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.foreground)
+                    .frame(width: AppBottomBar.circle, height: AppBottomBar.circle)
+                    .modifier(FloatingSurface(shape: Circle()))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressStyle())
+            .matchedGeometryEffect(id: "trailing", in: pill)
+            .accessibilityLabel("Close search")
+        }
+    }
+
+    private var placesRow: some View {
         HStack(alignment: .center, spacing: AppBottomBar.gap) {
             HStack(spacing: 2) {
                 ForEach(pinned) { item in slot(item) }
@@ -148,12 +207,16 @@ struct AppBottomBar: View {
             .modifier(FloatingSurface(shape: Capsule()))
             // The menu grows out of the capsule and covers it while open.
             .opacity(menuOpen ? 0 : 1)
+            .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
             circle("magnifyingglass", label: searchLabel, actions: searchActions, action: search)
                 .overlay { syncRing }
                 .overlay(alignment: .topTrailing) { syncBadge }
-            if let create { circle("plus", label: create.label, actions: newActions, action: create.run) }
+                .matchedGeometryEffect(id: "search", in: pill)
+            if let create {
+                circle("plus", label: create.label, actions: newActions, action: create.run)
+                    .matchedGeometryEffect(id: "trailing", in: pill)
+            }
         }
-        .padding(.horizontal, 16)
     }
 
     /// The round buttons' size; the capsule (4 + 42 + 4) is the same height so every edge lines up.
@@ -373,6 +436,8 @@ struct AppMenu: View {
     @EnvironmentObject private var session: SessionController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var editing = false
+    @State private var rowsHeight: CGFloat = 0
+    @State private var moreBelow = false
 
     /// As wide as the bar's capsule, so the menu reads as the capsule opening up.
     private var capsuleWidth: CGFloat {
@@ -388,10 +453,23 @@ struct AppMenu: View {
             } else {
                 header
                 Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 12)
-                // A short menu sits at its own height; a long one scrolls inside the room it has.
-                ViewThatFits(in: .vertical) {
-                    rows
-                    ScrollView { rows }.scrollIndicators(.hidden)
+                // Sized to its rows, so a short menu sits at its own height and a long one scrolls inside
+                // the room it has. The lower edge fades only while there is more below.
+                ScrollView {
+                    rows.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
+                }
+                .frame(maxHeight: rowsHeight > 0 ? rowsHeight : nil)
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(.hidden)
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.y + geometry.containerSize.height < geometry.contentSize.height - 1
+                } action: { _, more in moreBelow = more }
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .black.opacity(moreBelow ? 0 : 1)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 28)
+                    }
                 }
             }
         }
@@ -399,6 +477,8 @@ struct AppMenu: View {
         .frame(width: max(editing ? width - 32 : capsuleWidth, 0))
         .frame(maxHeight: editing ? .infinity : nil, alignment: .top)
         .foregroundStyle(Theme.foreground)
+        // Nothing inside, scrolled or not, draws outside the card's rounded edge.
+        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .modifier(FloatingSurface(shape: RoundedRectangle(cornerRadius: 30, style: .continuous)))
         .accessibilityAddTraits(.isModal)
         .accessibilityAction(.escape, close)

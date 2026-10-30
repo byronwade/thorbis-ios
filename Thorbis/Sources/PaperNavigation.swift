@@ -18,6 +18,9 @@ struct RootView: View {
     @State private var lastPlace: MenuItem?
     /// Places opened at least once this launch. They stay alive so each keeps its scroll and stack.
     @State private var visited: Set<String> = []
+    /// iPhone search: the bar turns into a field and results rise in a drawer above it.
+    @State private var barSearching = false
+    @State private var barQuery = ""
     @State private var newCustomer = false
     @State private var newEstimate = false
     @State private var reviewOutbox = false
@@ -202,12 +205,26 @@ struct RootView: View {
     private func phoneShell() -> some View {
         GeometryReader { geometry in
             phonePlaces()
-                .accessibilityHidden(menuOpen)
+                .accessibilityHidden(menuOpen || barSearching)
+                .overlay {
+                    if barSearching {
+                        // Frost the screen behind so only the drawer and field read; a tap closes search.
+                        Rectangle().fill(.ultraThinMaterial)
+                            .overlay(Theme.background.opacity(0.55))
+                            .ignoresSafeArea()
+                            .onTapGesture { closeBarSearch() }
+                            .accessibilityHidden(true)
+                            .transition(.opacity)
+                    }
+                }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     // Pulled down into the home indicator's margin, like Linear, so it sits low and small.
-                    if atTabRoot || menuOpen {
+                    if atTabRoot || menuOpen || barSearching {
                         VStack(spacing: 10) {
-                            if let job = currentJob, !menuOpen {
+                            if barSearching {
+                                searchDrawer(height: max(geometry.size.height - 92, 240))
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            } else if let job = currentJob, !menuOpen {
                                 CurrentJobChip(job: job, customer: store.customerName(job.customerId)) {
                                     store.requestedJobID = job.id
                                 }
@@ -248,6 +265,59 @@ struct RootView: View {
                 // Rotation or a new window size closes the menu instead of leaving it misplaced.
                 .onChange(of: geometry.size.width, initial: true) { phoneWidth = geometry.size.width }
                 .onChange(of: geometry.size.width) { if menuOpen { closeMenu() } }
+        }
+    }
+
+    /// Recent records and results in a card that rises from the bar. Drag its handle down to close.
+    private func searchDrawer(height: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Capsule().fill(Theme.border).frame(width: 36, height: 5)
+                .frame(maxWidth: .infinity, minHeight: 22)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 8).onEnded { if $0.translation.height > 60 { closeBarSearch() } })
+                .accessibilityHidden(true)
+            PaperGlobalSearch(externalQuery: $barQuery, openResult: openSearchResult)
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .modifier(FloatingSurface(shape: RoundedRectangle(cornerRadius: 28, style: .continuous)))
+        .padding(.horizontal, 12)
+    }
+
+    private var searchAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.38, dampingFraction: 0.86)
+    }
+
+    private func openBarSearch() {
+        closeMenu()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(searchAnimation) { barSearching = true }
+    }
+
+    private func closeBarSearch() {
+        withAnimation(searchAnimation) {
+            barSearching = false
+            barQuery = ""
+        }
+    }
+
+    /// A picked result closes search and opens on the place showing, so Back returns there.
+    private func openSearchResult(_ destination: SearchDestination) {
+        closeBarSearch()
+        switch destination {
+        case .job(let job): pushOnCurrent(job)
+        case .customer(let customer): pushOnCurrent(customer)
+        case .route(let route): pushOnCurrent(route)
+        }
+    }
+
+    private func pushOnCurrent<V: Hashable>(_ value: V) {
+        switch selectedTab {
+        case PrimaryTab.schedule.rawValue: schedulePath.append(value)
+        case PrimaryTab.jobs.rawValue: jobsPath.append(value)
+        case PrimaryTab.customers.rawValue: customersPath.append(value)
+        case PrimaryTab.more.rawValue: morePath.append(value)
+        default: customPaths[selectedTab, default: NavigationPath()].append(value)
         }
     }
 
@@ -345,11 +415,14 @@ struct RootView: View {
             menuOpen: menuOpen,
             select: { open($0) },
             openMenu: { setMenu(open: true) },
-            search: { closeMenu(); search = true },
+            search: { openBarSearch() },
             create: barCreate,
             sync: barSync,
             searchActions: searchActions,
-            newActions: newActions
+            newActions: newActions,
+            searchActive: barSearching,
+            searchQuery: $barQuery,
+            closeSearch: { closeBarSearch() }
         )
     }
 
@@ -369,7 +442,7 @@ struct RootView: View {
             },
             manageBusinesses: { closeMenu(); workspace = true },
             settings: { closeMenu(); showSettings = true },
-            search: { closeMenu(); search = true },
+            search: { openBarSearch() },
             close: closeMenu
         )
     }
@@ -458,7 +531,13 @@ struct RootView: View {
             case "my-day", "schedule": primaryTab = .schedule
             case "customers": primaryTab = .customers
             case "menu", "more": primaryTab = .more
-            case "search": search = true
+            case "search", "search-typed":
+                RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
+                RecentItems.shared.clear()
+                RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
+                RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
+                if PaperPreview.screen == "search-typed" { barQuery = "AC" }
+                barSearching = true
             case "inbox":
                 primaryTab = .more
                 morePath.append(PaperRoute.inbox)
@@ -818,10 +897,21 @@ extension APIClient {
     }
 }
 
+/// Where a search result leads, for callers that push it themselves.
+enum SearchDestination {
+    case job(Job)
+    case customer(Customer)
+    case route(PaperRoute)
+}
+
 /// Paper 76: one field, results grouped by record type. The server's Search Gateway
 /// searches the whole company; with no signal the phone's saved jobs and customers answer.
 struct PaperGlobalSearch: View {
     var embedded = false
+    /// Set by the iPhone's bottom search: its field owns the text, and a picked result is handed
+    /// back to push on the current place instead of inside this view.
+    var externalQuery: Binding<String>? = nil
+    var openResult: ((SearchDestination) -> Void)? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
@@ -850,7 +940,7 @@ struct PaperGlobalSearch: View {
             }
         }
     }
-    private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmed: String { (externalQuery?.wrappedValue ?? query).trimmingCharacters(in: .whitespacesAndNewlines) }
     private var useServer: Bool { !serverFailed && !session.isOffline && serverQuery == trimmed && !trimmed.isEmpty }
     private var jobs: [Job] { trimmed.isEmpty ? [] : JobFiltering.jobs(store.jobs, assignedTo: nil, search: trimmed) }
     private var customers: [Customer] { trimmed.isEmpty ? [] : store.customers.filter { $0.archived != true && $0.name.localizedCaseInsensitiveContains(trimmed) } }
@@ -861,7 +951,50 @@ struct PaperGlobalSearch: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        if openResult != nil {
+            results
+                .foregroundStyle(Theme.foreground)
+                .scrollDismissesKeyboard(.interactively)
+        } else {
+            NavigationStack(path: $path) {
+                results
+                    .foregroundStyle(Theme.foreground)
+                    .background(Theme.background)
+                    .navigationTitle("Search")
+                    .navigationBarTitleDisplayMode(.large)
+                    .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Jobs, customers, invoices")
+                    .searchFocused($fieldFocused)
+                    .task { if !embedded { fieldFocused = true } }
+                    .toolbar {
+                        if !embedded {
+                            ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                        }
+                    }
+                    .paperDestinations()
+            }
+        }
+    }
+
+    private func go(_ destination: SearchDestination) {
+        if let openResult { return openResult(destination) }
+        switch destination {
+        case .job(let job): path.append(job)
+        case .customer(let customer): path.append(customer)
+        case .route(let route): path.append(route)
+        }
+    }
+
+    private func searchLink<L: View>(_ job: Job, @ViewBuilder label: () -> L) -> some View {
+        Button(action: { go(.job(job)) }, label: label)
+    }
+    private func searchLink<L: View>(_ customer: Customer, @ViewBuilder label: () -> L) -> some View {
+        Button(action: { go(.customer(customer)) }, label: label)
+    }
+    private func searchLink<L: View>(_ route: PaperRoute, @ViewBuilder label: () -> L) -> some View {
+        Button(action: { go(.route(route)) }, label: label)
+    }
+
+    private var results: some View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if trimmed.isEmpty {
@@ -876,8 +1009,8 @@ struct PaperGlobalSearch: View {
                             ForEach(opened, id: \.0) { item, destination in
                                 Button {
                                     switch destination {
-                                    case .job(let job): path.append(job)
-                                    case .customer(let customer): path.append(customer)
+                                    case .job(let job): go(.job(job))
+                                    case .customer(let customer): go(.customer(customer))
                                     }
                                 } label: {
                                     HStack(spacing: 12) {
@@ -900,7 +1033,7 @@ struct PaperGlobalSearch: View {
                         } else if !recent.isEmpty {
                             PaperGroupHeader(title: "Open jobs").padding(.top, opened.isEmpty ? 8 : 16)
                             ForEach(Array(recent)) { job in
-                                NavigationLink(value: job) {
+                                searchLink(job) {
                                     HStack(spacing: 12) {
                                         StatusRing(status: job.status).accessibilityHidden(true)
                                         VStack(alignment: .leading, spacing: 2) {
@@ -931,7 +1064,7 @@ struct PaperGlobalSearch: View {
                         if session.can("job.view", feature: "jobs"), !jobs.isEmpty {
                             PaperGroupHeader(title: "Jobs", count: jobs.count).padding(.top, 8)
                             ForEach(jobs) { job in
-                                NavigationLink(value: job) {
+                                searchLink(job) {
                                     HStack(spacing: 10) {
                                         StatusRing(status: job.status)
                                         Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
@@ -945,7 +1078,7 @@ struct PaperGlobalSearch: View {
                         if session.can("customer.view", feature: "core_crm"), !customers.isEmpty {
                             PaperGroupHeader(title: "Customers", count: customers.count).padding(.top, 16)
                             ForEach(customers) { customer in
-                                NavigationLink(value: customer) {
+                                searchLink(customer) {
                                     HStack(spacing: 12) {
                                         Avatar(name: customer.name, size: 26)
                                         Text(customer.name).font(Theme.font(15, weight: .medium))
@@ -979,20 +1112,6 @@ struct PaperGlobalSearch: View {
                     serverFailed = true
                 }
             }
-            .foregroundStyle(Theme.foreground)
-            .background(Theme.background)
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Jobs, customers, invoices")
-            .searchFocused($fieldFocused)
-            .task { if !embedded { fieldFocused = true } }
-            .toolbar {
-                if !embedded {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-                }
-            }
-            .paperDestinations()
-        }
     }
 
     private func label(_ type: String) -> String {
