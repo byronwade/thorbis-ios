@@ -344,6 +344,23 @@ struct RootView: View {
     }
 
     private func pushOnCurrent<V: Hashable>(_ value: V) {
+        if typedJobsExperiment, let route = PaperTypedJobsRoute.wrapping(value) {
+            switch selectedTab {
+            case PrimaryTab.schedule.rawValue:
+                typedScheduleOwner.discardPendingPop()
+                typedSchedulePath.append(route)
+                return
+            case PrimaryTab.jobs.rawValue:
+                typedJobsOwner.discardPendingPop()
+                typedJobsPath.append(route)
+                return
+            case PrimaryTab.customers.rawValue:
+                typedCustomersOwner.discardPendingPop()
+                typedCustomersPath.append(route)
+                return
+            default: break
+            }
+        }
         switch selectedTab {
         case PrimaryTab.schedule.rawValue: schedulePath.append(value)
         case PrimaryTab.jobs.rawValue: jobsPath.append(value)
