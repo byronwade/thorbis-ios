@@ -48,6 +48,9 @@ enum PaperPreview {
     }
     static var jobDocumentEstimates: [EstimateRecord] {
         var draft = changed(estimate, ["id": "00000000-0000-4000-8000-000000002238", "title": "Water heater add-ons", "status": "draft", "options": NSNull()])
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-approved-unknown-total") {
+            draft = changed(draft, ["status": "approved", "options": NSNull()])
+        }
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-invalid-money") {
             let invalid = FieldLine(id: "00000000-0000-4000-8000-000000009299", description: "Unverifiable sample amount", quantity: 2,
                                     unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)

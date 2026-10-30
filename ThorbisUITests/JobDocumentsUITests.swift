@@ -40,6 +40,20 @@ final class JobDocumentsUITests: XCTestCase {
         capture(app, "Job sections reachable without scrolling")
     }
 
+    func testEstimateTotalsShowSentAmountAndExplainUnknownApprovedAmount() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-approved-unknown-total"])
+        thorbisStableButton(app, "Estimates").tap()
+        let totals = app.buttons["Estimate totals"]
+        app.swipeUp()
+        XCTAssertTrue(totals.waitForExistence(timeout: 5))
+        XCTAssertTrue(totals.isHittable)
+        totals.tap()
+        XCTAssertTrue(app.staticTexts["Approved total unavailable"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Awaiting approval · USD"].exists)
+        XCTAssertTrue(app.staticTexts["$970.00"].exists)
+    }
+
     func testAllJobInvoicesAreVisibleAndOpenTheirOwnDetail() {
         continueAfterFailure = false
         let app = preview()

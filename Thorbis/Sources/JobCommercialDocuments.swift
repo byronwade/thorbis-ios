@@ -91,14 +91,20 @@ struct JobEstimateSummary {
     }
     let amounts: [Amount]
     let optionCount: Int
+    let approvedUnavailable: Bool
 
     init?(records: [EstimateRecord], complete: Bool) {
         guard complete else { return nil }
         var sums: [String: [String: Int]] = [:]
         var options = 0
+        var unavailable = false
         for record in records {
-            // An absent options field does not establish what an approved customer accepted.
-            if record.status == "approved", record.options == nil { return nil }
+            // Neither missing alternatives nor an option list identifies accepted work.
+            if record.status == "approved", record.options == nil || record.options?.isEmpty == false {
+                unavailable = true
+                if record.options?.isEmpty == false { options += 1 }
+                continue
+            }
             if record.options?.isEmpty == false { options += 1; continue }
             guard ["approved", "sent"].contains(record.status) else { continue }
             let currency = record.lines.first?.unitPrice.currency ?? "USD"
@@ -108,11 +114,13 @@ struct JobEstimateSummary {
             guard !sum.overflow else { return nil }
             sums[record.status, default: [:]][currency] = sum.partialValue
         }
+        if unavailable { sums.removeValue(forKey: "approved") }
         amounts = sums.keys.sorted().flatMap { status in
             sums[status]!.keys.sorted().map { Amount(status: status, currency: $0, cents: sums[status]![$0]!) }
         }
         optionCount = options
-        if amounts.isEmpty && optionCount == 0 { return nil }
+        approvedUnavailable = unavailable
+        if amounts.isEmpty && optionCount == 0 && !approvedUnavailable { return nil }
     }
 }
 

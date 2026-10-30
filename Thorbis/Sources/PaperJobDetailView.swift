@@ -829,6 +829,13 @@ struct JobDetailView: View {
                                 }
                                 .accessibilityElement(children: .contain)
                             }
+                            if summary.approvedUnavailable {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Approved total unavailable")
+                                    Text("Open approved estimates to review their amounts.")
+                                        .foregroundStyle(Theme.muted)
+                                }
+                            }
                             if summary.optionCount > 0 {
                                 Text("\(summary.optionCount) \(summary.optionCount == 1 ? "estimate has" : "estimates have") pricing options. Review those options separately.")
                                     .foregroundStyle(Theme.muted)
