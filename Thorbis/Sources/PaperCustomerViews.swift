@@ -44,6 +44,7 @@ struct CustomersView: View {
     }
 
     var body: some View {
+        let jobGroups = CustomerJobGroups(jobs: store.jobs)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withMotion { showSearch.toggle() } })
@@ -53,15 +54,17 @@ struct CustomersView: View {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
                 }
                 if recordsLoading && records.isEmpty { SkeletonRows() }
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(sections, id: \.0) { letter, customers in
-                        PaperGroupHeader(title: letter).padding(.top, 6)
+                ForEach(sections, id: \.0) { letter, customers in
+                    Section {
                         ForEach(customers) { customer in
-                            customerRow(customer)
+                            customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
+                                .padding(.horizontal, Theme.gutter)
                         }
+                    } header: {
+                        PaperGroupHeader(title: letter).padding(.top, 6)
+                            .padding(.horizontal, Theme.gutter)
                     }
                 }
-                .padding(.horizontal, Theme.gutter)
                 if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
                         PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: search.isEmpty ? "Archived customers will appear here." : "Try a different search.")
@@ -89,10 +92,10 @@ struct CustomersView: View {
         }
         .sheet(item: $newJobFor) { customer in NewJobSheet(preselected: customer) }
     }
-    private func customerRow(_ customer: CustomerRecord) -> some View {
+    private func customerRow(_ customer: CustomerRecord, jobs: [Job]) -> some View {
         let now = Date()
-        let summaryJob = JobFiltering.customerJobSummary(store.jobs, customerID: customer.id, now: now)?.job
-        let jobCount = store.jobs.filter { $0.customerId == customer.id }.count
+        let summaryJob = JobFiltering.customerJobSummary(jobs, customerID: customer.id, now: now)?.job
+        let jobCount = jobs.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
         return NavigationLink(value: listCustomer) {
             HStack(alignment: .center, spacing: 12) {
