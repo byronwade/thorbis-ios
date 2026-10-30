@@ -249,6 +249,100 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
     }
 
+    func testTypedJobsRouteOpensBothScopedInvoiceDetails() {
+        let app = launch(["--invoice-route-owner-experiment"], screen: "job-invoice")
+        for (id, reference) in [(invoice, "INV-2209"), (second, "INV-2240")] {
+            let card = app.buttons["job-invoice-\(id)"]
+            XCTAssertTrue(card.waitForExistence(timeout: 15))
+            card.tap()
+            XCTAssertTrue(app.staticTexts[reference].waitForExistence(timeout: 5))
+            app.navigationBars.buttons.firstMatch.tap()
+        }
+        XCTAssertFalse(app.buttons["job-invoice-00000000-0000-4000-8000-000000002241"].exists)
+    }
+
+    func testTypedJobsRouteOpensCustomerAndNewJobSheet() {
+        let app = launch(["--invoice-route-owner-experiment"], screen: "job")
+        let customer = app.buttons["job-customer-link"]
+        XCTAssertTrue(customer.waitForExistence(timeout: 15))
+        customer.tap()
+        let newJob = app.buttons["customer-new-job-action"]
+        for _ in 0..<5 where !newJob.isHittable { app.swipeUp() }
+        XCTAssertTrue(newJob.isHittable)
+        newJob.tap()
+        XCTAssertTrue(app.buttons["Cancel new job"].waitForExistence(timeout: 10))
+        app.buttons["Cancel new job"].tap()
+        XCTAssertTrue(newJob.waitForExistence(timeout: 5))
+    }
+
+    func testTypedJobsCancelledSwipeKeepsInvoiceUntilNativeBack() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment"], screen: "job-invoice")
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        first.tap()
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        let partial = app.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.5))
+        edge.press(forDuration: 0.1, thenDragTo: partial)
+        XCTAssertTrue(app.staticTexts["INV-2209"].exists, "An interrupted swipe must not count as a completed pop")
+        app.navigationBars.buttons.firstMatch.tap()
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 10))
+        collect.tap()
+        let collection = app.scrollViews.containing(.textField, identifier: "Amount to collect in dollars").firstMatch
+        XCTAssertTrue(collection.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
+    }
+
+    func testTypedJobsAuthorityRefreshReverifiesSameInvoice() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--invoice-route-test-authority"], screen: "job-invoice")
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Back"].tap()
+        XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
+        app.buttons["Test authority refresh"].tap()
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 15)); XCTAssertTrue(collect.isHittable); collect.tap()
+        let collection = app.scrollViews.containing(.textField, identifier: "Amount to collect in dollars").firstMatch
+        XCTAssertTrue(collection.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
+    }
+
+    func testTypedJobsAPIInvalidationBlocksStaleCollection() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--invoice-route-test-api"], screen: "job-invoice")
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Back"].tap()
+        XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
+        app.buttons["Test API invalidation"].tap()
+        XCTAssertFalse(app.buttons["Collect payment"].isHittable)
+    }
+
+    func testTypedJobsChangedBalanceCannotUseOldPaymentModel() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--invoice-route-test-balance-change"], screen: "job-invoice")
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Back"].tap()
+        XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
+        app.buttons["Test invoice balance change"].tap()
+        XCTAssertFalse(app.buttons["Collect payment"].isHittable)
+    }
+
+    func testTypedJobsPaidReturnedInvoiceCannotFallBackToOtherOwedInvoice() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--invoice-route-test-paid"], screen: "job-invoice")
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Back"].tap()
+        XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
+        app.buttons["Test invoice paid"].tap()
+        XCTAssertTrue(app.staticTexts["typed-paid-reload-complete"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Collect payment"].isHittable)
+    }
+
     func testTypedJobsRouteRetainsSelectedInvoiceAfterReturn() {
         let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]

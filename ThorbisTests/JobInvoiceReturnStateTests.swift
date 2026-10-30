@@ -6,7 +6,9 @@ final class JobInvoiceReturnStateTests: XCTestCase {
     private func route(_ invoiceID: String) -> JobInvoiceRoute {
         .init(jobID: "job", invoiceID: invoiceID, organizationID: "org", customerID: "customer",
               actorID: "actor", sessionGeneration: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
-              authorityRevision: UUID(uuidString: "00000000-0000-4000-8000-000000000002")!)
+              authorityRevision: UUID(uuidString: "00000000-0000-4000-8000-000000000002")!,
+              presentationID: UUID(uuidString: "00000000-0000-4000-8000-000000000003")!,
+              apiGeneration: UUID(uuidString: "00000000-0000-4000-8000-000000000004")!, apiOrigin: "https://app.example.test")
     }
 
     func testOnlyFreshMatchingEligibleInvoiceCanEnableCollection() {

@@ -12,11 +12,12 @@ final class JobInvoiceRouteTransitionTests: XCTestCase {
     private let organization = "org-a"
     private let customer = "customer-a"
     private let session = UUID()
-    private let authority = UUID()
+    private let authority = UUID(), presentation = UUID(), apiGeneration = UUID()
+    private let origin = "https://app.example.test"
 
     private func invoice(_ id: String, job: String = "job-a") -> JobInvoiceRoute {
         .init(jobID: job, invoiceID: id, organizationID: organization, customerID: customer,
-              actorID: actor, sessionGeneration: session, authorityRevision: authority)
+              actorID: actor, sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: origin)
     }
 
     private func popped(_ old: [Route], _ new: [Route]) -> JobInvoiceRoute? {
@@ -42,18 +43,28 @@ final class JobInvoiceRouteTransitionTests: XCTestCase {
     func testRouteScopeMatchesAllCapturedAuthorityAndJobFields() {
         let route = invoice("invoice-2209")
         XCTAssertTrue(route.matches(jobID: "job-a", organizationID: organization, customerID: customer,
-                                    actorID: actor, sessionGeneration: session, authorityRevision: authority))
+                                    actorID: actor, sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: origin))
         XCTAssertFalse(route.matches(jobID: "job-b", organizationID: organization, customerID: customer,
-                                     actorID: actor, sessionGeneration: session, authorityRevision: authority))
+                                     actorID: actor, sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: origin))
         XCTAssertFalse(route.matches(jobID: "job-a", organizationID: "org-b", customerID: customer,
-                                     actorID: actor, sessionGeneration: session, authorityRevision: authority))
+                                     actorID: actor, sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: origin))
         XCTAssertFalse(route.matches(jobID: "job-a", organizationID: organization, customerID: "customer-b",
-                                     actorID: actor, sessionGeneration: session, authorityRevision: authority))
+                                     actorID: actor, sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: origin))
         XCTAssertFalse(route.matches(jobID: "job-a", organizationID: organization, customerID: customer,
-                                     actorID: "actor-b", sessionGeneration: session, authorityRevision: authority))
+                                     actorID: "actor-b", sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: origin))
         XCTAssertFalse(route.matches(jobID: "job-a", organizationID: organization, customerID: customer,
-                                     actorID: actor, sessionGeneration: UUID(), authorityRevision: authority))
+                                     actorID: actor, sessionGeneration: UUID(), authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: origin))
         XCTAssertFalse(route.matches(jobID: "job-a", organizationID: organization, customerID: customer,
-                                     actorID: actor, sessionGeneration: session, authorityRevision: UUID()))
+                                     actorID: actor, sessionGeneration: session, authorityRevision: UUID(), presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: origin))
     }
+    func testRouteRejectsDifferentPresentationAndAPIIdentity() {
+        let route = invoice("invoice-2209")
+        XCTAssertFalse(route.matches(jobID: "job-a", organizationID: organization, customerID: customer, actorID: actor,
+            sessionGeneration: session, authorityRevision: authority, presentationID: UUID(), apiGeneration: apiGeneration, apiOrigin: origin))
+        XCTAssertFalse(route.matches(jobID: "job-a", organizationID: organization, customerID: customer, actorID: actor,
+            sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: UUID(), apiOrigin: origin))
+        XCTAssertFalse(route.matches(jobID: "job-a", organizationID: organization, customerID: customer, actorID: actor,
+            sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: "https://other.example.test"))
+    }
+
 }

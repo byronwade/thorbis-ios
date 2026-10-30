@@ -10,11 +10,16 @@ struct JobInvoiceRoute: Hashable {
     let actorID: String
     let sessionGeneration: UUID
     let authorityRevision: UUID
+    let presentationID: UUID
+    let apiGeneration: UUID
+    let apiOrigin: String
 
     func matches(jobID: String, organizationID: String, customerID: String,
-                 actorID: String, sessionGeneration: UUID, authorityRevision: UUID) -> Bool {
+                 actorID: String, sessionGeneration: UUID, authorityRevision: UUID,
+                 presentationID: UUID, apiGeneration: UUID, apiOrigin: String) -> Bool {
         self.jobID == jobID && self.organizationID == organizationID && self.customerID == customerID &&
-        self.actorID == actorID && self.sessionGeneration == sessionGeneration && self.authorityRevision == authorityRevision
+        self.actorID == actorID && self.sessionGeneration == sessionGeneration && self.authorityRevision == authorityRevision &&
+        self.presentationID == presentationID && self.apiGeneration == apiGeneration && self.apiOrigin == apiOrigin
     }
 }
 

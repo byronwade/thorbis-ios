@@ -21,6 +21,9 @@ struct JobDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.paperTypedJobsOwner) private var typedJobsOwner
     @State private var job: JobRecord?
+    #if DEBUG
+    @State private var typedPaidReloaded = false
+    #endif
     @State private var showCustomerMode = false
     @State private var showCommercialDocuments = false
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
@@ -41,8 +44,11 @@ struct JobDetailView: View {
     private var invoicesLoaded: Bool { invoiceRead != nil }
     private var invoicesFailed: Bool { invoiceRead?.isComplete == false }
     @State private var selectedInvoiceID: String?
+    @State private var typedPresentationID = UUID()
     @State private var returnCoordinator = JobInvoiceReturnCoordinator()
     @State private var returnInvoiceID: String?
+    @State private var returnedTypedRoute: JobInvoiceRoute?
+    @State private var reauthorizeReturnTask: Task<Void, Never>?
     @State private var returnVerifiedInvoiceID: String?
     @State private var returnRefreshPending = false
     @State private var returnRequestID: UUID?
@@ -169,6 +175,13 @@ struct JobDetailView: View {
         }
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
+        #if DEBUG
+        .overlay(alignment: .top) {
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--invoice-route-test-paid") && typedPaidReloaded {
+                Text("Test payment reload complete").accessibilityIdentifier("typed-paid-reload-complete")
+            }
+        }
+        #endif
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -309,16 +322,8 @@ struct JobDetailView: View {
         .onChange(of: job) { _, _ in
             if let event = typedJobsOwner?.pop { acceptTypedPop(event) }
         }
-        .onChange(of: session.authorityRevision) { _, _ in
-            guard typedJobsOwner != nil else { return }
-            returnRefreshTask?.cancel()
-            returnRequestID = nil
-            returnCoordinator.invalidate()
-            returnVerifiedInvoiceID = nil
-            returnRefreshPending = false
-            invoicePaymentModel = nil
-            loadedInvoiceModelID = nil
-        }
+        .onChange(of: session.authorityRevision) { _, _ in retireTypedReturn(revalidate: true) }
+        .onChange(of: api.requestGeneration) { _, _ in retireTypedReturn(revalidate: false) }
         .onChange(of: selectedInvoiceID) { _, selectedID in
             guard let selectedID, let invoice = invoices.first(where: { $0.id == selectedID }) else { return }
             Task { await loadInvoicePayments(for: invoice) }
@@ -370,6 +375,38 @@ struct JobDetailView: View {
 
     /// Native bar: system back on the left, share and the job's one menu on the right (HIG-005, JS-02).
     @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--invoice-route-test-authority") {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Test authority refresh") { session.previewRefreshInvoiceRouteAuthority() }
+            }
+        }
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--invoice-route-test-api") {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Test API invalidation") { api.invalidateRequests() }
+            }
+        }
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--invoice-route-test-balance-change") {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Test invoice balance change") {
+                    guard let id = returnInvoiceID, let current = invoices.first(where: { $0.id == id }) else { return }
+                    documents.replaceInvoice(PaperPreview.invoiceBalanceChangedForRouteTest(current))
+                }
+            }
+        }
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--invoice-route-test-paid") {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Test invoice paid") {
+                    guard let id = returnInvoiceID, let current = invoices.first(where: { $0.id == id }) else { return }
+                    typedPaidReloaded = false
+                    documents.replaceInvoice(PaperPreview.invoiceMarkedPaidForRouteTest(current))
+                    if let next = selectedInvoice {
+                        Task { await loadInvoicePayments(for: next); typedPaidReloaded = true }
+                    }
+                }
+            }
+        }
+        #endif
         if let job {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 ShareLink(item: JobShareText.text(title: job.title, customer: store.customerName(job.customerId), scheduledFor: job.scheduledFor)) {
@@ -741,11 +778,13 @@ struct JobDetailView: View {
                   session.can("invoice.view", feature: "invoicing") {
             PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
         } else if selectedTab == "Invoice", !returnRefreshPending,
-                  (returnInvoiceID == nil || returnCoordinator.visibleInvoiceID(in: currentTypedContext) == returnInvoiceID),
                   session.can("invoice.payment.create", feature: "payments"),
                   let invoice = selectedInvoice,
                   let model = invoicePaymentModel,
-                  loadedInvoiceModelID == invoice.id {
+                  loadedInvoiceModelID == invoice.id,
+                  JobInvoiceReturnIdentity.permits(returnedID: returnInvoiceID, selectedID: invoice.id,
+                    modelID: model.invoice?.id, verifiedID: returnCoordinator.visibleInvoiceID(in: currentTypedContext),
+                    recordsMatch: model.invoice == invoice) {
             PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
         }
     }
@@ -970,46 +1009,84 @@ struct JobDetailView: View {
     }
 
     private var currentTypedContext: JobInvoiceReturnContext? {
-        guard session.phase == .ready, let job, let actor = session.user?.id,
+        guard session.phase == .ready, let job, let actor = session.user?.id, let origin = api.normalizedOrigin,
               session.activeOrganization?.id == job.organizationId,
+              session.can("job.view", feature: "jobs"),
               session.can("invoice.view", feature: "invoicing") else { return nil }
         return .init(jobID: job.id, organizationID: job.organizationId, customerID: job.customerId,
-                     actorID: actor, sessionGeneration: session.generation, authorityRevision: session.authorityRevision)
+                     actorID: actor, sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                     presentationID: typedPresentationID, apiGeneration: api.requestGeneration, apiOrigin: origin)
     }
 
     private func typedRoute(for invoice: InvoiceRecord, job: JobRecord) -> JobInvoiceRoute? {
         guard let context = currentTypedContext, scope(for: job)?.contains(invoice) == true else { return nil }
         return .init(jobID: context.jobID, invoiceID: invoice.id, organizationID: context.organizationID,
                      customerID: context.customerID, actorID: context.actorID,
-                     sessionGeneration: context.sessionGeneration, authorityRevision: context.authorityRevision)
+                     sessionGeneration: context.sessionGeneration, authorityRevision: context.authorityRevision,
+                     presentationID: context.presentationID, apiGeneration: context.apiGeneration, apiOrigin: context.apiOrigin)
     }
 
     private func clearTypedReturn() {
         guard typedJobsOwner != nil else { return }
         returnRefreshTask?.cancel()
+        reauthorizeReturnTask?.cancel()
         returnRequestID = nil
         returnCoordinator.invalidate()
+        returnedTypedRoute = nil
         returnInvoiceID = nil
         returnVerifiedInvoiceID = nil
         returnRefreshPending = false
     }
 
+    private func retireTypedReturn(revalidate: Bool) {
+        guard typedJobsOwner != nil, let previous = returnedTypedRoute else { return }
+        returnRefreshTask?.cancel()
+        reauthorizeReturnTask?.cancel()
+        returnRequestID = nil
+        returnCoordinator.invalidate()
+        returnVerifiedInvoiceID = nil
+        returnRefreshPending = false
+        invoicePaymentModel = nil
+        loadedInvoiceModelID = nil
+        error = "Access changed. Open this invoice again to refresh payment."
+        guard revalidate else { return }
+        reauthorizeReturnTask = Task {
+            await Task.yield()
+            guard !Task.isCancelled, let context = currentTypedContext,
+                  context.jobID == previous.jobID, context.organizationID == previous.organizationID,
+                  context.customerID == previous.customerID, context.actorID == previous.actorID,
+                  context.sessionGeneration == previous.sessionGeneration, context.presentationID == previous.presentationID,
+                  context.apiGeneration == previous.apiGeneration, context.apiOrigin == previous.apiOrigin,
+                  let job, let invoice = invoices.first(where: { $0.id == previous.invoiceID }),
+                  let renewed = typedRoute(for: invoice, job: job) else { return }
+            error = nil
+            refreshTypedReturn(renewed)
+        }
+    }
+
     private func acceptTypedPop(_ event: PaperTypedJobsOwner.Pop) {
-        guard let job, job.id == event.route.jobID else { return }
+        guard let job, job.id == event.route.jobID, typedPresentationID == event.route.presentationID else { return }
         typedJobsOwner?.consume(event.id)
         refreshTypedReturn(event.route)
     }
 
     private func refreshTypedReturn(_ route: JobInvoiceRoute) {
-        guard let request = returnCoordinator.begin(route, context: currentTypedContext), let job,
-              let scope = scope(for: job) else { return }
         returnRefreshTask?.cancel()
+        returnRequestID = nil
+        returnCoordinator.invalidate()
+        returnedTypedRoute = route
         returnInvoiceID = route.invoiceID
         returnVerifiedInvoiceID = nil
-        returnRefreshPending = true
-        returnRequestID = request
+        returnRefreshPending = false
         invoicePaymentModel = nil
         loadedInvoiceModelID = nil
+        guard let request = returnCoordinator.begin(route, context: currentTypedContext), let job,
+              let scope = scope(for: job) else {
+            error = "Access changed. Open this invoice again to refresh payment."
+            return
+        }
+        returnRefreshPending = true
+        returnRequestID = request
         returnRefreshTask = Task {
             let published = await documents.loadInvoices(scope: scope, api: api) {
                 currentTypedContext?.contains(route) == true && !Task.isCancelled

@@ -118,6 +118,13 @@ final class SessionController: ObservableObject {
         api.onUnauthorized = { [weak self] in self?.invalidateUnauthorizedSession() }
     }
 
+    #if DEBUG
+    func previewRefreshInvoiceRouteAuthority() {
+        guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--invoice-route-test-authority") else { return }
+        authorityRevision = UUID()
+    }
+    #endif
+
     func can(_ capability: String, feature: String? = nil) -> Bool {
         guard phase == .ready,
               let sessionDeadline, Date() < sessionDeadline,

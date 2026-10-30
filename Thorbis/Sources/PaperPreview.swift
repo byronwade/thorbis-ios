@@ -121,6 +121,14 @@ enum PaperPreview {
             "netAmount": ["amount": 5_000, "currency": "USD"]])
         return [card, cash]
     }
+    static func invoiceBalanceChangedForRouteTest(_ invoice: InvoiceRecord) -> InvoiceRecord {
+        changed(invoice, ["amountPaid": invoice.amountPaid + 1])
+    }
+
+    static func invoiceMarkedPaidForRouteTest(_ invoice: InvoiceRecord) -> InvoiceRecord {
+        changed(invoice, ["status": "paid", "amountPaid": paperLinesTotal(invoice.lines) ?? invoice.amountPaid])
+    }
+
     private static func changed<T: Codable>(_ value: T, _ fields: [String: Any]) -> T {
         var object = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as! [String: Any]
         fields.forEach { object[$0.key] = $0.value }
