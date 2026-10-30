@@ -78,6 +78,7 @@ struct JobDetailView: View {
     @State private var showAssign = false
     @State private var showFollowUps = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Photos", "Activity"]
 
@@ -143,6 +144,8 @@ struct JobDetailView: View {
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .sensoryFeedback(.success, trigger: committed)
@@ -415,7 +418,13 @@ struct JobDetailView: View {
                session.can("customer.view", feature: "core_crm") {
                 NavigationLink(value: customer) {
                     HStack(alignment: .center, spacing: 6) {
-                        Label(customer.name, systemImage: "person.crop.circle")
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.brandText)
+                            .frame(width: 28, height: 28)
+                            .background(Theme.brandSurface, in: Circle())
+                            .accessibilityHidden(true)
+                        Text(customer.name)
                             .fixedSize(horizontal: false, vertical: true)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
@@ -435,8 +444,8 @@ struct JobDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text(job.title)
-                .font(Theme.font(24, weight: .medium))
-                .tracking(-0.36)
+                .font(Theme.font(26, weight: .semibold))
+                .tracking(-0.39)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             // One wrapping row of chips instead of two fixed rows (chips are pills).
@@ -479,12 +488,38 @@ struct JobDetailView: View {
                 // MF-01/MF-03: what's owed on the job is a labelled figure, not a chip. It jumps to
                 // the Invoice tab, where it can be collected.
                 Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 12)
-                        Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
+                    Group {
+                        if typeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Theme.brandText)
+                                        .accessibilityHidden(true)
+                                }
+                                Text(money(balance, currency: "USD"))
+                                    .moneyStyle(.total).foregroundStyle(Theme.foreground)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+                                Spacer(minLength: 8)
+                                Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Theme.brandText)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                     }
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
                 .padding(.top, 8)
@@ -630,7 +665,7 @@ struct JobDetailView: View {
     }
 
     private var tabBar: some View {
-        PaperTabs(options: tabs, selection: $selectedTab).padding(.bottom, 4)
+        PaperTabs(options: tabs, selection: $selectedTab, wrapOverflow: true).padding(.bottom, 4)
     }
 
     /// JS-01: the body is for reading, in the order a tech needs it at the door. Every action that

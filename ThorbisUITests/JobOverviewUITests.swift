@@ -2,6 +2,51 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testJobHeaderKeepsTitleClearOfNavigationAndBalanceOpensInvoice() {
+        let app = preview("job", working: true)
+        let title = app.staticTexts["AC not cooling"]
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        let bar = app.navigationBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(title.frame.minY, bar.frame.maxY,
+                                    "The job title must not sit behind navigation controls")
+        let balance = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Balance due")).firstMatch
+        XCTAssertTrue(balance.waitForExistence(timeout: 20))
+        XCTAssertTrue(balance.isHittable)
+        capture(app, name: "Job header before invoice")
+        balance.tap()
+        XCTAssertTrue(app.staticTexts["Invoices"].waitForExistence(timeout: 10), "Tapping the balance should open invoice content")
+    }
+
+    func testDarkJobHeaderKeepsWorkAndPaymentVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "-thorbis.appearance", "dark"]
+        app.launch()
+        let title = app.staticTexts["AC not cooling"]
+        let collect = button(startingWith: "Collect ", in: app)
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        XCTAssertTrue(collect.waitForExistence(timeout: 20))
+        XCTAssertTrue(title.isHittable)
+        XCTAssertTrue(collect.isHittable)
+        XCTAssertGreaterThanOrEqual(title.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        capture(app, name: "Dark job overview")
+    }
+
+    func testAllJobTabsRemainReachableAtStandardAndLargeText() {
+        for accessible in [false, true] {
+            let app = preview("job", accessibleText: accessible, working: true)
+            let activity = app.buttons["Activity"]
+            for _ in 0..<4 where !activity.isHittable { app.swipeUp() }
+            XCTAssertTrue(activity.waitForExistence(timeout: 10))
+            XCTAssertTrue(activity.isHittable, "Activity should be visible without horizontal scrolling")
+            XCTAssertLessThanOrEqual(activity.frame.maxX, app.frame.maxX)
+            capture(app, name: accessible ? "Job tabs at large text" : "Job tabs on narrow phone")
+            activity.tap()
+            XCTAssertTrue(app.buttons["Notes"].waitForExistence(timeout: 10))
+            app.terminate()
+        }
+    }
+
     func testCustomerLinkIsComfortableAndOpensCustomerProfile() {
         let app = preview("job", working: true)
         let customer = app.buttons["job-customer-link"]
