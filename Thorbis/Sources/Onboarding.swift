@@ -448,6 +448,10 @@ enum CompanyFact {
         case "email_sender_name": "Name on emails"
         case "email_sender_address": "Reply-to email"
         case "dba_names": "Also known as"
+        case "timezone": "Time zone"
+        case "business_hours": "Business hours"
+        case "sales_tax_rate": "Sales tax rate"
+        case "default_payment_terms": "Payment terms"
         default: fallback
         }
     }
@@ -512,6 +516,8 @@ final class CompanyDetailsModel: ObservableObject {
     @Published var saving = false
     @Published var loadError: String?
     @Published var fieldErrors: [String: String] = [:]
+    /// Values typed without signal, waiting in the outbox; they count as saved here.
+    @Published var queued: [String: String] = [:]
 
     func load(api: APIClient) async {
         loading = true
@@ -520,6 +526,8 @@ final class CompanyDetailsModel: ObservableObject {
             let fresh = try await api.organizationProfile()
             profile = fresh
             loadError = nil
+            // A queued value the server now has is no longer waiting.
+            for (key, value) in queued where fresh.value(key) == value { queued[key] = nil }
             for entry in fresh.catalog where drafts[entry.factKey] == nil {
                 drafts[entry.factKey] = fresh.value(entry.factKey) ?? ""
             }
@@ -533,14 +541,16 @@ final class CompanyDetailsModel: ObservableObject {
 
     func changed(_ key: String) -> Bool {
         let draft = (drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return !draft.isEmpty && draft != (profile?.value(key) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return !draft.isEmpty && draft != queued[key]
+            && draft != (profile?.value(key) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var dirty: Bool { profile?.catalog.contains { changed($0.factKey) } ?? false }
 
     /// Confirms each changed fact in turn; a refused one keeps its typed value and says why.
     /// `only` limits the save to some facts (one setup step), leaving other edits untouched.
-    func save(api: APIClient, session: SessionController, only: Set<String>? = nil) async -> Bool {
+    /// With an outbox, a fact that can't reach the server is kept on the phone and sent later (OF-01).
+    func save(api: APIClient, session: SessionController, only: Set<String>? = nil, outbox: FieldOutbox? = nil) async -> Bool {
         guard let profile, let actor = session.user?.id, let org = session.activeOrganization?.id,
               org.lowercased() == profile.organizationId.lowercased() else {
             loadError = "The open company changed. Close this screen and try again."
@@ -550,17 +560,32 @@ final class CompanyDetailsModel: ObservableObject {
         defer { saving = false }
         fieldErrors = [:]
         var allSaved = true
+        var queuedNow = false
         for entry in profile.catalog where changed(entry.factKey) && (only?.contains(entry.factKey) ?? true) {
             let value = (drafts[entry.factKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             do {
                 try await api.confirmOrganizationFact(entry.factKey, value: value, actorID: actor, organizationID: org)
+                outbox?.discardPendingFact(entry.factKey)
+                queued[entry.factKey] = nil
             } catch is CancellationError {
                 return false
+            } catch let error where error.isConnectivityFailure && outbox != nil {
+                let label = CompanyFact.label(entry.factKey, fallback: entry.label)
+                if outbox?.enqueue(.organizationFact(.init(factKey: entry.factKey, value: value, label: label)),
+                                   policyVersion: session.policyVersion ?? 0) != nil {
+                    queued[entry.factKey] = value
+                    queuedNow = true
+                } else {
+                    allSaved = false
+                    fieldErrors[entry.factKey] = error.localizedDescription
+                }
             } catch {
                 allSaved = false
                 fieldErrors[entry.factKey] = error.localizedDescription
             }
         }
+        // Offline: keep what is on screen rather than reloading into an error.
+        if queuedNow { return allSaved }
         let typed = drafts
         await load(api: api)
         // Keep what failed to save on screen.
@@ -575,6 +600,7 @@ struct CompanyDetailsView: View {
     var onSaved: (() -> Void)? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = CompanyDetailsModel()
     @State private var saved = 0
@@ -621,7 +647,8 @@ struct CompanyDetailsView: View {
     }
 
     private func form(_ profile: OrganizationProfile) -> some View {
-        let entries = profile.catalog
+        // Hours, tax and terms have their own screen with real controls.
+        let entries = profile.catalog.filter { !OperatingFacts.keys.contains($0.factKey) && $0.factKey != "logo" }
         let needed = entries.filter { CompanyFact.group($0) == 0 }
         let shown = entries.filter { CompanyFact.group($0) == 1 }
         let legal = entries.filter { CompanyFact.group($0) == 2 }
@@ -637,6 +664,9 @@ struct CompanyDetailsView: View {
             Section {
                 ForEach(needed, id: \.factKey) { row($0) }
             } header: { Text("Needed for setup") }
+            if profile.catalog.contains(where: { $0.factKey == "logo" }) {
+                Section { CompanyLogoPicker().padding(.vertical, 4) }
+            }
             Section {
                 ForEach(shown, id: \.factKey) { row($0) }
             } header: { Text("What customers see") } footer: {
@@ -651,6 +681,11 @@ struct CompanyDetailsView: View {
                 } footer: { Text("Optional. Payment providers may ask for these.") }
             }
             Section {
+                if OperatingFacts.offered(profile) {
+                    NavigationLink { OperatingDetailsView() } label: {
+                        Label("Hours, tax and terms", systemImage: "clock").foregroundStyle(Theme.foreground)
+                    }
+                }
                 NavigationLink { CompanyFeaturesView() } label: {
                     Label("Plan and features", systemImage: "square.grid.2x2").foregroundStyle(Theme.foreground)
                 }
@@ -695,7 +730,7 @@ struct CompanyDetailsView: View {
 
     private func save() async {
         focused = nil
-        if await model.save(api: api, session: session) {
+        if await model.save(api: api, session: session, outbox: outbox) {
             saved += 1
             onSaved?()
         }

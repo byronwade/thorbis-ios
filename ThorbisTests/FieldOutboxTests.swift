@@ -277,3 +277,47 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertNil(box.waitingSignature(invoiceID: invoice))
     }
 }
+
+@MainActor
+final class OrganizationFactOutboxTests: XCTestCase {
+    private let actor = "019f0000-0000-7000-8000-000000000011"
+    private let org = "019f0000-0000-7000-8000-000000000001"
+
+    func testAnOfflineCompanyDetailWaitsKeepsOnlyTheNewestValueAndReplaysThroughTheFactsRoute() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("outbox-facts-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let box = FieldOutbox(directory: directory, defaults: UserDefaults(suiteName: "outbox.\(UUID().uuidString)")!)
+        box.bind(actorID: actor, organizationID: org)
+        box.enqueue(.organizationFact(.init(factKey: "sales_tax_rate", value: "8", label: "Sales tax rate")), policyVersion: 3)
+        box.enqueue(.organizationFact(.init(factKey: "sales_tax_rate", value: "8.25", label: "Sales tax rate")), policyVersion: 3)
+        XCTAssertEqual(box.pending.count, 1)
+        XCTAssertNil(box.pending.first?.command, "Company details replay through REST only")
+        XCTAssertEqual(box.pending.first?.jobID, OutboxEntry.organizationRecord)
+
+        let api = APIClient(session: URLProtocolFixture.session([.init(201, "{}")]), baseURL: "https://app.thorbis.com")
+        await box.drain(api: api, useCommandEndpoint: true)
+        XCTAssertTrue(box.pending.isEmpty)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.last)
+        XCTAssertEqual(request.url?.path, "/v1/organization/facts")
+        let body = try XCTUnwrap(request.body.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(body["factKey"] as? String, "sales_tax_rate")
+        XCTAssertEqual(body["value"] as? String, "8.25")
+        XCTAssertEqual((body["expectedIdentity"] as? [String: String])?["organizationId"], org)
+    }
+}
+
+@MainActor
+final class OrganizationFactDiscardTests: XCTestCase {
+    func testAnOnlineSaveDropsTheOlderWaitingValue() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("outbox-discard-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let box = FieldOutbox(directory: directory, defaults: UserDefaults(suiteName: "outbox.\(UUID().uuidString)")!)
+        box.bind(actorID: "019f0000-0000-7000-8000-000000000011", organizationID: "019f0000-0000-7000-8000-000000000001")
+        box.enqueue(.organizationFact(.init(factKey: "timezone", value: "America/Denver", label: "Time zone")), policyVersion: 1)
+        box.enqueue(.organizationFact(.init(factKey: "sales_tax_rate", value: "7", label: "Sales tax rate")), policyVersion: 1)
+        box.discardPendingFact("timezone")
+        XCTAssertEqual(box.pending.count, 1)
+        if case .organizationFact(let fact) = box.pending.first?.action { XCTAssertEqual(fact.factKey, "sales_tax_rate") }
+        else { XCTFail("Expected the tax rate to keep waiting") }
+    }
+}

@@ -3,14 +3,14 @@ import SwiftUI
 // The owner's guided setup, one job per screen (design.thorbis.com GuidedFlow). It carries the
 // web panel's onboarding wizard (old Thorbis OS: welcome, company, communication, data import,
 // services, team, payments, complete) onto what today's API serves:
-// - facts:      GET /v1/organization/profile, POST /v1/organization/facts
+// - facts:      GET /v1/organization/profile, POST /v1/organization/facts (queued when offline)
 // - customers:  POST /v1/customer-imports
 // - services:   price book items
 // - team:       /v1/organization/invitations
 // - get paid:   Stripe hosted onboarding (it, not Thorbis, takes owner ID, SSN, EIN and bank documents)
 
 enum SetupStep: String, CaseIterable, Identifiable {
-    case trade, company, legal, messages, customers, services, team, payments, done
+    case trade, company, legal, messages, hours, customers, services, team, payments, done
     var id: String { rawValue }
 
     var title: String {
@@ -19,6 +19,7 @@ enum SetupStep: String, CaseIterable, Identifiable {
         case .company: "Your company"
         case .legal: "Legal details"
         case .messages: "How customers hear from you"
+        case .hours: "Hours, tax and terms"
         case .customers: "Bring your customers"
         case .services: "What you sell"
         case .team: "Your team"
@@ -34,6 +35,7 @@ enum SetupStep: String, CaseIterable, Identifiable {
         case .company: "Your name, phone and address go on every estimate and invoice your customers see."
         case .legal: "Optional. Payment providers and lenders ask for these, so you only type them once."
         case .messages: "Estimates and invoices are emailed in your company’s name, and replies come back to you."
+        case .hours: "When you’re open, your time zone, and the sales tax and payment terms you usually charge."
         case .customers: "Import your customer list from your old software, so nobody has to be typed in twice."
         case .services: "Add the services and parts you sell with prices, so estimates take seconds."
         case .team: "Invite technicians and office staff. Each person gets an email to join with their role."
@@ -48,6 +50,7 @@ enum SetupStep: String, CaseIterable, Identifiable {
         case .company: "building.2"
         case .legal: "doc.text"
         case .messages: "envelope"
+        case .hours: "clock"
         case .customers: "person.2"
         case .services: "book.closed"
         case .team: "person.badge.plus"
@@ -63,6 +66,7 @@ enum SetupStep: String, CaseIterable, Identifiable {
         case .company: ["legal_name", "dba_names", "primary_phone", "primary_email", "website", "business_address", "mailing_address"]
         case .legal: ["entity_type", "formation_jurisdiction", "formation_date"]
         case .messages: ["email_sender_name", "email_sender_address"]
+        case .hours: OperatingFacts.keys
         default: []
         }
     }
@@ -73,7 +77,7 @@ enum SetupStep: String, CaseIterable, Identifiable {
 
     @MainActor func permitted(_ session: SessionController) -> Bool {
         switch self {
-        case .trade, .company, .legal, .messages, .payments: session.can("organization.settings.edit")
+        case .trade, .company, .legal, .messages, .hours, .payments: session.can("organization.settings.edit")
         case .customers: session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm")
         case .services: session.can("pricebook.edit", feature: "price_book") || session.can("organization.settings.edit", feature: "price_book")
         case .team: session.can("organization.members.manage")
@@ -135,6 +139,7 @@ struct SetupWizardView: View {
     var start: SetupStep? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @StateObject private var facts = CompanyDetailsModel()
     @StateObject private var importer = CustomerImportModel()
@@ -151,11 +156,15 @@ struct SetupWizardView: View {
     @State private var mailingSame = true
     @State private var formedOn = Date()
     @State private var hasFormedOn = false
+    @State private var week = SetupWeek.standard
     @State private var stepError: String?
     @State private var advanced = 0
     @FocusState private var focused: String?
 
-    private var steps: [SetupStep] { SetupStep.steps(session) }
+    /// Hours, tax and terms shows once the server knows those facts.
+    private var steps: [SetupStep] {
+        SetupStep.steps(session).filter { $0 != .hours || OperatingFacts.offered(facts.profile) }
+    }
     private var busy: Bool { advancing || facts.saving || facts.loading || importer.phase == .checking || importer.phase == .importing }
     private var index: Int { steps.firstIndex(of: step) ?? 0 }
 
@@ -197,10 +206,14 @@ struct SetupWizardView: View {
         }
         .task {
             let resume = start ?? SetupProgress.load(session.activeOrganization?.id)
-            if let resume, steps.contains(resume) { step = resume } else { step = steps.first ?? .done }
+            if let resume, SetupStep.steps(session).contains(resume) { step = resume } else { step = steps.first ?? .done }
             skipped = SetupProgress.skipped(session.activeOrganization?.id)
             await facts.load(api: api)
             if facts.profile != nil { prefill() } else if !step.facts.isEmpty { stepError = facts.loadError }
+            // A server without hours, tax and terms yet: go on to the step after it.
+            if step == .hours, facts.profile != nil, !steps.contains(.hours) {
+                step = SetupStep.allCases.drop { $0 != .hours }.dropFirst().first(where: steps.contains) ?? .done
+            }
             await loadPayments()
         }
         .onChange(of: step) { _, next in
@@ -283,6 +296,7 @@ struct SetupWizardView: View {
         case .company:
             VStack(alignment: .leading, spacing: 16) {
                 factField("legal_name", "Business name", placeholder: "Wade Plumbing & Heating LLC", required: true)
+                if facts.profile?.catalog.contains(where: { $0.factKey == "logo" }) == true { CompanyLogoPicker() }
                 factField("dba_names", "Also known as", placeholder: "The name on your trucks, if different")
                 factField("primary_phone", "Business phone", placeholder: "(555) 555-0123", required: true)
                 factField("primary_email", "Business email", placeholder: "office@company.com")
@@ -336,6 +350,14 @@ struct SetupWizardView: View {
                         PaperMenuRow("Who hears about jobs", symbol: "bell.badge", subtitle: "Email and in-app alerts for booked, changed and canceled jobs")
                     }
                     .buttonStyle(RowPressStyle())
+                }
+            }
+        case .hours:
+            VStack(alignment: .leading, spacing: 12) {
+                OperatingFactsFields(model: facts, week: $week)
+                if !facts.queued.isEmpty {
+                    Label("Saved on this phone. It syncs when you're back online.", systemImage: "icloud.and.arrow.up")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
             }
         case .customers:
@@ -493,6 +515,8 @@ struct SetupWizardView: View {
         if (facts.drafts["primary_email"] ?? "").isEmpty, let email = session.user?.email { facts.drafts["primary_email"] = email }
         if let raw = facts.profile?.value("formation_date"), let date = SetupDates.parse(raw) { formedOn = date; hasFormedOn = true }
         let mailing = facts.profile?.value("mailing_address") ?? ""
+        if let saved = SetupWeek.parse(facts.profile?.value("business_hours")) { week = saved }
+        if (facts.drafts["timezone"] ?? "").isEmpty { facts.drafts["timezone"] = TimeZone.current.identifier }
         mailingSame = mailing.isEmpty || mailing == facts.profile?.value("business_address")
     }
 
@@ -518,13 +542,17 @@ struct SetupWizardView: View {
             }
             if step == .company, mailingSame { facts.drafts["mailing_address"] = facts.drafts["business_address"] }
             if step == .legal, hasFormedOn { facts.drafts["formation_date"] = SetupDates.format(formedOn) }
+            if step == .hours {
+                if let problem = week.problem { stepError = problem; return }
+                facts.drafts["business_hours"] = week.json
+            }
             let missing = step.required.filter { (facts.drafts[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             if !missing.isEmpty {
                 for key in missing { facts.fieldErrors[key] = "Needed to finish setup." }
                 stepError = missing.count == 1 ? "Fill in the field marked above." : "Fill in the \(missing.count) fields marked above."
                 return
             }
-            guard await facts.save(api: api, session: session, only: Set(step.facts)) else {
+            guard await facts.save(api: api, session: session, only: Set(step.facts), outbox: outbox) else {
                 stepError = facts.loadError ?? "Some details were not saved. Check the fields marked above."
                 return
             }
