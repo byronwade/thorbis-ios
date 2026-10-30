@@ -389,7 +389,13 @@ enum StoreRefreshResult: Equatable {
 }
 
 /// iPad sidebar sections.
-enum TabletSection: Hashable { case schedule, jobs, customers, more }
+enum TabletSection: Hashable {
+    case schedule, jobs, customers, more
+    /// Any other place from the phone menu, so the sidebar lists the same places.
+    case place(MenuItem)
+    /// A record kept only on this device (Fleet, Equipment, Agreements, ...).
+    case local(LocalWorkspaceSection)
+}
 
 /// iPhone tab bar: Paper's technician dock as native destinations (HIG-005).
 /// Search uses the system search tab role.

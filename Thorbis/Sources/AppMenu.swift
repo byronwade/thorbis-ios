@@ -67,7 +67,8 @@ enum AppMenuContent {
     static func menu(tabs: [MenuItem], hidden: Set<MenuItem>, order: [MenuItem],
                      permitted: (MenuItem) -> Bool) -> [MenuItem] {
         (order + MenuItem.allCases).reduce(into: [MenuItem]()) { list, item in
-            guard !list.contains(item), !tabs.contains(item), !hidden.contains(item), permitted(item) else { return }
+            guard !list.contains(item), !tabs.contains(item), !hidden.contains(item),
+                  MenuItem.listed(item, permitted: permitted) else { return }
             list.append(item)
         }
     }
@@ -96,7 +97,7 @@ struct FloatingSurface<S: InsettableShape>: ViewModifier {
 }
 
 /// The phone's only navigation, laid out like Linear: a floating capsule of pinned places that ends in
-/// a switcher slot, then round Search and New job buttons on the same line. There is no side
+/// a switcher slot, then round Search and Create (+) buttons on the same line. There is no side
 /// menu and no system tab bar. Tapping the switcher slot goes to its place; tapping it again (or when
 /// it is empty) opens `AppMenu`. The bar sits low, partly over the home indicator's margin.
 struct AppBottomBar: View {
@@ -125,10 +126,11 @@ struct AppBottomBar: View {
     let select: (MenuItem) -> Void
     let openMenu: () -> Void
     let search: () -> Void
-    /// The + after Search: what it makes follows the screen showing (New customer on Customers).
+    /// The + after Search: always the same small create menu (New job, New estimate, New customer),
+    /// whatever the screen. With only one thing this person may create, it starts that directly.
     var create: (label: String, run: () -> Void)?
     var sync: Sync?
-    /// Long-press menus, in sections: recent records on Search, quick creates on New job.
+    /// Long-press menus, in sections: recent records on Search; on +, the same creates as a shortcut.
     var searchActions: [[QuickAction]] = []
     var newActions: [[QuickAction]] = []
     /// Search lives in the bar: when active the places and + give way to a field and a close button.
@@ -216,6 +218,7 @@ struct AppBottomBar: View {
                 .matchedGeometryEffect(id: "search", in: pill)
             if let create {
                 circle("plus", label: create.label, actions: newActions, action: create.run)
+                    .accessibilityIdentifier("bottom-bar-create")
                     .matchedGeometryEffect(id: "trailing", in: pill)
             }
         }
@@ -431,7 +434,7 @@ struct CurrentJobChip: View {
 }
 
 /// The pop-up menu over the bar (Linear's): the business on top with its switcher and an edit
-/// button, then every place, then Settings and Search. Edit turns the menu into `AppMenuEditor`.
+/// button, then every place, then Settings. Edit turns the menu into `AppMenuEditor`.
 struct AppMenu: View {
     /// The screen width; the menu matches the bar's capsule, and editing widens it to the gutters.
     let width: CGFloat
@@ -445,7 +448,6 @@ struct AppMenu: View {
     let openLocal: (LocalWorkspaceSection) -> Void
     let manageBusinesses: () -> Void
     let settings: () -> Void
-    let search: () -> Void
     let close: () -> Void
     @EnvironmentObject private var session: SessionController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -511,8 +513,8 @@ struct AppMenu: View {
             ForEach(local, id: \.self) { section in
                 row(section.title, symbol: section.moreSymbol, here: false) { openLocal(section) }
             }
+            // Search is the round button beside the bar, so it is not repeated here.
             row("Settings", symbol: "gearshape", here: false, action: settings)
-            row("Search", symbol: "magnifyingglass", here: false, action: search)
         }
         .padding(8)
     }

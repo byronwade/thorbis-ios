@@ -50,17 +50,28 @@ extension APIClient {
 }
 
 /// Paper 60: the numbers an owner checks, as words and mono figures; each report says when it's incomplete.
+/// For anyone who can see revenue this is the one Money place: Revenue first, then the reports, so
+/// every figure from the old Money and Reports screens is one tab away.
 struct ReportsView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
-    @State private var tab = "Operations"
+    /// Money: Revenue leads the tabs and the header reads Money.
+    var includesRevenue = false
+    @State private var tab: String
+    @State private var refreshes = 0
     @State private var operations: OperationsReport?
     @State private var schedule: ScheduleReport?
     @State private var payments: PaymentActivityReport?
     @State private var error: String?
 
+    init(includesRevenue: Bool = false, initialTab: String? = nil) {
+        self.includesRevenue = includesRevenue
+        _tab = State(initialValue: initialTab ?? (includesRevenue ? "Revenue" : "Operations"))
+    }
+
     private var tabs: [String] {
         var result: [String] = []
+        if includesRevenue && MenuItem.money.permitted(session) { result.append("Revenue") }
         if session.can("estimate.view", feature: "estimates") { result.append("Operations") }
         if session.can("job.view", feature: "jobs") { result.append("Schedule") }
         if session.can("invoice.view", feature: "invoicing") { result.append("Payments") }
@@ -71,8 +82,9 @@ struct ReportsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Reports").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text("How work and money are moving").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text(includesRevenue ? "Money" : "Reports").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
+                    Text(includesRevenue ? "Revenue, receivables and how work is moving" : "How work and money are moving")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
                 if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab) }
@@ -80,6 +92,9 @@ struct ReportsView: View {
                 Group {
                     if tabs.isEmpty {
                         PaperEmptyState(symbol: "chart.bar", title: "Reports unavailable", message: "Your role can't view estimate, job or payment reports.")
+                    } else if (tabs.contains(tab) ? tab : tabs[0]) == "Revenue" {
+                        // Rebuilt on pull to refresh, so its figures reload with the rest.
+                        WorkspaceRevenueView(api: api, available: true, embedded: true).id(refreshes)
                     } else if (tabs.contains(tab) ? tab : tabs[0]) == "Operations" {
                         if let operations { operationsContent(operations) } else { loadingState }
                     } else if (tabs.contains(tab) ? tab : tabs[0]) == "Payments" {
@@ -95,7 +110,7 @@ struct ReportsView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await load() }
+        .refreshable { refreshes += 1; await load() }
         .task { await load() }
     }
 
@@ -110,17 +125,17 @@ struct ReportsView: View {
                 Text("of presented estimates approved").font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
             .padding(.bottom, 10)
-            HStack(spacing: 10) {
-                tile("Presented", report.estimates.presented)
-                tile("Approved", report.estimates.approved)
-                tile("Declined", report.estimates.declined)
-            }
+            PaperStatRow(stats: [
+                stat("Presented", report.estimates.presented),
+                stat("Approved", report.estimates.approved),
+                stat("Declined", report.estimates.declined),
+            ])
             PaperGroupHeader(title: "Jobs").padding(.top, 18)
-            HStack(spacing: 10) {
-                tile("Booked", report.jobs.booked)
-                tile("Completed", report.jobs.completed)
-                tile("Open", report.jobs.open)
-            }
+            PaperStatRow(stats: [
+                stat("Booked", report.jobs.booked),
+                stat("Completed", report.jobs.completed),
+                stat("Open", report.jobs.open),
+            ])
             if !report.months.isEmpty {
                 PaperGroupHeader(title: "Jobs by month", count: report.months.count).padding(.top, 18)
                 ForEach(report.months.suffix(6).reversed()) { month in
@@ -140,10 +155,10 @@ struct ReportsView: View {
         if report.truncated { incomplete }
         else {
             PaperGroupHeader(title: "Needs attention")
-            HStack(spacing: 10) {
-                tile("Unscheduled", report.backlog.unscheduledOpenJobs, alert: report.backlog.unscheduledOpenJobs > 0)
-                tile("Past due", report.backlog.overdueScheduledJobs, alert: report.backlog.overdueScheduledJobs > 0)
-            }
+            PaperStatRow(stats: [
+                stat("Unscheduled", report.backlog.unscheduledOpenJobs, alert: report.backlog.unscheduledOpenJobs > 0),
+                stat("Past due", report.backlog.overdueScheduledJobs, alert: report.backlog.overdueScheduledJobs > 0),
+            ])
             let recent = Array(report.days.suffix(14).reversed())
             if !recent.isEmpty {
                 PaperGroupHeader(title: "By day", count: recent.count).padding(.top, 18)
@@ -229,16 +244,8 @@ struct ReportsView: View {
                         message: "The server reached its scan limit, so these counts would understate the totals. Open the report on the web.")
     }
 
-    private func tile(_ label: String, _ value: Int, alert: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text("\(value)").font(Theme.monoFont(22, weight: .semibold)).foregroundStyle(alert ? Theme.warning : Theme.foreground)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-        .accessibilityElement(children: .combine)
+    private func stat(_ label: String, _ value: Int, alert: Bool = false) -> PaperStatRow.Stat {
+        .init(label: label, value: "\(value)", tint: alert ? Theme.warning : Theme.foreground)
     }
 
     private func footer(_ version: Int, _ generatedAt: String) -> some View {

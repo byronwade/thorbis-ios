@@ -154,14 +154,14 @@ struct TeamView: View {
                                     actionTitle: "Clear filters") { search = ""; filter = "All" }
                 }
                 VStack(alignment: .leading, spacing: 0) {
-                    if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count) }
-                    ForEach(visible) { member in
+                    if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
+                    PaperCardList(data: visible) { member in
                         Button { if canManage && !member.member.isLegalOwner { opening = member } } label: {
                         HStack(spacing: 12) {
-                            Avatar(name: member.member.displayName, size: 34)
+                            Avatar(name: member.member.displayName, size: IconTile.size)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(member.member.displayName).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                Text(member.member.email).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                                Text(member.member.displayName).font(Theme.font(15, weight: .medium)).lineLimit(2)
+                                Text(member.member.email).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                             }
                             Spacer(minLength: 8)
                             // Role is a word on a quiet capsule; owner reads by weight, not a brand tint.
@@ -171,14 +171,14 @@ struct TeamView: View {
                                 .padding(.horizontal, 10).frame(height: 24)
                                 .background(Theme.fill, in: Capsule())
                             if canManage && !member.member.isLegalOwner {
-                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                                PaperDisclosure()
                             }
                         }
-                        .frame(minHeight: 56)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
+                        .frame(minHeight: 60)
                         .contentShape(Rectangle())
                         }
-                        .buttonStyle(PressStyle())
+                        .buttonStyle(RowPressStyle())
                         .accessibilityElement(children: .combine)
                         .accessibilityHint(canManage && !member.member.isLegalOwner ? "Change role" : "")
                         // MA-12: long-press mirrors what the row already offers.
@@ -193,17 +193,18 @@ struct TeamView: View {
                         }
                     }
                 }
-                .padding(.horizontal, Theme.gutter)
+                .paperCardMargin()
                 if canInvite && !invitations.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
-                        PaperGroupHeader(title: "Invited", count: invitations.count)
-                        ForEach(invitations) { invitation in
+                        PaperGroupHeader(title: "Invited", count: invitations.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                        PaperCardList(data: invitations) { invitation in
                             HStack(spacing: 12) {
-                                Image(systemName: "envelope").foregroundStyle(Theme.markOlive).frame(width: 34)
+                                IconTile(symbol: "envelope", tint: Theme.markOlive)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(invitation.email).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                    Text("\(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")")
-                                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                    Text(invitation.email).font(Theme.font(15, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                                    // "Invited" is the state, said as a word.
+                                    Text("Invited · \(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")")
+                                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
                                 }
                                 Spacer(minLength: 8)
                                 ThorbisMenu(items: [
@@ -212,10 +213,11 @@ struct TeamView: View {
                                     Image(systemName: "ellipsis").frame(width: 44, height: 44)
                                 }
                             }
-                            .frame(minHeight: 56)
+                            .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 4).padding(.vertical, 8)
+                            .frame(minHeight: 60)
                         }
                     }
-                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                    .paperCardMargin().padding(.top, 16)
                 }
                 if canManage {
                     VStack(alignment: .leading, spacing: 0) {
@@ -225,14 +227,15 @@ struct TeamView: View {
                             }
                             .accessibilityLabel("New role")
                         }
-                        ForEach(customRoles) { role in
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                        PaperCardList(data: customRoles) { role in
                             Button { editingRoleID = role.id } label: {
-                                PaperMenuRow(role.revision.name, symbol: "person.badge.key", subtitle: role.revision.description?.isEmpty == false ? role.revision.description : nil, tile: Theme.markOlive)
+                                PaperMenuRow(role.revision.name, symbol: "person.badge.key", subtitle: role.revision.description?.isEmpty == false ? role.revision.description : nil, tile: Theme.markOlive, filled: true)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RowPressStyle())
                         }
                     }
-                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                    .paperCardMargin().padding(.top, 16)
                 }
                 if !loading && visible.isEmpty && error == nil {
                     PaperEmptyState(symbol: "person.2", title: search.isEmpty ? "No team members" : "No matches", message: "Invite people with the invite button above.")

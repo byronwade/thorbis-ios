@@ -13,6 +13,30 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-search-create",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "plus.magnifyingglass", title: "One search, one + and quicker booking",
+                      detail: "Search from the bar, start a job, estimate or customer from +, and book unscheduled jobs right from the list.")
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-visual-rollout",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "rectangle.grid.1x2", title: "Clearer lists on every screen",
+                      detail: "Jobs, customers, money and team lists sit in tidy groups with an icon and status in words.")
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-nav-by-role",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "person.crop.circle.badge.checkmark", title: "Your day and your places, by role",
+                      detail: "Techs open on their own jobs, the bar fits your role, and Settings, Money and reports each live in one place.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-job-customer-links",
             date: "2026-10-30",
             highlights: [

@@ -1,7 +1,9 @@
 import SwiftUI
 import UserNotifications
 
-/// Settings as grouped lists with the person on top, opened from Settings in the bottom bar's menu.
+/// The one Settings: the person on top, then company, business setup, payments, menu, notification
+/// rules, appearance, notifications, What's new and sign-out. Opened from the bottom bar's menu,
+/// More, and the iPad sidebar.
 /// Native grouped lists per D-025 (Apple HIG for settings), Thorbis tokens for color.
 struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
@@ -49,6 +51,12 @@ struct SettingsView: View {
                         }
                         NavigationLink(value: PaperRoute.payments) {
                             row("Payments", symbol: "creditcard", value: nil)
+                        }
+                    }
+                    // Who hears about booked and changed jobs; the feed itself is Inbox.
+                    if MenuItem.notices.permitted(session) {
+                        NavigationLink(value: PaperRoute.notices) {
+                            row("Notification rules", symbol: "bell.badge", value: nil)
                         }
                     }
                 }

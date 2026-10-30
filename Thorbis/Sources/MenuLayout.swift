@@ -21,7 +21,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .money: "Money"
         case .reports: "Reports"
         case .team: "Team & permissions"
-        case .notices: "Job notices"
+        case .notices: "Notification rules"
         case .drafts: "Message drafts"
         }
     }
@@ -32,7 +32,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .billing: "Billing"
         case .attention: "Attention"
         case .team: "Team"
-        case .notices: "Notices"
+        case .notices: "Rules"
         case .drafts: "Drafts"
         default: title
         }
@@ -71,9 +71,9 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     var subtitle: String? {
         switch self {
         case .attention: "Unpaid invoices, waiting estimates, jobs without a time"
-        case .inbox: "Job notices and assignments"
+        case .inbox: "Booked, changed and assigned jobs"
         case .billing: "Progress billing, deposits, retainage"
-        case .money: "Revenue, collected and overdue"
+        case .money: "Revenue, overdue and reports"
         case .reports: "Estimate conversion and schedule"
         case .notices: "Who hears about booked and changed jobs"
         case .drafts: "Saved here, not sent"
@@ -116,6 +116,21 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     init?(serverTab id: String) { self.init(rawValue: id == "revenue" ? "money" : id) }
 
+    /// Whether the place is listed in the menu, the iPad sidebar and Customize menu. Notification
+    /// rules live in Settings; Reports sits inside Money for anyone who can open Money, so a role
+    /// without Money still finds Reports on its own. Neither changes what a role can open.
+    @MainActor func listed(_ session: SessionController) -> Bool {
+        Self.listed(self, permitted: { $0.permitted(session) })
+    }
+
+    static func listed(_ item: MenuItem, permitted: (MenuItem) -> Bool) -> Bool {
+        switch item {
+        case .notices: false
+        case .reports: permitted(.reports) && !permitted(.money)
+        default: permitted(item)
+        }
+    }
+
     @MainActor func permitted(_ session: SessionController) -> Bool {
         switch self {
         case .schedule, .jobs: session.can("job.view", feature: "jobs")
@@ -135,12 +150,48 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+/// Who the bottom bar is first set up for, read from capabilities the server already grants
+/// (no new roles): owners edit company settings, office staff assign jobs, everyone else is in
+/// the field.
+enum WorkRole: Equatable {
+    case technician, office, owner
+
+    init(can: (String, String?) -> Bool) {
+        if can("organization.settings.edit", nil) { self = .owner }
+        else if can("job.assign", "jobs") { self = .office }
+        else { self = .technician }
+    }
+
+    @MainActor init(_ session: SessionController) { self.init(can: { session.can($0, feature: $1) }) }
+
+    /// Technicians open Schedule on their own day; office and owners see everyone's.
+    var schedulesOwnDay: Bool { self == .technician }
+}
+
 /// The phone's menu layout: which items sit in the tab bar (in order) and which are hidden from More.
 /// Stored on this phone; a company-wide layout from the server can later supply the defaults.
 @MainActor
 final class MenuLayout: ObservableObject {
     static let maxTabs = 4
     static let defaultTabs: [MenuItem] = [.schedule, .jobs, .customers]
+
+    /// The bar a role starts with when neither the company nor this phone has saved one.
+    /// Places the role cannot open drop out and the technician bar fills the gap, so the bar
+    /// never shrinks to one place. Schedule stays, because the app opens on it.
+    static func defaultTabs(for role: WorkRole, permitted: (MenuItem) -> Bool) -> [MenuItem] {
+        let wanted: [MenuItem] = switch role {
+        case .technician: [.schedule, .jobs, .customers]
+        case .office: [.schedule, .inbox, .customers, .jobs]
+        case .owner: [.schedule, .attention, .money, .customers]
+        }
+        let allowed = (wanted + defaultTabs).reduce(into: [MenuItem]()) { result, item in
+            if !result.contains(item), permitted(item) || defaultTabs.contains(item) { result.append(item) }
+        }
+        return Array(allowed.prefix(maxTabs))
+    }
+
+    /// The default this phone falls back to; set from the person's role once they sign in.
+    private(set) var roleDefaultTabs: [MenuItem] = MenuLayout.defaultTabs
 
     @Published var tabs: [MenuItem] { didSet { changed() } }
     @Published var hidden: Set<MenuItem> { didSet { changed() } }
@@ -176,7 +227,19 @@ final class MenuLayout: ObservableObject {
         self.menuOrder = stored?.menu?.compactMap(MenuItem.init(rawValue:)) ?? []
     }
 
-    var isDefault: Bool { tabs == Self.defaultTabs && hidden.isEmpty && menuOrder.isEmpty }
+    var isDefault: Bool { tabs == roleDefaultTabs && hidden.isEmpty && menuOrder.isEmpty }
+
+    /// True once this phone has a saved layout of its own.
+    var hasSavedPhoneLayout: Bool { defaults.data(forKey: key) != nil }
+
+    /// Sets the bar for the person's role, but never over a saved phone layout or a company one.
+    func applyRoleDefaults(_ role: WorkRole, permitted: (MenuItem) -> Bool) {
+        roleDefaultTabs = Self.defaultTabs(for: role, permitted: permitted)
+        guard source == .phone, !hasSavedPhoneLayout, tabs != roleDefaultTabs else { return }
+        applying = true
+        defer { applying = false }
+        tabs = roleDefaultTabs
+    }
 
     /// Whether `item` can sit in the bar: a company layout carries only `companyTabs`.
     func canBeTab(_ item: MenuItem) -> Bool { source != .company || MenuItem.companyTabs.contains(item) }
@@ -197,7 +260,7 @@ final class MenuLayout: ObservableObject {
 
     /// More shows every permitted item that is not already a tab and not hidden.
     func moreItems(in group: MenuItem.Group, session: SessionController) -> [MenuItem] {
-        MenuItem.allCases.filter { $0.group == group && !tabs.contains($0) && !hidden.contains($0) && $0.permitted(session) }
+        MenuItem.allCases.filter { $0.group == group && !tabs.contains($0) && !hidden.contains($0) && $0.listed(session) }
     }
 
     func addTab(_ item: MenuItem) {
@@ -209,7 +272,7 @@ final class MenuLayout: ObservableObject {
     func removeTab(_ item: MenuItem) { tabs.removeAll { $0 == item } }
 
     func reset() {
-        tabs = Self.defaultTabs
+        tabs = roleDefaultTabs
         hidden = []
         menuOrder = []
     }
@@ -268,7 +331,7 @@ final class MenuLayout: ObservableObject {
         let stored = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Stored.self, from: $0) }
         applying = true
         defer { applying = false }
-        tabs = Array((stored?.tabs.compactMap(MenuItem.init(rawValue:)) ?? Self.defaultTabs).prefix(Self.maxTabs))
+        tabs = Array((stored?.tabs.compactMap(MenuItem.init(rawValue:)) ?? roleDefaultTabs).prefix(Self.maxTabs))
         hidden = Set(stored?.hidden.compactMap(MenuItem.init(rawValue:)) ?? [])
         menuOrder = stored?.menu?.compactMap(MenuItem.init(rawValue:)) ?? []
         source = .phone
@@ -328,7 +391,7 @@ struct CustomizeMenuView: View {
                 Text(footer)
             }
 
-            let addable = MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.permitted(session) && canBeTab($0) }
+            let addable = MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && canBeTab($0) }
             if editable, layout.tabs.count < MenuLayout.maxTabs, !addable.isEmpty {
                 Section("Add to bottom bar") {
                     ForEach(addable) { item in
@@ -341,7 +404,7 @@ struct CustomizeMenuView: View {
             }
 
             Section {
-                ForEach(MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.permitted(session) && $0.route != nil }) { item in
+                ForEach(MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && $0.route != nil }) { item in
                     Toggle(isOn: Binding(get: { !layout.hidden.contains(item) },
                                          set: { show in if show { layout.hidden.remove(item) } else { layout.hidden.insert(item) } })) {
                         Label(item.title, systemImage: item.symbol)

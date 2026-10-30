@@ -24,15 +24,16 @@ struct EstimatesView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
-                if !records.isEmpty { summaryLine(estimates: records) }
+                if !records.isEmpty { summaryLine(estimates: records).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 6)
-                    ForEach(group) { record in
+                    PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 10)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                    PaperCardList(data: group) { record in
                         NavigationLink { EstimateDetailView(id: record.id).thorbisBackButton() } label: {
+                            // The status is a word on every row; the tile's colour only reinforces it.
                             PaperDocumentRow(kind: .estimate, reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
                                              subtitle: store.customerName(record.customerId), status: record.status,
-                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") },
-                                             showsStatus: false)
+                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
                         }.buttonStyle(RowPressStyle())
                     }
                 }
@@ -44,7 +45,7 @@ struct EstimatesView: View {
                                     actionTitle: session.can("estimate.create", feature: "estimates") ? "New estimate" : nil, action: { showCreate = true })
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .background(Theme.background)
         .navigationTitle("Estimates")
@@ -325,10 +326,12 @@ struct InvoicesView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
-                if !records.isEmpty { summaryLine(invoices: records) }
+                if !records.isEmpty { summaryLine(invoices: records).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 6)
-                    ForEach(group) { record in
+                    PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 10)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                    // The subtitle carries the status as a word ("Balance due", "Paid").
+                    PaperCardList(data: group) { record in
                         NavigationLink { InvoiceDetailView(id: record.id).thorbisBackButton() } label: {
                             let total = paperLinesTotal(record.lines)
                             let due = total.map { max(0, $0 - record.amountPaid) }
@@ -348,7 +351,7 @@ struct InvoicesView: View {
                     PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices created from jobs appear here.")
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .background(Theme.background)
         .navigationTitle("Invoices")
@@ -761,15 +764,11 @@ struct PaperDocumentRow: View {
     let amount: String?
     var showsStatus = true
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.paperRowInset) private var inset
 
     var body: some View {
         HStack(alignment: typeSize.isAccessibilitySize ? .top : .center, spacing: 12) {
-            Image(systemName: kind.symbol)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Theme.brandText)
-                .frame(width: 38, height: 38)
-                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                .accessibilityHidden(true)
+            DocumentTile(symbol: kind.symbol, status: status)
             if typeSize.isAccessibilitySize {
                 stackedContent
             } else {
@@ -786,7 +785,8 @@ struct PaperDocumentRow: View {
             }
         }
         .frame(minHeight: 64)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
+        .padding(.horizontal, inset)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }

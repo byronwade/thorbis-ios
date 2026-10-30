@@ -32,6 +32,9 @@ struct RootView: View {
     @State private var barQuery = ""
     @State private var newCustomer = false
     @State private var newEstimate = false
+    /// The bar's create menu, and the choice that runs once it has closed.
+    @State private var createMenuOpen = false
+    @State private var pendingCreate: (() -> Void)?
     @State private var reviewScope: SavedWorkScope?
     @ObservedObject private var recents = RecentItems.shared
     /// The phone's width, which sizes the pop-up menu against the bar.
@@ -49,8 +52,6 @@ struct RootView: View {
     @State private var settings = false
     @State private var workspace = false
     @State private var createJob = false
-    @State private var priceBook = false
-    @State private var drafts = false
     #if DEBUG
     @State private var previewInvoiceEditor = false
     @State private var previewInvoiceDetail = false
@@ -78,6 +79,8 @@ struct RootView: View {
             #endif
             await layout.refreshCompanyLayout(api: api)
         }
+        // With no company or saved phone layout, the bar starts from the person's role.
+        .onChange(of: session.capabilities, initial: true) { applyRoleDefaults() }
         // MA-19: once after an update, risen over the home screen rather than during launch.
         .task {
             #if DEBUG
@@ -93,6 +96,15 @@ struct RootView: View {
         .sheet(item: $whatsNew.showing, onDismiss: { whatsNew.dismissed() }) { content in
             WhatsNewSheet(content: content) { whatsNew.dismissed() }
         }
+    }
+
+    private func applyRoleDefaults() {
+        #if DEBUG
+        // Screenshots and UI tests keep the standard bar.
+        if PaperPreview.enabled { return }
+        #endif
+        guard session.phase == .ready else { return }
+        layout.applyRoleDefaults(WorkRole(session), permitted: { $0.permitted(session) })
     }
 
     private func writeTodaySnapshot() {
@@ -117,22 +129,17 @@ struct RootView: View {
                 case .jobs: JobsView()
                 case .customers: CustomersView()
                 case .more: MoreView()
+                case .place(let item): if let route = item.route { PaperRouteView(route: route) }
+                case .local(let section): PaperRouteView(route: .local(section))
                 }
             }
             .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
             .background(Theme.background)
             .paperDestinations()
-            .thorbisDestination(isPresented: $priceBook) {
-                WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
-            }
-            .thorbisDestination(isPresented: $drafts) {
-                if let actor = session.user?.id, let org = session.activeOrganization?.id {
-                    InboxLocalDraftView(actorID: actor, organizationID: org)
-                }
-            }
         }
         .sheet(isPresented: $search, onDismiss: { searchSeed = "" }) { PaperGlobalSearch(initialQuery: searchSeed) }
-        .sheet(isPresented: $settings) { NavigationStack { MoreView().paperDestinations().safeAreaInset(edge: .top) { HStack { Spacer(); Button("Done") { settings = false }.font(Theme.font(15, weight: .medium)).frame(minWidth: 44, minHeight: 44) }.padding(.horizontal, Theme.gutter) } } }
+        // The same one Settings as the phone.
+        .sheet(isPresented: $settings) { SettingsView() }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
         #if DEBUG
@@ -278,6 +285,11 @@ struct RootView: View {
                 .onChange(of: geometry.size.width, initial: true) { phoneWidth = geometry.size.width }
                 .onChange(of: geometry.size.width) { if menuOpen { closeMenu() } }
         }
+        .sheet(isPresented: $createMenuOpen, onDismiss: {
+            let run = pendingCreate
+            pendingCreate = nil
+            run?()
+        }) { createMenu }
     }
 
     /// Recent records and results in a card that rises from the bar. Drag its handle down to close.
@@ -290,6 +302,8 @@ struct RootView: View {
                 .accessibilityHidden(true)
             PaperGlobalSearch(externalQuery: $barQuery, openResult: openSearchResult)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("bar-search-results")
         .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .modifier(FloatingSurface(shape: RoundedRectangle(cornerRadius: 28, style: .continuous)))
@@ -382,22 +396,8 @@ struct RootView: View {
         return [Array(recent), sync].filter { !$0.isEmpty }
     }
 
-    /// The bar's +: the record the screen showing is about, else a job.
-    private var barCreate: (label: String, run: () -> Void)? {
-        let canCustomer = session.can("customer.create", feature: "core_crm")
-        let canEstimate = session.can("estimate.create", feature: "estimates")
-        switch selectedTab {
-        case MenuItem.customers.rawValue where canCustomer: return ("New customer", { closeMenu(); newCustomer = true })
-        case MenuItem.estimates.rawValue where canEstimate: return ("New estimate", { closeMenu(); newEstimate = true })
-        default:
-            if session.can("job.create", feature: "jobs") { return ("New job", { closeMenu(); createJob = true }) }
-            if canCustomer { return ("New customer", { closeMenu(); newCustomer = true }) }
-            return nil
-        }
-    }
-
-    /// Long-press +: the other things people start from the field.
-    private var newActions: [[AppBottomBar.QuickAction]] {
+    /// What this person may start from the bar, in a fixed order so + means the same on every screen.
+    private var createChoices: [AppBottomBar.QuickAction] {
         var create: [AppBottomBar.QuickAction] = []
         if session.can("job.create", feature: "jobs") {
             create.append(.init(title: "New job", symbol: "briefcase") { createJob = true })
@@ -408,7 +408,32 @@ struct RootView: View {
         if session.can("customer.create", feature: "core_crm") {
             create.append(.init(title: "New customer", symbol: "person.badge.plus") { newCustomer = true })
         }
-        return [create]
+        return create
+    }
+
+    /// The bar's +: a small create menu. With one choice it starts that directly; with none it hides.
+    private var barCreate: (label: String, run: () -> Void)? {
+        let choices = createChoices
+        if choices.count == 1, let only = choices.first { return (only.title, { closeMenu(); only.run() }) }
+        guard !choices.isEmpty else { return nil }
+        return ("Create", { closeMenu(); createMenuOpen = true })
+    }
+
+    /// Long-press +: the same creates, straight from the press (a shortcut, never the only way).
+    private var newActions: [[AppBottomBar.QuickAction]] {
+        let choices = createChoices
+        return choices.count > 1 ? [choices] : []
+    }
+
+    /// The create menu's card. The picked sheet opens once this one has closed; presenting both in
+    /// one pass would drop the second.
+    private var createMenu: some View {
+        ThorbisMenuCard(items: createChoices.map { choice in
+            ThorbisMenuItem(choice.title, icon: choice.symbol, action: choice.run)
+        }, title: "Create") { item in
+            pendingCreate = item.action
+            createMenuOpen = false
+        }
     }
 
     private func openRecent(_ item: RecentItems.Item) {
@@ -459,7 +484,6 @@ struct RootView: View {
             },
             manageBusinesses: { closeMenu(); workspace = true },
             settings: { closeMenu(); showSettings = true },
-            search: { openBarSearch() },
             close: closeMenu
         )
     }
@@ -566,6 +590,8 @@ struct RootView: View {
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
             case "new-job": createJob = true
+            case "create-menu": primaryTab = .jobs; createMenuOpen = true
+            case "schedule-unscheduled": primaryTab = .schedule
             case "settings": showSettings = true
             case "app-menu", "app-menu-edit", "side-menu", "side-menu-search": menuOpen = true
             case "bar-live", "bar-syncing":
@@ -744,6 +770,7 @@ struct RootView: View {
         }
     }
 
+    /// The same places as the phone menu, in the person's Customize menu order, grouped like More.
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { workspace = true } label: {
@@ -758,20 +785,51 @@ struct RootView: View {
                 }.padding(.horizontal, 8).frame(minHeight: 44)
             }.padding(.bottom, 10)
             SidebarSearchButton { search = true }.padding(.bottom, 12)
-            if session.can("job.view", feature: "jobs") {
-                sidebarRow("Schedule", icon: "calendar", target: .schedule, count: JobFiltering.schedule(store.jobs, range: .today).count)
-                sidebarRow("Jobs", icon: "briefcase", target: .jobs, count: store.jobs.count)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(MenuItem.Group.allCases, id: \.self) { group in
+                        let items = menuPlaces.filter { $0.group == group }
+                        let local = group == .phone ? localSections : []
+                        if !items.isEmpty || !local.isEmpty {
+                            if group != .work {
+                                Text(group.rawValue).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                    .padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 4)
+                                    .accessibilityAddTraits(.isHeader)
+                            }
+                            ForEach(items) { item in
+                                sidebarRow(item.title, icon: item.symbol, target: tabletSection(item), count: sidebarCount(item))
+                            }
+                            ForEach(local, id: \.self) { section in
+                                sidebarRow(section.title, icon: section.moreSymbol, target: .local(section))
+                            }
+                        }
+                    }
+                    menuRow("Settings", icon: "gearshape") { settings = true }.padding(.top, 14)
+                }
             }
-            if session.can("customer.view", feature: "core_crm") { sidebarRow("Customers", icon: "person.2", target: .customers) }
-            menuRow("Message drafts", icon: "bubble.left") { drafts = true }
-            if session.can("pricebook.view", feature: "price_book") { menuRow("Price book", icon: "book.closed") { priceBook = true } }
-            menuRow("Workspace tools", icon: "slider.horizontal.3") { settings = true }
-            Spacer()
+            .scrollIndicators(.hidden)
             SidebarAccountButton(name: session.user?.name ?? "") { settings = true }
                 .padding(.top, 12)
         }.padding(.vertical, 14).padding(.horizontal, 10).frame(width: 244)
             .foregroundStyle(Theme.foreground).buttonStyle(.plain)
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
+    }
+
+    private func tabletSection(_ item: MenuItem) -> TabletSection {
+        switch item {
+        case .schedule: .schedule
+        case .jobs: .jobs
+        case .customers: .customers
+        default: .place(item)
+        }
+    }
+
+    private func sidebarCount(_ item: MenuItem) -> Int? {
+        switch item {
+        case .schedule: JobFiltering.schedule(store.jobs, range: .today).count
+        case .jobs: store.jobs.count
+        default: nil
+        }
     }
 
     private func sidebarRow(_ title: String, icon: String, target: TabletSection, count: Int? = nil) -> some View {
@@ -849,14 +907,15 @@ struct PaperRouteView: View {
         case .invoices: InvoicesView()
         case .priceBook:
             WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
-        case .revenue: WorkspaceRevenueView(api: api, available: true).id(session.generation)
+        // Money and Reports are one place: Revenue first, then the reports.
+        case .revenue: ReportsView(includesRevenue: true).id(session.generation)
         case .drafts:
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 InboxLocalDraftView(actorID: actor, organizationID: org)
             }
         case .closeout(let jobID): JobCloseoutView(jobID: jobID)
         case .team: TeamView()
-        case .reports: ReportsView()
+        case .reports: ReportsView(includesRevenue: MenuItem.money.permitted(session), initialTab: "Operations")
         case .assign(let jobID): JobAssignmentView(jobID: jobID)
         case .billing: BillingSchedulesView()
         case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)

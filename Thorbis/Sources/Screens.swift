@@ -45,61 +45,66 @@ struct NewJobSheet: View {
                     Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
                 }.padding(.horizontal, Theme.gutter).padding(.top, 6).padding(.bottom, 10)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 2) {
-                            TextField("Job title", text: $draft.title, axis: .vertical)
-                                .font(Theme.font(24, weight: .medium))
-                                .tracking(-0.39)
+                    // F21: in the order a call gives it — who, then what, then when and who goes.
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text("New job")
+                            .font(Theme.font(24, weight: .medium)).tracking(-0.39)
+                            .accessibilityAddTraits(.isHeader)
+                            .padding(.top, 4)
+
+                        labelled("Customer") { customerPicker }
+
+                        labelled("Job title") {
+                            TextField("What's wrong, e.g. AC not cooling", text: $draft.title, axis: .vertical)
+                                .font(Theme.font(17, weight: .medium))
                                 .textFieldStyle(.plain)
+                                .lineLimit(1...3)
                                 .accessibilityLabel("Job title")
                                 .focused($titleFocused)
                                 .disabled(busy || savedJobID != nil)
-                        }
-                        .padding(.top, 8)
-                        if draft.titleIsTooLong {
-                            Text("Job titles can be up to 200 characters.")
-                                .font(Theme.font(12))
-                                .foregroundStyle(Theme.destructive)
-                                .padding(.top, 4)
-                        }
-
-                        TextField(
-                            text: $draft.notes,
-                            prompt: Text("Add description — what's the problem, where, anything the tech should know…")
-                                .foregroundStyle(Theme.muted),
-                            axis: .vertical
-                        ) {
-                            Text("Job description")
-                        }
-                            .font(Theme.font(15))
-                            .foregroundStyle(Theme.foreground)
-                            .lineLimit(2...6)
-                            .textFieldStyle(.plain)
-                            .accessibilityLabel("Job description")
-                            .padding(.top, 8)
-                            .disabled(busy || savedJobID != nil)
-                        if draft.notesAreTooLong {
-                            Text("Descriptions can be up to 10,000 characters.")
-                                .font(Theme.font(12))
-                                .foregroundStyle(Theme.destructive)
-                                .padding(.top, 4)
+                                .modifier(FieldWell())
+                            if draft.titleIsTooLong {
+                                Text("Job titles can be up to 200 characters.")
+                                    .font(Theme.font(12))
+                                    .foregroundStyle(Theme.destructive)
+                            }
                         }
 
-                        // Customer, when and who as pills that wrap on narrow phones (a chip is a pill;
-                        // values stay words).
-                        FlowRow(spacing: 8, lineSpacing: 8) {
-                            customerPicker
-                            if canAssign {
+                        labelled("Description") {
+                            TextField(
+                                text: $draft.notes,
+                                prompt: Text("Where, what the customer said, anything the tech should know…")
+                                    .foregroundStyle(Theme.muted),
+                                axis: .vertical
+                            ) {
+                                Text("Job description")
+                            }
+                                .font(Theme.font(15))
+                                .foregroundStyle(Theme.foreground)
+                                .lineLimit(2...6)
+                                .textFieldStyle(.plain)
+                                .accessibilityLabel("Job description")
+                                .disabled(busy || savedJobID != nil)
+                                .modifier(FieldWell())
+                            if draft.notesAreTooLong {
+                                Text("Descriptions can be up to 10,000 characters.")
+                                    .font(Theme.font(12))
+                                    .foregroundStyle(Theme.destructive)
+                            }
+                        }
+
+                        // When and who are optional; both save right after the job is created.
+                        if canAssign {
+                            labelled("When", note: "Optional") {
                                 Button { pickingWhen = true } label: {
-                                    pill(when.map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()) } ?? "When",
-                                         symbol: "clock", set: when != nil)
+                                    rowLabel(when.map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()) } ?? "Not scheduled yet",
+                                             symbol: "clock", set: when != nil)
                                 }
                                 .accessibilityLabel(when == nil ? "Choose a time" : "Time: \(when!.formatted())")
                                 .disabled(busy || timeSaved)
-                                techPicker
                             }
+                            labelled("Technician", note: "Optional") { techPicker }
                         }
-                        .padding(.top, 12)
 
                         if let error {
                             Label(error, systemImage: "exclamationmark.triangle")
@@ -134,12 +139,14 @@ struct NewJobSheet: View {
                     .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
                     .background(Theme.background)
                 }
-                .onAppear { if draft.title.isEmpty { titleFocused = true } }
+                // The customer comes first; with one already chosen, typing starts at the title.
+                .onAppear { if !draft.customerID.isEmpty && draft.title.isEmpty { titleFocused = true } }
                 .toolbar(.hidden, for: .navigationBar)
                 // The new-customer sheet opens once the picker has finished closing; presenting
                 // both in one pass would drop the second sheet.
                 .sheet(isPresented: $pickingCustomer, onDismiss: {
                     if wantsNewCustomer { wantsNewCustomer = false; showNewCustomer = true }
+                    else if !draft.customerID.isEmpty && draft.title.isEmpty { titleFocused = true }
                 }) {
                     CustomerPickerSheet(selectedID: draft.customerID,
                                         canCreate: session.can("customer.create", feature: "core_crm"),
@@ -179,8 +186,8 @@ struct NewJobSheet: View {
     private var customerPicker: some View {
         // A menu can't search; with hundreds of customers the picker is a searchable sheet.
         Button { pickingCustomer = true } label: {
-            pill(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Customer",
-                 symbol: "person", set: !draft.customerID.isEmpty)
+            rowLabel(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Find or add a customer",
+                     symbol: draft.customerID.isEmpty ? "magnifyingglass" : "person", set: !draft.customerID.isEmpty)
         }
         .accessibilityLabel("Customer: \(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Choose a customer")")
         // Once the job exists its title, description and customer are fixed; edit them on the job.
@@ -196,22 +203,38 @@ struct NewJobSheet: View {
         })
         return ThorbisMenu(items: items, title: "Technician",
                            accessibilityLabel: "Technician: \(tech?.displayName ?? "none")") {
-            pill(tech?.displayName ?? "Tech", symbol: "person.badge.clock", set: tech != nil)
+            rowLabel(tech?.displayName ?? "No technician yet", symbol: "person.badge.clock", set: tech != nil)
         }
         .disabled(busy || techSaved)
         .task { if people.isEmpty { people = (try? await api.fieldAssignees()) ?? [] } }
     }
 
-    private func pill(_ text: String, symbol: String, set: Bool) -> some View {
-        Label { Text(text).lineLimit(1).truncationMode(.tail) } icon: { Image(systemName: symbol) }
-            .font(Theme.font(13, weight: .medium))
-            .foregroundStyle(set ? Theme.foreground : Theme.muted)
-            .padding(.horizontal, 12)
-            .frame(height: Theme.chipHeight + 4)
-            .frame(maxWidth: 240)
-            .background(Theme.fill, in: Capsule())
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+    /// A persistent label above its field (GR-26), with an optional quiet note beside it.
+    private func labelled<Content: View>(_ label: String, note: String? = nil,
+                                         @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                if let note { Text("· \(note)").font(Theme.font(13)).foregroundStyle(Theme.muted.opacity(0.8)) }
+            }
+            .accessibilityHidden(true)
+            content()
+        }
+    }
+
+    /// A tappable full-width choice: icon, the value (or what to do) and a chevron.
+    private func rowLabel(_ text: String, symbol: String, set: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                .frame(width: 20)
+            Text(text).font(Theme.font(15, weight: set ? .medium : .regular))
+                .foregroundStyle(set ? Theme.foreground : Theme.muted)
+                .lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+        }
+        .modifier(FieldWell())
+        .contentShape(Rectangle())
     }
 
     private static func nextHour() -> Date {
@@ -280,6 +303,17 @@ struct NewJobSheet: View {
                 dismiss()
             }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+}
+
+/// The new-job form's field surface: one quiet well per answer.
+private struct FieldWell: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
     }
 }
 
@@ -669,17 +703,13 @@ extension LocalWorkspaceSection {
 
 /// Paper 29 and 65 together: every destination that is not a tab, then account settings.
 struct MoreView: View {
-    @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject var api: APIClient
-    @EnvironmentObject private var outbox: FieldOutbox
-    @EnvironmentObject private var pendingMedia: PendingMediaStore
-    @State private var showWorkspaces = false
-    @State private var showNewJob = false
-    @State private var confirmSignOut = false
+    @State private var showSettings = false
 
-
+    /// More holds places only. Account, company, payments, menu, appearance, What's new and
+    /// sign-out all live in the one Settings.
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -693,54 +723,19 @@ struct MoreView: View {
                         group(section.rawValue) {
                             ForEach(items) { item in
                                 if let route = item.route {
-                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint) }
+                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint, filled: true) }
                                 }
                             }
                             ForEach(local, id: \.self) { section in
-                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt) }
+                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt, filled: true) }
                             }
                         }
                     }
                 }
                 group("Account") {
-                    if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.businessSetup) {
-                            PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Company details, payments, services and team", tile: Theme.markAccent)
-                        }
-                        NavigationLink(value: PaperRoute.companyDetails) {
-                            PaperMenuRow("Company details", symbol: "building.2", subtitle: "Name, address and phone customers see", tile: Theme.markOlive)
-                        }
-                    }
-                    if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.payments) {
-                            PaperMenuRow("Payments", symbol: "creditcard", subtitle: "Stripe setup, card payments and payouts", tile: Theme.markForest)
-                        }
-                    }
-                    NavigationLink(value: PaperRoute.customizeMenu) {
-                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
-                    }
-                    // MA-19: the notes stay one tap away on iPad too, where the gear opens More.
-                    NavigationLink(value: PaperRoute.whatsNew) {
-                        PaperMenuRow("What's new", symbol: "sparkles", subtitle: "What changed in recent updates", tile: Theme.markAccent)
-                    }
-                    HStack(spacing: 12) {
-                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(15, weight: .medium)).foregroundStyle(.white)
-                            .frame(width: 40, height: 40).background(Theme.brandText, in: Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.user?.name ?? "Account").font(Theme.font(15, weight: .medium))
-                            if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
-                        }
-                        Spacer()
-                    }
-                    .frame(minHeight: 56)
-                    .accessibilityElement(children: .combine)
-                    PaperMenuRow(title: "Appearance", symbol: "circle.lefthalf.filled") {
-                        ThorbisSelect(options: [("system", "System"), ("light", "Light"), ("dark", "Dark")],
-                                      selection: $appearance, menuTitle: "Appearance")
-                    }
-                    Button { confirmSignOut = true } label: {
-                        PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
+                    Button { showSettings = true } label: {
+                        PaperMenuRow("Settings", symbol: "gearshape",
+                                     subtitle: "Account, company, payments, menu and appearance", tile: Theme.markAccent, filled: true)
                     }
                 }
                 Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
@@ -751,12 +746,7 @@ struct MoreView: View {
         }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
-        .sheet(isPresented: $showNewJob) { NewJobSheet() }
-        .thorbisConfirm("Sign out of Thorbis?",
-                        message: pendingMedia.signOutWarning(outboxWarning: outbox.signOutWarning),
-                        isPresented: $confirmSignOut,
-                        actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
+        .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
     /// MA-05: the same header as every tab root (30/500 title). Switching business lives in the
@@ -765,11 +755,15 @@ struct MoreView: View {
         PaperHeader(title: "More", subtitle: session.activeOrganization?.name ?? "Workspace")
     }
 
+    /// A titled group of places on one planar card; rows are separated by space, not rules.
     private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: title).padding(.top, 14)
-            content()
+            PaperGroupHeader(title: title).padding(.top, 14).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+            PaperCard {
+                VStack(alignment: .leading, spacing: 0) { content() }
+                    .padding(.vertical, PaperCardMetrics.edge)
+            }
         }
-        .padding(.horizontal, Theme.gutter)
+        .paperCardMargin()
     }
 }

@@ -9,8 +9,6 @@ struct CustomersView: View {
     @State private var showNew = false
     @State private var newJobFor: Customer?
     @Environment(\.openURL) private var openURL
-    @State private var showSearch = false
-    @State private var search = ""
     @State private var newName = ""
     @State private var selectedView = CustomerListScope.recent.rawValue
     @State private var stateFilter = "Any state"
@@ -19,13 +17,14 @@ struct CustomersView: View {
     @State private var loadGeneration = 0
     @State private var busy = false
     @State private var error: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var scope: CustomerListScope { CustomerListScope(rawValue: selectedView) ?? .recent }
     private var items: [CustomerRecord] {
         scope.customers(from: records).filter { customer in
             let matchesState = stateFilter == "Any state"
                 || (stateFilter == "Archived") == customer.archived
-            return matchesState && (search.isEmpty || customer.name.localizedCaseInsensitiveContains(search))
+            return matchesState
         }
     }
     private var activeJobs: Int { store.jobs.filter { !["completed", "canceled"].contains($0.status) }.count }
@@ -47,8 +46,8 @@ struct CustomersView: View {
         let jobGroups = CustomerJobGroups(jobs: store.jobs)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withMotion { showSearch.toggle() } })
-                if showSearch { PaperSearchField(text: $search, prompt: "Customer name") }
+                // Finding a customer is the bar's Search; Recent / All / Archived narrow the book.
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs")
                 PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
                 if let error = error ?? store.error {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
@@ -56,20 +55,18 @@ struct CustomersView: View {
                 if recordsLoading && records.isEmpty { SkeletonRows() }
                 ForEach(sections, id: \.0) { letter, customers in
                     Section {
-                        ForEach(customers) { customer in
+                        PaperCardList(data: customers) { customer in
                             customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
-                                .padding(.horizontal, Theme.gutter)
                         }
+                        .paperCardMargin()
                     } header: {
-                        PaperGroupHeader(title: letter).padding(.top, 6)
+                        PaperGroupHeader(title: letter).padding(.top, 10)
                             .padding(.horizontal, Theme.gutter)
                     }
                 }
                 if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
-                        PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: search.isEmpty ? "Archived customers will appear here." : "Try a different search.")
-                    } else if !search.isEmpty {
-                        PaperEmptyState.search(search)
+                        PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: "Archived customers will appear here.")
                     } else {
                         PaperEmptyState(symbol: "person.2", title: "No customers yet", message: "Customers you add appear here, A to Z.",
                                         actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
@@ -100,34 +97,33 @@ struct CustomersView: View {
         return NavigationLink(value: listCustomer) {
             HStack(alignment: .center, spacing: 12) {
                 Text(initials(customer.name))
-                    .font(Theme.font(16, weight: .semibold))
+                    .font(Theme.font(15, weight: .semibold))
                     .foregroundStyle(customer.archived ? Theme.muted : Theme.brandText)
-                    .frame(width: 42, height: 42)
+                    .frame(width: IconTile.size, height: IconTile.size)
                     .background(customer.archived ? Theme.fill : Theme.brandSurface,
-                                in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .dynamicTypeSize(...DynamicTypeSize.large)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(customer.name)
-                        .font(Theme.font(16, weight: .semibold))
+                        .font(Theme.font(15, weight: .medium))
                         .foregroundStyle(customer.archived ? Theme.muted : Theme.foreground)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(alignment: .top, spacing: 5) {
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
                         if let summaryJob, !customer.archived {
                             StatusRing(status: summaryJob.status, size: 12).accessibilityHidden(true)
                         }
+                        // The open job's state is a word; the mark only reinforces it.
                         Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: summaryJob, now: now))
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     }
                 }
                 Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
+                PaperDisclosure()
             }
-            .padding(.horizontal, 8).padding(.vertical, 10)
-            .frame(minHeight: 64).contentShape(Rectangle())
+            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+            .frame(minHeight: 60).contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         // MA-12: the common actions on long-press; each also exists on the customer.
@@ -144,7 +140,6 @@ struct CustomersView: View {
             }
             Button("Copy name", systemImage: "doc.on.doc") { UIPasteboard.general.string = customer.name }
         }
-        .padding(.horizontal, -8)
     }
 
     private func rowDetail(jobCount: Int, open: Job?, now: Date) -> String {
@@ -505,17 +500,23 @@ struct CustomerDetailView: View {
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let record {
-                if let phone = record.phone { detailRow("Phone", value: phone) }
-                if let email = record.email {
-                    HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(15)).frame(minHeight: 44)
+                PaperCard {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let phone = record.phone { detailRow("Phone", value: phone).cardRow() }
+                        if let email = record.email {
+                            HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(15)).cardRow()
+                        }
+                        if let address = record.address {
+                            HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(15)).cardRow()
+                        }
+                        if let industry = record.industry { detailRow("Industry", value: industry).cardRow() }
+                        if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel).cardRow() }
+                        if let terms = record.billingTerms { detailRow("Billing terms", value: terms).cardRow() }
+                        if smsConsentLoaded { smsConsentRow.cardRow() }
+                    }
+                    .padding(.vertical, PaperCardMetrics.edge)
                 }
-                if let address = record.address {
-                    HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(15)).frame(minHeight: 44)
-                }
-                if let industry = record.industry { detailRow("Industry", value: industry) }
-                if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel) }
-                if let terms = record.billingTerms { detailRow("Billing terms", value: terms) }
-                if smsConsentLoaded { smsConsentRow }
+                .padding(.top, 8)
             }
         }
     }
@@ -526,21 +527,22 @@ struct CustomerDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 PaperGroupHeader(title: summary.openCount > 1 ? "\(summary.heading) · \(summary.openCount) open" : summary.heading)
                 NavigationLink(value: job) {
-                    HStack(alignment: .top, spacing: 12) {
-                        StatusRing(status: job.status).accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: typeSize.isAccessibilitySize ? .top : .center, spacing: 12) {
+                        StatusTile(status: job.status)
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(job.title).font(Theme.font(16, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
                             Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
                                   job.status.statusLabel].joined(separator: " · "))
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 8)
                         PaperDisclosure()
                     }
-                    .padding(16)
+                    .padding(PaperCardMetrics.inset)
                     .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .circular))
+                    .overlay(RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .circular).strokeBorder(Theme.border, lineWidth: 1))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(RowPressStyle())
@@ -669,12 +671,17 @@ struct CustomerDetailView: View {
                     .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     .accessibilityIdentifier("contact-mutation-error")
             }
+            if !contacts.isEmpty {
+            PaperCard {
+            VStack(alignment: .leading, spacing: 0) {
             ForEach(contacts) { contact in
                 HStack(spacing: 10) {
-                    Avatar(name: contact.name, size: 28)
+                    Avatar(name: contact.name, size: IconTile.size)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(contact.name).font(Theme.font(15, weight: .medium))
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                         Text([contact.role, contact.primary ? "Primary" : nil].compactMap { $0 }.joined(separator: " · ")).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     }
                     Spacer(minLength: 2)
                     if let phone = contact.phone { CustomerContactIcon(value: phone, isPhone: true) }
@@ -684,7 +691,13 @@ struct CustomerDetailView: View {
                         Image(systemName: "ellipsis").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
                     }
                     .disabled(isMutatingContact)
-                }.frame(minHeight: 48)
+                }
+                .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 4)
+                .frame(minHeight: 56)
+            }
+            }
+            .padding(.vertical, PaperCardMetrics.edge)
+            }
             }
             if contacts.isEmpty { emptyText("No contacts") }
         }
@@ -698,10 +711,15 @@ struct CustomerDetailView: View {
                     .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     .accessibilityIdentifier("location-mutation-error")
             }
+            if !locations.isEmpty {
+            PaperCard {
+            VStack(alignment: .leading, spacing: 0) {
             ForEach(locations) { location in
+                HStack(alignment: .top, spacing: 12) {
+                IconTile(symbol: location.coordinates == nil ? "mappin.slash" : "mappin.and.ellipse")
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text(location.label).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                        Text(location.label).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
                         Spacer(minLength: 4)
                         Text(location.kind.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         if canEdit {
@@ -723,7 +741,13 @@ struct CustomerDetailView: View {
                         Text(location.coordinates.map { String(format: "%.4f, %.4f", $0.latitude, $0.longitude) } ?? "No map pin")
                     }
                     .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                }.padding(.vertical, 5)
+                }
+                }
+                .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 4).padding(.vertical, 8)
+            }
+            }
+            .padding(.vertical, PaperCardMetrics.edge)
+            }
             }
             if locations.isEmpty { emptyText("No locations") }
         }
@@ -780,10 +804,11 @@ struct CustomerDetailView: View {
         VStack(alignment: .leading, spacing: 2) {
             sectionTitle("All jobs", count: jobs.count)
             // Open work first, soonest first; then finished jobs, newest first. Same words as Next visit.
-            ForEach(CustomerJobOrder.sorted(jobs)) { job in
+            VStack(spacing: 0) {
+            PaperCardList(data: CustomerJobOrder.sorted(jobs)) { job in
                 NavigationLink(value: job) {
                     HStack(spacing: 12) {
-                        Image(systemName: statusIcon(job.status).0).foregroundStyle(statusIcon(job.status).1).frame(width: 16)
+                        StatusTile(status: job.status)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(job.title).font(Theme.font(15, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                             Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet", job.status.statusLabel]
@@ -792,9 +817,12 @@ struct CustomerDetailView: View {
                         }
                         Spacer(minLength: 8)
                         PaperDisclosure()
-                    }.frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                    .frame(minHeight: 60).contentShape(Rectangle())
                 }.buttonStyle(RowPressStyle())
                 .accessibilityHint("Opens the job")
+            }
             }
             if jobs.isEmpty { emptyText("No jobs") }
         }
@@ -865,23 +893,18 @@ struct CustomerDetailView: View {
                 }
                 if activityLoading && activity.isEmpty { SkeletonRows(count: 4, inset: 0) }
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(activity) { event in
+                    PaperCardList(data: activity) { event in
                         ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id)) {
-                            HStack(alignment: .top, spacing: 10) {
-                                Image(systemName: activitySymbol(for: event.kind))
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Theme.muted)
-                                    .frame(width: 30, height: 30)
-                                    .background(Theme.fill, in: Circle())
-                                    .accessibilityHidden(true)
+                            HStack(alignment: .top, spacing: 12) {
+                                IconTile(symbol: activitySymbol(for: event.kind))
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(event.summary).font(Theme.font(15, weight: .medium)).lineLimit(3)
                                     Text(activityTimestamp(event.occurredAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
                                 }
                             }
-                            .padding(.vertical, 9)
-                            .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+                            .padding(.leading, PaperCardMetrics.inset).padding(.vertical, 9)
                         }
+                        .padding(.trailing, PaperCardMetrics.inset)
                     }
                 }
                 if activity.isEmpty && !activityLoading && activityError == nil {
