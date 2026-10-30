@@ -8,6 +8,7 @@ final class SetupWizardTests: XCTestCase {
         XCTAssertEqual(CSVReader.rows(text), [
             ["Name", "Phone", "Notes"],
             ["Smith, Ann", "555-0100", "Gate code \"42\"\nBack door"],
+            ["", "", ""],
             ["Bob", "555-0101", ""],
         ])
     }
@@ -54,12 +55,13 @@ final class SetupWizardTests: XCTestCase {
     func testRowsWithoutANameAreCountedNotDropped() {
         let model = CustomerImportModel()
         model.headers = ["Name", "Phone"]
-        model.records = [["Ann", "1"], ["", "2"], ["Bob", ""]]
+        model.records = [["Ann", "1"], ["", "2"], ["", ""], ["Bob", ""]]
         model.mapping = .guess(model.headers)
         let prepared = model.prepared
         XCTAssertEqual(prepared.rows.map(\.name), ["Ann", "Bob"])
-        XCTAssertEqual(prepared.lines, [2, 4])
+        XCTAssertEqual(prepared.lines, [2, 5], "a blank row still counts toward the spreadsheet row number")
         XCTAssertEqual(prepared.unnamed, [3])
+        XCTAssertEqual(model.rowCount, 3)
     }
 
     func testTradesRoundTripInListOrder() {

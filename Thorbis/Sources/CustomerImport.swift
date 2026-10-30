@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 // (domains/customers CUSTOMER_IMPORT_MAX_ROWS / MAX_WORK), so rows are chunked by both.
 
 /// A small RFC 4180 reader: quoted fields, doubled quotes, commas and line breaks inside quotes.
+/// Blank rows are kept so a row's position still matches the row number in the spreadsheet.
 enum CSVReader {
     static func rows(_ text: String) -> [[String]] {
         var rows: [[String]] = []
@@ -38,10 +39,10 @@ enum CSVReader {
             }
         }
         if !field.isEmpty || !row.isEmpty { row.append(field); rows.append(row) }
-        return rows
-            .map { $0.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
-            .filter { $0.contains { !$0.isEmpty } }
+        return rows.map { $0.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
     }
+
+    static func isBlank(_ row: [String]) -> Bool { row.allSatisfy(\.isEmpty) }
 }
 
 /// Which column feeds each customer field. Columns are header positions; nil means unused.
@@ -200,7 +201,10 @@ final class CustomerImportModel: ObservableObject {
     @Published var phase: Phase = .choose
     @Published var fileName = ""
     @Published var headers: [String] = []
+    /// Every row under the header, blank ones included, so positions map back to spreadsheet rows.
     @Published var records: [[String]] = []
+    /// Spreadsheet row of `records[0]` (the header is the row above it).
+    var firstRecordLine = 2
     @Published var mapping = CustomerImportMapping() {
         didSet { if mapping != oldValue { committedChunks = 0 } }
     }
@@ -216,17 +220,18 @@ final class CustomerImportModel: ObservableObject {
     /// Rows to send, with the spreadsheet line each came from (line 1 is the header).
     var prepared: (rows: [CustomerImportRow], lines: [Int], unnamed: [Int]) {
         var rows: [CustomerImportRow] = [], lines: [Int] = [], unnamed: [Int] = []
-        for (index, cells) in records.enumerated() {
+        for (index, cells) in records.enumerated() where !CSVReader.isBlank(cells) {
             if let row = CustomerImportRow.from(cells, mapping: mapping) {
-                rows.append(row); lines.append(index + 2)
+                rows.append(row); lines.append(index + firstRecordLine)
             } else {
-                unnamed.append(index + 2)
+                unnamed.append(index + firstRecordLine)
             }
         }
         return (rows, lines, unnamed)
     }
 
     var rows: [CustomerImportRow] { prepared.rows }
+    var rowCount: Int { records.lazy.filter { !CSVReader.isBlank($0) }.count }
 
     func read(_ url: URL) {
         error = nil
@@ -238,19 +243,23 @@ final class CustomerImportModel: ObservableObject {
         }
         let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
         let table = CSVReader.rows(text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text)
-        guard let header = table.first, table.count > 1 else {
+        let headerIndex = table.firstIndex { !CSVReader.isBlank($0) }
+        let body = headerIndex.map { Array(table[($0 + 1)...]) } ?? []
+        let count = body.lazy.filter { !CSVReader.isBlank($0) }.count
+        guard let headerIndex, count > 0 else {
             error = "That file has no customer rows. Export customers from your old software as CSV and try again."
             return
         }
-        guard table.count - 1 <= Self.maxRows else {
-            error = "That file has \(table.count - 1) rows. Split it into files of \(Self.maxRows) customers or fewer and import each one."
+        guard count <= Self.maxRows else {
+            error = "That file has \(count) rows. Split it into files of \(Self.maxRows) customers or fewer and import each one."
             return
         }
         reset()
         fileName = url.lastPathComponent
-        headers = header
-        records = Array(table.dropFirst())
-        mapping = .guess(header)
+        headers = table[headerIndex]
+        records = body
+        firstRecordLine = headerIndex + 2
+        mapping = .guess(headers)
         phase = .map
     }
 
@@ -320,7 +329,7 @@ final class CustomerImportModel: ObservableObject {
     }
 
     func reset() {
-        phase = .choose; fileName = ""; headers = []; records = []; mapping = .init()
+        phase = .choose; fileName = ""; headers = []; records = []; firstRecordLine = 2; mapping = .init()
         preview = nil; problems = []; imported = 0; progress = 0; error = nil; committedChunks = 0
     }
 }
@@ -368,7 +377,7 @@ struct CustomerImportPanel: View {
 
     private var mappingSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(model.fileName) · \(model.records.count == 1 ? "1 row" : "\(model.records.count) rows")")
+            Text("\(model.fileName) · \(model.rowCount == 1 ? "1 row" : "\(model.rowCount) rows")")
                 .font(Theme.font(15, weight: .medium))
             Text("Check which column holds each detail.").font(Theme.font(13)).foregroundStyle(Theme.muted)
             VStack(spacing: 0) {

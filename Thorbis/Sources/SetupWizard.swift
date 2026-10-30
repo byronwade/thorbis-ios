@@ -141,6 +141,8 @@ struct SetupWizardView: View {
     @State private var step: SetupStep = .trade
     @State private var skipped: Set<SetupStep> = []
     @State private var finished: Set<SetupStep> = []
+    /// True while Continue is working, so a double tap can't finish two steps.
+    @State private var advancing = false
     @State private var priceItems: [String] = []
     @State private var invites: [TeamInvitation] = []
     @State private var addingItem = false
@@ -154,7 +156,7 @@ struct SetupWizardView: View {
     @FocusState private var focused: String?
 
     private var steps: [SetupStep] { SetupStep.steps(session) }
-    private var busy: Bool { facts.saving || facts.loading || importer.phase == .checking || importer.phase == .importing }
+    private var busy: Bool { advancing || facts.saving || facts.loading || importer.phase == .checking || importer.phase == .importing }
     private var index: Int { steps.firstIndex(of: step) ?? 0 }
 
     var body: some View {
@@ -241,7 +243,11 @@ struct SetupWizardView: View {
 
     private var footer: some View {
         VStack(spacing: 4) {
-            Button { Task { await advance() } } label: {
+            Button {
+                // Captured at tap time, so a second tap queued behind the first can't advance again.
+                let from = step
+                Task { await advance(from: from) }
+            } label: {
                 HStack(spacing: 8) {
                     if facts.saving { ProgressView().tint(Theme.onInk) }
                     Text(step == .done ? "Start using Thorbis" : "Continue")
@@ -490,11 +496,13 @@ struct SetupWizardView: View {
         mailingSame = mailing.isEmpty || mailing == facts.profile?.value("business_address")
     }
 
-    private func advance() async {
+    private func advance(from origin: SetupStep) async {
+        guard step == origin, !advancing else { return }
+        advancing = true
+        defer { advancing = false }
         focused = nil
         stepError = nil
         if step == .done { dismiss(); return }
-        let origin = step
         if !step.facts.isEmpty, facts.profile == nil {
             // The first load failed (offline, say): try again here instead of a dead end.
             await facts.load(api: api)
