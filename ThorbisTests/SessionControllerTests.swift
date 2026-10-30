@@ -91,17 +91,17 @@ final class SessionControllerTests: XCTestCase {
             .init(200, activeSession), .init(200, catalog), .init(200, enabledFeatures)
         ])
         await session.restore()
-        let initial = ActivitySnapshotScope.capture(session: session, capability: "customer.view", feature: "core_crm")
+        let initial = ActivitySnapshotScope.capture(session: session, recordID: "customer-1", capability: "customer.view", feature: "core_crm")
         XCTAssertNotNil(initial)
         XCTAssertTrue(initial!.isCurrent(session: session))
         let generation = session.generation
         await session.revalidate()
         XCTAssertFalse(initial!.isCurrent(session: session))
-        XCTAssertNil(ActivitySnapshotScope.capture(session: session, capability: "customer.view", feature: "core_crm"))
+        XCTAssertNil(ActivitySnapshotScope.capture(session: session, recordID: "customer-1", capability: "customer.view", feature: "core_crm"))
         await session.revalidate()
         XCTAssertEqual(session.generation, generation)
         XCTAssertFalse(initial!.isCurrent(session: session), "Old feed content must stay retired after regrant")
-        XCTAssertNotNil(ActivitySnapshotScope.capture(session: session, capability: "customer.view", feature: "core_crm"))
+        XCTAssertNotNil(ActivitySnapshotScope.capture(session: session, recordID: "customer-1", capability: "customer.view", feature: "core_crm"))
     }
 
     func testCustomerRecordsScopeRejectsStaleCompletionAfterSameVersionRevokeAndRegrant() async {

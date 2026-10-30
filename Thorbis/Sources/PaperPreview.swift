@@ -466,6 +466,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
         var priceBookViewRevoked = false
+        var customerViewRevoked = false
+        var customerViewRegranted = false
         var priceBookReads = 0
         var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
@@ -473,7 +475,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.customerViewRevoked = false; scenario.customerViewRegranted = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -483,6 +485,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
+    static func revokeCustomerView() { scenario.lock.withLock { scenario.customerViewRevoked = true } }
+    static func regrantCustomerView() { scenario.lock.withLock { scenario.customerViewRevoked = false; scenario.customerViewRegranted = true } }
     static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
     static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
     static func switchSavedWorkWorkspace() {
@@ -838,6 +842,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-activity-authority"), scenario.lock.withLock({ scenario.customerViewRevoked }) { capabilities.removeAll { $0 == "customer.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
@@ -1083,10 +1088,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                         "membership": ["id": "00000000-0000-4000-8000-000000006201", "name": "Comfort Club", "renewsOn": "2027-01-15"]]
             }
             if path == "/v1/customers/\(id)/history" {
+                let activityRegranted = ProcessInfo.processInfo.arguments.contains("--paper-preview-activity-authority") && scenario.lock.withLock { scenario.customerViewRegranted }
+                if activityRegranted { Thread.sleep(forTimeInterval: 5) }
                 return ["items": [
                     ["occurredAt": "2026-10-27T16:10:00Z", "kind": "job", "subjectId": "job-2214", "summary": "Job booked: AC not cooling"],
                     ["occurredAt": "2026-10-20T15:00:00Z", "kind": "contact", "subjectId": "contact-1", "summary": "Agreed to job texts"],
-                    ["occurredAt": "2026-10-12T18:30:00Z", "kind": "payment", "subjectId": "pay-1", "summary": "Card payment of $480.00"],
+                    ["occurredAt": "2026-10-12T18:30:00Z", "kind": "payment", "subjectId": "pay-1", "summary": activityRegranted ? "Refreshed card payment of $480.00" : "Card payment of $480.00"],
                     ["occurredAt": "2026-10-12T17:55:00Z", "kind": "invoice", "subjectId": "inv-1", "summary": "Invoice sent for drain cleaning"],
                     ["occurredAt": "2026-10-11T14:00:00Z", "kind": "estimate", "subjectId": "est-1", "summary": "Estimate approved: drain cleaning"]
                 ], "nextCursor": NSNull()] as [String: Any]

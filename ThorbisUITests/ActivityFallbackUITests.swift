@@ -14,4 +14,17 @@ final class ActivityFallbackUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Activity"].exists)
         XCTAssertFalse(app.navigationBars["Invoice"].exists)
     }
+    func testOldCustomerActivityDoesNotReturnAfterPermissionRegrant() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-activity", "--paper-preview-activity-authority"]
+        app.launch()
+        let old = app.staticTexts["Card payment of $480.00"]
+        XCTAssertTrue(old.waitForExistence(timeout: 30))
+        app.buttons["Sample access"].tap()
+        app.buttons["Cycle customer access"].tap()
+        XCTAssertTrue(old.waitForNonExistence(timeout: 20))
+        XCTAssertFalse(old.exists)
+        XCTAssertTrue(app.staticTexts["Refreshed card payment of $480.00"].waitForExistence(timeout: 30))
+        XCTAssertFalse(old.exists, "The old authority's row must not reappear after regrant")
+    }
 }

@@ -6,6 +6,7 @@ import UIKit
 struct CustomerRecordsView: View {
     let compilation: CustomerJobCompilation
     let customerID: String
+    let activityScope: ActivitySnapshotScope
     var retryMedia: () async -> Void = {}
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var openedLegacy: LegacyCustomerPhoto?
@@ -202,7 +203,7 @@ struct CustomerRecordsView: View {
                 jobHeading(group.title, jobID: group.jobID, count: group.count)
                 ForEach(group.items) { entry in
                     ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID),
-                                 fallback: ActivityFallback(title: entry.summary, when: ActivityRecordLabel.noteWhen(entry.occurredAt), capability: "customer.view", feature: "core_crm")) {
+                                 fallback: ActivityFallback(title: entry.summary, when: ActivityRecordLabel.noteWhen(entry.occurredAt), capability: "customer.view", feature: "core_crm", sourceScope: activityScope)) {
                         Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
                     }
                 }
@@ -211,7 +212,7 @@ struct CustomerRecordsView: View {
                 Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
                 ForEach(compilation.accountActivity) { entry in
                     ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID),
-                                 fallback: ActivityFallback(title: entry.summary, when: ActivityRecordLabel.noteWhen(entry.occurredAt), capability: "customer.view", feature: "core_crm")) {
+                                 fallback: ActivityFallback(title: entry.summary, when: ActivityRecordLabel.noteWhen(entry.occurredAt), capability: "customer.view", feature: "core_crm", sourceScope: activityScope)) {
                         Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
                     }
                 }

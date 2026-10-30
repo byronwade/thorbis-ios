@@ -15,25 +15,27 @@ struct ActivityFallback {
     var when: String? = nil
     let capability: String
     let feature: String
+    var sourceScope: ActivitySnapshotScope? = nil
 }
 
 struct ActivitySnapshotScope: Equatable {
     let actorID: String
     let organizationID: String
+    let recordID: String
     let generation: UUID
     let authorityRevision: UUID
     let capability: String
     let feature: String
 
-    @MainActor static func capture(session: SessionController, capability: String, feature: String) -> Self? {
+    @MainActor static func capture(session: SessionController, recordID: String, capability: String, feature: String) -> Self? {
         guard session.can(capability, feature: feature), let actorID = session.user?.id,
               let organizationID = session.activeOrganization?.id else { return nil }
-        return Self(actorID: actorID, organizationID: organizationID, generation: session.generation,
+        return Self(actorID: actorID, organizationID: organizationID, recordID: recordID, generation: session.generation,
                     authorityRevision: session.authorityRevision, capability: capability, feature: feature)
     }
 
     @MainActor func isCurrent(session: SessionController) -> Bool {
-        Self.capture(session: session, capability: capability, feature: feature) == self
+        Self.capture(session: session, recordID: recordID, capability: capability, feature: feature) == self
     }
 }
 
@@ -56,9 +58,11 @@ struct ActivityLink<Content: View>: View {
             if let destination {
                 NavigationLink(value: destination.route) { label }
                     .buttonStyle(RowPressStyle())
-            } else {
+            } else if let scope = fallback.sourceScope,
+                      scope.capability == fallback.capability, scope.feature == fallback.feature,
+                      scope.isCurrent(session: session) {
                 Button {
-                    guard let scope = ActivitySnapshotScope.capture(session: session, capability: fallback.capability, feature: fallback.feature) else { return }
+                    guard scope.isCurrent(session: session) else { return }
                     snapshot = ActivitySnapshot(fallback: fallback, scope: scope)
                 } label: { label }
                 .buttonStyle(RowPressStyle())
@@ -67,6 +71,8 @@ struct ActivityLink<Content: View>: View {
                         ActivitySnapshotView(snapshot: detail)
                     }
                 }
+            } else {
+                content().frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
         }
     }

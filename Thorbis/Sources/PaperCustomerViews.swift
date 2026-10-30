@@ -261,6 +261,19 @@ struct CustomerDetailView: View {
     @State private var activityLoading = false
     @State private var activityError: String?
     @State private var activityLoadGeneration = 0
+    @State private var activityPublishedScope: ActivitySnapshotScope?
+    @State private var activityRequestedScope: ActivitySnapshotScope?
+    private var activityScope: ActivitySnapshotScope? {
+        ActivitySnapshotScope.capture(session: session, recordID: customer.id, capability: "customer.view", feature: "core_crm")
+    }
+    private var visibleActivity: [CustomerHistoryEntry] {
+        guard let scope = activityScope, activityPublishedScope == scope else { return [] }
+        return activity
+    }
+    private var visibleActivityCursor: String? {
+        guard let scope = activityScope, activityPublishedScope == scope else { return nil }
+        return activityCursor
+    }
     @State private var locationState = ServiceLocationCollectionState()
     @State private var error: String?
     @State private var showNewJob = false
@@ -355,6 +368,23 @@ struct CustomerDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-activity-authority") {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu("Sample access") {
+                        Button("Cycle customer access") {
+                            Task { @MainActor in
+                                PaperPreviewProtocol.revokeCustomerView()
+                                await session.revalidate()
+                                try? await Task.sleep(for: .seconds(3))
+                                PaperPreviewProtocol.regrantCustomerView()
+                                await session.revalidate()
+                            }
+                        }
+                    }
+                }
+            }
+            #endif
             if canEdit {
                 ToolbarItem(placement: .topBarTrailing) {
                     ThorbisMenu(items: [
@@ -377,6 +407,18 @@ struct CustomerDetailView: View {
                 recordsError = nil
             }
             if tab == "Records" { await loadRecords() }
+        }
+        .task(id: activityScope) {
+            if activityPublishedScope != activityScope {
+                activityLoadGeneration += 1
+                activity = []
+                activityCursor = nil
+                activityPublishedScope = nil
+                activityRequestedScope = nil
+                activityError = nil
+                activityLoading = false
+            }
+            if tab == "Activity" { await loadActivity(reset: true) }
         }
         .onAppear {
             RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
@@ -783,8 +825,11 @@ struct CustomerDetailView: View {
                 }
                 if visible == nil && visibleError == nil {
                     SkeletonRows(count: 4, inset: 0)
-                } else if let visible {
-                    CustomerRecordsView(compilation: visible, customerID: customer.id) { await loadRecords() }
+                } else if let visible, let publishedScope = recordsPublishedScope {
+                    let sourceScope = ActivitySnapshotScope(actorID: publishedScope.actorID, organizationID: publishedScope.organizationID,
+                        recordID: publishedScope.customerID, generation: publishedScope.generation,
+                        authorityRevision: publishedScope.authorityRevision, capability: "customer.view", feature: "core_crm")
+                    CustomerRecordsView(compilation: visible, customerID: customer.id, activityScope: sourceScope) { await loadRecords() }
                         .accessibilityIdentifier("customer-records")
                 }
             }
@@ -818,25 +863,25 @@ struct CustomerDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Text("Customer activity").font(Theme.font(13, weight: .medium))
-                Text("\(activity.count)").font(Theme.font(12))
-                if activityCursor != nil { Text("· loaded").font(Theme.font(12)) }
+                Text("\(visibleActivity.count)").font(Theme.font(12))
+                if visibleActivityCursor != nil { Text("· loaded").font(Theme.font(12)) }
             }.foregroundStyle(Theme.muted).padding(.bottom, 6)
             if !session.can("customer.view", feature: "core_crm") {
                 emptyText("You don’t have access to customer activity.")
             } else {
-                if let activityError {
-                    ErrorBanner(message: activity.isEmpty ? "Activity did not load. \(activityError)" : activityError) {
+                if let activityError, activityRequestedScope == activityScope {
+                    ErrorBanner(message: visibleActivity.isEmpty ? "Activity did not load. \(activityError)" : activityError) {
                         // A failed "load earlier" keeps its cursor, so retry continues the page
                         // instead of throwing away what already loaded.
                         await loadActivity(reset: activityCursor == nil)
                     }
                     .accessibilityIdentifier("customer-activity-retry")
                 }
-                if activityLoading && activity.isEmpty { SkeletonRows(count: 4, inset: 0) }
+                if activityLoading && visibleActivity.isEmpty { SkeletonRows(count: 4, inset: 0) }
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(activity) { event in
+                    ForEach(visibleActivity) { event in
                         ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id),
-                                     fallback: ActivityFallback(title: event.summary, when: ActivityRecordLabel.noteWhen(event.occurredAt), capability: "customer.view", feature: "core_crm")) {
+                                     fallback: ActivityFallback(title: event.summary, when: ActivityRecordLabel.noteWhen(event.occurredAt), capability: "customer.view", feature: "core_crm", sourceScope: activityPublishedScope)) {
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: activitySymbol(for: event.kind))
                                     .font(.system(size: 13, weight: .medium))
@@ -854,10 +899,10 @@ struct CustomerDetailView: View {
                         }
                     }
                 }
-                if activity.isEmpty && !activityLoading && activityError == nil {
+                if visibleActivity.isEmpty && !activityLoading && activityError == nil {
                     emptyText("Nothing yet…")
                 }
-                if activityCursor != nil {
+                if visibleActivityCursor != nil {
                     Button {
                         Task { await loadActivity(reset: false) }
                     } label: {
@@ -873,30 +918,32 @@ struct CustomerDetailView: View {
     }
 
     private func loadActivity(reset: Bool) async {
-        guard session.can("customer.view", feature: "core_crm"), !activityLoading else { return }
+        guard let scope = activityScope, !activityLoading else { return }
         if reset {
             activityLoadGeneration += 1
             activityCursor = nil
-        } else if activityCursor == nil {
+        } else if activityPublishedScope != scope || activityCursor == nil {
             return
         }
         let request = activityLoadGeneration
         let cursor = reset ? nil : activityCursor
+        activityRequestedScope = scope
         activityLoading = true
         defer { if activityLoadGeneration == request { activityLoading = false } }
         do {
             let page = try await api.fieldCustomerHistory(customer.id, cursor: cursor)
-            guard activityLoadGeneration == request else { return }
+            guard activityLoadGeneration == request, activityScope == scope, scope.isCurrent(session: session) else { return }
             if reset { activity = page.items }
             else {
                 let existingIDs = Set(activity.map(\.id))
                 activity.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
             }
             activityCursor = page.nextCursor
+            activityPublishedScope = scope
             activityError = nil
         } catch is CancellationError {
         } catch {
-            guard activityLoadGeneration == request else { return }
+            guard activityLoadGeneration == request, activityScope == scope, scope.isCurrent(session: session) else { return }
             activityError = error.localizedDescription
         }
     }
