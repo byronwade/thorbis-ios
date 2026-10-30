@@ -194,11 +194,28 @@ struct InvoiceLineEditorView: View {
         .keyboardDoneButton()
         .safeAreaInset(edge: .top, spacing: 0) {
             if canEdit && !editor.hasUnsupportedLineSources {
-                EstimateSearchBar(query: catalogQuery, kind: catalogKind, focus: $focus, searching: searching,
-                                  prompt: "Search price book or type a line", finish: finishSearch)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("invoice-catalog-search")
-                    .disabled(busy)
+                Group {
+                    if editingAddedLine && dynamicTypeSize.isAccessibilitySize {
+                        HStack {
+                            Button("Results") { editingAddedLine = false }
+                                .accessibilityLabel("Back to results")
+                            Spacer(minLength: 12)
+                            Button("Done", action: finishSearch)
+                        }
+                        .font(Theme.font(17, weight: .medium))
+                        .foregroundStyle(Theme.foreground)
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
+                        .background(Theme.background)
+                    } else {
+                        EstimateSearchBar(query: catalogQuery, kind: catalogKind, focus: $focus, searching: searching,
+                                          prompt: "Search price book or type a line", compactFiltersWhileSearching: true,
+                                          finish: finishSearch)
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("invoice-catalog-search")
+                .disabled(busy)
             }
         }
         .task(id: catalogContext) { await refreshCatalog() }
@@ -304,21 +321,28 @@ struct InvoiceLineEditorView: View {
                             priceBookOverrideReasonField.padding(.top, 8)
                         }
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ViewThatFits(in: .horizontal) {
-                                HStack {
+                        Group {
+                            if dynamicTypeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text("Edit added line").font(Theme.font(15, weight: .medium))
-                                    Spacer(minLength: 8)
+                                    Text(line.description).font(Theme.font(15)).lineLimit(1)
                                     Text(addedLineSummary(line)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
-                                }.fixedSize(horizontal: true, vertical: false)
-                                Text("Edit added line").font(Theme.font(15, weight: .medium))
+                                }
+                            } else {
+                                HStack(spacing: 8) {
+                                    Text("Edit added line").font(Theme.font(15, weight: .medium))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(line.description).font(Theme.font(15)).lineLimit(1)
+                                        Text(addedLineSummary(line)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                                    }
+                                }
                             }
-                            Text(line.description).font(Theme.font(15)).lineLimit(1)
                         }
                         .foregroundStyle(Theme.foreground)
+                        .frame(minHeight: 24)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .combine)
-                        .accessibilityValue(addedLineSummary(line))
+                        .accessibilityValue("\(line.description), \(addedLineSummary(line))")
                     }
                     .tint(Theme.foreground)
                     .padding(12)

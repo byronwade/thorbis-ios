@@ -211,41 +211,29 @@ struct EstimateSearchBar: View {
     let searching: Bool
     let prompt: String
     var keepFiltersVisible = false
+    var compactFiltersWhileSearching = false
     let finish: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    TextField(prompt, text: $query)
-                        .font(Theme.font(17))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.done)
-                        .focused(focus, equals: .search)
-                        .onSubmit(finish)
-                        .accessibilityLabel(prompt)
-                    if !query.isEmpty {
-                        Button { query = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
-                                .frame(width: 44, height: 44).contentShape(Rectangle())
-                        }
-                        .accessibilityLabel("Clear search")
-                    }
+                searchField
+                if searching && compactFiltersWhileSearching && !dynamicTypeSize.isAccessibilitySize {
+                    categoryMenu
                 }
-                .padding(.leading, 14)
-                .frame(minHeight: 50)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                if searching {
-                    Button("Done", action: finish)
-                        .font(Theme.font(17, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                if searching && (!compactFiltersWhileSearching || !dynamicTypeSize.isAccessibilitySize) {
+                    finishButton
                 }
             }
-            if searching || keepFiltersVisible {
+            if searching && compactFiltersWhileSearching && dynamicTypeSize.isAccessibilitySize {
+                HStack(spacing: 12) {
+                    categoryMenu
+                    Spacer(minLength: 0)
+                    finishButton
+                }
+            }
+            if (searching && !compactFiltersWhileSearching) || keepFiltersVisible {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(PriceBookKindFilter.allCases) { filter in
@@ -268,6 +256,62 @@ struct EstimateSearchBar: View {
         .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
         .background(Theme.background)
         .animation(.spring(response: 0.3, dampingFraction: 1), value: searching)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 17)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+            TextField(prompt, text: $query)
+                .font(Theme.font(17))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .focused(focus, equals: .search)
+                .onSubmit(finish)
+                .accessibilityLabel(prompt)
+                .clipped()
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.leading, 14)
+        .frame(minHeight: 50)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+    }
+
+    private var categoryMenu: some View {
+        Menu {
+            ForEach(PriceBookKindFilter.allCases) { filter in
+                Button { kind = filter } label: {
+                    if kind == filter { Label(filter.title, systemImage: "checkmark") }
+                    else { Text(filter.title) }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(kind.title).lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+            }
+            .font(Theme.font(13, weight: .medium))
+            .foregroundStyle(Theme.foreground)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Category: \(kind.title)")
+        .accessibilityHint("Choose a price book category")
+    }
+
+    private var finishButton: some View {
+        Button("Done", action: finish)
+            .font(Theme.font(17, weight: .medium))
+            .foregroundStyle(Theme.foreground)
+            .frame(minWidth: 44, minHeight: 44)
+            .transition(.move(edge: .trailing).combined(with: .opacity))
     }
 }
 
@@ -322,6 +366,12 @@ struct PriceBookResultsList: View {
                 header("Price book")
             }
             if !customLineAfterFirstResult { customLine }
+            // Present an actionable result before pagination or a custom-line alternative.
+            // Navigation remains close to the top even for a large result set.
+            if customLineAfterFirstResult {
+                ForEach(Array(page.results.prefix(1)), content: row)
+                customLine
+            }
             if page.total > PriceBookSearchIndex.resultLimit, !page.results.isEmpty {
                 Text("Items \(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -353,8 +403,6 @@ struct PriceBookResultsList: View {
                 .accessibilityIdentifier("price-book-show-more")
             }
             if customLineAfterFirstResult {
-                ForEach(Array(page.results.prefix(1)), content: row)
-                customLine
                 ForEach(Array(page.results.dropFirst()), content: row)
             } else {
                 ForEach(page.results, content: row)
@@ -473,10 +521,6 @@ private struct PriceBookCatalogResultRow: View {
                     Text("\(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized) · \(item.unit)")
                         .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(PriceBookResultsList.highlighted(item.description, result.highlights))
-                        .font(Theme.font(17)).foregroundStyle(Theme.foreground)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .center, spacing: 12) {
                             price(item).fixedSize(horizontal: true, vertical: false)
@@ -488,6 +532,10 @@ private struct PriceBookCatalogResultRow: View {
                             addIndicator(added)
                         }
                     }
+                    Text(PriceBookResultsList.highlighted(item.description, result.highlights))
+                        .font(Theme.font(17)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

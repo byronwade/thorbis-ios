@@ -10,6 +10,14 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let search = app.textFields["Search price book or type a line"]
         XCTAssertTrue(search.waitForExistence(timeout: 20))
         search.tap()
+        let category = app.buttons["Category: All"]
+        XCTAssertTrue(category.waitForExistence(timeout: 5))
+        category.tap()
+        app.buttons["Materials"].tap()
+        let materials = app.buttons["Category: Materials"]
+        XCTAssertTrue(materials.waitForExistence(timeout: 5))
+        materials.tap()
+        app.buttons["All"].tap()
         search.typeText("Camera sewer inspection")
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009999"]
         let custom = app.buttons["price-book-add-custom"]
@@ -26,6 +34,46 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(description.waitForExistence(timeout: 5), "The unmatched search must become an editable custom invoice line")
     }
 
+    func testManyMatchesShowAnItemBeforePageNavigation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-many"]
+        app.launch()
+        let search = app.textFields["Search price book or type a line"]
+        XCTAssertTrue(search.waitForExistence(timeout: 20))
+        search.tap()
+        search.typeText("plumbing")
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "price-book-item-")).firstMatch
+        let next = app.buttons["price-book-show-more"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        XCTAssertTrue(next.waitForExistence(timeout: 15))
+        XCTAssertLessThan(first.frame.minY, next.frame.minY, "An item should appear before page navigation")
+        XCTAssertTrue(first.isHittable)
+        let proof = XCTAttachment(screenshot: app.screenshot())
+        proof.name = "Many matches show an item before navigation"
+        proof.lifetime = .keepAlways
+        add(proof)
+    }
+
+    func testLongDescriptionKeepsPriceAndCompleteDetailsAvailable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-many"]
+        app.launch()
+        let search = app.textFields["Search price book or type a line"]
+        XCTAssertTrue(search.waitForExistence(timeout: 20))
+        search.tap()
+        search.typeText("Detailed scope")
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"]
+        XCTAssertTrue(item.waitForExistence(timeout: 15))
+        XCTAssertTrue(item.label.contains("$245.00"), "The price must remain in the result")
+        XCTAssertTrue(item.label.contains("Finish by testing for leaks"), "The full description must remain accessible")
+        let proof = XCTAttachment(screenshot: app.screenshot())
+        proof.name = "Long catalog description with price before details"
+        proof.lifetime = .keepAlways
+        add(proof)
+    }
+
     func testLastAddedLineCanBeEditedWithoutLeavingCatalog() {
         assertLastAddedLineCanBeEdited(extraArguments: [])
     }
@@ -40,6 +88,13 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let search = app.textFields["Search price book or type a line"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()
+        let category = app.buttons["Category: All"]
+        let searchDone = app.otherElements["invoice-catalog-search"].buttons["Done"]
+        XCTAssertTrue(category.waitForExistence(timeout: 5))
+        XCTAssertTrue(searchDone.waitForExistence(timeout: 5))
+        XCTAssertFalse(search.frame.intersects(category.frame), "Search and category controls must not overlap")
+        XCTAssertFalse(search.frame.intersects(searchDone.frame), "Search and Done must not overlap")
+        XCTAssertFalse(category.frame.intersects(searchDone.frame), "Category and Done must not overlap")
         search.typeText("Camera sewer inspection")
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009999"]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
@@ -65,7 +120,6 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
         replaceQuantityWithTen(quantity, in: app)
         XCTAssertEqual(quantity.value as? String, "10")
-        XCTAssertEqual(search.value as? String, "Camera sewer inspection")
         let editingProof = XCTAttachment(screenshot: app.screenshot())
         editingProof.name = "Largest text quantity editing above the keyboard after scrolling"
         editingProof.lifetime = .keepAlways
@@ -79,6 +133,9 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         priceProof.name = "Largest text full unit price above the decimal keyboard"
         priceProof.lifetime = .keepAlways
         add(priceProof)
+        searchBar.buttons["Back to results"].tap()
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        XCTAssertEqual(search.value as? String, "Camera sewer inspection")
         searchBar.buttons["Done"].tap()
         XCTAssertFalse(added.exists)
         XCTAssertTrue(app.buttons["Save draft"].isHittable)
@@ -150,23 +207,30 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
     }
 
     private func revealControl(_ control: XCUIElement, below searchBar: XCUIElement, in app: XCUIApplication) {
-        // Large text requires normal content scrolling; interactive dismissal may hide the keyboard.
+        // The keyboard's AX frame omits its prediction and accessory bars on this simulator.
+        // Scroll in the direction needed; a control above the viewport needs a downward drag.
         for _ in 0..<8 {
             let visibleTop = searchBar.frame.maxY + 8
-            // The keyboard AX frame starts below its predictive/accessory surfaces.
-            // Keep the gesture in the upper half of the header-to-keyboard interval.
             let keyboard = app.keyboards.firstMatch
-            let visibleBottom = keyboard.exists
-                ? (searchBar.frame.maxY + keyboard.frame.minY) / 2
-                : app.frame.maxY - 16
-            if control.frame.minY >= visibleTop && control.frame.maxY <= visibleBottom { break }
-            let distance = min(control.frame.maxY - visibleBottom + 8, visibleBottom - visibleTop - 16)
-            let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.midX, dy: visibleBottom - 8))
-            let end = start.withOffset(CGVector(dx: 0, dy: -distance))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            let accessoryHeight: CGFloat = keyboard.keys["Q"].exists ? 88 : 44
+            let visibleBottom = keyboard.exists ? keyboard.frame.minY - accessoryHeight : app.frame.maxY - 16
+            let frame = control.frame
+            if frame.minY >= visibleTop && frame.maxY <= visibleBottom { break }
+            let space = visibleBottom - visibleTop
+            XCTAssertGreaterThan(space, 44, "The editor must have a usable scrolling area")
+            let startY = (visibleTop + visibleBottom) / 2
+            let required = frame.minY < visibleTop ? visibleTop - frame.minY : frame.maxY - visibleBottom
+            let distance = max(40, min(required + 12, space / 2))
+            let direction: CGFloat = frame.minY < visibleTop ? 1 : -1
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: app.frame.maxX - 10, dy: startY))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: direction * distance)))
         }
+        let keyboard = app.keyboards.firstMatch
+        let accessoryHeight: CGFloat = keyboard.keys["Q"].exists ? 88 : 44
+        let visibleBottom = keyboard.exists ? keyboard.frame.minY - accessoryHeight : app.frame.maxY - 16
         XCTAssertGreaterThanOrEqual(control.frame.minY, searchBar.frame.maxY)
-        XCTAssertLessThan(control.frame.maxY, app.frame.maxY - 16)
+        XCTAssertLessThanOrEqual(control.frame.maxY, visibleBottom)
         XCTAssertTrue(control.isHittable, app.debugDescription)
     }
 
@@ -193,9 +257,9 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["invoice-added-line-editor"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertTrue(item.isHittable, "Adding another item must not require closing the keyboard or editor")
-        // The keyboard AX frame excludes its accessory bar. This short fixture's entire
-        // row, including price and Add, should be visible without scrolling after adding.
-        XCTAssertLessThanOrEqual(item.frame.maxY, app.keyboards.firstMatch.frame.minY - 44,
+        // The screenshot for this simulator places the toolbar and keyboard prediction
+        // area above the keyboard AX frame. Check this short fixture, not arbitrary long rows.
+        XCTAssertLessThanOrEqual(item.frame.maxY, app.keyboards.firstMatch.frame.minY - 88,
                                  "The result, including its price and Add cue, must remain above the keyboard accessory")
         item.tap()
         XCTAssertTrue(app.buttons.matching(identifier: item.identifier).matching(NSPredicate(format: "value == %@", "2 in draft")).firstMatch.waitForExistence(timeout: 5))

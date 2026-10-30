@@ -889,9 +889,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 let items: [[String: Any]] = numbers.map { number in
                     let id = String(format: "00000000-0000-4000-8000-%012d", 9700 + number)
                     let title = String(format: "Plumbing catalog service %03d", number)
+                    let description = number == 73
+                        ? title + "\n\nDetailed scope: Inspect the existing piping, protect nearby surfaces, and install the replacement to the agreed specification.\n\nFinish by testing for leaks, cleaning the work area, and explaining the completed work to the customer."
+                        : title
                     return ["id": id, "resourceId": "price_book_items", "label": title, "subtitle": "Service · flat",
                             "fields": ["price_book_items.id": id, "price_book_items.current_revision": 4,
-                                       "price_book_items.description": title, "price_book_items.unit": "flat",
+                                       "price_book_items.description": description, "price_book_items.unit": "flat",
                                        "price_book_items.sell_price_amount": 24500, "price_book_items.currency": "USD",
                                        "price_book_items.tax_classification": "taxable", "price_book_items.kind": "service"]]
                 }
