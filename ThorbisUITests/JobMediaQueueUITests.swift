@@ -19,6 +19,26 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertFalse(app.buttons["job-media-load-more"].exists)
     }
 
+    func testDatedPhotosRemainReachableWhenScrolledOnNarrowPhone() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].waitForExistence(timeout: 20))
+        let later = app.buttons["Photo, Finished unit"]
+        for _ in 0..<5 where !later.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.37)))
+        }
+        XCTAssertTrue(later.isHittable)
+        let undated = app.buttons["Photo, Uncertain date"]
+        for _ in 0..<5 where !undated.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.37)))
+        }
+        XCTAssertTrue(undated.isHittable)
+    }
+
     func testUndatedPhotosStayVisibleAndFilterableInTheirOwnGroup() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media"]
