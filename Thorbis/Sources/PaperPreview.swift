@@ -388,6 +388,9 @@ struct PaperPreviewConnectionMenu: View {
         Menu("Sample connection") {
             Button("Make sample estimate unavailable") { PaperPreviewProtocol.makeSampleEstimateUnavailable() }
             Button("Restore sample connection") { PaperPreviewProtocol.restoreReviewConnection() }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-documents-status-change") {
+                Button("Change sample document statuses") { PaperPreviewProtocol.changeSampleDocumentStatuses() }
+            }
         }
         .font(.system(size: 17, weight: .medium))
         .foregroundStyle(Color.orange)
@@ -452,6 +455,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
+        var documentStatusesChanged = false
         var savedWorkOffline = false
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
@@ -463,7 +467,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -481,6 +485,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     static func markOwnerAuthenticated() { scenario.lock.withLock { scenario.ownerAuthenticated = true } }
     static func makeSampleEstimateUnavailable() {
         scenario.lock.withLock { scenario.estimateUnavailable = true }
+    }
+    static func changeSampleDocumentStatuses() {
+        scenario.lock.withLock { scenario.documentStatusesChanged = true }
     }
     static func restoreReviewConnection() {
         scenario.lock.withLock { scenario.reviewConnectionRestored = true; scenario.estimateUnavailable = false }
@@ -619,12 +626,21 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 let legacy = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-legacy")
                 return ["items": legacy ? [] : invoices.map { jsonObject($0)! }]
             }
-            if let record = estimates.first(where: { path == "/v1/estimates/\($0.id)" }) { return jsonObject(record) }
+            if let record = estimates.first(where: { path == "/v1/estimates/\($0.id)" }) {
+                var object = jsonObject(record) as! [String: Any]
+                if record.id == estimates[0].id, scenario.lock.withLock({ scenario.documentStatusesChanged }) {
+                    object["status"] = "approved"
+                }
+                return object
+            }
             if let record = estimates.first(where: { path == "/v1/estimates/\($0.id)/revisions/\($0.currentRevisionNumber ?? 0)" }) {
                 return reviewRevision(record)
             }
             if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) {
                 var object = jsonObject(record) as! [String: Any]
+                if record.id == invoices[0].id, scenario.lock.withLock({ scenario.documentStatusesChanged }) {
+                    object["status"] = "void"
+                }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-foreign") ||
                     scenario.lock.withLock({ scenario.ownerAuthenticated }) {
                     object["jobId"] = "00000000-0000-4000-8000-000000002215"

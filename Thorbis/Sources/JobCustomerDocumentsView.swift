@@ -168,7 +168,7 @@ struct JobCustomerDocumentsView: View {
                         refreshEstimatesInBackground()
                     }, onDone: beginHandBack)
             } else {
-                CustomerJobReadOnlyPaper(estimate: estimate, handBack: handBack)
+                CustomerJobReadOnlyPaper(estimate: estimate, handBack: beginHandBack)
             }
         case .invoice(let invoice, let signing):
             if ["issued", "paid"].contains(invoice.status) {
@@ -184,7 +184,7 @@ struct JobCustomerDocumentsView: View {
                         invoiceUpdated(updated)
                     }, onDone: beginHandBack)
             } else {
-                CustomerJobReadOnlyPaper(invoice: invoice, handBack: handBack)
+                CustomerJobReadOnlyPaper(invoice: invoice, handBack: beginHandBack)
             }
         }
     }
