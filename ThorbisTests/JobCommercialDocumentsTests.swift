@@ -8,6 +8,20 @@ final class JobCommercialDocumentsTests: XCTestCase {
         .init(jobID: id(job), organizationID: id(1), customerID: id(2), originEstimateID: origin.map(id))
     }
 
+    func testApprovedEstimateWithUnknownOptionsDoesNotAssertBaseAmount() throws {
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
+        payload["status"] = "approved"
+        payload["lines"] = [["id": id(901), "description": "Base work", "quantity": 1,
+                             "unitPrice": ["amount": 10000, "currency": "USD"]]]
+        payload.removeValue(forKey: "options")
+        let record = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: payload))
+        XCTAssertNil(record.options)
+        let row = JobDocumentRow(estimate: record, fresh: true)
+        XCTAssertNil(row.amount, "Absent options do not prove the base amount was accepted")
+        XCTAssertEqual(row.detail, "View estimate details")
+        XCTAssertNil(JobEstimateSummary(records: [record], complete: true), "The approved total cannot be inferred")
+    }
+
     func testApprovedOptionEstimateDoesNotShowBaseLinesAsAcceptedAmount() throws {
         var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
         payload["status"] = "approved"
@@ -372,7 +386,7 @@ final class JobCommercialDocumentsTests: XCTestCase {
                                 quantity: Int = 1, options: Bool = false) throws -> EstimateRecord {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate)) as? [String: Any])
         object["status"] = status
-        if !options { object["options"] = NSNull() }
+        if !options { object["options"] = [] }
         object["lines"] = [["id": id(900), "description": "Fixture service", "quantity": quantity,
                             "unitPrice": ["amount": cents, "currency": currency]]]
         return try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: object))

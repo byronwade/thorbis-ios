@@ -117,7 +117,10 @@ extension JobDocumentRow {
         title = estimate.title
         status = estimate.status
         // Whole alternatives are never added together or presented as add-ons.
-        if let options = estimate.options, !options.isEmpty {
+        if estimate.status == "approved" && estimate.options == nil {
+            amount = nil
+            detail = fresh ? "View estimate details" : nil
+        } else if let options = estimate.options, !options.isEmpty {
             amount = nil
             detail = estimate.status == "approved" ? (fresh ? "View estimate details" : nil) : "\(options.count) \(options.count == 1 ? "option" : "options")"
         } else {

@@ -28,17 +28,16 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["EST-2218"].waitForExistence(timeout: 10))
     }
 
-    func testNarrowJobSectionsCanReachActivity() {
+    func testNarrowJobSectionsCanReachEverySectionWithoutScrollingTabs() {
+        continueAfterFailure = false
         let app = preview()
-        thorbisStableButton(app, "Estimates").tap()
-        let activity = app.buttons["Activity"]
-        let more = app.buttons["Show more job sections"]
-        XCTAssertTrue(more.waitForExistence(timeout: 5))
-        more.tap()
-        XCTAssertTrue(activity.isHittable)
-        activity.tap()
-        XCTAssertTrue(app.buttons["Notes"].waitForExistence(timeout: 10))
-        capture(app, "Activity reached from narrow job sections")
+        for section in ["Estimates", "Invoice", "Photos", "Activity", "Overview"] {
+            let destination = app.buttons[section]
+            XCTAssertTrue(destination.waitForExistence(timeout: 10), section)
+            XCTAssertTrue(destination.isHittable, "\(section) must be reachable without scrolling the tab row")
+            destination.tap()
+        }
+        capture(app, "Job sections reachable without scrolling")
     }
 
     func testAllJobInvoicesAreVisibleAndOpenTheirOwnDetail() {

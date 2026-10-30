@@ -681,7 +681,7 @@ struct JobDetailView: View {
                 .accessibilityHint("Choose a job section")
                 .accessibilityIdentifier("job-section-chooser")
             } else {
-                PaperTabs(options: tabs, selection: $selectedTab, explicitScrollControl: true)
+                PaperTabs(options: tabs, selection: $selectedTab, wrapOverflow: true)
             }
         }
         .padding(.bottom, 4)
