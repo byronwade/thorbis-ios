@@ -43,17 +43,19 @@ enum PaperPreview {
     }
     /// Good / better / best for the customer presentation screenshots.
     static var optionsEstimate: EstimateRecord {
-        func line(_ id: Int, _ text: String, _ quantity: Int, _ cents: Int) -> FieldLine {
+        // `list` marks a price book line the server member-priced, so the savings row shows.
+        func line(_ id: Int, _ text: String, _ quantity: Int, _ cents: Int, list: Int? = nil) -> FieldLine {
             FieldLine(id: String(format: "00000000-0000-4000-8000-0000000093%02d", id), description: text, quantity: quantity,
-                      unitPrice: FieldMoney(amount: cents, currency: "USD"), source: nil)
+                      unitPrice: FieldMoney(amount: cents, currency: "USD"),
+                      source: list.map { FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: $0, currency: "USD")) })
         }
         func option(_ id: Int, _ title: String, _ text: String, _ lines: [FieldLine]) -> FieldEstimateOption {
             FieldEstimateOption(id: String(format: "00000000-0000-4000-8000-0000000094%02d", id), title: title, description: text, lines: lines,
                                 totalAmount: paperLinesTotal(lines) ?? 0, currency: "USD")
         }
         let repair = [line(1, "Run capacitor, 45/5 µF", 1, 14_500), line(2, "Coil cleaning", 2, 12_000), line(3, "Labor, licensed technician", 1, 9_500)]
-        let better = repair + [line(4, "Surge protector, installed", 1, 39_500), line(5, "One-year parts warranty", 1, 151_000)]
-        let replace = [line(6, "3-ton high-efficiency condenser", 1, 690_000), line(7, "Installation and haul-away", 1, 220_000), line(8, "Ten-year warranty registration", 1, 75_000)]
+        let better = repair + [line(4, "Surge protector, installed", 1, 39_500, list: 43_900), line(5, "One-year parts warranty", 1, 151_000)]
+        let replace = [line(6, "3-ton high-efficiency condenser", 1, 690_000, list: 766_700), line(7, "Installation and haul-away", 1, 220_000), line(8, "Ten-year warranty registration", 1, 75_000)]
         return EstimateRecord(id: estimate.id, organizationId: estimate.organizationId, customerId: customerID, createdByUserId: estimate.createdByUserId,
                               locationId: nil, status: "sent", currentRevisionNumber: 2, title: "AC not cooling", lines: [],
                               options: [option(1, "Repair", "Replace the failed capacitor and clean the coil.", repair),
