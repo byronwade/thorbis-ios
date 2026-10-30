@@ -53,7 +53,7 @@ struct TodayJobsWidget: Widget {
         }
         .configurationDisplayName("Today's jobs")
         .description("Your job under way and what's next today.")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
+        .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular, .accessoryCircular, .accessoryInline])
     }
 }
 
@@ -89,6 +89,8 @@ struct TodayJobsView: View {
     var body: some View {
         switch family {
         case .accessoryRectangular: rectangular
+        case .accessoryCircular: circular
+        case .accessoryInline: inline
         case .systemMedium: medium
         default: small
         }
@@ -148,15 +150,52 @@ struct TodayJobsView: View {
     @ViewBuilder private var rectangular: some View {
         if let next = entry.items.first {
             VStack(alignment: .leading, spacing: 1) {
-                Text(timeText(next)).font(.headline).widgetAccentable()
-                Text(next.title).font(.caption).lineLimit(1)
-                Text(next.customer).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(timeText(next)).font(.headline).widgetAccentable()
+                    Spacer(minLength: 4)
+                    Text(TodayJobsView.leftText(entry.items.count)).font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(next.customer).font(.caption).lineLimit(1)
+                Text(next.title).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .widgetURL(JobActivityLink.url(jobID: next.id))
         } else {
             Text(entry.signedOut ? "Open Thorbis to sign in" : "No more jobs today").font(.caption)
         }
+    }
+
+    /// Jobs left today, as a number with the word "left" under it.
+    @ViewBuilder private var circular: some View {
+        ZStack {
+            AccessoryWidgetBackground()
+            if entry.signedOut {
+                Image(systemName: "person.crop.circle").font(.title3)
+                    .accessibilityLabel("Open Thorbis to sign in")
+            } else {
+                VStack(spacing: 0) {
+                    Text("\(entry.items.count)").font(.title3.weight(.semibold).monospacedDigit()).widgetAccentable()
+                    Text("left").font(.caption2)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(TodayJobsView.leftText(entry.items.count) + " today")
+            }
+        }
+        .widgetURL(entry.items.first.flatMap { JobActivityLink.url(jobID: $0.id) } ?? URL(string: "thorbis://schedule"))
+    }
+
+    /// One line next to the Lock Screen clock: the next job's time and customer.
+    @ViewBuilder private var inline: some View {
+        if let next = entry.items.first {
+            Text("\(timeText(next)) · \(next.customer)")
+                .widgetURL(JobActivityLink.url(jobID: next.id))
+        } else {
+            Text(entry.signedOut ? "Open Thorbis to sign in" : "No more jobs today")
+        }
+    }
+
+    static func leftText(_ count: Int) -> String {
+        count == 1 ? "1 job left" : "\(count) jobs left"
     }
 
     private var empty: some View {

@@ -24,7 +24,13 @@ final class WidgetRenderTests: XCTestCase {
                 attributes: JobActivityAttributes(jobID: "1", jobNumber: "JOB-2214", title: "AC not cooling",
                                                   customer: "Danielle Marlowe", address: "412 Birchwood Ln"),
                 state: .init(status: "en_route", since: .now.addingTimeInterval(-420), waitingToSync: false))
-                .background(Color(red: 0.12, green: 0.12, blue: 0.12))), CGSize(width: 360, height: 150)),
+                .background(Color(red: 0.12, green: 0.12, blue: 0.12))), CGSize(width: 360, height: 210)),
+            // A step saved without signal: the card says so and offers the following step.
+            ("live-activity-waiting", AnyView(JobLockScreenView(
+                attributes: JobActivityAttributes(jobID: "1", jobNumber: "JOB-2214", title: "AC not cooling",
+                                                  customer: "Danielle Marlowe", address: "412 Birchwood Ln"),
+                state: .init(status: "arrived", since: .now.addingTimeInterval(-60), waitingToSync: true))
+                .background(Color(red: 0.12, green: 0.12, blue: 0.12))), CGSize(width: 360, height: 210)),
             ("today-medium", AnyView(TodayJobsView(entry: TodayEntry(date: .now, items: TodayJobsWidget.sample, signedOut: false))
                 .padding(16).background(WidgetInk.ground)), CGSize(width: 340, height: 170)),
         ]

@@ -41,12 +41,44 @@ extension JobActivityAttributes.ContentState {
         }
     }
 
+    /// A status word short enough for the minimal Dynamic Island.
+    var shortLabel: String {
+        switch status {
+        case "en_route": "Driving"
+        case "arrived": "On site"
+        case "in_progress": "Working"
+        case "paused": "Paused"
+        default: label
+        }
+    }
+
+    /// The one forward field step the card offers, or nil when the next move needs the app
+    /// (pausing, resuming and finishing need the server's audit state and a wrap-up).
+    var nextStep: JobNextStep? { JobNextStep.after(status) }
+
     /// 0 driving, 1 on site, 2 working; drives the three-step progress row.
     var step: Int {
         switch status {
         case "en_route": 0
         case "arrived": 1
         default: 2
+        }
+    }
+}
+
+/// The next forward field step for a job: On my way, Mark arrived or Start work.
+struct JobNextStep: Equatable {
+    /// The job status the step moves to (en_route, arrived or in_progress).
+    let target: String
+    let title: String
+    let symbol: String
+
+    static func after(_ status: String) -> JobNextStep? {
+        switch status {
+        case "scheduled", "dispatched": JobNextStep(target: "en_route", title: "On my way", symbol: "car.fill")
+        case "en_route": JobNextStep(target: "arrived", title: "Mark arrived", symbol: "mappin.and.ellipse")
+        case "arrived": JobNextStep(target: "in_progress", title: "Start work", symbol: "wrench.and.screwdriver.fill")
+        default: nil
         }
     }
 }

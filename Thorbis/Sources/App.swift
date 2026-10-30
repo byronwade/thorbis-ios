@@ -69,6 +69,8 @@ struct ThorbisApp: App {
             } else { pendingMedia?.bind(nil) }
             Task { @MainActor in RecentItems.shared.bind(actorID: actorID, organizationID: organizationID) }
         }
+        // Lock Screen and Dynamic Island step buttons run here, through the same session and outbox.
+        JobStepIntentRunner.configure(api: api, session: session, outbox: outbox, store: store)
         PushNotifications.shared.start(api: api, store: store)
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }

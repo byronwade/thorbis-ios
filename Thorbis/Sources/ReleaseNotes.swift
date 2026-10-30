@@ -13,6 +13,16 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-lock-screen-controls",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "lock", title: "Update a job from the Lock Screen",
+                      detail: "Tap On my way, Mark arrived or Start work on the job card; without signal it waits to sync."),
+                .init(symbol: "calendar.badge.clock", title: "See your next job at a glance",
+                      detail: "Lock Screen widgets show your next job's time, customer and how many jobs are left today."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-photo-markup-measure",
             date: "2026-10-30",
             highlights: [
