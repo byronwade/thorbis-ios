@@ -91,22 +91,23 @@ struct CustomersView: View {
         .sheet(item: $newJobFor) { customer in NewJobSheet(preselected: customer) }
     }
     private func customerRow(_ customer: CustomerRecord) -> some View {
-        let open = store.jobs.first { $0.customerId == customer.id && !["completed", "canceled"].contains($0.status) }
+        let nextVisit = JobFiltering.nextScheduledVisit(store.jobs, customerID: customer.id)
+        let activeJob = JobFiltering.activeCustomerJob(store.jobs, customerID: customer.id)
+        let summaryJob = activeJob ?? nextVisit
         let jobCount = store.jobs.filter { $0.customerId == customer.id }.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
         return NavigationLink(value: listCustomer) {
             HStack(spacing: 12) {
                 Avatar(name: customer.name, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
-                    // The open job's state as a word next to the count (a mark alone was a guess).
-                    Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: open))
+                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+                    Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: summaryJob))
                         .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                 }
                 Spacer(minLength: 4)
-                if let open { StatusRing(status: open.status).accessibilityHidden(true) }
+                if let summaryJob { StatusRing(status: summaryJob.status).accessibilityHidden(true) }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 8).padding(.vertical, 6)
             .frame(minHeight: 56).contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
