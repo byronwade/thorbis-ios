@@ -193,6 +193,10 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["invoice-added-line-editor"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertTrue(item.isHittable, "Adding another item must not require closing the keyboard or editor")
+        // The keyboard AX frame excludes its accessory bar. This short fixture's entire
+        // row, including price and Add, should be visible without scrolling after adding.
+        XCTAssertLessThanOrEqual(item.frame.maxY, app.keyboards.firstMatch.frame.minY - 44,
+                                 "The result, including its price and Add cue, must remain above the keyboard accessory")
         item.tap()
         XCTAssertTrue(app.buttons.matching(identifier: item.identifier).matching(NSPredicate(format: "value == %@", "2 in draft")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(item.label.contains("Add"), "Adding once must not make the row look unavailable for another addition")
