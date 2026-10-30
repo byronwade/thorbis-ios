@@ -222,6 +222,13 @@ final class JobDocumentsUITests: XCTestCase {
 
 @MainActor
 final class JobDocumentsSafetyUITests: XCTestCase {
+    func testTypedBottomSearchOpensSelectedJob() {
+        let app = launch(["--invoice-route-owner-experiment"], screen: "search-typed")
+        let job = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "AC not cooling")).firstMatch
+        XCTAssertTrue(job.waitForExistence(timeout: 15))
+        job.tap()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 10), "Search must open its selected job")
+    }
     private let invoice = "00000000-0000-4000-8000-000000002209"
     private let second = "00000000-0000-4000-8000-000000002240"
 
