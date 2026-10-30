@@ -16,8 +16,10 @@ struct PendingMedia: Codable, Identifiable, Hashable, Sendable {
     let capturedAt: Date
     let kind: String
     let mime: String
+    /// Sent with registration, e.g. "Marked up" or a site measurement. Absent on older saves.
+    var caption: String? = nil
 
-    var title: String { kind == "document" ? filename : tags.first.map { "\($0) photo" } ?? "Photo" }
+    var title: String { kind == "document" ? filename : caption ?? tags.first.map { "\($0) photo" } ?? "Photo" }
 }
 
 /// Metadata is observable; original bytes stay on disk until matching server confirmation.
@@ -254,7 +256,7 @@ final class PendingMediaStore: ObservableObject {
                 let data = try read(item)
                 _ = try await MediaTransfer(api: api, storageSession: storageSession).upload(jobID: item.jobID, clientAssetID: item.id,
                     kind: item.kind, mime: item.mime, originalFilename: item.filename, data: data, tags: item.tags,
-                    capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID, currentAuthority: current)
+                    caption: item.caption, capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID, currentAuthority: current)
                 guard current() else { return }
                 try finishRecoveredSources(item, data: data, owner: owner, current: current)
                 guard current() else { return }
