@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-setup-check-retry",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "arrow.clockwise", title: "Retry setup checks",
+                      detail: "See when a setup step couldn't be checked and try again."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-inbox-day-groups",
             date: "2026-10-30",
             highlights: [

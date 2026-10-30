@@ -107,8 +107,8 @@ extension APIClient {
         try await send("GET", "/v1/organization/money-availability")
     }
 
-    func merchantReadiness() async throws -> MerchantReadiness {
-        try await send("GET", "/v1/organization/merchant-readiness")
+    func merchantReadiness(requireFresh: Bool = false) async throws -> MerchantReadiness {
+        try await send("GET", "/v1/organization/merchant-readiness", requireFresh: requireFresh)
     }
 
     func startMerchantOnboarding() async throws -> HostedMerchantOnboardingLink {

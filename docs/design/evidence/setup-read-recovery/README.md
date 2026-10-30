@@ -1,0 +1,7 @@
+# Setup read recovery
+
+The iPhone 16 iOS 18.2 dark-mode screenshot is the isolated read-only Paper preview with a simulated first payment-read failure. It demonstrates distinct confirmed, incomplete, and unavailable rows, with retry. It is not a live merchant readiness result.
+
+The combined `xcodebuild` run (`/tmp/setup-read-build/Logs/Test/Test-Thorbis-2026.10.30_07-30-54--0400.xcresult`) passed 13 focused unit tests and two UI tests. Coverage includes offline and partial reads, retry, capability scope, wrong-organization profile, in-flight revoke/regrant and API generation changes, incomplete cursor chains, expired/canceled invitations, duplicate members, positive early evidence, What's New, fresh request headers, and retry and payment destination at standard and maximum accessibility text sizes. The large-text screenshot documents the stacked retry banner.
+
+Not yet verified: live backend behavior, workspace-switch and overlapping-refresh races, cancellation and reappearance UI, VoiceOver interaction, RTL, iPad, and physical devices. The Paper artboards informed a native grouped checklist; no provider capability was invented. The canonical server at Thorbis-TanStack commit 3dfd7d20 `domains/access-control/src/invitations.ts` and `invitation-schemas.ts` label open pending invitations expired when their expiry is at or before server time, so only server-reported pending invitations count.

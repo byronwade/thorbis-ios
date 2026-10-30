@@ -70,12 +70,26 @@ extension APIClient {
                                                          reason: "Changed in the Thorbis iPhone app"))
     }
 
-    func roleMembers() async throws -> [RoleMember] {
+    func roleMembers(requireComplete: Bool = false, whileCurrent: (() -> Bool)? = nil) async throws -> [RoleMember] {
         var items: [RoleMember] = []
         var cursor: String?
+        var seen: Set<String> = []
+        var pages = 0
+        var memberIDs: Set<String> = []
         repeat {
-            let page: Items<RoleMember> = try await send("GET", "/v1/organization/role-members", cursor: cursor)
-            items += page.items
+            let page: Items<RoleMember> = try await send("GET", "/v1/organization/role-members", cursor: cursor, requireFresh: requireComplete)
+            guard whileCurrent?() ?? true else {
+                throw CancellationError()
+            }
+            pages += 1
+            if requireComplete { items += page.items.filter { memberIDs.insert($0.member.memberId).inserted } }
+            else { items += page.items }
+            if requireComplete && items.count > 1 { return items }
+            if let next = page.nextCursor, requireComplete {
+                guard pages < 500, seen.insert(next).inserted, items.count < 2_000 else {
+                    throw Problem(title: "Incomplete members", status: nil, detail: "Could not check every team member.")
+                }
+            }
             guard page.nextCursor != cursor else { break }
             cursor = page.nextCursor
         } while cursor != nil && items.count < 2_000
