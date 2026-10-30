@@ -19,37 +19,38 @@ struct PaperTabletSchedule: View {
         return "\(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) · \(jobs.count) jobs today"
     }
 
+    /// The detail pane is rebuilt only when a different job is chosen. `Job` hashes every field,
+    /// so keying on it rebuilt the pane on each store refresh and lost the chosen invoice.
+    static func detailIdentity(_ job: Job) -> String { job.id }
+
     var body: some View {
         HStack(spacing: 0) {
             scheduleColumn
                 .frame(width: 350)
                 .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
-            NavigationStack {
-                Group {
-                    if range == "Map" {
-                        // iPad gets the same route map as the phone, beside today's list.
-                        ScrollView {
-                            ScheduleMapView(jobs: jobs.filter { $0.status != "canceled" }, selection: $selectedID).padding(.top, 16)
-                        }
-                        .background(Theme.background)
-                    } else if let selectedJob {
-                        JobDetailView(jobId: selectedJob.id, showsBack: false)
-                            .id(selectedJob)
-                    } else if store.loading && store.jobs.isEmpty {
-                        SkeletonRows(count: 8, leading: false)
-                            .frame(maxHeight: .infinity, alignment: .top)
-                    } else {
-                        PaperEmptyState(symbol: "calendar", title: "Pick a job",
-                                        message: "Choose a job on the left to see its details, notes and invoice here.")
+            // No NavigationStack here: RootView's tablet stack owns every push from this pane
+            // (invoice, estimate, customer, activity rows) as well as deep links. A second stack
+            // nested in its root dropped those pushes.
+            Group {
+                if range == "Map" {
+                    // iPad gets the same route map as the phone, beside today's list.
+                    ScrollView {
+                        ScheduleMapView(jobs: jobs.filter { $0.status != "canceled" }, selection: $selectedID).padding(.top, 16)
                     }
+                    .background(Theme.background)
+                } else if let selectedJob {
+                    JobDetailView(jobId: selectedJob.id, showsBack: false)
+                        .id(Self.detailIdentity(selectedJob))
+                } else if store.loading && store.jobs.isEmpty {
+                    SkeletonRows(count: 8, leading: false)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                } else {
+                    PaperEmptyState(symbol: "calendar", title: "Pick a job",
+                                    message: "Choose a job on the left to see its details, notes and invoice here.")
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.background)
-                .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
-                .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
-                .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.background)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)

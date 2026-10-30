@@ -13,6 +13,15 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-tablet-invoice",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.plaintext", title: "Invoices open from iPad Schedule",
+                      detail: "On iPad, a job's invoice opens from Schedule and stays the one you picked when you come back."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
             id: "2026-10-30-modern-pass-1",
             date: "2026-10-30",
             highlights: [
