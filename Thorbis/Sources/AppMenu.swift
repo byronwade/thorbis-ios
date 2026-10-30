@@ -423,26 +423,23 @@ struct AppMenu: View {
         .padding(8)
     }
 
+    /// Every business this person belongs to, the current one checked, then Add a business.
+    private var businessItems: [ThorbisMenuItem] {
+        session.organizations.map { organization in
+            let current = organization.id == session.activeOrganization?.id
+            return ThorbisMenuItem(organization.name, isSelected: current) {
+                close()
+                guard !current else { return }
+                Task { await session.selectOrganization(id: organization.id) }
+            }
+        } + [ThorbisMenuItem("Add a business", icon: "plus", action: manageBusinesses)]
+    }
+
     /// The business and its switcher. Every business this person belongs to is one tap away.
     private var header: some View {
         HStack(spacing: 8) {
-            Menu {
-                ForEach(session.organizations) { organization in
-                    Button {
-                        close()
-                        guard organization.id != session.activeOrganization?.id else { return }
-                        Task { await session.selectOrganization(id: organization.id) }
-                    } label: {
-                        if organization.id == session.activeOrganization?.id {
-                            Label(organization.name, systemImage: "checkmark")
-                        } else {
-                            Text(organization.name)
-                        }
-                    }
-                }
-                Divider()
-                Button(action: manageBusinesses) { Label("Add a business", systemImage: "plus") }
-            } label: {
+            ThorbisMenu(items: businessItems, title: "Switch business",
+                        accessibilityLabel: "\(businessName). Switch business") {
                 HStack(spacing: 10) {
                     Avatar(name: businessName, size: 28, fill: Theme.fill)
                     Text(businessName)
@@ -456,7 +453,6 @@ struct AppMenu: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
-            .accessibilityLabel("\(businessName). Switch business")
             Spacer(minLength: 0)
             Button { withAnimation(animation) { editing = true } } label: {
                 Image(systemName: "slider.horizontal.3")
