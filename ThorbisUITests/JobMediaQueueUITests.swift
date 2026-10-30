@@ -19,6 +19,35 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertFalse(app.buttons["job-media-load-more"].exists)
     }
 
+    func testLateMediaPageDoesNotAppearAfterJobAccessIsRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-pages", "--paper-preview-media-revoke-late-page"]
+        app.launch()
+        let first = app.buttons["Photo, Outdoor unit"]
+        XCTAssertTrue(first.waitForExistence(timeout: 20))
+        let more = app.buttons["job-media-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+        XCTAssertFalse(app.buttons["Photo, Later repair"].exists)
+        XCTAssertFalse(app.staticTexts["Later document.pdf"].exists)
+    }
+
+    func testOpenMediaPreviewClosesAfterJobAccessIsRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-revoke-preview"]
+        app.launch()
+        let photo = app.buttons["Photo, Outdoor unit"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 20)); photo.tap()
+        let preview = app.descendants(matching: .any)["job-media-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: preview)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 15), .completed)
+        XCTAssertFalse(photo.exists)
+    }
+
     func testDatedPhotosRemainReachableWhenScrolledOnNarrowPhone() {
         continueAfterFailure = false
         let app = XCUIApplication()
