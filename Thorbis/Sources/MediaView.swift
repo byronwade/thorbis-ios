@@ -112,34 +112,51 @@ struct JobMediaView: View {
                 if !photos.isEmpty {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                         ForEach(photos) { record in
-                            Button { open(record) } label: {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    MediaThumbnail(record: record, attempt: thumbnailAttempt)
-                                        .frame(maxWidth: .infinity).frame(height: 120)
-                                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
-                                        .overlay(alignment: .topLeading) {
-                                            if let tag = ["Before", "After"].first(where: record.tags.contains) {
-                                                Text(tag).font(Theme.font(11, weight: .semibold))
-                                                    .foregroundStyle(Theme.foreground)
-                                                    .padding(.horizontal, 8).frame(height: 24)
-                                                    .background(Theme.background.opacity(0.9), in: Capsule())
-                                                    .padding(8)
+                            ZStack(alignment: .bottomTrailing) {
+                                Button { open(record) } label: {
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        MediaThumbnail(record: record, attempt: thumbnailAttempt)
+                                            .frame(maxWidth: .infinity).frame(height: 120)
+                                            .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
+                                            .overlay(alignment: .topLeading) {
+                                                if let tag = ["Before", "After"].first(where: record.tags.contains) {
+                                                    Text(tag).font(Theme.font(11, weight: .semibold))
+                                                        .foregroundStyle(Theme.foreground)
+                                                        .padding(.horizontal, 8).frame(height: 24)
+                                                        .background(Theme.background.opacity(0.9), in: Capsule())
+                                                        .padding(8)
+                                                }
                                             }
+                                        Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium)).lineLimit(1)
+                                            .padding(.horizontal, 10).padding(.vertical, 8)
+                                        if record.uploadState != "stored" {
+                                            Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
+                                                .padding(.horizontal, 10).padding(.bottom, 8)
                                         }
-                                    Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium)).lineLimit(1)
-                                        .padding(.horizontal, 10).padding(.vertical, 8)
-                                    if record.uploadState != "stored" {
-                                        Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
-                                            .padding(.horizontal, 10).padding(.bottom, 8)
                                     }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                                .buttonStyle(.plain)
+                                .disabled(busy || preview.loading || record.uploadState != "stored")
+                                .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
+                                if canAdd, record.uploadState == "stored" {
+                                    ThorbisMenu(items: [
+                                        ThorbisMenuItem("Before") { Task { await retag(record, .before) } },
+                                        ThorbisMenuItem("After") { Task { await retag(record, .after) } },
+                                        ThorbisMenuItem("Other") { Task { await retag(record, .other) } },
+                                    ], title: "Tag photo", accessibilityLabel: stageName(record)) {
+                                        Image(systemName: "tag")
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(Theme.foreground)
+                                            .frame(width: 44, height: 44)
+                                            .background(Theme.background.opacity(0.92), in: Circle())
+                                    }
+                                    .disabled(busy)
+                                    .padding(4)
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .disabled(busy || preview.loading || record.uploadState != "stored")
-                            .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
                         }
                     }
                 }
@@ -173,13 +190,9 @@ struct JobMediaView: View {
         .safeAreaInset(edge: .bottom) {
             if canAdd {
                 VStack(spacing: 8) {
-                    Picker("Photo stage", selection: $stage) {
-                        Text("Before").tag("Before")
-                        Text("After").tag("After")
-                        Text("Other").tag("Other")
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(busy)
+                    ThorbisSegmented(options: [("Before", "Before"), ("After", "After"), ("Other", "Other")],
+                                     selection: $stage)
+                        .disabled(busy)
                     HStack(spacing: 8) {
                         Button { showCamera = true } label: {
                             HStack(spacing: 7) {
@@ -198,19 +211,16 @@ struct JobMediaView: View {
                         }
                         .disabled(busy)
                         .accessibilityLabel("Choose from library")
-                        Menu {
-                            if VNDocumentCameraViewController.isSupported {
-                                Button("Scan a document", systemImage: "doc.viewfinder") { showScanner = true }
-                            }
-                            Button("Choose a PDF", systemImage: "doc") { importDocument = true }
-                        } label: {
+                        ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
+                            ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
+                            : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }],
+                                    title: "Add a document", accessibilityLabel: "Add a document") {
                             Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
                                 .frame(width: 46, height: 46)
                                 .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         }
                         .disabled(busy)
-                        .accessibilityLabel("Add a document")
                     }
                 }
                 .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
@@ -285,6 +295,24 @@ struct JobMediaView: View {
         clientAssetID = UUID().uuidString
         error = nil
     }
+    private func stageName(_ record: MediaAssetRecord) -> String {
+        if record.tags.contains("Before") { return "Change photo stage, currently Before" }
+        if record.tags.contains("After") { return "Change photo stage, currently After" }
+        return "Change photo stage, currently Other"
+    }
+
+    private func retag(_ record: MediaAssetRecord, _ stage: MediaStage) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let updated = try await api.tagFieldMedia(record.id, tags: MediaStageTags.applying(stage, to: record.tags), caption: record.caption)
+            if let index = records.firstIndex(where: { $0.id == updated.id }) { records[index] = updated }
+            error = nil
+        } catch is CancellationError {
+        } catch { self.error = error.localizedDescription }
+    }
+
     private func load() async {
         loading = true
         defer { loading = false }

@@ -201,6 +201,57 @@ final class FieldAPITests: XCTestCase {
         XCTAssertNil(body["jobId"])
     }
 
+    func testTaggingAStoredPhotoPostsTheStageAndKeepsTheCaption() async throws {
+        let mediaID = "00000000-0000-4000-8000-00000000000c"
+        let reply = #"{"id":"00000000-0000-4000-8000-00000000000c","organizationId":"00000000-0000-4000-8000-000000000002","jobId":"00000000-0000-4000-8000-000000000001","uploaderUserId":"00000000-0000-4000-8000-000000000004","kind":"photo","mime":"image/jpeg","sizeBytes":4,"originalFilename":"valve.jpg","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","storageKey":"generated","uploadState":"stored","tags":["Warranty","After"],"caption":"Coil","archived":false,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:10:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+
+        let updated = try await client.tagFieldMedia(mediaID, tags: MediaStageTags.applying(.after, to: ["Warranty", "Before"]), caption: "Coil")
+
+        XCTAssertEqual(updated.tags, ["Warranty", "After"])
+        XCTAssertEqual(updated.caption, "Coil")
+        let sent = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(sent.method, "POST")
+        XCTAssertEqual(sent.url?.path, "/v1/media/\(mediaID)/tags")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent.body)) as? [String: Any])
+        XCTAssertEqual(body["tags"] as? [String], ["Warranty", "After"])
+        XCTAssertEqual(body["caption"] as? String, "Coil")
+    }
+
+    func testTaggingDropsBlankTagsAndOmitsAnEmptyCaption() async throws {
+        let mediaID = "00000000-0000-4000-8000-00000000000c"
+        let reply = #"{"id":"00000000-0000-4000-8000-00000000000c","organizationId":"00000000-0000-4000-8000-000000000002","jobId":"00000000-0000-4000-8000-000000000001","uploaderUserId":"00000000-0000-4000-8000-000000000004","kind":"photo","mime":"image/jpeg","sizeBytes":4,"originalFilename":"valve.jpg","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","storageKey":"generated","uploadState":"stored","tags":["After"],"archived":false,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:10:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+
+        _ = try await client.tagFieldMedia(mediaID, tags: [" After ", ""], caption: "   ")
+
+        let sent = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(sent.body)) as? [String: Any])
+        XCTAssertEqual(body["tags"] as? [String], ["After"])
+        XCTAssertNil(body["caption"])
+    }
+
+    func testTaggingRejectsTooManyTagsAndABadMediaIDBeforeSending() async {
+        let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        let mediaID = "00000000-0000-4000-8000-00000000000c"
+
+        do {
+            _ = try await client.tagFieldMedia(mediaID, tags: (1...21).map { "tag-\($0)" })
+            XCTFail("Expected too many tags")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Too many photo tags")
+        } catch { XCTFail("Unexpected error: \(error)") }
+
+        do {
+            _ = try await client.tagFieldMedia("not-a-photo", tags: ["Before"])
+            XCTFail("Expected an invalid media id")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Invalid media ID")
+        } catch { XCTFail("Unexpected error: \(error)") }
+
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
     func testPendingMediaRegistrationRequiresExactlyOneUploadMethod() throws {
         let asset = #"{"id":"00000000-0000-4000-8000-00000000000c","organizationId":"00000000-0000-4000-8000-000000000002","jobId":"00000000-0000-4000-8000-000000000001","uploaderUserId":"00000000-0000-4000-8000-000000000004","kind":"photo","mime":"image/jpeg","sizeBytes":4,"originalFilename":"valve.jpg","contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","storageKey":"generated","uploadState":"pending","tags":[],"archived":false,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
         let decoder = JSONDecoder()

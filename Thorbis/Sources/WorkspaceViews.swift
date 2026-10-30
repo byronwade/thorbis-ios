@@ -235,15 +235,18 @@ struct WorkspaceRevenueView: View {
 
         PaperGroupHeader(title: "By month", count: months.count)
         ForEach(months.reversed()) { month in
-            HStack {
-                Text(monthName(month.month, long: true)).font(Theme.font(15, weight: .medium))
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(money(month.collected, currency: "USD")).moneyStyle(.row)
-                    Text("Invoiced \(money(month.revenue, currency: "USD"))").font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+            // Month and what was invoiced on the left, what came in on the right: one amount per side.
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(monthName(month.month, long: true)).font(Theme.font(15, weight: .medium))
+                    Text("Invoiced \(money(month.revenue, currency: "USD"))")
+                        .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
+                Spacer(minLength: 12)
+                Text(money(month.collected, currency: "USD")).moneyStyle(.row)
             }
-            .frame(minHeight: 48)
+            .padding(.vertical, 8)
+            .frame(minHeight: 56)
             .accessibilityElement(children: .combine)
         }
     }
@@ -457,7 +460,7 @@ struct WorkspacePriceBookView: View {
             items = page.items
             nextCursor = page.nextCursor
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { self.error = PriceBookLoadError.message(for: error) }
     }
 
     private func loadMore() async {
@@ -472,7 +475,7 @@ struct WorkspacePriceBookView: View {
             items.append(contentsOf: page.items)
             nextCursor = page.nextCursor
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch { self.error = PriceBookLoadError.message(for: error) }
     }
 }
 
@@ -518,9 +521,8 @@ private struct WorkspacePriceBookDetailView: View {
                 PriceBookItemEditor(api: api, existing: detail) { Task { await load() } }
             }
         }
-        .confirmationDialog("Remove this item from the price book?", isPresented: $confirmArchive, titleVisibility: .visible) {
-            Button("Remove", role: .destructive) { Task { await archive() } }
-        }
+        .thorbisConfirm("Remove this item from the price book?", isPresented: $confirmArchive,
+                        actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await archive() } }])
         .task { await load() }
     }
 
@@ -566,13 +568,10 @@ struct PriceBookItemEditor: View {
                     TextField("Unit (each, hour, foot…)", text: $content.unit)
                 }
                 Section {
-                    Picker("Kind", selection: $content.kind) {
-                        ForEach(PriceBookContent.kinds, id: \.self) { Text($0.capitalized).tag($0) }
-                    }
-                    Picker("Tax", selection: $content.taxClassification) {
-                        Text("Taxable").tag("taxable")
-                        Text("Not taxable").tag("non_taxable")
-                    }
+                    ThorbisSelect(options: PriceBookContent.kinds.map { ($0, $0.capitalized) },
+                                  selection: $content.kind, label: "Kind")
+                    ThorbisSelect(options: [("taxable", "Taxable"), ("non_taxable", "Not taxable")],
+                                  selection: $content.taxClassification, label: "Tax")
                 }
                 if let error { Section { ListErrorRow(message: error) } }
             }

@@ -232,6 +232,19 @@ final class APIClient: ObservableObject {
         return response.data
     }
 
+    /// A call recording (JS-05): only the server's own calls route, only audio, at most 50 MB.
+    func audioData(_ path: String) async throws -> Data {
+        guard path.range(of: #"^/v1/calls/[0-9A-Fa-f-]{36}/recording$"#, options: .regularExpression) != nil else {
+            throw Problem(title: "Invalid recording", status: nil, detail: path)
+        }
+        let response = try await sendData("GET", path, body: Optional<String>.none, accept: "audio/mpeg")
+        guard response.contentType?.lowercased().hasPrefix("audio/") == true, !response.data.isEmpty,
+              response.data.count <= 50 * 1024 * 1024 else {
+            throw Problem(title: "Invalid recording", status: response.status, detail: "The server did not return audio.")
+        }
+        return response.data
+    }
+
     private struct DataResponse {
         let data: Data
         let status: Int

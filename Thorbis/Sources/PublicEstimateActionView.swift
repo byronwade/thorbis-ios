@@ -63,12 +63,10 @@ struct PublicEstimateActionView: View {
         .background(Theme.background)
         .safeAreaInset(edge: .bottom, spacing: 0) { approvalFooter }
         .task(id: token) { await model.load(api: api, token: token) }
-        .confirmationDialog("Decline this estimate?", isPresented: $confirmsDecline, titleVisibility: .visible) {
-            Button("Decline estimate", role: .destructive) { decline() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The company will be notified that you declined this estimate.")
-        }
+        .thorbisConfirm("Decline this estimate?",
+                        message: "The company will be notified that you declined this estimate.",
+                        isPresented: $confirmsDecline,
+                        actions: [ThorbisConfirmAction("Decline estimate", role: .destructive) { decline() }])
         .onChange(of: model.signerName) { _, value in
             if value.count > 120 { model.signerName = String(value.prefix(120)) }
         }

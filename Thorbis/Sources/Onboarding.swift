@@ -357,9 +357,8 @@ struct CreateCompanyForm: View {
         .toolbar(firstCompany ? .hidden : .automatic, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { focused = true }
-        .confirmationDialog("Sign out of Thorbis?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
-        }
+        .thorbisConfirm("Sign out of Thorbis?", isPresented: $confirmSignOut,
+                        actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
     }
 
     private var greeting: String {

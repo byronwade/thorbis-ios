@@ -11,9 +11,12 @@ enum Theme {
         let size = onRamp(size)
         return Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
     }
+    /// Numbers, times and record numbers. Inter with tabular digits, so amounts line up in a
+    /// column without a typewriter face (the 2026-10-30 modern pass retired Geist Mono here).
     static func monoFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         let size = onRamp(size)
-        return Font.custom("GeistMono-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
+        return Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size))
+            .weight(allowed(weight)).monospacedDigit()
     }
     static let minimumSize: CGFloat = 12
     /// design.thorbis.com MF-02: four money sizes, nothing smaller. Hero is what the screen is
@@ -27,7 +30,7 @@ enum Theme {
         let weight: Font.Weight = regular || size == .line ? .regular : .medium
         switch size {
         case .hero:
-            return Font.custom("GeistMono-Regular", size: wide ? 40 : 34, relativeTo: .largeTitle).weight(weight)
+            return Font.custom("Inter-Regular", size: wide ? 40 : 34, relativeTo: .largeTitle).weight(weight).monospacedDigit()
         case .total: return monoFont(24, weight: weight)
         case .row: return monoFont(17, weight: weight)
         case .line: return monoFont(15, weight: weight)
@@ -151,11 +154,12 @@ struct Chip: View {
 struct Avatar: View {
     let name: String
     var size: CGFloat = 24
+    var fill: Color = Theme.fill
     var body: some View {
         Text(initials(name)).font(Theme.font(size * 0.38, weight: .medium))
             .foregroundStyle(Theme.muted)
             .frame(width: size, height: size)
-            .background(Theme.fill, in: Circle())
+            .background(fill, in: Circle())
             .dynamicTypeSize(...DynamicTypeSize.large)
     }
 }
