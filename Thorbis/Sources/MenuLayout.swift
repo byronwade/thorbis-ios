@@ -130,6 +130,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .reports: session.can("estimate.view", feature: "estimates") || session.can("job.view", feature: "jobs")
         case .team: session.can("organization.members.manage") || session.can("organization.permissions.manage")
         case .notices: session.can("organization.settings.edit", feature: "job_booking_notices")
+            || PushNotifications.receivesMorningDigest(session)
         case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil
         }
     }
