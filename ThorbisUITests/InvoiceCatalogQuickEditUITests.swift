@@ -267,7 +267,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         // Use the native text selection menu; touching the right edge can place the
         // caret before the final digit at accessibility sizes.
         XCTAssertEqual(field.value as? String, original)
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.5)).press(forDuration: 1.2)
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.90, dy: 0.5)).press(forDuration: 1.2)
         let selectAll = app.menuItems["Select All"]
         XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "The selected value must expose Select All")
         selectAll.tap()
