@@ -105,7 +105,11 @@ struct RootView: View {
 
     private func tabletNavigation() -> some View {
         Group {
-            if typedJobsExperiment {
+            if typedJobsExperiment && tab == .schedule {
+                PaperTabletSchedule(typedPath: $typedTabletPath, typedOwner: typedTabletOwner,
+                                    priceBook: $priceBook, drafts: $drafts)
+                    .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
+            } else if typedJobsExperiment {
                 NavigationStack(path: Binding(get: { typedTabletPath }, set: { next in
                     let old = typedTabletPath
                     typedTabletPath = next
@@ -186,7 +190,8 @@ struct RootView: View {
             Group {
                 switch tab {
                 case .schedule:
-                    PaperTabletSchedule()
+                    PaperTabletSchedule(typedPath: $typedTabletPath, typedOwner: typedTabletOwner,
+                                        priceBook: $priceBook, drafts: $drafts)
                 case .jobs: JobsView()
                 case .customers: CustomersView()
                 case .more: MoreView()

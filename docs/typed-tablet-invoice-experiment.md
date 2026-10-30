@@ -7,12 +7,16 @@ The tablet Jobs test opens the Invoice navigation bar, returns with the Back
 button, and verifies the selected invoice in the payment sheet. It passed in
 `/private/tmp/thorbis-typed-tablet-detailassert.xcresult`.
 
-The tablet Schedule test taps a hittable invoice row but the Invoice navigation
-bar does not appear. It failed in the same result bundle. A previous version of
+The earlier nested-stack tablet Schedule experiment tapped a hittable invoice row
+but the Invoice navigation bar did not appear. It failed in that result bundle. A previous version of
 the test incorrectly accepted text from the underlying row as proof that the
 invoice opened; do not weaken the explicit navigation-bar and Back assertions.
 An earlier experiment returned to a payment sheet for the wrong invoice. The
-distinct nested route type in this checkpoint has not fixed the opening failure.
+distinct nested route type did not fix the opening failure.
+
+The later single-owner Schedule prototype passed both explicit-open iPad tests
+in `/private/tmp/thorbis-tablet-single-owner.xcresult`. Selection changes, deep
+links, accessibility, and interactive navigation still require verification.
 
 The tablet outer stack and Schedule detail stack must be redesigned or otherwise
 proved to route and return within the correct presentation owner before this can
