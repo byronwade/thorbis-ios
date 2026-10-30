@@ -305,3 +305,19 @@ final class OrganizationFactOutboxTests: XCTestCase {
         XCTAssertEqual((body["expectedIdentity"] as? [String: String])?["organizationId"], org)
     }
 }
+
+@MainActor
+final class OrganizationFactDiscardTests: XCTestCase {
+    func testAnOnlineSaveDropsTheOlderWaitingValue() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("outbox-discard-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let box = FieldOutbox(directory: directory, defaults: UserDefaults(suiteName: "outbox.\(UUID().uuidString)")!)
+        box.bind(actorID: "019f0000-0000-7000-8000-000000000011", organizationID: "019f0000-0000-7000-8000-000000000001")
+        box.enqueue(.organizationFact(.init(factKey: "timezone", value: "America/Denver", label: "Time zone")), policyVersion: 1)
+        box.enqueue(.organizationFact(.init(factKey: "sales_tax_rate", value: "7", label: "Sales tax rate")), policyVersion: 1)
+        box.discardPendingFact("timezone")
+        XCTAssertEqual(box.pending.count, 1)
+        if case .organizationFact(let fact) = box.pending.first?.action { XCTAssertEqual(fact.factKey, "sales_tax_rate") }
+        else { XCTFail("Expected the tax rate to keep waiting") }
+    }
+}

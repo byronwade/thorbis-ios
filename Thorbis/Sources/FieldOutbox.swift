@@ -344,6 +344,15 @@ final class FieldOutbox: ObservableObject {
         return entry
     }
 
+    /// A company detail saved online wins over an older value still waiting here.
+    func discardPendingFact(_ factKey: String) {
+        let before = entries.count
+        entries.removeAll {
+            if case .organizationFact(let fact) = $0.action { fact.factKey == factKey && $0.state == .pending } else { false }
+        }
+        if entries.count != before { persist() }
+    }
+
     private var signatureDirectory: URL { directory.appendingPathComponent("Signatures", isDirectory: true) }
 
     /// Keeps a customer's ink on the phone and queues the invoice authorization that uses it.

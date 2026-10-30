@@ -526,6 +526,8 @@ final class CompanyDetailsModel: ObservableObject {
             let fresh = try await api.organizationProfile()
             profile = fresh
             loadError = nil
+            // A queued value the server now has is no longer waiting.
+            for (key, value) in queued where fresh.value(key) == value { queued[key] = nil }
             for entry in fresh.catalog where drafts[entry.factKey] == nil {
                 drafts[entry.factKey] = fresh.value(entry.factKey) ?? ""
             }
@@ -563,6 +565,8 @@ final class CompanyDetailsModel: ObservableObject {
             let value = (drafts[entry.factKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             do {
                 try await api.confirmOrganizationFact(entry.factKey, value: value, actorID: actor, organizationID: org)
+                outbox?.discardPendingFact(entry.factKey)
+                queued[entry.factKey] = nil
             } catch is CancellationError {
                 return false
             } catch let error where error.isConnectivityFailure && outbox != nil {
@@ -596,6 +600,7 @@ struct CompanyDetailsView: View {
     var onSaved: (() -> Void)? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = CompanyDetailsModel()
     @State private var saved = 0
@@ -725,7 +730,7 @@ struct CompanyDetailsView: View {
 
     private func save() async {
         focused = nil
-        if await model.save(api: api, session: session) {
+        if await model.save(api: api, session: session, outbox: outbox) {
             saved += 1
             onSaved?()
         }
