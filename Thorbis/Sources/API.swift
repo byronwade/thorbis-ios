@@ -232,6 +232,17 @@ final class APIClient: ObservableObject {
         return response.data
     }
 
+    /// A server-rendered Excel workbook (`/v1/reports/*.xlsx`), checked to be a zip before it is saved.
+    func spreadsheetData(_ path: String) async throws -> Data {
+        let mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        let response = try await sendData("GET", path, body: Optional<String>.none, accept: mime)
+        guard response.contentType?.lowercased().split(separator: ";").first.map(String.init) == mime,
+              response.data.starts(with: Data("PK".utf8)), response.data.count <= 50 * 1024 * 1024 else {
+            throw Problem(title: "Invalid spreadsheet", status: response.status, detail: "The server did not return an Excel file.")
+        }
+        return response.data
+    }
+
     /// A call recording (JS-05): only the server's own calls route, only audio, at most 50 MB.
     func audioData(_ path: String) async throws -> Data {
         guard path.range(of: #"^/v1/calls/[0-9A-Fa-f-]{36}/recording$"#, options: .regularExpression) != nil else {

@@ -786,6 +786,8 @@ enum PaperRoute: Hashable {
     case payments
     case businessSetup
     case companyDetails
+    case properties
+    case importCustomers
     case job(String)
     case media(jobID: String, assetID: String)
     case note(jobID: String, noteID: String)
@@ -840,6 +842,8 @@ struct PaperRouteView: View {
         case .payments: PaymentsSetupView()
         case .businessSetup: BusinessSetupView()
         case .companyDetails: CompanyDetailsView()
+        case .properties: PropertiesView()
+        case .importCustomers: CustomerImportView()
         case .job(let id): JobDetailView(jobId: id)
         case .media(let jobID, let assetID): JobMediaDetailView(jobID: jobID, assetID: assetID)
         case .note(let jobID, let noteID): JobNoteDetailView(jobID: jobID, noteID: noteID)

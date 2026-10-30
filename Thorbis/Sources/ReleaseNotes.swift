@@ -13,6 +13,23 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-owner-setup",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "person.crop.circle.badge.plus", title: "Start your company from your phone",
+                      detail: "Create an account, name your company and walk through setup one step at a time."),
+                .init(symbol: "square.and.arrow.down", title: "Import customers from a spreadsheet",
+                      detail: "Choose a CSV from your old software, check the columns and bring everyone in."),
+                .init(symbol: "person.badge.minus", title: "Remove someone from your team",
+                      detail: "Long-press a person on Team to remove them. They keep their account and can be invited again."),
+                .init(symbol: "house", title: "See every property in one list",
+                      detail: "Properties shows each service address across your customers, with search."),
+                .init(symbol: "tablecells", title: "Download reports as spreadsheets",
+                      detail: "Revenue, jobs, schedule and payment reports open as Excel files you can share."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
             id: "2026-10-30-work-offline",
             date: "2026-10-30",
             highlights: [
