@@ -172,6 +172,7 @@ struct CallDetailView: View {
     @State private var error: String?
     @State private var linkError: String?
     @State private var linking = false
+    @State private var choosingJob = false
 
     private var canLink: Bool { session.can("job.edit") }
 
@@ -219,19 +220,9 @@ struct CallDetailView: View {
         }
     }
 
+    /// A button that opens a scrolling list: twenty jobs don't fit a menu card on a phone.
     private func linkMenu(_ call: BookingCallRecord) -> some View {
-        let jobs = CallLogRules.linkableJobs(store.jobs)
-        var items = jobs.map { job in
-            ThorbisMenuItem(job.title, icon: "wrench.and.screwdriver", isSelected: job.id == call.jobId) {
-                Task { await link(call, to: job.id) }
-            }
-        }
-        if call.jobId != nil {
-            items.append(ThorbisMenuItem("Unlink", icon: "link.badge.plus", role: .destructive) {
-                Task { await link(call, to: nil) }
-            })
-        }
-        return ThorbisMenu(items: items, title: "Link to job", accessibilityLabel: call.jobId == nil ? "Link to job" : "Change job") {
+        Button { choosingJob = true } label: {
             HStack(spacing: 6) {
                 if linking { ProgressView() } else { Image(systemName: "link") }
                 Text(call.jobId == nil ? "Link to job" : "Change job")
@@ -239,7 +230,48 @@ struct CallDetailView: View {
             .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
             .frame(minHeight: 44).contentShape(Rectangle())
         }
-        .disabled(linking || (jobs.isEmpty && call.jobId == nil))
+        .buttonStyle(.plain)
+        .disabled(linking || (store.jobs.isEmpty && call.jobId == nil))
+        .sheet(isPresented: $choosingJob) { jobPicker(call) }
+    }
+
+    private func jobPicker(_ call: BookingCallRecord) -> some View {
+        NavigationStack {
+            List {
+                ForEach(CallLogRules.linkableJobs(store.jobs)) { job in
+                    Button {
+                        choosingJob = false
+                        Task { await link(call, to: job.id) }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                Text(job.shortRef).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            if job.id == call.jobId {
+                                Image(systemName: "checkmark").foregroundStyle(Theme.brandText).accessibilityLabel("Linked")
+                            }
+                        }
+                        .frame(minHeight: 44)
+                    }
+                }
+                if call.jobId != nil {
+                    Button(role: .destructive) {
+                        choosingJob = false
+                        Task { await link(call, to: nil) }
+                    } label: {
+                        Text("Unlink").font(Theme.font(15, weight: .medium)).frame(minHeight: 44)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle("Link to job")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Cancel") { choosingJob = false } } }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private func load() async {
