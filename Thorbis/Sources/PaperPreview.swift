@@ -548,11 +548,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
-        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-success") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response")),
+        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-success") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss")),
            request.httpMethod == "POST", url.path == "/v1/estimates" {
             let revoke = { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewRevokeDuringEstimateCreate"), object: nil) }
             if ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") {
                 if Thread.isMainThread { revoke() } else { DispatchQueue.main.sync(execute: revoke) }
+            } else if ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss") {
+                let loseJob = { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewLoseEstimateJob"), object: nil) }
+                if Thread.isMainThread { loseJob() } else { DispatchQueue.main.sync(execute: loseJob) }
             }
             if let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
                 let data = ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response")
@@ -564,7 +567,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
             return
         }
-        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response")),
+        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss")),
            request.httpMethod == "POST", url.path.hasSuffix("/link") {
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewEstimateLinkAttempt"), object: nil)
@@ -585,7 +588,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--canvas-test-create-success"),
+        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-success") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss")),
            request.httpMethod == "POST", url.path.hasSuffix("/link") {
             status = 200
             payload = ["id": "00000000-0000-4000-8000-000000009301", "jobId": PaperPreview.jobID,

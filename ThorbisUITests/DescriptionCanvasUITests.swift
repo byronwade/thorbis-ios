@@ -122,6 +122,44 @@ final class DescriptionCanvasUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Leave before checking?"].waitForExistence(timeout: 5))
     }
 
+    func testCreatedEstimateWaitsForJobWithoutAllowingUnsavedEdits() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-catalog-pages", "--canvas-test-new-estimate-job", "--canvas-test-create-job-loss"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Estimates"].waitForExistence(timeout: 30)); app.buttons["Estimates"].tap()
+        let add = app.buttons["Add estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 20)); add.tap()
+        let search = app.textFields["Search price book or type a line"]
+        XCTAssertTrue(search.waitForExistence(timeout: 15)); search.tap(); search.typeText("Replace capacitor")
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
+        XCTAssertTrue(item.waitForExistence(timeout: 15)); item.tap(); app.buttons["Review estimate · 1 item"].tap()
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        let receipt = app.staticTexts["preview-estimate-create-receipt"]
+        let delivered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Response delivered"), object: receipt)
+        XCTAssertEqual(XCTWaiter.wait(for: [delivered], timeout: 10), .completed)
+        XCTAssertTrue(app.staticTexts["Estimate unavailable"].waitForExistence(timeout: 5))
+        XCTAssertTrue(receipt.label.contains("links 0"))
+        app.buttons["Test job return"].tap()
+        XCTAssertTrue(app.staticTexts["Estimate created"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["Estimate title"].exists)
+        XCTAssertFalse(app.textFields["Search price book or type a line"].exists)
+        XCTAssertFalse(app.buttons.matching(identifier: "estimate-line-description-more").firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["EST-2218 · 2 items"].exists)
+        let retry = app.buttons["Retry adding to job"]
+        XCTAssertTrue(retry.exists); XCTAssertTrue(retry.isEnabled)
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Leave before checking?"].waitForExistence(timeout: 5))
+        guard let keep = app.buttons.matching(identifier: "Cancel").allElementsBoundByIndex.last(where: { $0.isHittable }) else {
+            XCTFail("The saved-estimate warning must allow returning to the editor"); return
+        }
+        keep.tap()
+        XCTAssertTrue(retry.waitForExistence(timeout: 5)); retry.tap()
+        let linked = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: retry)
+        XCTAssertEqual(XCTWaiter.wait(for: [linked], timeout: 10), .completed)
+    }
+
     func testEstimateDescriptionCanvasAppliesWithoutSavingAndCancelKeepsOriginal() {
         continueAfterFailure = false
         let app = XCUIApplication()

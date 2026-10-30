@@ -95,14 +95,22 @@ struct NewEstimateView: View {
     private var canUsePriceBook: Bool { session.can("pricebook.view", feature: "price_book") }
     private var searching: Bool { focus == .search || !query.isEmpty }
     private var total: Int? { lines.isEmpty ? nil : lines.subtotal() }
+    private var displayedTotal: Int? {
+        if let created { return paperLinesTotal(created.lines) }
+        return total
+    }
 
     var valid: Bool {
-        editorScopeCurrent && jobScopeCurrent && uncertainOutcome == nil && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
-        lines.allSatisfy { line in
-            !line.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            (Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)).map { (1...100_000).contains($0) } ?? false) &&
-            MoneyInput.cents(line.unitPrice) != nil
+        guard editorScopeCurrent, jobScopeCurrent, uncertainOutcome == nil else { return false }
+        if let created {
+            return UUID(uuidString: created.id) != nil && created.organizationId == session.activeOrganization?.id && created.customerId == customerID
         }
+        return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
+            lines.allSatisfy { line in
+                !line.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                (Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)).map { (1...100_000).contains($0) } ?? false) &&
+                MoneyInput.cents(line.unitPrice) != nil
+            }
     }
 
     var body: some View {
@@ -114,6 +122,8 @@ struct NewEstimateView: View {
                             ? "The estimate may have been created. Check existing estimates before creating another."
                             : (uncertainOutcome ?? (waitingForJob ? "Waiting for the current job. Your edits stay here." : "Access or the job changed. Close this editor to start again."))))
                         .padding(20)
+                } else if let created {
+                    createdSummary(created)
                 } else if searching {
                     PriceBookResultsList(
                         catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
@@ -123,8 +133,9 @@ struct NewEstimateView: View {
                         },
                         secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom, retry: { Task { await refreshCatalog(force: true) } }
                     )
+                    .disabled(busy)
                 } else {
-                    builder
+                    builder.disabled(busy)
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -133,6 +144,13 @@ struct NewEstimateView: View {
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                #if DEBUG
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss") {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Test job return") { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewReturnEstimateJob"), object: nil) }
+                    }
+                }
+                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         if hasUnconfirmedServerResult { confirmUncertainExit = true }
@@ -164,7 +182,7 @@ struct NewEstimateView: View {
                 ).presentationDetents([.large])
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if editorScopeCurrent && jobScopeCurrent { VStack(spacing: 0) {
+                if editorScopeCurrent && jobScopeCurrent && created == nil { VStack(spacing: 0) {
                     EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
                                       prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
                                       finish: finishSearch)
@@ -176,11 +194,11 @@ struct NewEstimateView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if editorScopeCurrent && jobScopeCurrent { VStack(spacing: 0) {
-                    if let removed {
+                    if let removed, created == nil {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
                     }
-                    if !searching {
-                        EstimateBuilderTotal(total: total)
+                    if !searching || created != nil {
+                        EstimateBuilderTotal(total: displayedTotal)
                         PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
                                        disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
                     }
@@ -198,7 +216,7 @@ struct NewEstimateView: View {
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewEstimateCreateResponse"))) { _ in previewCreateResponse = true }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewEstimateLinkAttempt"))) { _ in previewLinkAttempts += 1 }
             .overlay(alignment: .top) {
-                if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response")) {
+                if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss")) {
                     Text("Response \(previewCreateResponse ? "delivered" : "pending"); links \(previewLinkAttempts)")
                         .accessibilityIdentifier("preview-estimate-create-receipt")
                 }
@@ -207,6 +225,7 @@ struct NewEstimateView: View {
             .onDisappear { editorPresented = false }
             .onChange(of: parentJob) { _, current in
                 if expectedJob != nil && current != nil && !jobScopeCurrent { editorAccessRetired = true }
+                if jobScopeCurrent && created != nil && uncertainOutcome == nil && error == "The estimate was created. Return to the same job to finish adding it." { error = nil }
             }
             .onChange(of: session.authorityRevision) { _, _ in
                 if descriptionOwnerScope != nil && !editorScopeCurrent { editorAccessRetired = true }
@@ -246,6 +265,25 @@ struct NewEstimateView: View {
 
     private var reviewTitle: String {
         "Review estimate · \(lines.count) \(lines.count == 1 ? "item" : "items")"
+    }
+
+    private func createdSummary(_ estimate: EstimateRecord) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Estimate created", systemImage: "checkmark.circle.fill")
+                .font(Theme.font(20, weight: .medium)).foregroundStyle(Theme.success)
+                .accessibilityAddTraits(.isHeader)
+            Text(estimate.title).font(Theme.font(24, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+            Text("EST-\(estimate.id.suffix(4).uppercased()) · \(estimate.lines.count) \(estimate.lines.count == 1 ? "item" : "items")")
+                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+            Text("Your estimate is saved. Finish adding it to this job before making more changes.")
+                .font(Theme.font(16)).fixedSize(horizontal: false, vertical: true)
+            if let error { ErrorBanner(message: error) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+        .padding(.horizontal, Theme.gutter).padding(.top, 16).padding(.bottom, 28)
     }
 
     private var builder: some View {
