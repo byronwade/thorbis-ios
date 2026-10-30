@@ -280,7 +280,10 @@ struct JobDetailView: View {
             }
         }
         // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
-        .onAppear { if job != nil { Task { await load() } } }
+        .onAppear {
+            typedRouteProbe("job-appear id=\(jobId) presentation=\(typedPresentationID) owner=\(typedJobsOwner?.diagnosticID.uuidString ?? "nil") pending=\(typedJobsOwner?.pop?.id.uuidString ?? "nil")")
+            if job != nil { Task { await load() } }
+        }
         .onChange(of: session.can("customer.view", feature: "core_crm")) { _, _ in
             locations = []
             locationsContext = nil
@@ -300,6 +303,7 @@ struct JobDetailView: View {
             acceptTypedPop(event)
         }
         .onChange(of: job) { _, _ in
+            typedRouteProbe("job-change id=\(jobId) presentation=\(typedPresentationID) owner=\(typedJobsOwner?.diagnosticID.uuidString ?? "nil") pending=\(typedJobsOwner?.pop?.id.uuidString ?? "nil")")
             if let event = typedJobsOwner?.pop { acceptTypedPop(event) }
         }
         .onChange(of: session.authorityRevision) { _, _ in retireTypedReturn(revalidate: true) }
@@ -1034,9 +1038,11 @@ struct JobDetailView: View {
     }
 
     private func acceptTypedPop(_ event: PaperTypedJobsOwner.Pop) {
-        guard let job, job.id == event.route.jobID, typedPresentationID == event.route.presentationID else { return }
+        typedRouteProbe("job=\(job?.id ?? "nil") presentation=\(typedPresentationID) event=\(event.id) routes=\(event.routes.map { $0.invoiceID + ":" + $0.presentationID.uuidString }.joined(separator: ","))")
+        guard let job, let route = event.routes.last(where: { $0.jobID == job.id && $0.presentationID == typedPresentationID }) else { return }
+        typedRouteProbe("accepted=\(route.invoiceID) presentation=\(typedPresentationID)")
         typedJobsOwner?.consume(event.id)
-        refreshTypedReturn(event.route)
+        refreshTypedReturn(route)
     }
 
     private func refreshTypedReturn(_ route: JobInvoiceRoute) {
@@ -1049,8 +1055,10 @@ struct JobDetailView: View {
         returnRefreshPending = false
         invoicePaymentModel = nil
         loadedInvoiceModelID = nil
+        typedRouteProbe("refresh-start=\(route.invoiceID) presentation=\(typedPresentationID)")
         guard let request = returnCoordinator.begin(route, context: currentTypedContext), let job,
               let scope = scope(for: job) else {
+            typedRouteProbe("refresh-denied=\(route.invoiceID)")
             error = "Access changed. Open this invoice again to refresh payment."
             return
         }
@@ -1082,6 +1090,7 @@ struct JobDetailView: View {
             }
             returnCoordinator.finish(requestID: request, context: currentTypedContext, fresh: true,
                                      actualInvoiceID: model.invoice?.id, canCollect: model.canRecordPayment)
+            typedRouteProbe("refresh-result=\(route.invoiceID) eligible=\(model.canRecordPayment) model=\(model.invoice?.id ?? "nil")")
             if returnCoordinator.collectibleInvoiceID(in: currentTypedContext) == route.invoiceID {
                 selectedInvoiceID = route.invoiceID
                 invoicePaymentModel = model

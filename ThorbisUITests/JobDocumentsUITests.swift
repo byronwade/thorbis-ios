@@ -209,8 +209,9 @@ final class JobDocumentsSafetyUITests: XCTestCase {
             let card = app.buttons["job-invoice-\(id)"]
             XCTAssertTrue(card.waitForExistence(timeout: 15))
             card.tap()
+            XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
             XCTAssertTrue(app.staticTexts[reference].waitForExistence(timeout: 5))
-            app.navigationBars.buttons.firstMatch.tap()
+            app.navigationBars["Invoice"].buttons["Back"].tap()
         }
         XCTAssertFalse(app.buttons["job-invoice-00000000-0000-4000-8000-000000002241"].exists)
     }
@@ -234,12 +235,13 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let first = app.buttons["job-invoice-\(invoice)"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
         let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
         let partial = app.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.5))
         edge.press(forDuration: 0.1, thenDragTo: partial)
         XCTAssertTrue(app.staticTexts["INV-2209"].exists, "An interrupted swipe must not count as a completed pop")
-        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars["Invoice"].buttons["Back"].tap()
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
         collect.tap()
@@ -252,8 +254,9 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--invoice-route-test-authority"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]
         XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons["Back"].tap()
+        app.navigationBars["Invoice"].buttons["Back"].tap()
         XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
         app.buttons["Test authority refresh"].tap()
         let collect = app.buttons["Collect payment"]
@@ -267,8 +270,9 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--invoice-route-test-api"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]
         XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons["Back"].tap()
+        app.navigationBars["Invoice"].buttons["Back"].tap()
         XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
         app.buttons["Test API invalidation"].tap()
         XCTAssertFalse(app.buttons["Collect payment"].isHittable)
@@ -278,8 +282,9 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--invoice-route-test-balance-change"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]
         XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons["Back"].tap()
+        app.navigationBars["Invoice"].buttons["Back"].tap()
         XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
         app.buttons["Test invoice balance change"].tap()
         XCTAssertTrue(app.staticTexts["typed-invoice-refresh-guidance"].waitForExistence(timeout: 5))
@@ -290,8 +295,9 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--invoice-route-test-paid"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]
         XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons["Back"].tap()
+        app.navigationBars["Invoice"].buttons["Back"].tap()
         XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
         app.buttons["Test invoice paid"].tap()
         XCTAssertTrue(app.staticTexts["typed-paid-reload-complete"].waitForExistence(timeout: 10))
@@ -303,9 +309,26 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let invoiceTab = app.buttons["Invoice"]
         XCTAssertTrue(invoiceTab.waitForExistence(timeout: 15)); invoiceTab.tap()
         let first = app.buttons["job-invoice-\(invoice)"]
-        XCTAssertTrue(first.waitForExistence(timeout: 10)); first.tap()
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(first.isHittable); first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars["Invoice"].buttons["Back"].tap()
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 10)); collect.tap()
+        let collection = app.scrollViews.containing(.textField, identifier: "Amount to collect in dollars").firstMatch
+        XCTAssertTrue(collection.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
+    }
+
+    func testTypedTabletScheduleRetainsSelectedInvoice() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment", "--typed-route-diagnostics"], screen: "my-day")
+        let invoiceTab = app.buttons["Invoice"]
+        XCTAssertTrue(invoiceTab.waitForExistence(timeout: 15)); invoiceTab.tap()
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(first.isHittable); first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        app.navigationBars["Invoice"].buttons["Back"].tap()
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10)); collect.tap()
         let collection = app.scrollViews.containing(.textField, identifier: "Amount to collect in dollars").firstMatch
@@ -318,8 +341,9 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let first = app.buttons["job-invoice-\(invoice)"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars["Invoice"].buttons["Back"].tap()
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
         collect.tap()
@@ -334,8 +358,9 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let paid = app.buttons["job-invoice-\(second)"]
         XCTAssertTrue(paid.waitForExistence(timeout: 15))
         paid.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
         XCTAssertTrue(app.staticTexts["INV-2240"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars["Invoice"].buttons["Back"].tap()
         XCTAssertTrue(app.buttons["job-invoice-\(second)"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Collect payment"].isHittable, "Returning from a paid invoice must not collect another invoice")
     }
