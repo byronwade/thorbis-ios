@@ -13,13 +13,12 @@ final class AdaptiveControlsUITests: XCTestCase {
         XCTAssertTrue(residential.waitForExistence(timeout: 30))
         let form = app.scrollViews.containing(.button, identifier: "Residential").firstMatch
         XCTAssertTrue(form.waitForExistence(timeout: 10))
-        let done = app.buttons["Done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 10))
-        done.tap()
+        let dismissStart = form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.29))
+        let dismissEnd = form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.46))
+        dismissStart.press(forDuration: 0.1, thenDragTo: dismissEnd)
         XCTAssertFalse(app.keyboards.firstMatch.exists, "Dismiss the keyboard before navigating the form.")
         for _ in 0..<10 where !commercial.isHittable { form.swipeUp() }
         XCTAssertTrue(commercial.isHittable, app.debugDescription)
-        capture("New customer choices, large text")
         XCTAssertGreaterThanOrEqual(commercial.frame.width, 44)
         XCTAssertGreaterThanOrEqual(commercial.frame.height, 44)
         XCTAssertGreaterThanOrEqual(commercial.frame.minY, residential.frame.maxY,
@@ -45,19 +44,10 @@ final class AdaptiveControlsUITests: XCTestCase {
         signOut.tap()
         let warning = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "older saved photos")).firstMatch
         XCTAssertTrue(warning.waitForExistence(timeout: 10))
-        capture("Sign-out warning, large text")
         let cancel = app.buttons["Cancel"]
         for _ in 0..<8 where !cancel.isHittable { app.swipeUp() }
         XCTAssertTrue(cancel.isHittable, app.debugDescription)
-        capture("Sign-out actions, large text")
         cancel.tap()
         XCTAssertFalse(warning.exists)
-    }
-
-    private func capture(_ name: String) {
-        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 }
