@@ -366,8 +366,12 @@ struct RootView: View {
             case "signature": previewSignature = true
             case "new-job": createJob = true
             case "settings": showSettings = true
-            case "side-menu":
+            case "side-menu", "side-menu-search":
                 RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
+                RecentItems.shared.clear()
+                RecentItems.shared.record(.customer, id: "preview-customer-2", title: "Riverstone HVAC", subtitle: "Customer")
+                RecentItems.shared.record(.job, id: "preview-job-3", title: "No heat upstairs", subtitle: "JOB-2208")
+                RecentItems.shared.record(.job, id: "preview-job-2", title: "Water heater leak", subtitle: "JOB-2211")
                 RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
                 RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
                 drawerOpen = true

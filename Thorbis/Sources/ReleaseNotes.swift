@@ -80,6 +80,14 @@ enum ReleaseNotes {
             fixes: 0
         ),
         ReleaseNote(
+            id: "2026-10-29-menu-layout",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "A menu with room to tap",
+                      detail: "Places are a plain list. Pull the menu down to search. Your account opens Settings."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-price-book-loads",
             date: "2026-10-29",
             highlights: [

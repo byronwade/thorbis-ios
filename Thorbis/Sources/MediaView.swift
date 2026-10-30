@@ -159,11 +159,11 @@ struct JobMediaView: View {
                                 .disabled(busy || preview.loading || record.uploadState != "stored")
                                 .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
                                 if canAdd, record.uploadState == "stored" {
-                                    Menu {
-                                        Button("Before") { Task { await retag(record, .before) } }
-                                        Button("After") { Task { await retag(record, .after) } }
-                                        Button("Other") { Task { await retag(record, .other) } }
-                                    } label: {
+                                    ThorbisMenu(items: [
+                                        ThorbisMenuItem("Before") { Task { await retag(record, .before) } },
+                                        ThorbisMenuItem("After") { Task { await retag(record, .after) } },
+                                        ThorbisMenuItem("Other") { Task { await retag(record, .other) } },
+                                    ], title: "Tag photo", accessibilityLabel: stageName(record)) {
                                         Image(systemName: "tag")
                                             .font(.system(size: 15, weight: .semibold))
                                             .foregroundStyle(Theme.foreground)
@@ -171,7 +171,6 @@ struct JobMediaView: View {
                                             .background(Theme.background.opacity(0.92), in: Circle())
                                     }
                                     .disabled(busy)
-                                    .accessibilityLabel(stageName(record))
                                     .padding(4)
                                 }
                             }
@@ -208,13 +207,9 @@ struct JobMediaView: View {
         .safeAreaInset(edge: .bottom) {
             if canAdd {
                 VStack(spacing: 8) {
-                    Picker("Photo stage", selection: $stage) {
-                        Text("Before").tag("Before")
-                        Text("After").tag("After")
-                        Text("Other").tag("Other")
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(busy)
+                    ThorbisSegmented(options: [("Before", "Before"), ("After", "After"), ("Other", "Other")],
+                                     selection: $stage)
+                        .disabled(busy)
                     HStack(spacing: 8) {
                         Button { showCamera = true } label: {
                             HStack(spacing: 7) {
@@ -233,19 +228,16 @@ struct JobMediaView: View {
                         }
                         .disabled(busy)
                         .accessibilityLabel("Choose from library")
-                        Menu {
-                            if VNDocumentCameraViewController.isSupported {
-                                Button("Scan a document", systemImage: "doc.viewfinder") { showScanner = true }
-                            }
-                            Button("Choose a PDF", systemImage: "doc") { importDocument = true }
-                        } label: {
+                        ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
+                            ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
+                            : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }],
+                                    title: "Add a document", accessibilityLabel: "Add a document") {
                             Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
                                 .frame(width: 46, height: 46)
                                 .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                         }
                         .disabled(busy)
-                        .accessibilityLabel("Add a document")
                     }
                 }
                 .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)

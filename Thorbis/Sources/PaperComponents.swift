@@ -62,6 +62,9 @@ struct PaperCircleButton: View {
     let symbol: String
     let label: String
     var size: CGFloat = 36
+    /// Canvas fill; use `Theme.card` with `bordered` on a cream ground so the circle reads as a button.
+    var fill: Color = Theme.fill
+    var bordered = false
     let action: () -> Void
 
     var body: some View {
@@ -69,7 +72,9 @@ struct PaperCircleButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.foreground)
-                .frame(width: size, height: size).background(Theme.fill, in: Circle())
+                .frame(width: size, height: size)
+                .background(fill, in: Circle())
+                .overlay { if bordered { Circle().strokeBorder(Theme.border, lineWidth: 1) } }
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())

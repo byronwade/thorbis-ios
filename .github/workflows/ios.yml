@@ -18,10 +18,8 @@ jobs:
     name: Custom controls guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Non-blocking while the migration finishes and Codex lanes land: the guard reports stock
-    # controls outside the design system but does not fail other lanes' PRs. Flip to blocking
-    # (drop continue-on-error) once the allowlist is empty.
-    continue-on-error: true
+    # Blocking: every screen is on the design system and the allowlist is empty, so any stock
+    # SwiftUI control outside Thorbis/Sources/DesignSystem now fails the build.
     steps:
       - uses: actions/checkout@v4
       - name: Guard against stock SwiftUI controls

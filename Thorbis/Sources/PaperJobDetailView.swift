@@ -350,14 +350,10 @@ struct JobDetailView: View {
                 .accessibilityLabel("Share job")
                 let groups = menuGroups(job)
                 if !groups.isEmpty {
-                    Menu {
-                        ForEach(groups.indices, id: \.self) { index in
-                            Section { ForEach(groups[index], id: \.self) { menuItem($0, job: job) } }
-                        }
-                    } label: {
+                    ThorbisMenu(items: groups.flatMap { $0 }.map { menuActionItem($0, job: job) },
+                                title: "Job actions", accessibilityLabel: "Job actions") {
                         Image(systemName: "ellipsis")
                     }
-                    .accessibilityLabel("Job actions")
                 }
             }
         }
@@ -379,36 +375,28 @@ struct JobDetailView: View {
             canEditCustomer: session.can("customer.edit", feature: "core_crm")))
     }
 
-    @ViewBuilder
-    private func menuItem(_ action: JobMenuAction, job: JobRecord) -> some View {
+    private func menuActionItem(_ action: JobMenuAction, job: JobRecord) -> ThorbisMenuItem {
         switch action {
         case .transition(let target):
-            Button(transitionTitle(target), systemImage: transitionSymbol(target)) { runTransition(target) }.disabled(busy)
+            return ThorbisMenuItem(transitionTitle(target), icon: transitionSymbol(target), isDisabled: busy) { runTransition(target) }
         case .schedule:
-            Button(job.scheduledFor == nil ? "Schedule" : "Reschedule", systemImage: "calendar") { showSchedule = true }
+            return ThorbisMenuItem(job.scheduledFor == nil ? "Schedule" : "Reschedule", icon: "calendar") { showSchedule = true }
         case .assign:
-            Button(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", systemImage: "person.crop.circle.badge.plus") { showAssign = true }
+            return ThorbisMenuItem(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", icon: "person.crop.circle.badge.plus") { showAssign = true }
         case .billWithoutEstimate:
-            Button { run(.createInvoice) } label: {
-                Label { Text("Create invoice"); Text("Bill without an estimate") } icon: { Image(systemName: "doc.plaintext") }
-            }
-            .disabled(creatingInvoice)
+            return ThorbisMenuItem("Create invoice", icon: "doc.plaintext", subtitle: "Bill without an estimate", isDisabled: creatingInvoice) { run(.createInvoice) }
         case .deposit:
-            Button { showDeposit = true } label: {
-                Label { Text("Request a deposit"); Text("Bill part up front") } icon: { Image(systemName: "banknote") }
-            }
+            return ThorbisMenuItem("Request a deposit", icon: "banknote", subtitle: "Bill part up front") { showDeposit = true }
         case .wrapUp:
-            Button { showWrapUp = true } label: {
-                Label { Text("Wrap up"); Text("Closeout checklist") } icon: { Image(systemName: "checkmark.seal") }
-            }
+            return ThorbisMenuItem("Wrap up", icon: "checkmark.seal", subtitle: "Closeout checklist") { showWrapUp = true }
         case .followUps:
-            Button("Follow-ups", systemImage: "list.bullet") { showFollowUps = true }
+            return ThorbisMenuItem("Follow-ups", icon: "list.bullet") { showFollowUps = true }
         case .showToCustomer:
-            Button("Show to customer", systemImage: "person.crop.rectangle") { showCommercialDocuments = true }
+            return ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCommercialDocuments = true }
         case .customerDetails:
-            Button("Customer details", systemImage: "person.crop.circle") { showCustomerMode = true }
+            return ThorbisMenuItem("Customer details", icon: "person.crop.circle") { showCustomerMode = true }
         case .copyID:
-            Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
+            return ThorbisMenuItem("Copy job ID", icon: "doc.on.doc") { UIPasteboard.general.string = job.id }
         }
     }
 
@@ -595,14 +583,11 @@ struct JobDetailView: View {
         if transitions.isEmpty {
             statusChip(job, tint: tint, showsMenu: false)
         } else {
-            Menu {
-                ForEach(transitions, id: \.self) { target in
-                    Button(transitionTitle(target)) { runTransition(target) }
-                }
-            } label: {
+            ThorbisMenu(items: transitions.map { target in
+                ThorbisMenuItem(transitionTitle(target)) { runTransition(target) }
+            }, title: "Change status") {
                 statusChip(job, tint: tint, showsMenu: true)
             }
-            .buttonStyle(.plain)
         }
     }
 
