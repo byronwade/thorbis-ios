@@ -51,3 +51,48 @@ final class AdaptiveControlsUITests: XCTestCase {
         XCTAssertFalse(warning.exists)
     }
 }
+
+
+@MainActor
+final class SetupRecoveryUITests: XCTestCase {
+    func testRetryAtAccessibilityTextSize() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "onboard-setup", "--paper-preview-setup-retry", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 20))
+        if !retry.isHittable { app.swipeUp() }
+        XCTAssertTrue(retry.isHittable)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Setup retry at accessibility text size"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        retry.tap()
+        let recovered = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND value == %@", "Get paid by card", "Not done")).firstMatch
+        XCTAssertTrue(recovered.waitForExistence(timeout: 15))
+    }
+
+    func testUnavailableStatusCanBeRetriedWithoutLosingSetupRoutes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "onboard-setup", "--paper-preview-setup-retry", "-thorbis.appearance", "dark"]
+        app.launch()
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Some steps couldn't be checked."].exists)
+        let payment = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Get paid by card")).firstMatch
+        XCTAssertTrue(payment.exists)
+        XCTAssertTrue(payment.value as? String == "Status unavailable")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Setup status unavailable"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        retry.tap()
+        XCTAssertTrue(payment.waitForExistence(timeout: 10))
+        let recovered = NSPredicate(format: "value == %@", "Not done")
+        expectation(for: recovered, evaluatedWith: payment)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(retry.exists)
+        payment.tap()
+        XCTAssertTrue(app.staticTexts["Card payments and payouts run through Stripe. Stripe holds your bank and identity details; Thorbis never sees them."].waitForExistence(timeout: 15))
+    }
+}

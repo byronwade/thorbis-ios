@@ -420,8 +420,8 @@ struct OrganizationProfile: Decodable, Equatable {
 }
 
 extension APIClient {
-    func organizationProfile() async throws -> OrganizationProfile {
-        try await send("GET", "/v1/organization/profile")
+    func organizationProfile(requireFresh: Bool = false) async throws -> OrganizationProfile {
+        try await send("GET", "/v1/organization/profile", requireFresh: requireFresh)
     }
 
     func confirmOrganizationFact(_ key: String, value: String, actorID: String, organizationID: String) async throws {
@@ -784,6 +784,36 @@ final class BusinessSetupModel: ObservableObject {
 
     @Published var done: Set<Step> = []
     @Published var loaded = false
+    @Published private(set) var unavailable: Set<Step> = []
+    private var refreshID = UUID()
+    private struct Scope: Equatable {
+        let actor: String
+        let organization: String
+        let sessionGeneration: UUID
+        let authorityRevision: UUID
+        let apiGeneration: UUID
+        let apiOrigin: String
+        let policyVersion: Int?
+        let capabilities: Set<String>
+        let priceBookEnabled: Bool
+        let visible: Set<Step>
+    }
+    private var resultScope: Scope?
+
+    private func scope(api: APIClient, session: SessionController) -> Scope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id else { return nil }
+        return Scope(actor: actor, organization: organization, sessionGeneration: session.generation,
+                     authorityRevision: session.authorityRevision, apiGeneration: api.requestGeneration,
+                     apiOrigin: api.baseURL, policyVersion: session.policyVersion,
+                     capabilities: session.capabilities, priceBookEnabled: session.isFeatureOn("price_book"),
+                     visible: Set(steps(session)))
+    }
+
+    func isCurrent(api: APIClient, session: SessionController) -> Bool {
+        guard let resultScope else { return false }
+        return resultScope == scope(api: api, session: session)
+    }
 
     func steps(_ session: SessionController) -> [Step] {
         Step.allCases.filter { step in
@@ -795,21 +825,60 @@ final class BusinessSetupModel: ObservableObject {
         }
     }
 
-    /// Each step's state comes from the server; one that cannot be read stays open.
+    /// An unsuccessful read is unknown, never evidence that setup is incomplete.
     func refresh(api: APIClient, session: SessionController) async {
-        let visible = Set(steps(session))
-        var next: Set<Step> = []
-        if visible.contains(.details), (try? await api.organizationProfile())?.coreReady == true { next.insert(.details) }
-        if visible.contains(.payments), (try? await api.merchantReadiness())?.chargesReady == true { next.insert(.payments) }
-        if visible.contains(.services), let page = try? await api.priceBookItems(limit: 1), !page.items.isEmpty { next.insert(.services) }
-        if visible.contains(.team) {
-            let invited = (try? await api.pendingInvitations()).map { !$0.isEmpty } ?? false
-            let teammates = invited ? false : ((try? await api.roleMembers()).map { $0.count > 1 } ?? false)
-            if invited || teammates { next.insert(.team) }
+        let id = UUID()
+        refreshID = id
+        guard let binding = scope(api: api, session: session) else {
+            done = []; unavailable = []; resultScope = nil; loaded = false
+            return
         }
+        let visible = binding.visible
+        loaded = false
+        resultScope = nil
+        var next: Set<Step> = []
+        var unknown: Set<Step> = []
+        func stillCurrent() -> Bool {
+            refreshID == id && binding == scope(api: api, session: session) && !Task.isCancelled
+        }
+        if visible.contains(.details) {
+            do {
+                let profile = try await api.organizationProfile(requireFresh: true)
+                guard stillCurrent() else { return }
+                if profile.organizationId != binding.organization { unknown.insert(.details) }
+                else if profile.coreReady { next.insert(.details) }
+            } catch { unknown.insert(.details) }
+            guard stillCurrent() else { return }
+        }
+        if visible.contains(.payments) {
+            do { if try await api.merchantReadiness(requireFresh: true).chargesReady { next.insert(.payments) } }
+            catch { unknown.insert(.payments) }
+            guard stillCurrent() else { return }
+        }
+        if visible.contains(.services) {
+            do { let page = try await api.priceBookItems(limit: 1, requireFresh: true); if !page.items.isEmpty { next.insert(.services) } }
+            catch { unknown.insert(.services) }
+            guard stillCurrent() else { return }
+        }
+        if visible.contains(.team) {
+            let invited = try? await api.pendingInvitations(requireComplete: true, whileCurrent: stillCurrent)
+            guard stillCurrent() else { return }
+            if invited?.isEmpty == false {
+                next.insert(.team)
+            } else {
+                let members = try? await api.roleMembers(requireComplete: true, whileCurrent: stillCurrent)
+                guard stillCurrent() else { return }
+                if let members, members.count > 1 { next.insert(.team) }
+                else if invited == nil || members == nil { unknown.insert(.team) }
+            }
+        }
+        guard stillCurrent() else { return }
+        resultScope = binding
         done = next
+        unavailable = unknown
         loaded = true
     }
+
 }
 
 /// The owner's first-run checklist: four steps, each one tap away, each finished on the server.
@@ -819,27 +888,54 @@ struct BusinessSetupView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @StateObject private var model = BusinessSetupModel()
     @State private var inviting = false
 
     var body: some View {
         let steps = model.steps(session)
-        let doneCount = steps.filter { model.done.contains($0) }.count
+        let current = model.loaded && model.isCurrent(api: api, session: session)
+        let doneCount = current ? steps.filter { model.done.contains($0) }.count : 0
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text(presented ? "Set up \(session.activeOrganization?.name ?? "your business")" : "Set up your business")
                     .font(Theme.font(24, weight: .medium))
                     .accessibilityAddTraits(.isHeader)
-                Text(model.loaded ? "\(doneCount) of \(steps.count) done. Each step takes a minute or two, and you can come back any time from More."
+                Text(current && model.unavailable.isEmpty ? "\(doneCount) of \(steps.count) done. Each step takes a minute or two, and you can come back any time from More."
                                   : "Each step takes a minute or two, and you can come back any time from More.")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .padding(.top, 6)
-                ProgressView(value: Double(doneCount), total: Double(max(steps.count, 1)))
-                    .tint(Theme.success)
-                    .padding(.top, 16)
-                    .opacity(model.loaded ? 1 : 0)
-                    .accessibilityLabel("\(doneCount) of \(steps.count) steps done")
+                if current && model.unavailable.isEmpty {
+                    ProgressView(value: Double(doneCount), total: Double(max(steps.count, 1)))
+                        .tint(Theme.success)
+                        .padding(.top, 16)
+                        .accessibilityLabel("\(doneCount) of \(steps.count) steps done")
+                }
 
+                if current && !model.unavailable.isEmpty {
+                    if typeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Some steps couldn't be checked.", systemImage: "exclamationmark.triangle")
+                                .font(Theme.font(13)).foregroundStyle(Theme.foreground)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button { Task { await model.refresh(api: api, session: session) } } label: {
+                                Text("Try again").font(Theme.font(13, weight: .medium))
+                                    .padding(.horizontal, 12).frame(minHeight: 44)
+                                    .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                            }
+                            .buttonStyle(PressStyle())
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        .padding(.top, 16)
+                    } else {
+                        ErrorBanner(message: "Some steps couldn't be checked.") {
+                            await model.refresh(api: api, session: session)
+                        }
+                        .padding(.top, 16)
+                    }
+                }
                 VStack(spacing: 0) {
                     ForEach(steps) { step in
                         stepRow(step)
@@ -855,7 +951,7 @@ struct BusinessSetupView: View {
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .safeAreaInset(edge: .bottom) {
-            if presented, model.loaded, doneCount == steps.count {
+            if presented, current, doneCount == steps.count {
                 Button { dismiss() } label: { Text("Start using Thorbis").inkCommit() }
                     .buttonStyle(PressStyle())
                     .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
@@ -872,22 +968,23 @@ struct BusinessSetupView: View {
         .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
             InviteMemberSheet { _ in }
         }
-        .task { await model.refresh(api: api, session: session) }
-        .onAppear { Task { await model.refresh(api: api, session: session) } }
+        .task(id: [session.authorityRevision, api.requestGeneration]) { await model.refresh(api: api, session: session) }
     }
 
     @ViewBuilder
     private func stepRow(_ step: BusinessSetupModel.Step) -> some View {
-        let isDone = model.done.contains(step)
+        let current = model.loaded && model.isCurrent(api: api, session: session)
+        let isDone = current && model.done.contains(step)
+        let isUnknown = current && model.unavailable.contains(step)
         let label = HStack(alignment: .top, spacing: 14) {
-            Image(systemName: isDone ? "checkmark.circle.fill" : step.symbol)
+            Image(systemName: isDone ? "checkmark.circle.fill" : (isUnknown ? "exclamationmark.circle" : step.symbol))
                 .font(.system(size: 19))
                 .foregroundStyle(isDone ? Theme.success : Theme.muted)
                 .frame(width: 26)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(step.title).font(Theme.font(15, weight: .medium))
-                Text(isDone ? "Done" : step.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                Text(!current ? "Checking…" : (isDone ? "Done" : (isUnknown ? "Status unavailable" : step.subtitle))).font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
             Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
@@ -896,7 +993,7 @@ struct BusinessSetupView: View {
         .frame(minHeight: 56)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityValue(isDone ? "Done" : "Not done")
+        .accessibilityValue(!current ? "Checking" : (isDone ? "Done" : (isUnknown ? "Status unavailable" : "Not done")))
 
         switch step {
         case .details:
