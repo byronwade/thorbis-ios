@@ -100,6 +100,34 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Add a document"].isHittable)
     }
 
+    func testCaptureControlsPrecedeManyPendingUploadsAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let base = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-reset-media"]
+        app.launchArguments = base + ["--paper-preview-many-pending", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        defer { app.terminate(); app.launchArguments = base; app.launch(); app.terminate() }
+        let firstPending = app.descendants(matching: .any).matching(identifier: "pending-media-00000000-0000-4000-8000-000000009800").firstMatch
+        XCTAssertTrue(firstPending.waitForExistence(timeout: 20))
+        let library = app.buttons["Choose from library"]
+        XCTAssertTrue(library.exists)
+        XCTAssertLessThan(library.frame.minY, firstPending.frame.minY, "Capture should precede the pending queue")
+        XCTAssertTrue(app.staticTexts["Waiting to upload"].exists)
+        XCTAssertTrue(app.buttons["Retry"].exists)
+    }
+
+    func testEmptyPhotoFilterOffersReturnToAllPhotos() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media"]
+        app.launch()
+        XCTAssertTrue(app.buttons["After · 0"].waitForExistence(timeout: 20))
+        app.buttons["After · 0"].tap()
+        XCTAssertTrue(app.staticTexts["No matching photos"].exists)
+        XCTAssertFalse(app.staticTexts["No photos yet"].exists)
+        app.buttons["Show all photos"].tap()
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
+    }
+
     func testSavedScanRemainsJobBoundAfterNavigationAndRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()

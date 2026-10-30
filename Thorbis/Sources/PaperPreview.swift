@@ -286,6 +286,19 @@ enum PaperPreview {
                 catch { assertionFailure("Synthetic media fixture could not be saved: \(error)") }
             }
         }
+        if args.contains("--paper-preview-many-pending") {
+            store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
+            let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 100, height: 100)).pdfData { $0.beginPage() }
+            do {
+                guard let context = store.captureContext else { return store }
+                for number in 0..<20 {
+                    let id = String(format: "00000000-0000-4000-8000-%012d", 9800 + number)
+                    try store.save(.init(id: id, jobID: jobID, filename: "Pending scan \(number + 1).pdf", tags: [],
+                                         capturedAt: Date(timeIntervalSince1970: 1_700_000_000 + Double(number)),
+                                         kind: "document", mime: "application/pdf"), data: pdf, context: context)
+                }
+            } catch { assertionFailure("Synthetic pending media failed: \(error)") }
+        }
         if args.contains("--paper-preview-seed-legacy") {
             do {
                 let folder = root.appendingPathComponent("PendingPhotos")
