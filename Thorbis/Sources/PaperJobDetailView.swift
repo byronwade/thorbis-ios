@@ -963,6 +963,16 @@ struct JobDetailView: View {
 
     private func invoiceContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 15) {
+            if typedJobsOwner != nil, let returnedID = returnInvoiceID, !returnRefreshPending,
+               returnVerifiedInvoiceID != nil, let invoice = selectedInvoice, invoice.status != "draft",
+               !JobInvoiceReturnIdentity.permits(returnedID: returnedID, selectedID: invoice.id,
+                    modelID: invoicePaymentModel?.invoice?.id, verifiedID: returnCoordinator.visibleInvoiceID(in: currentTypedContext),
+                    recordsMatch: invoicePaymentModel?.invoice == invoice) {
+                Text("This invoice changed or cannot be collected. Refresh the job, then open this invoice again to review it.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("typed-invoice-refresh-guidance")
+            }
             if !session.can("invoice.view", feature: "invoicing") {
                 emptyCard("Invoice access is unavailable.")
             } else if !invoicesLoaded {
