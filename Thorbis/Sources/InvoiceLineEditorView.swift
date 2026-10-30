@@ -22,6 +22,7 @@ struct InvoiceLineEditorView: View {
     @State private var kind = PriceBookKindFilter.all
     @State private var addedLineSelection: InvoiceCatalogLineSelection?
     @State private var editingAddedLine = false
+    @State private var editingAccessibleLine = false
     @State private var focusedNumber: InvoiceNumericField?
     @FocusState private var focus: EstimateBuilderFocus?
 
@@ -34,7 +35,7 @@ struct InvoiceLineEditorView: View {
     }
 
     private var activeFocusedNumber: InvoiceNumericField? {
-        guard editingAddedLine, dynamicTypeSize.isAccessibilitySize,
+        guard editingAccessibleLine, dynamicTypeSize.isAccessibilitySize,
               let focusedNumber, focusedNumber.lineID == addedLineID else { return nil }
         return focusedNumber
     }
@@ -76,7 +77,6 @@ struct InvoiceLineEditorView: View {
     }
 
     var body: some View {
-        ScrollViewReader { scrollProxy in
         ScrollView {
             if let error {
                 ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12)
@@ -189,15 +189,7 @@ struct InvoiceLineEditorView: View {
             .frame(maxWidth: .infinity)
             }
         }
-        .scrollDismissesKeyboard(editingAddedLine && dynamicTypeSize.isAccessibilitySize ? .never : .interactively)
-        .onChange(of: focusedNumber) { _, _ in
-            if let field = activeFocusedNumber { scrollProxy.scrollTo(field, anchor: .top) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
-            if let field = activeFocusedNumber {
-                withAnimation { scrollProxy.scrollTo(field, anchor: .top) }
-            }
-        }
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Edit invoice")
@@ -210,25 +202,9 @@ struct InvoiceLineEditorView: View {
         .keyboardDoneButton()
         .safeAreaInset(edge: .top, spacing: 0) {
             if canEdit && !editor.hasUnsupportedLineSources {
-                Group {
-                    if editingAddedLine && dynamicTypeSize.isAccessibilitySize {
-                        HStack {
-                            Button("Results") { editingAddedLine = false }
-                                .accessibilityLabel("Back to results")
-                            Spacer(minLength: 12)
-                            Button("Done", action: finishSearch)
-                        }
-                        .font(Theme.font(17, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                        .frame(minHeight: 44)
-                        .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
-                        .background(Theme.background)
-                    } else {
-                        EstimateSearchBar(query: catalogQuery, kind: catalogKind, focus: $focus, searching: searching,
-                                          prompt: "Search price book or type a line", compactFiltersWhileSearching: true,
-                                          finish: finishSearch)
-                    }
-                }
+                EstimateSearchBar(query: catalogQuery, kind: catalogKind, focus: $focus, searching: searching,
+                                  prompt: "Search price book or type a line", compactFiltersWhileSearching: true,
+                                  finish: finishSearch)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("invoice-catalog-search")
                 .disabled(busy)
@@ -240,7 +216,10 @@ struct InvoiceLineEditorView: View {
             if expanded { focus = nil } else { focusedNumber = nil }
         }
         .onChange(of: addedLineID) { old, new in
-            if old != new { focusedNumber = nil }
+            if old != new {
+                focusedNumber = nil
+                if new == nil { editingAccessibleLine = false }
+            }
         }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) {
@@ -264,11 +243,17 @@ struct InvoiceLineEditorView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $editingAccessibleLine, onDismiss: {
+            focusedNumber = nil
+            editingAddedLine = false
+        }) {
+            NavigationStack { accessibleAddedLineEditor }
+                .presentationDetents([.large])
+        }
         .thorbisConfirm("Reload the latest invoice?",
                         message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
                         isPresented: $confirmReload,
                         actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
-        }
     }
 
     private var invoiceCommitActions: some View {
@@ -321,51 +306,21 @@ struct InvoiceLineEditorView: View {
         if let selectedID = addedLineID {
             ForEach($editor.lines) { $line in
                 if line.id == selectedID {
-                    DisclosureGroup(isExpanded: $editingAddedLine) {
-                        EditableInvoiceLineRow(
-                            line: committedLine($line),
-                            canMoveUp: editor.lines.first?.id != line.id,
-                            canMoveDown: editor.lines.last?.id != line.id,
-                            moveUp: { moveLine(line.id, offset: -1) },
-                            moveDown: { moveLine(line.id, offset: 1) },
-                            onNumberFocus: { focusedNumber = $0 },
-                            remove: {
-                                do {
-                                    try editor.removeLine(id: line.id)
-                                    addedLineSelection = nil
-                                    editingAddedLine = false
-                                    error = nil
-                                } catch { self.error = error.localizedDescription }
-                            }
-                        )
-                        if editor.needsPriceBookOverrideReason {
-                            priceBookOverrideReasonField.padding(.top, 8)
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Button {
+                                focus = nil
+                                editingAddedLine = true
+                                editingAccessibleLine = true
+                            } label: { addedLineLabel(line) }
+                            .buttonStyle(.plain)
+                        } else {
+                            DisclosureGroup(isExpanded: $editingAddedLine) {
+                                addedLineFields($line)
+                            } label: { addedLineLabel(line) }
+                            .tint(Theme.foreground)
                         }
-                    } label: {
-                        Group {
-                            if dynamicTypeSize.isAccessibilitySize {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Edit added line").font(Theme.font(15, weight: .medium))
-                                    Text(line.description).font(Theme.font(15)).lineLimit(1)
-                                    Text(addedLineSummary(line)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
-                                }
-                            } else {
-                                HStack(spacing: 8) {
-                                    Text("Edit added line").font(Theme.font(15, weight: .medium))
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(line.description).font(Theme.font(15)).lineLimit(1)
-                                        Text(addedLineSummary(line)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
-                                    }
-                                }
-                            }
-                        }
-                        .foregroundStyle(Theme.foreground)
-                        .frame(minHeight: 24)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityValue("\(line.description), \(addedLineSummary(line))")
                     }
-                    .tint(Theme.foreground)
                     .padding(12)
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     .accessibilityElement(children: .contain)
@@ -374,6 +329,88 @@ struct InvoiceLineEditorView: View {
                 }
             }
         }
+    }
+
+    private func addedLineLabel(_ line: InvoiceLineDraft) -> some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Edit added line").font(Theme.font(15, weight: .medium))
+                    Text(line.description).font(Theme.font(15)).lineLimit(1)
+                    Text(addedLineSummary(line)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    Text("Edit added line").font(Theme.font(15, weight: .medium))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(line.description).font(Theme.font(15)).lineLimit(1)
+                        Text(addedLineSummary(line)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+        }
+        .foregroundStyle(Theme.foreground)
+        .frame(minHeight: 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue("\(line.description), \(addedLineSummary(line))")
+    }
+
+    @ViewBuilder private func addedLineFields(_ line: Binding<InvoiceLineDraft>) -> some View {
+        EditableInvoiceLineRow(
+            line: committedLine(line),
+            canMoveUp: editor.lines.first?.id != line.wrappedValue.id,
+            canMoveDown: editor.lines.last?.id != line.wrappedValue.id,
+            moveUp: { moveLine(line.wrappedValue.id, offset: -1) },
+            moveDown: { moveLine(line.wrappedValue.id, offset: 1) },
+            onNumberFocus: { focusedNumber = $0 },
+            remove: {
+                do {
+                    try editor.removeLine(id: line.wrappedValue.id)
+                    addedLineSelection = nil
+                    editingAddedLine = false
+                    editingAccessibleLine = false
+                    error = nil
+                } catch { self.error = error.localizedDescription }
+            }
+        )
+        if editor.needsPriceBookOverrideReason {
+            priceBookOverrideReasonField.padding(.top, 8)
+        }
+    }
+
+    private var accessibleAddedLineEditor: some View {
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                if let selectedID = addedLineID {
+                    ForEach($editor.lines) { $line in
+                        if line.id == selectedID {
+                            VStack(alignment: .leading, spacing: 8) { addedLineFields($line) }
+                                .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("invoice-line-focus-editor")
+                        }
+                    }
+                }
+            }
+            .scrollDismissesKeyboard(.never)
+            .onChange(of: focusedNumber) { _, _ in
+                if let field = activeFocusedNumber { scrollProxy.scrollTo(field, anchor: .top) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                if let field = activeFocusedNumber {
+                    withAnimation { scrollProxy.scrollTo(field, anchor: .top) }
+                }
+            }
+        }
+        .background(Theme.background)
+        .foregroundStyle(Theme.foreground)
+        .navigationTitle("Line details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .confirmationAction) {
+            Button("Done") { editingAccessibleLine = false }
+        } }
+        .keyboardDoneButton()
     }
 
     private func addedLineSummary(_ line: InvoiceLineDraft) -> String {

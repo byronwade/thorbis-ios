@@ -106,19 +106,22 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Save draft"].exists)
         XCTAssertFalse(app.buttons["Issue invoice"].exists)
         added.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Edit added line")).firstMatch.tap()
-        let description = added.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        let lineNavigation = app.navigationBars["Line details"]
+        XCTAssertTrue(lineNavigation.waitForExistence(timeout: 5), "Large-text editing needs a full-height focused surface")
+        let focusedEditor = app.otherElements["invoice-line-focus-editor"]
+        XCTAssertTrue(focusedEditor.waitForExistence(timeout: 5))
+        let description = focusedEditor.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
         XCTAssertTrue(description.waitForExistence(timeout: 5))
         let identity = String(description.identifier.dropFirst("invoice-line-description-".count))
-        let quantity = added.otherElements["invoice-line-quantity-" + identity].textFields.firstMatch
-        let searchBar = app.otherElements["invoice-catalog-search"]
-        revealControl(quantity, below: searchBar, in: app)
+        let quantity = focusedEditor.otherElements["invoice-line-quantity-" + identity].textFields.firstMatch
+        revealControl(quantity, below: lineNavigation, in: app)
         XCTAssertGreaterThan(quantity.frame.width, 200, "Accessibility quantity editing must have room for the full value")
-        let price = added.textFields["Unit price in dollars"]
+        let price = focusedEditor.textFields["Unit price in dollars"]
         XCTAssertEqual(price.value as? String, "245.00")
         XCTAssertGreaterThan(price.frame.width, 200, "The full unit price must fit without a clipped money well")
         quantity.tap()
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
-        assertFocusedNumberVisible(quantity, below: searchBar, in: app)
+        assertFocusedNumberVisible(quantity, below: lineNavigation, in: app)
         XCTAssertEqual(quantity.value as? String, "1")
         replaceQuantityWithTen(quantity, in: app)
         XCTAssertEqual(quantity.value as? String, "10")
@@ -126,11 +129,11 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         editingProof.name = "Largest text quantity editing above the keyboard after scrolling"
         editingProof.lifetime = .keepAlways
         add(editingProof)
-        revealControl(price, below: searchBar, in: app)
+        revealControl(price, below: lineNavigation, in: app)
         XCTAssertEqual(price.value as? String, "245.00")
         price.tap()
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
-        assertFocusedNumberVisible(price, below: searchBar, in: app)
+        assertFocusedNumberVisible(price, below: lineNavigation, in: app)
         XCTAssertEqual(price.value as? String, "245.00")
         replaceVisibleNumber(price, original: "245.00", with: "275.00", in: app)
         XCTAssertEqual(price.value as? String, "275.00", "The unit price must be editable at the largest text size")
@@ -138,14 +141,14 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         priceProof.name = "Largest text full unit price above the decimal keyboard"
         priceProof.lifetime = .keepAlways
         add(priceProof)
-        searchBar.buttons["Back to results"].tap()
+        lineNavigation.buttons["Done"].tap()
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         XCTAssertEqual(search.value as? String, "Camera sewer inspection")
         XCTAssertTrue(search.isHittable, "Returning to results must leave the search field reachable")
         search.tap()
         XCTAssertEqual(search.value as? String, "Camera sewer inspection")
         XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009999"].waitForExistence(timeout: 5))
-        searchBar.buttons["Done"].tap()
+        app.otherElements["invoice-catalog-search"].buttons["Done"].tap()
         XCTAssertFalse(added.exists)
         XCTAssertTrue(app.buttons["Save draft"].isHittable)
         XCTAssertTrue(app.buttons["Issue invoice"].isHittable)
