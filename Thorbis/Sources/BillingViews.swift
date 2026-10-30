@@ -98,7 +98,7 @@ struct BillingSchedulesView: View {
                 ForEach(paperDocumentGroups(schedules, status: \.status, order: ["open", "closed"]), id: \.0) { status, group in
                     PaperGroupHeader(title: status == "open" ? "Open" : "Closed", count: group.count).padding(.top, 6)
                     ForEach(group) { schedule in
-                        NavigationLink(value: PaperRoute.billingSchedule(schedule.id)) {
+                        PaperCompatibleLink(value: PaperRoute.billingSchedule(schedule.id)) {
                             PaperDocumentRow(kind: .billingSchedule, reference: "SOV-\(schedule.id.suffix(4).uppercased())",
                                              title: store.customerName(schedule.customerId),
                                              subtitle: "\(schedule.lines.count) line\(schedule.lines.count == 1 ? "" : "s")\(schedule.retainageRateBps > 0 ? " · \(schedule.retainageRateBps / 100)% retainage" : "")",

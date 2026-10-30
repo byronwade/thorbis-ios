@@ -94,7 +94,7 @@ struct CustomersView: View {
         let summaryJob = JobFiltering.customerJobSummary(store.jobs, customerID: customer.id, now: now)?.job
         let jobCount = store.jobs.filter { $0.customerId == customer.id }.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
-        return NavigationLink(value: listCustomer) {
+        return PaperCompatibleLink(value: listCustomer) {
             HStack(alignment: .center, spacing: 12) {
                 Text(initials(customer.name))
                     .font(Theme.font(16, weight: .semibold))
@@ -523,7 +523,7 @@ struct CustomerDetailView: View {
             let job = summary.job
             VStack(alignment: .leading, spacing: 8) {
                 PaperGroupHeader(title: summary.openCount > 1 ? "\(summary.heading) · \(summary.openCount) open" : summary.heading)
-                NavigationLink(value: job) {
+                PaperCompatibleLink(value: job) {
                     HStack(alignment: .top, spacing: 12) {
                         StatusRing(status: job.status).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 5) {
@@ -753,7 +753,7 @@ struct CustomerDetailView: View {
         VStack(alignment: .leading, spacing: 2) {
             sectionTitle("All jobs", count: jobs.count)
             ForEach(jobs) { job in
-                NavigationLink(value: job) {
+                PaperCompatibleLink(value: job) {
                     HStack(spacing: 12) {
                         Image(systemName: statusIcon(job.status).0).foregroundStyle(statusIcon(job.status).1).frame(width: 16)
                         VStack(alignment: .leading, spacing: 2) {

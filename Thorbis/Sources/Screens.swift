@@ -693,34 +693,34 @@ struct MoreView: View {
                         group(section.rawValue) {
                             ForEach(items) { item in
                                 if let route = item.route {
-                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint) }
+                                    PaperCompatibleLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint) }
                                 }
                             }
                             ForEach(local, id: \.self) { section in
-                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt) }
+                                PaperCompatibleLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt) }
                             }
                         }
                     }
                 }
                 group("Account") {
                     if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.businessSetup) {
+                        PaperCompatibleLink(value: PaperRoute.businessSetup) {
                             PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Company details, payments, services and team", tile: Theme.markAccent)
                         }
-                        NavigationLink(value: PaperRoute.companyDetails) {
+                        PaperCompatibleLink(value: PaperRoute.companyDetails) {
                             PaperMenuRow("Company details", symbol: "building.2", subtitle: "Name, address and phone customers see", tile: Theme.markOlive)
                         }
                     }
                     if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.payments) {
+                        PaperCompatibleLink(value: PaperRoute.payments) {
                             PaperMenuRow("Payments", symbol: "creditcard", subtitle: "Stripe setup, card payments and payouts", tile: Theme.markForest)
                         }
                     }
-                    NavigationLink(value: PaperRoute.customizeMenu) {
+                    PaperCompatibleLink(value: PaperRoute.customizeMenu) {
                         PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
                     }
                     // MA-19: the notes stay one tap away on iPad too, where the gear opens More.
-                    NavigationLink(value: PaperRoute.whatsNew) {
+                    PaperCompatibleLink(value: PaperRoute.whatsNew) {
                         PaperMenuRow("What's new", symbol: "sparkles", subtitle: "What changed in recent updates", tile: Theme.markAccent)
                     }
                     HStack(spacing: 12) {

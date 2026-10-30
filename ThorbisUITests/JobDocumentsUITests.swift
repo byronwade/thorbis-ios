@@ -203,6 +203,33 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
     }
 
+    func testTypedJobsRouteRetainsSelectedInvoiceAfterReturn() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment"], screen: "job-invoice")
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15))
+        first.tap()
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 10))
+        collect.tap()
+        XCTAssertTrue(app.navigationBars["Collect payment"].waitForExistence(timeout: 5))
+        let collection = app.scrollViews.containing(.textField, identifier: "Amount to collect in dollars").firstMatch
+        XCTAssertTrue(collection.staticTexts["INV-2209"].exists)
+        XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
+    }
+
+    func testTypedJobsRouteDoesNotCollectAnotherInvoiceAfterPaidDocument() {
+        let app = launch(["--invoice-route-owner-experiment"], screen: "job-invoice")
+        let paid = app.buttons["job-invoice-\(second)"]
+        XCTAssertTrue(paid.waitForExistence(timeout: 15))
+        paid.tap()
+        XCTAssertTrue(app.staticTexts["INV-2240"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["job-invoice-\(second)"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Collect payment"].isHittable, "Returning from a paid invoice must not collect another invoice")
+    }
+
     func testLegacyCustomerRefreshKeepsBothKnownJobInvoices() {
         let app = launch(["--paper-preview-job-invoices-legacy"])
         ready(app)

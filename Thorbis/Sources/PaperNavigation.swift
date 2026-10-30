@@ -20,6 +20,8 @@ struct RootView: View {
     @State private var path = NavigationPath()
     @State private var schedulePath = NavigationPath()
     @State private var jobsPath = NavigationPath()
+    @State private var typedJobsPath: [PaperTypedJobsRoute] = []
+    @StateObject private var typedJobsOwner = PaperTypedJobsOwner()
     @State private var customersPath = NavigationPath()
     @State private var morePath = NavigationPath()
     @State private var search = false
@@ -390,7 +392,7 @@ struct RootView: View {
             case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups":
                 if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs
-                    jobsPath.append(job)
+                    if typedJobsExperiment { typedJobsPath.append(.job(job)) } else { jobsPath.append(job) }
                     if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
                     if PaperPreview.screen == "job-assign" { jobsPath.append(PaperRoute.assign(jobID: job.id)) }
                     if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
@@ -417,7 +419,7 @@ struct RootView: View {
     private var atTabRoot: Bool {
         switch selectedTab {
         case PrimaryTab.schedule.rawValue: schedulePath.isEmpty
-        case PrimaryTab.jobs.rawValue: jobsPath.isEmpty
+        case PrimaryTab.jobs.rawValue: typedJobsExperiment ? typedJobsPath.isEmpty : jobsPath.isEmpty
         case PrimaryTab.customers.rawValue: customersPath.isEmpty
         case PrimaryTab.more.rawValue: morePath.isEmpty
         case PrimaryTab.search.rawValue: false
@@ -488,12 +490,51 @@ struct RootView: View {
     @ViewBuilder private func tabRoot(_ item: MenuItem) -> some View {
         switch item {
         case .schedule: NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.paperDestinations() }
-        case .jobs: NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.paperDestinations() }
+        case .jobs:
+            if typedJobsExperiment {
+                NavigationStack(path: Binding(get: { typedJobsPath }, set: { next in
+                    let old = typedJobsPath
+                    typedJobsPath = next
+                    typedJobsOwner.changed(from: old, to: next)
+                })) {
+                    gated(.jobs) { JobsView() }
+                        .environment(\.paperTypedJobsOwner, typedJobsOwner)
+                        .navigationDestination(for: PaperTypedJobsRoute.self) { route in
+                            typedJobsDestination(route).environment(\.paperTypedJobsOwner, typedJobsOwner)
+                        }
+                }
+            } else {
+                NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.paperDestinations() }
+            }
         case .customers: NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.paperDestinations() }
         default:
             NavigationStack(path: Binding(get: { customPaths[item.rawValue] ?? NavigationPath() },
                                           set: { customPaths[item.rawValue] = $0 })) {
                 if let route = item.route { PaperRouteView(route: route).paperDestinations() }
+            }
+        }
+    }
+
+    private var typedJobsExperiment: Bool {
+        #if DEBUG
+        return PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--invoice-route-owner-experiment")
+        #else
+        return false
+        #endif
+    }
+
+    @ViewBuilder private func typedJobsDestination(_ route: PaperTypedJobsRoute) -> some View {
+        switch route {
+        case .job(let job): JobDetailView(jobId: job.id)
+        case .customer(let customer): CustomerDetailView(customer: customer)
+        case .paper(let value): PaperRouteView(route: value)
+        case .invoice(let value):
+            if session.phase == .ready, session.user?.id == value.actorID,
+               session.activeOrganization?.id == value.organizationID, session.generation == value.sessionGeneration,
+               session.authorityRevision == value.authorityRevision, session.can("invoice.view", feature: "invoicing") {
+                InvoiceDetailView(id: value.invoiceID, expectedJobScope: .init(jobID: value.jobID, organizationID: value.organizationID, customerID: value.customerID))
+            } else {
+                ContentUnavailableView("Invoice unavailable", systemImage: "lock", description: Text("Return to the job to refresh this invoice."))
             }
         }
     }
@@ -832,7 +873,7 @@ struct PaperGlobalSearch: View {
                         } else if !recent.isEmpty {
                             PaperGroupHeader(title: "Open jobs").padding(.top, opened.isEmpty ? 8 : 16)
                             ForEach(Array(recent)) { job in
-                                NavigationLink(value: job) {
+                                PaperCompatibleLink(value: job) {
                                     HStack(spacing: 12) {
                                         StatusRing(status: job.status).accessibilityHidden(true)
                                         VStack(alignment: .leading, spacing: 2) {
@@ -863,7 +904,7 @@ struct PaperGlobalSearch: View {
                         if session.can("job.view", feature: "jobs"), !jobs.isEmpty {
                             PaperGroupHeader(title: "Jobs", count: jobs.count).padding(.top, 8)
                             ForEach(jobs) { job in
-                                NavigationLink(value: job) {
+                                PaperCompatibleLink(value: job) {
                                     HStack(spacing: 10) {
                                         StatusRing(status: job.status)
                                         Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
@@ -877,7 +918,7 @@ struct PaperGlobalSearch: View {
                         if session.can("customer.view", feature: "core_crm"), !customers.isEmpty {
                             PaperGroupHeader(title: "Customers", count: customers.count).padding(.top, 16)
                             ForEach(customers) { customer in
-                                NavigationLink(value: customer) {
+                                PaperCompatibleLink(value: customer) {
                                     HStack(spacing: 12) {
                                         Avatar(name: customer.name, size: 26)
                                         Text(customer.name).font(Theme.font(15, weight: .medium))
@@ -951,18 +992,18 @@ struct PaperGlobalSearch: View {
         .frame(minHeight: 50).contentShape(Rectangle())
         switch result.resultType {
         case "job":
-            NavigationLink(value: store.jobs.first { $0.id == result.entityId }
+            PaperCompatibleLink(value: store.jobs.first { $0.id == result.entityId }
                            ?? Job(id: result.entityId, customerId: nil, title: result.title, status: result.status ?? "scheduled",
                                   createdAt: nil, updatedAt: nil, allowedTransitions: nil)) { row }.buttonStyle(RowPressStyle())
         case "customer":
-            NavigationLink(value: store.customers.first { $0.id == result.entityId }
+            PaperCompatibleLink(value: store.customers.first { $0.id == result.entityId }
                            ?? Customer(id: result.entityId, name: result.title, archived: nil, createdAt: nil)) { row }.buttonStyle(RowPressStyle())
         case "estimate":
-            NavigationLink(value: PaperRoute.estimate(result.entityId)) { row }.buttonStyle(RowPressStyle())
+            PaperCompatibleLink(value: PaperRoute.estimate(result.entityId)) { row }.buttonStyle(RowPressStyle())
         case "invoice":
-            NavigationLink(value: PaperRoute.invoice(result.entityId)) { row }.buttonStyle(RowPressStyle())
+            PaperCompatibleLink(value: PaperRoute.invoice(result.entityId)) { row }.buttonStyle(RowPressStyle())
         case "billing_schedule":
-            NavigationLink(value: PaperRoute.billingSchedule(result.entityId)) { row }.buttonStyle(RowPressStyle())
+            PaperCompatibleLink(value: PaperRoute.billingSchedule(result.entityId)) { row }.buttonStyle(RowPressStyle())
         default:
             row.opacity(0.6)
         }

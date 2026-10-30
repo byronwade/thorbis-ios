@@ -152,7 +152,7 @@ struct SavedWorkReviewView: View {
         }
     }
     private func openJob(_ group: SavedWorkGroup) -> some View {
-        NavigationLink(value: PaperRoute.job(group.jobID)) {
+        PaperCompatibleLink(value: PaperRoute.job(group.jobID)) {
             HStack(spacing: 8) { Text("Open job"); Image(systemName: "chevron.right") }
                 .font(Theme.font(15, weight: .medium)).frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
         }

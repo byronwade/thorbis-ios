@@ -88,7 +88,7 @@ struct CustomerRecordsView: View {
                 .buttonStyle(.plain).accessibilityLabel("Photo, \(title)")
                 .accessibilityIdentifier("customer-photo-\(asset.id)")
             } else {
-                NavigationLink(value: PaperRoute.media(jobID: jobID, assetID: asset.id)) {
+                PaperCompatibleLink(value: PaperRoute.media(jobID: jobID, assetID: asset.id)) {
                     photoCardBody(title: title, status: asset.uploadState == "stored" ? nil : asset.uploadState.statusLabel) {
                         MediaThumbnail(record: asset)
                     }
@@ -153,13 +153,13 @@ struct CustomerRecordsView: View {
                 jobHeading(group.title, jobID: group.jobID, count: group.count)
                 ForEach(group.items) { item in
                     let pair = row(item)
-                    NavigationLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
+                    PaperCompatibleLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
                 }
             }
             if !extra.isEmpty {
                 Text("Not on a job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
                 ForEach(Array(extra.enumerated()), id: \.offset) { _, pair in
-                    NavigationLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
+                    PaperCompatibleLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
                 }
             }
         }
@@ -226,7 +226,7 @@ struct CustomerRecordsView: View {
     }
 
     private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false) -> some View {
-        NavigationLink(value: PaperRoute.job(jobID)) {
+        PaperCompatibleLink(value: PaperRoute.job(jobID)) {
             HStack(spacing: 6) {
                 Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
                 Text(incomplete ? "Partial" : "\(count)").font(Theme.font(12)).foregroundStyle(Theme.muted)

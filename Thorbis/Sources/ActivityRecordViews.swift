@@ -15,7 +15,7 @@ struct ActivityLink<Content: View>: View {
 
     var body: some View {
         if let destination {
-            NavigationLink(value: destination.route) { label }
+            PaperCompatibleLink(value: destination.route) { label }
                 .buttonStyle(RowPressStyle())
         } else {
             label

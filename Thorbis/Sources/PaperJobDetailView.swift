@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -18,6 +19,7 @@ struct JobDetailView: View {
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.paperTypedJobsOwner) private var typedJobsOwner
     @State private var job: JobRecord?
     @State private var showCustomerMode = false
     @State private var showCommercialDocuments = false
@@ -39,6 +41,12 @@ struct JobDetailView: View {
     private var invoicesLoaded: Bool { invoiceRead != nil }
     private var invoicesFailed: Bool { invoiceRead?.isComplete == false }
     @State private var selectedInvoiceID: String?
+    @State private var returnCoordinator = JobInvoiceReturnCoordinator()
+    @State private var returnInvoiceID: String?
+    @State private var returnVerifiedInvoiceID: String?
+    @State private var returnRefreshPending = false
+    @State private var returnRequestID: UUID?
+    @State private var returnRefreshTask: Task<Void, Never>?
     @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
     @State private var loadedInvoiceModelID: String?
     @State private var showCollectPayment = false
@@ -182,6 +190,7 @@ struct JobDetailView: View {
         }
         .sheet(isPresented: $showDeposit) {
             JobDepositSheet(jobID: jobId) { invoice in
+                clearTypedReturn()
                 selectedInvoiceID = invoice.id
                 Task { await loadInvoices() }
             }
@@ -273,6 +282,22 @@ struct JobDetailView: View {
             if tab == "Invoice" { Task { await loadInvoices() } }
             // Photos added on the Photos tab show in the Overview count straight away (JS-09).
             if previous == "Photos" { Task { await loadMediaCount() } }
+        }
+        .onReceive(typedJobsOwner?.$pop.compactMap { $0 }.eraseToAnyPublisher() ?? Empty<PaperTypedJobsOwner.Pop, Never>().eraseToAnyPublisher()) { event in
+            acceptTypedPop(event)
+        }
+        .onChange(of: job) { _, _ in
+            if let event = typedJobsOwner?.pop { acceptTypedPop(event) }
+        }
+        .onChange(of: session.authorityRevision) { _, _ in
+            guard typedJobsOwner != nil else { return }
+            returnRefreshTask?.cancel()
+            returnRequestID = nil
+            returnCoordinator.invalidate()
+            returnVerifiedInvoiceID = nil
+            returnRefreshPending = false
+            invoicePaymentModel = nil
+            loadedInvoiceModelID = nil
         }
         .onChange(of: selectedInvoiceID) { _, selectedID in
             guard let selectedID, let invoice = invoices.first(where: { $0.id == selectedID }) else { return }
@@ -387,7 +412,7 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let customer = store.customers.first(where: { $0.id == job.customerId }),
                session.can("customer.view", feature: "core_crm") {
-                NavigationLink(value: customer) {
+                PaperCompatibleLink(value: customer) {
                     HStack(alignment: .center, spacing: 6) {
                         Image(systemName: "person.fill")
                             .font(.system(size: 12, weight: .semibold))
@@ -676,10 +701,13 @@ struct JobDetailView: View {
             } else if canBuildEstimate {
                 PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
             }
-        } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
+        } else if selectedTab == "Invoice", !returnRefreshPending,
+                  let invoice = selectedInvoice, invoice.status == "draft",
+                  (returnInvoiceID == nil || (returnVerifiedInvoiceID == invoice.id && returnInvoiceID == invoice.id)),
                   session.can("invoice.view", feature: "invoicing") {
             PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
-        } else if selectedTab == "Invoice",
+        } else if selectedTab == "Invoice", !returnRefreshPending,
+                  (returnInvoiceID == nil || returnCoordinator.visibleInvoiceID(in: currentTypedContext) == returnInvoiceID),
                   session.can("invoice.payment.create", feature: "payments"),
                   let invoice = selectedInvoice,
                   let model = invoicePaymentModel,
@@ -873,17 +901,106 @@ struct JobDetailView: View {
             } else {
                 PaperGroupHeader(title: "Invoices", count: invoices.count)
                 ForEach(invoices) { invoice in
-                    Button {
-                        selectedInvoiceID = invoice.id
-                        documentInvoiceID = invoice.id
-                    } label: {
-                        JobDocumentRow(invoice: invoice, fresh: invoiceRead?.freshIDs.contains(invoice.id) == true)
+                    if typedJobsOwner != nil {
+                        if let route = typedRoute(for: invoice, job: job) {
+                            PaperCompatibleLink(value: route) {
+                                JobDocumentRow(invoice: invoice, fresh: invoiceRead?.freshIDs.contains(invoice.id) == true)
+                            }
+                            .buttonStyle(PressStyle())
+                            .accessibilityIdentifier("job-invoice-\(invoice.id)")
+                            .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true || returnRefreshPending)
+                        } else {
+                            JobDocumentRow(invoice: invoice, fresh: false)
+                        }
+                    } else {
+                        Button {
+                            selectedInvoiceID = invoice.id
+                            documentInvoiceID = invoice.id
+                        } label: {
+                            JobDocumentRow(invoice: invoice, fresh: invoiceRead?.freshIDs.contains(invoice.id) == true)
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("job-invoice-\(invoice.id)")
+                        .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true)
                     }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("job-invoice-\(invoice.id)")
-                    .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true)
                 }
             }
+        }
+    }
+
+    private var currentTypedContext: JobInvoiceReturnContext? {
+        guard session.phase == .ready, let job, let actor = session.user?.id,
+              session.activeOrganization?.id == job.organizationId,
+              session.can("invoice.view", feature: "invoicing") else { return nil }
+        return .init(jobID: job.id, organizationID: job.organizationId, customerID: job.customerId,
+                     actorID: actor, sessionGeneration: session.generation, authorityRevision: session.authorityRevision)
+    }
+
+    private func typedRoute(for invoice: InvoiceRecord, job: JobRecord) -> JobInvoiceRoute? {
+        guard let context = currentTypedContext, scope(for: job)?.contains(invoice) == true else { return nil }
+        return .init(jobID: context.jobID, invoiceID: invoice.id, organizationID: context.organizationID,
+                     customerID: context.customerID, actorID: context.actorID,
+                     sessionGeneration: context.sessionGeneration, authorityRevision: context.authorityRevision)
+    }
+
+    private func clearTypedReturn() {
+        guard typedJobsOwner != nil else { return }
+        returnRefreshTask?.cancel()
+        returnRequestID = nil
+        returnCoordinator.invalidate()
+        returnInvoiceID = nil
+        returnVerifiedInvoiceID = nil
+        returnRefreshPending = false
+    }
+
+    private func acceptTypedPop(_ event: PaperTypedJobsOwner.Pop) {
+        guard let job, job.id == event.route.jobID else { return }
+        typedJobsOwner?.consume(event.id)
+        refreshTypedReturn(event.route)
+    }
+
+    private func refreshTypedReturn(_ route: JobInvoiceRoute) {
+        guard let request = returnCoordinator.begin(route, context: currentTypedContext), let job,
+              let scope = scope(for: job) else { return }
+        returnRefreshTask?.cancel()
+        returnInvoiceID = route.invoiceID
+        returnVerifiedInvoiceID = nil
+        returnRefreshPending = true
+        returnRequestID = request
+        invoicePaymentModel = nil
+        loadedInvoiceModelID = nil
+        returnRefreshTask = Task {
+            let published = await documents.loadInvoices(scope: scope, api: api) {
+                currentTypedContext?.contains(route) == true && !Task.isCancelled
+            }
+            guard !Task.isCancelled, returnRequestID == request else { return }
+            guard published, currentTypedContext?.contains(route) == true,
+                  invoiceRead?.isComplete == true, invoiceRead?.freshIDs.contains(route.invoiceID) == true,
+                  let invoice = invoices.first(where: { $0.id == route.invoiceID }), scope.contains(invoice) else {
+                returnCoordinator.finish(requestID: request, context: currentTypedContext, fresh: false, actualInvoiceID: nil, canCollect: false)
+                error = "The invoice could not be verified. Refresh the job, then open this invoice again."
+                returnRefreshPending = false
+                return
+            }
+            returnVerifiedInvoiceID = route.invoiceID
+            selectedInvoiceID = route.invoiceID
+            let model = InvoicePaymentCollectionModel(api: api, invoiceID: route.invoiceID, expectedJobScope: scope)
+            await model.load()
+            guard !Task.isCancelled, returnRequestID == request else { return }
+            guard currentTypedContext?.contains(route) == true else {
+                returnCoordinator.invalidate()
+                returnRefreshPending = false
+                error = "The invoice could not be verified. Refresh the job, then open this invoice again."
+                return
+            }
+            returnCoordinator.finish(requestID: request, context: currentTypedContext, fresh: true,
+                                     actualInvoiceID: model.invoice?.id, canCollect: model.canRecordPayment)
+            if returnCoordinator.collectibleInvoiceID(in: currentTypedContext) == route.invoiceID {
+                selectedInvoiceID = route.invoiceID
+                invoicePaymentModel = model
+                loadedInvoiceModelID = route.invoiceID
+            }
+            returnRefreshPending = false
         }
     }
 
@@ -1114,6 +1231,7 @@ struct JobDetailView: View {
         case .reviewInvoice(let id): reviewInvoiceID = id
         case .collect(let invoiceID, _, _):
             Task {
+                clearTypedReturn()
                 selectedInvoiceID = invoiceID
                 if let invoice = invoices.first(where: { $0.id == invoiceID }) { await loadInvoicePayments(for: invoice) }
                 if invoicePaymentModel?.canRecordPayment == true { showCollectPayment = true }
@@ -1209,6 +1327,7 @@ struct JobDetailView: View {
                 throw Problem(title: "Invoice could not be verified for this job", status: nil, detail: nil)
             }
             JobInvoiceMemory.remember(invoice.id, jobID: jobId)
+            clearTypedReturn()
             selectedInvoiceID = invoice.id
             await loadInvoices()
             committed += 1
@@ -1226,6 +1345,7 @@ struct JobDetailView: View {
               session.can("invoice.payment.create", feature: "payments"),
               invoiceRead?.freshIDs.contains(requestedID) == true,
               let invoice = invoices.first(where: { $0.id == requestedID }) else { return }
+        clearTypedReturn()
         selectedInvoiceID = requestedID
         await loadInvoicePayments(for: invoice)
         guard session.generation == generation, loadedInvoiceModelID == requestedID,

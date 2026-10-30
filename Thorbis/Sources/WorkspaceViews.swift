@@ -45,7 +45,7 @@ struct WorkspaceNoticesView: View {
                                 .accessibilityIdentifier("inbox-day-heading")
                         }
                         // Each notice opens the job it is about.
-                        NavigationLink(value: PaperRoute.job(notice.jobId)) {
+                        PaperCompatibleLink(value: PaperRoute.job(notice.jobId)) {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: notice.read ? "bell" : "bell.badge.fill")
                                 .font(.system(size: 17, weight: .medium))
@@ -249,7 +249,7 @@ struct WorkspaceRevenueView: View {
         .padding(.bottom, 18)
 
         // The tiles open the invoices behind the numbers, so nobody has to go looking for them.
-        NavigationLink(value: PaperRoute.invoices) {
+        PaperCompatibleLink(value: PaperRoute.invoices) {
         HStack(spacing: 10) {
             tile("Outstanding", money(report.receivable.balance, currency: "USD"),
                  detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")", alert: nil)

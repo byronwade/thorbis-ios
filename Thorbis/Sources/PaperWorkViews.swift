@@ -359,7 +359,7 @@ private struct ScheduleHero<Commit: View>: View {
             }
             .frame(width: typeSize.isAccessibilitySize ? nil : laneWidth, alignment: .leading)
             VStack(alignment: .leading, spacing: 10) {
-                NavigationLink(value: job) {
+                PaperCompatibleLink(value: job) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(job.title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
@@ -464,7 +464,7 @@ struct ScheduleCompactRow: View {
     }
 
     var body: some View {
-        NavigationLink(value: job) {
+        PaperCompatibleLink(value: job) {
             HStack(alignment: .center, spacing: 10) {
                 if !typeSize.isAccessibilitySize {
                     time.frame(width: laneWidth, alignment: .leading)
@@ -625,7 +625,7 @@ struct JobsView: View {
                 PaperGroupHeader(title: title, count: jobs.count)
                 ForEach(jobs) { job in
                     let customer = store.customerName(job.customerId)
-                    NavigationLink(value: job) {
+                    PaperCompatibleLink(value: job) {
                         // MA-11: what, then who and when, on two lines; same record, same row.
                         HStack(spacing: 12) {
                             StatusRing(status: job.status)
