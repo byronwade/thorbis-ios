@@ -291,10 +291,9 @@ private struct LocalWorkspaceEditor: View {
             Form {
                 Section("On this device") {
                     if section == .agreements {
-                        Picker("Kind", selection: $draft.kind) {
-                            Text("Maintenance").tag(LocalAgreementRecord.Kind.maintenance)
-                            Text("Membership").tag(LocalAgreementRecord.Kind.membership)
-                        }
+                        ThorbisSelect(options: [(LocalAgreementRecord.Kind.maintenance, "Maintenance"),
+                                                (LocalAgreementRecord.Kind.membership, "Membership")],
+                                      selection: $draft.kind, label: "Kind")
                     }
                     ForEach(section.fields.indices, id: \.self) { index in
                         let field = section.fields[index]

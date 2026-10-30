@@ -134,11 +134,10 @@ struct RoleEditorView: View {
                 }
             }
             if enabled, capability.allowedScopes.count > 1 {
-                Picker("Whose", selection: Binding(get: { grants[capability.id]?.scope ?? "" },
-                                                   set: { grants[capability.id]?.scope = $0 })) {
-                    ForEach(capability.allowedScopes, id: \.id) { Text($0.label).tag($0.id) }
-                }
-                .font(Theme.font(13))
+                ThorbisSelect(options: capability.allowedScopes.map { ($0.id, $0.label) },
+                              selection: Binding(get: { grants[capability.id]?.scope ?? "" },
+                                                 set: { grants[capability.id]?.scope = $0 }),
+                              label: "Whose")
             }
             if enabled {
                 ForEach(capability.supportedConditions, id: \.id) { condition in

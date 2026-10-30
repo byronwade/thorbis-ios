@@ -123,8 +123,8 @@ struct PriceBookSearchIndex {
     // MARK: Matching
 
     /// Each number joined to a letter word beside it ("r", "410a" → "r410a"; "10", "mm" → "10mm").
-    /// `after` tries the word after the number first, otherwise the word before; two numbers never
-    /// join. The index adds the same joins for descriptions.
+    /// `after` tries the word after the number first, otherwise the word before; without `after` a
+    /// number only joins the word before it ("5 R-410A" → "5", "r410a"). Two numbers never join. The index adds the same joins for descriptions.
     static func joinedModelWords(_ words: [String], after: Bool) -> [String] {
         var joined: [String] = []
         var previousFree = false
@@ -135,7 +135,7 @@ struct PriceBookSearchIndex {
             if !word.contains(where: \.isNumber) {
                 joined.append(word)
                 previousFree = true
-            } else if nextFree && (after || !previousFree) {
+            } else if nextFree && after {
                 joined.append(word + words[index + 1])
                 index += 1
                 previousFree = false
@@ -330,7 +330,7 @@ final class PriceBookCatalog: ObservableObject {
         } catch is CancellationError {
         } catch {
             guard self.organizationID == organizationID else { return }
-            self.error = error.localizedDescription
+            self.error = PriceBookLoadError.message(for: error)
         }
     }
 

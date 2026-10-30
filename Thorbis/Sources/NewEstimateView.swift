@@ -114,11 +114,9 @@ struct NewEstimateView: View {
                     .accessibilityLabel("Estimate title")
                 HStack(spacing: 6) {
                     Chip(text: "Draft", icon: "circle.dashed")
-                    Menu {
-                        ForEach(store.customers.filter { $0.archived != true }) { customer in
-                            Button(customer.name) { customerID = customer.id }
-                        }
-                    } label: {
+                    ThorbisMenu(items: store.customers.filter { $0.archived != true }.map { customer in
+                        ThorbisMenuItem(customer.name, isSelected: customer.id == customerID) { customerID = customer.id }
+                    }, title: "Customer") {
                         Chip(text: customerID.isEmpty ? "Choose customer" : store.customerName(customerID), icon: "person",
                              tint: customerID.isEmpty ? Theme.brandText : Theme.muted)
                             .padding(.vertical, 10).contentShape(Rectangle())

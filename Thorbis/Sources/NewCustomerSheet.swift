@@ -49,21 +49,13 @@ struct NewCustomerSheet: View {
                         .onSubmit { if valid { Task { await save() } } }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        Picker("Account", selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 })) {
-                            Text("Residential").tag("residential")
-                            Text("Commercial").tag("commercial")
-                        }
-                        .pickerStyle(.segmented)
+                        ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Commercial")],
+                                         selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 }))
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Prefers").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        Picker("Preferred contact", selection: Binding(get: { request.preferredContact ?? "" }, set: { request.preferredContact = $0.isEmpty ? nil : $0 })) {
-                            Text("No preference").tag("")
-                            Text("Call").tag("phone")
-                            Text("Text").tag("sms")
-                            Text("Email").tag("email")
-                        }
-                        .pickerStyle(.segmented)
+                        ThorbisSegmented(options: [("", "None"), ("phone", "Call"), ("sms", "Text"), ("email", "Email")],
+                                         selection: Binding(get: { request.preferredContact ?? "" }, set: { request.preferredContact = $0.isEmpty ? nil : $0 }))
                     }
                     if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
                 }

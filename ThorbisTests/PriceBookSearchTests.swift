@@ -92,6 +92,8 @@ final class PriceBookSearchTests: XCTestCase {
         XCTAssertEqual(joinedPipe.search("pipe 10 mm").count, 1, "a size typed apart after the name")
         XCTAssertEqual(joinedPipe.search("10 mm pipe").count, 1)
         XCTAssertTrue(joinedPipe.search("pipe 110 mm").isEmpty)
+        let joinedSize = PriceBookSearchIndex(items: [item(24, "Refrigerant R410A 5 lb")])
+        XCTAssertEqual(joinedSize.search("5 R-410A").count, 1, "a size typed before a dashed model")
         XCTAssertEqual(search("R 410A"), ["Refrigerant R-410A"])
         XCTAssertEqual(search("CONDÉNSER").first, "Condenser coil cleaning")
     }

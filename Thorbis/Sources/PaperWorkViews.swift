@@ -236,12 +236,17 @@ struct ScheduleView: View {
     @ViewBuilder private func commit(for job: Job) -> some View {
         switch nextStep(for: job) {
         case "en_route":
-            Menu {
-                Button("On my way") { Task { await progress(job, .enRoute(etaMinutes: nil)) } }
-                ForEach([15, 30, 45, 60], id: \.self) { minutes in
-                    Button("On my way · ETA \(minutes) min") { Task { await progress(job, .enRoute(etaMinutes: minutes)) } }
-                }
-            } label: { commitLabel("On my way", symbol: "location.fill", busy: busyJobID == job.id) }
+            ThorbisMenu(
+                items: [ThorbisMenuItem("On my way", icon: "location.fill") {
+                    Task { await progress(job, .enRoute(etaMinutes: nil)) }
+                }] + [15, 30, 45, 60].map { minutes in
+                    ThorbisMenuItem("ETA \(minutes) min", icon: "clock") {
+                        Task { await progress(job, .enRoute(etaMinutes: minutes)) }
+                    }
+                },
+                title: "On my way",
+                accessibilityLabel: "On my way"
+            ) { commitLabel("On my way", symbol: "location.fill", busy: busyJobID == job.id) }
             .disabled(busyJobID != nil)
             .accessibilityHint("Tells the office and customer you are driving to this job")
         case "arrived":
@@ -459,13 +464,23 @@ struct JobsView: View {
     @EnvironmentObject private var session: SessionController
     @State private var tab = "Assigned"
     @State private var search = ""
-    @State private var searchVisible = false
+    @State private var showDisplay = false
+    @State private var display = DisplayOptions()
+    /// Empty means every status; otherwise only the ticked ones.
+    @State private var statusFilter: Set<String> = []
     @State private var showNew = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
+    /// Statuses offered as filter chips, in lifecycle order.
+    private let statusChips = ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused", "completed", "canceled"]
+    /// A filter is on when the sheet narrows the board past its defaults.
+    private var filterActive: Bool { !statusFilter.isEmpty || !display.showCompleted || display.ordering != .recent }
+
     private var jobs: [Job] {
         let assigned = tab == "Assigned" ? (session.user?.id ?? "") : nil
-        return JobFiltering.jobs(store.jobs, assignedTo: assigned, search: search)
+        return JobFiltering.board(store.jobs, assignedTo: assigned, search: search,
+                                  showCompleted: display.showCompleted, statuses: statusFilter,
+                                  ordering: display.ordering)
     }
     private var activeCount: Int { jobs.filter { !["completed", "canceled"].contains($0.status) }.count }
     private var attentionCount: Int { jobs.filter { $0.status == "paused" }.count }
@@ -476,9 +491,8 @@ struct JobsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Jobs", subtitle: subtitle) { withMotion { searchVisible.toggle() } }
+                PaperHeader(title: "Jobs", subtitle: subtitle) { showDisplay = true }
                 OfflineBanner()
-                if searchVisible { PaperSearchField(text: $search, prompt: "Title or job number") }
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 VStack(alignment: .leading, spacing: 14) {
@@ -515,6 +529,50 @@ struct JobsView: View {
             }
         }
         .sheet(isPresented: $showNew) { NewJobSheet() }
+        .sheet(isPresented: $showDisplay) { displaySheet }
+    }
+
+    /// Search, ordering, and status filters for the board — the jobs homepage's custom
+    /// filter sheet, in place of a stock picker or an inline search bar.
+    private var displaySheet: some View {
+        ThorbisSheetScaffold(title: "Display", onClose: { showDisplay = false }) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
+                TextField("Title or job number", text: $search)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                if !search.isEmpty {
+                    Button { search = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
+                    }.accessibilityLabel("Clear search")
+                }
+            }
+            .font(Theme.font(16)).padding(.horizontal, 12).frame(minHeight: 44)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+
+            ThorbisSheetGroup {
+                ThorbisSheetRow(label: "Ordering", value: display.ordering.label,
+                                options: DisplayOptions.Ordering.allCases.map(\.label)) { picked in
+                    display.ordering = DisplayOptions.Ordering.allCases.first { $0.label == picked } ?? .recent
+                }
+                ThorbisSheetDivider()
+                ThorbisSheetToggleRow(label: "Show completed", isOn: $display.showCompleted)
+            }
+
+            HStack {
+                Text("Status").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+                if filterActive {
+                    Button("Reset") { statusFilter = []; display = DisplayOptions() }
+                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                }
+            }
+            ThorbisChipGroup(data: statusChips, id: \.self,
+                             isOn: { statusFilter.contains($0) },
+                             label: { $0.statusLabel }) { status in
+                if statusFilter.contains(status) { statusFilter.remove(status) } else { statusFilter.insert(status) }
+            }
+        }
     }
 
     /// Customer, then when (or the state when there is no time), then the job number.
