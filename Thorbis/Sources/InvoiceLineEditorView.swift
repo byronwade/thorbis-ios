@@ -90,7 +90,8 @@ struct InvoiceLineEditorView: View {
                         canUsePriceBook: canUsePriceBook,
                         quantityInCurrentDraft: priceBookQuantity, secondaryPriceText: { _ in nil },
                         addItem: addCatalogItem, addCustomLine: addCustomLine,
-                        retry: { Task { await refreshCatalog(force: true) } }
+                        retry: { Task { await refreshCatalog(force: true) } },
+                        customLineAfterFirstResult: true
                     )
                 }
                 .disabled(busy)
@@ -303,14 +304,21 @@ struct InvoiceLineEditorView: View {
                             priceBookOverrideReasonField.padding(.top, 8)
                         }
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Edit added line").font(Theme.font(15, weight: .medium))
-                            Text(line.description).font(Theme.font(15)).lineLimit(2)
-                            Text(addedLineSummary(line)).font(Theme.monoFont(15))
-                                .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            ViewThatFits(in: .horizontal) {
+                                HStack {
+                                    Text("Edit added line").font(Theme.font(15, weight: .medium))
+                                    Spacer(minLength: 8)
+                                    Text(addedLineSummary(line)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                                }.fixedSize(horizontal: true, vertical: false)
+                                Text("Edit added line").font(Theme.font(15, weight: .medium))
+                            }
+                            Text(line.description).font(Theme.font(15)).lineLimit(1)
                         }
                         .foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityValue(addedLineSummary(line))
                     }
                     .tint(Theme.foreground)
                     .padding(12)

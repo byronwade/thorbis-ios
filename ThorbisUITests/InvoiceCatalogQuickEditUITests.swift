@@ -2,6 +2,30 @@ import XCTest
 
 @MainActor
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
+    func testMatchingCatalogItemPrecedesCustomLineAndCustomLineStillWorksWithoutMatches() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-pages"]
+        app.launch()
+        let search = app.textFields["Search price book or type a line"]
+        XCTAssertTrue(search.waitForExistence(timeout: 20))
+        search.tap()
+        search.typeText("Camera sewer inspection")
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009999"]
+        let custom = app.buttons["price-book-add-custom"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        XCTAssertTrue(custom.waitForExistence(timeout: 5))
+        XCTAssertLessThan(item.frame.minY, custom.frame.minY)
+        app.buttons["Clear search"].tap()
+        search.typeText("Unique custom work")
+        XCTAssertTrue(custom.waitForExistence(timeout: 5))
+        XCTAssertTrue(custom.isHittable)
+        custom.tap()
+        let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line item description"))
+            .matching(NSPredicate(format: "value == %@", "Unique custom work")).firstMatch
+        XCTAssertTrue(description.waitForExistence(timeout: 5), "The unmatched search must become an editable custom invoice line")
+    }
+
     func testLastAddedLineCanBeEditedWithoutLeavingCatalog() {
         assertLastAddedLineCanBeEdited(extraArguments: [])
     }

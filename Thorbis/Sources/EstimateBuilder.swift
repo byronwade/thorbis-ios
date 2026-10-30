@@ -284,6 +284,7 @@ struct PriceBookResultsList: View {
     let addItem: (PriceBookListItem) -> Void
     let addCustomLine: ((String) -> Void)?
     let retry: () -> Void
+    var customLineAfterFirstResult = false
 
     @State private var pageOffset = 0
     @State private var usageSnapshot: [String: PriceBookUsage] = [:]
@@ -320,21 +321,7 @@ struct PriceBookResultsList: View {
                 ForEach(recent) { item in row(PriceBookSearchResult(item: item, highlights: [])) }
                 header("Price book")
             }
-            if !trimmedQuery.isEmpty, let addCustomLine {
-                Button { addCustomLine(trimmedQuery) } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "plus").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
-                            .frame(width: 24)
-                        Text("Add \u{201C}\(trimmedQuery)\u{201D} as a line")
-                            .font(Theme.font(17)).foregroundStyle(Theme.foreground)
-                            .multilineTextAlignment(.leading)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, Theme.gutter).frame(minHeight: 56).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("price-book-add-custom")
-            }
+            if !customLineAfterFirstResult { customLine }
             if page.total > PriceBookSearchIndex.resultLimit, !page.results.isEmpty {
                 Text("Items \(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -365,7 +352,13 @@ struct PriceBookResultsList: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("price-book-show-more")
             }
-            ForEach(page.results, content: row)
+            if customLineAfterFirstResult {
+                ForEach(Array(page.results.prefix(1)), content: row)
+                customLine
+                ForEach(Array(page.results.dropFirst()), content: row)
+            } else {
+                ForEach(page.results, content: row)
+            }
             if canUsePriceBook, current, !catalog.loading, catalog.error == nil,
                page.results.isEmpty, recent.isEmpty, addCustomLine == nil {
                 ContentUnavailableView(
@@ -401,6 +394,24 @@ struct PriceBookResultsList: View {
         Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
             .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 4)
             .accessibilityAddTraits(.isHeader)
+    }
+
+    @ViewBuilder private var customLine: some View {
+        if !trimmedQuery.isEmpty, let addCustomLine {
+            Button { addCustomLine(trimmedQuery) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "plus").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(width: 24)
+                    Text("Add \u{201C}\(trimmedQuery)\u{201D} as a line")
+                        .font(Theme.font(17)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Theme.gutter).frame(minHeight: 56).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("price-book-add-custom")
+        }
     }
 
     private func row(_ result: PriceBookSearchResult) -> some View {
