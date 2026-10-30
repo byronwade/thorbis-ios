@@ -3,6 +3,7 @@ import SwiftUI
 /// Read-only browsing; consent and signature remain in their existing separate destinations.
 struct CustomerJobDocumentBook: View {
     let scope: JobDocumentScope
+    let sourceGeneration: UUID?
     let estimates: [EstimateRecord]
     let invoices: [InvoiceRecord]
     let freshEstimates: Set<String>
@@ -17,15 +18,20 @@ struct CustomerJobDocumentBook: View {
     let canPayInvoice: Bool
     @State private var selection: CustomerJobDocumentSelection
     @EnvironmentObject private var api: APIClient
+    #if DEBUG
+    @EnvironmentObject private var previewSession: SessionController
+    @State private var previewDocumentChanged = false
+    #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(scope: JobDocumentScope, estimates: [EstimateRecord], invoices: [InvoiceRecord],
+    init(scope: JobDocumentScope, sourceGeneration: UUID?, estimates: [EstimateRecord], invoices: [InvoiceRecord],
          freshEstimates: Set<String>, freshInvoices: Set<String>, unavailableEstimates: [String],
          initial: CustomerJobDocumentID, actionError: String?, refresh: @escaping () async -> Void,
          reviewEstimate: @escaping (String) -> Void, signInvoice: @escaping (String) -> Void,
          payInvoice: @escaping (String) -> Void, canSignInvoice: Bool, canPayInvoice: Bool) {
         self.scope = scope
+        self.sourceGeneration = sourceGeneration
         self.estimates = estimates
         self.invoices = invoices.filter(scope.contains)
         self.freshEstimates = freshEstimates
@@ -66,6 +72,16 @@ struct CustomerJobDocumentBook: View {
         }
         .navigationTitle(selection.selected?.reference ?? "Documents")
         .onChange(of: ids) { _, value in selection.reconcile(value) }
+        #if DEBUG
+        .task { await PaperPreview.expireDocumentSessionForTesting(previewSession) }
+        .task {
+            let args = ProcessInfo.processInfo.arguments
+            guard PaperPreview.isJobDocumentsPreview,
+                  args.contains("--paper-preview-description-stale") || args.contains("--paper-preview-description-replaced") else { return }
+            try? await Task.sleep(for: .seconds(10))
+            if !Task.isCancelled { previewDocumentChanged = true }
+        }
+        #endif
         .background(Theme.background)
     }
 
@@ -154,7 +170,16 @@ struct CustomerJobDocumentBook: View {
         switch id {
         case .estimate(let value):
             if let record = estimates.first(where: { $0.id == value }) {
-                CustomerEstimateBookPage(estimate: record, fresh: freshEstimates.contains(value),
+                #if DEBUG
+                let args = ProcessInfo.processInfo.arguments
+                let effectiveRecord = previewDocumentChanged && args.contains("--paper-preview-description-replaced")
+                    ? PaperPreview.replacedDescriptionEstimate(record) : record
+                let effectiveFresh = freshEstimates.contains(value) && !(previewDocumentChanged && args.contains("--paper-preview-description-stale"))
+                #else
+                let effectiveRecord = record
+                let effectiveFresh = freshEstimates.contains(value)
+                #endif
+                CustomerEstimateBookPage(scope: scope, sourceGeneration: sourceGeneration, estimate: effectiveRecord, fresh: effectiveFresh, active: selection.selected == id,
                     refresh: refresh, review: { reviewEstimate(value) })
             } else {
                 VStack(spacing: 16) {
@@ -165,8 +190,8 @@ struct CustomerJobDocumentBook: View {
             }
         case .invoice(let value):
             if let record = invoices.first(where: { $0.id == value }) {
-                CustomerInvoiceBookPage(invoice: record, scope: scope, api: api, fresh: freshInvoices.contains(value),
-                    canSign: canSignInvoice, canPay: canPayInvoice,
+                CustomerInvoiceBookPage(invoice: record, scope: scope, sourceGeneration: sourceGeneration, api: api, fresh: freshInvoices.contains(value),
+                    canSign: canSignInvoice, canPay: canPayInvoice, active: selection.selected == id,
                     refresh: refresh, sign: { signInvoice(value) }, pay: { payInvoice(value) })
             }
         }
@@ -179,8 +204,11 @@ private struct CustomerEstimateBookLoadID: Hashable {
 }
 
 private struct CustomerEstimateBookPage: View {
+    let scope: JobDocumentScope
+    let sourceGeneration: UUID?
     let estimate: EstimateRecord
     let fresh: Bool
+    let active: Bool
     let refresh: () async -> Void
     let review: () -> Void
     @EnvironmentObject private var api: APIClient
@@ -189,6 +217,10 @@ private struct CustomerEstimateBookPage: View {
     @State private var loading = false
     @State private var error: String?
     private var type: CustomerType { CustomerType(sizeClass) }
+    private var readingAccess: DocumentDescriptionAccess {
+        .init(identity: .estimate(scope: scope, record: estimate, issued: issued), organizationID: scope.organizationID,
+              capability: "estimate.view", feature: "estimates", sourceGeneration: sourceGeneration, fresh: fresh, active: active, scopeValid: scope.contains(estimate, requestedID: estimate.id))
+    }
     private var options: [FieldEstimateOption] { issued.map { $0.options ?? [] } ?? estimate.options ?? [] }
     private var lines: [FieldLine] { issued?.lines ?? estimate.lines }
     private var currency: String { issued?.currency ?? lines.first?.unitPrice.currency ?? "USD" }
@@ -219,7 +251,7 @@ private struct CustomerEstimateBookPage: View {
                             }
                             ForEach(options) { option in
                                 Text(option.title).font(Theme.font(type.heading, weight: .medium))
-                                if !option.description.isEmpty { Text(option.description).font(Theme.font(type.body)) }
+                                if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess) }
                                 estimateLines(option.lines, currency: option.currency)
                             }
                         }
@@ -241,7 +273,7 @@ private struct CustomerEstimateBookPage: View {
     @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String) -> some View {
         if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
             CustomerLinesCard(lines: lines, currency: currency, type: type,
-                rows: customerAmountRows(amounts, currency: currency, invoice: false))
+                rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                 .font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
@@ -262,9 +294,12 @@ private struct CustomerEstimateBookPage: View {
 
 private struct CustomerInvoiceBookPage: View {
     let original: InvoiceRecord
+    let scope: JobDocumentScope
+    let sourceGeneration: UUID?
     let fresh: Bool
     let canSign: Bool
     let canPay: Bool
+    let active: Bool
     let refresh: () async -> Void
     let sign: () -> Void
     let pay: () -> Void
@@ -272,16 +307,20 @@ private struct CustomerInvoiceBookPage: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showPayments = false
 
-    init(invoice: InvoiceRecord, scope: JobDocumentScope, api: APIClient, fresh: Bool,
-         canSign: Bool, canPay: Bool, refresh: @escaping () async -> Void,
+    init(invoice: InvoiceRecord, scope: JobDocumentScope, sourceGeneration: UUID?, api: APIClient, fresh: Bool,
+         canSign: Bool, canPay: Bool, active: Bool, refresh: @escaping () async -> Void,
          sign: @escaping () -> Void, pay: @escaping () -> Void) {
-        original = invoice; self.fresh = fresh; self.canSign = canSign; self.canPay = canPay
-        self.refresh = refresh; self.sign = sign; self.pay = pay
+        original = invoice; self.scope = scope; self.sourceGeneration = sourceGeneration; self.fresh = fresh; self.canSign = canSign; self.canPay = canPay
+        self.active = active; self.refresh = refresh; self.sign = sign; self.pay = pay
         _model = StateObject(wrappedValue: InvoicePaymentCollectionModel(api: api, invoiceID: invoice.id, expectedJobScope: scope))
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
     private var invoice: InvoiceRecord { model.invoice ?? original }
+    private var readingAccess: DocumentDescriptionAccess {
+        .init(identity: .invoice(scope: scope, record: invoice), organizationID: scope.organizationID,
+              capability: "invoice.view", feature: "invoicing", sourceGeneration: sourceGeneration, fresh: fresh, active: active, scopeValid: scope.contains(invoice))
+    }
     private var amounts: CustomerDocumentAmounts? { CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) }
     private var signed: Bool { invoice.customerAuthorization?.linesRevision == invoice.linesRevision }
 
@@ -307,7 +346,7 @@ private struct CustomerInvoiceBookPage: View {
                                 .font(Theme.monoFont(type.total, weight: .medium))
                         }
                         CustomerLinesCard(lines: invoice.lines, currency: invoice.currency, type: type,
-                            rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"))
+                            rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"), readingAccess: readingAccess)
                     } else {
                         Text("These amounts couldn't be verified. Hand the device back to your technician.").font(Theme.font(type.body))
                     }

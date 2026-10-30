@@ -2,6 +2,18 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
+    func testLongInvoiceDescriptionOpensReadOnlyAndReturnsToInvoice() {
+        let app = openPrimary(extra: ["--paper-preview-long-document-description", "--paper-preview-job-invoice-signed"])
+        let more = app.buttons["Show more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        XCTAssertTrue(text("Final invoice detail: leave the site clean.", in: app).exists)
+        XCTAssertFalse(app.textViews.firstMatch.exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 5))
+        assertMoneyRow("Total", "$340.00", in: app)
+    }
+
     func testDiscountRefundAndCashStayWithTheirInvoiceWhenPaging() {
         continueAfterFailure = false
         let app = XCUIApplication()
