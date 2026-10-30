@@ -606,13 +606,11 @@ struct JobsView: View {
         }
     }
 
-    /// Customer, then when (or the state when there is no time), then the job number.
+    /// Keep the status visible even when a visit has a scheduled time.
     private func detail(_ job: Job, customer: String) -> String {
-        var parts = [customer]
+        var parts = [customer, job.status.statusLabel]
         if let date = JobFiltering.date(job.scheduledFor), !["completed", "canceled"].contains(job.status) {
             parts.append(date.visitLabel())
-        } else {
-            parts.append(job.status.statusLabel)
         }
         parts.append(job.shortRef)
         return parts.joined(separator: " · ")
@@ -626,16 +624,16 @@ struct JobsView: View {
                 ForEach(jobs) { job in
                     let customer = store.customerName(job.customerId)
                     NavigationLink(value: job) {
-                        // MA-11: what, then who and when, on two lines; same record, same row.
+                        // Keep the job, customer, status and visit time together.
                         HStack(spacing: 12) {
-                            StatusRing(status: job.status)
+                            ScheduleVisitMarker(status: job.status)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(job.title).font(Theme.font(15, weight: .medium))
                                     .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
-                                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+                                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                                 Text(detail(job, customer: customer))
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                             }
                             Spacer(minLength: 0)
                             // On Assigned every row is yours, so the badge would only repeat itself.
