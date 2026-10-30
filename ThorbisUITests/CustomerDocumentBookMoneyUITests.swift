@@ -22,6 +22,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         assertMoneyRow("Total", "$300.00", in: app)
         assertMoneyRow("Paid", "$150.00", in: app)
         assertMoneyRow("Amount due", "$150.00", in: app)
+        XCTAssertFalse(text("Paid in full", in: app).exists)
         openHistory(in: app)
         assertText("Card", in: app)
         assertText("Refunded $50.00", in: app)
@@ -37,6 +38,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.buttons["Choose a job document"].tap()
         app.buttons["INV-2240"].tap()
         XCTAssertTrue(app.staticTexts["Deposit invoice"].waitForExistence(timeout: 10))
+        assertText("Paid in full", in: app)
         assertMoneyRow("Total", "$340.00", in: app)
         assertMoneyRow("Paid", "$340.00", in: app)
         assertMoneyRow("Amount due", "$0.00", in: app)
@@ -54,6 +56,44 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         openHistory(in: app)
         assertText("Refunded $50.00", in: app)
         assertText("Cash", in: app)
+    }
+
+    func testDraftInvoiceShowsDraftTotalRatherThanAClaimOfPayment() {
+        let app = openPrimary(extra: ["--paper-preview-job-invoice-draft"])
+        assertText("Draft total", in: app)
+        XCTAssertFalse(text("Paid in full", in: app).exists)
+        assertMoneyRow("Total", "$340.00", in: app)
+    }
+
+    func testZeroDollarInvoiceDoesNotClaimPayment() {
+        let app = openPrimary(extra: ["--paper-preview-job-invoice-zero"])
+        assertText("No balance due", in: app)
+        XCTAssertFalse(text("Paid in full", in: app).exists)
+        assertMoneyRow("Total", "$0.00", in: app)
+        assertMoneyRow("Amount due", "$0.00", in: app)
+    }
+
+    func testUnavailablePaymentHistoryDoesNotClaimPaidInFull() {
+        let app = openPrimary(extra: ["--paper-preview-deposit-history-failure"])
+        app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.staticTexts["Deposit invoice"].waitForExistence(timeout: 10))
+        assertText("Payments couldn't be loaded", in: app)
+        assertText("No balance due", in: app)
+        XCTAssertFalse(text("Paid in full", in: app).exists)
+        assertMoneyRow("Paid", "$340.00", in: app)
+    }
+
+    private func openPrimary(extra: [String]) -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"] + extra
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
+        app.buttons["Job actions"].tap(); app.buttons["Show to customer"].tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10)); invoice.tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 10))
+        return app
     }
 
     private func text(_ value: String, in app: XCUIApplication) -> XCUIElement {

@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-invoice-balance-wording",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.text", title: "Clearer invoice balances",
+                      detail: "See when an invoice is a draft, has no balance due, or is paid."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-readonly-handback",
             date: "2026-10-30",
             highlights: [
