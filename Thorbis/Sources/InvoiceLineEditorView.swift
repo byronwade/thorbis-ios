@@ -559,7 +559,7 @@ private struct EditableInvoiceLineRow: View {
                 if DescriptionPreview.isLong(line.description) && !descriptionFocused {
                     Text(line.description).font(Theme.font(15, weight: .medium)).lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityLabel("Line item description preview")
+                        .accessibilityLabel("Line item description: \(line.description)")
                 } else {
                     TextField("Line item description", text: $line.description, axis: .vertical)
                         .font(Theme.font(15, weight: .medium)).lineLimit(1...2)
@@ -570,10 +570,10 @@ private struct EditableInvoiceLineRow: View {
                 LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
                                 moveUp: moveUp, moveDown: moveDown, remove: remove)
             }
-            if DescriptionPreview.isLong(line.description) && !descriptionFocused {
-                Button("Show more", action: showDescription)
+            if !line.description.isEmpty && !descriptionFocused {
+                Button(DescriptionPreview.isLong(line.description) ? "Show more" : "Read or edit", action: showDescription)
                     .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                    .frame(minHeight: 44).accessibilityLabel("Show more line item description")
+                    .frame(minHeight: 44).accessibilityLabel(DescriptionPreview.isLong(line.description) ? "Show more line item description" : "Read or edit line item description")
                     .accessibilityIdentifier("invoice-line-description-more")
             }
             if dynamicTypeSize.isAccessibilitySize {

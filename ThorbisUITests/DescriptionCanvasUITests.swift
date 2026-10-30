@@ -67,7 +67,7 @@ final class DescriptionCanvasUITests: XCTestCase {
         editor.tap()
         editor.typeText(" revised")
         app.navigationBars["Line description"].buttons["Apply to estimate"].tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "value CONTAINS %@", "revised")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "revised", "revised")).firstMatch.waitForExistence(timeout: 5))
     }
 
     func testInvoiceCanvasEditsAnAddedLineAndReturnsToCatalog() {
@@ -96,7 +96,8 @@ final class DescriptionCanvasUITests: XCTestCase {
         editor.typeText(" revised")
         app.navigationBars["Line item description"].buttons["Apply to invoice"].tap()
         XCTAssertTrue(search.waitForExistence(timeout: 10))
-        XCTAssertTrue(added.descendants(matching: .any).matching(NSPredicate(format: "value CONTAINS %@", "revised")).firstMatch.exists)
+        let updated = added.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "revised", "revised")).firstMatch
+        XCTAssertTrue(updated.waitForExistence(timeout: 5))
     }
 
     func testLargestTextCanvasKeepsOverLimitTextWithoutApplying() {

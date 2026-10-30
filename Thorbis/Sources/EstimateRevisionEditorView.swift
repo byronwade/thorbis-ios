@@ -540,15 +540,17 @@ private struct EstimateRevisionOptionEditor: View {
             if DescriptionPreview.isLong(option.description) && !descriptionFocused {
                 Text(option.description).font(Theme.font(15)).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel("Option description preview")
-                Button("Show more", action: showDescription)
-                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                    .frame(minHeight: 44).accessibilityLabel("Show more option description")
-                    .accessibilityIdentifier("estimate-option-description-more")
+                    .accessibilityLabel("Option description: \(option.description)")
             } else {
                 TextField("What this package includes", text: $option.description, axis: .vertical)
                     .font(Theme.font(15)).lineLimit(1...2).focused($descriptionFocused)
                     .accessibilityLabel("Option package description")
+            }
+            if !option.description.isEmpty && !descriptionFocused {
+                Button(DescriptionPreview.isLong(option.description) ? "Show more" : "Read or edit", action: showDescription)
+                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .frame(minHeight: 44).accessibilityLabel(DescriptionPreview.isLong(option.description) ? "Show more option description" : "Read or edit option description")
+                    .accessibilityIdentifier("estimate-option-description-more")
             }
             EstimateLineGroupsEditor(lines: $option.lines, disabled: disabled, focus: focus, addTo: addTo, showDescription: showLineDescription, removed: removed)
         }

@@ -600,6 +600,7 @@ struct EstimateBuilderLineRow: View {
     let remove: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var quantity: Int { Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 }
     private var moveLabel: String { "Move to \(line.group.other.title)" }
@@ -616,11 +617,14 @@ struct EstimateBuilderLineRow: View {
                 }
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                let descriptionLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                descriptionLayout {
                     if DescriptionPreview.isLong(line.description) && focus.wrappedValue != .description(line.id) {
                         Text(line.description).font(Theme.font(17)).lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityLabel("Line description preview")
+                            .accessibilityLabel("Line description: \(line.description)")
                     } else {
                         TextField("Description", text: $line.description, axis: .vertical)
                             .font(Theme.font(17)).lineLimit(1...2)
@@ -634,10 +638,10 @@ struct EstimateBuilderLineRow: View {
                         .fixedSize(horizontal: true, vertical: false)
                     menu
                 }
-                if DescriptionPreview.isLong(line.description) && focus.wrappedValue != .description(line.id) {
-                    Button("Show more", action: showDescription)
+                if !line.description.isEmpty && focus.wrappedValue != .description(line.id) {
+                    Button(DescriptionPreview.isLong(line.description) ? "Show more" : "Read or edit", action: showDescription)
                         .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                        .frame(minHeight: 44).accessibilityLabel("Show more line description")
+                        .frame(minHeight: 44).accessibilityLabel(DescriptionPreview.isLong(line.description) ? "Show more line description" : "Read or edit line description")
                         .accessibilityIdentifier("estimate-line-description-more")
                 }
                 HStack(spacing: 6) {
