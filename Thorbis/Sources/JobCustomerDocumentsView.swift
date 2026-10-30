@@ -166,11 +166,7 @@ struct JobCustomerDocumentsView: View {
                     onApproved: { approved in
                         documents.markEstimatesStale(scope: scope, updated: approved, requestedID: estimate.id)
                         refreshEstimatesInBackground()
-                    }, onDone: {
-                        paper = nil
-                        book = nil
-                        handBack()
-                    })
+                    }, onDone: beginHandBack)
             } else {
                 CustomerJobReadOnlyPaper(estimate: estimate, handBack: handBack)
             }
@@ -186,7 +182,7 @@ struct JobCustomerDocumentsView: View {
                         paymentModel?.acceptInvoiceMutationResponse(updated)
                         paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
-                    }, onDone: handBack)
+                    }, onDone: beginHandBack)
             } else {
                 CustomerJobReadOnlyPaper(invoice: invoice, handBack: handBack)
             }
@@ -198,6 +194,12 @@ struct JobCustomerDocumentsView: View {
         case .estimate(let estimate): "EST-\(estimate.id.suffix(4).uppercased())"
         case .invoice(let invoice, _): "INV-\(invoice.id.suffix(4).uppercased())"
         }
+    }
+
+    private func beginHandBack() {
+        paper = nil
+        book = nil
+        handBack()
     }
 
     private func empty(_ text: String) -> some View {

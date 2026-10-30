@@ -18,6 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "doc.on.doc", title: "Keep reviewing job documents",
                       detail: "Return to the job's documents after reviewing or approving an estimate."),
+                .init(symbol: "hand.wave", title: "Hand back after invoice review",
+                      detail: "Return the phone to your technician after reviewing an invoice."),
             ]
         ),
         ReleaseNote(

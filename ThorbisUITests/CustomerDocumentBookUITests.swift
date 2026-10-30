@@ -148,6 +148,27 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Approved"].waitForExistence(timeout: 20))
     }
 
+    func testInvoicePresentationCanHandBackToTechnician() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
+        app.buttons["Job actions"].tap(); app.buttons["Show to customer"].tap()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        XCTAssertTrue(app.buttons["Choose a job document"].waitForExistence(timeout: 10))
+        app.buttons["Choose a job document"].tap(); app.buttons["INV-2209"].tap()
+        let sign = app.buttons["Sign for the work"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 10)); sign.tap()
+        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
+        let back = app.buttons.matching(identifier: "Back").allElementsBoundByIndex.max { $0.frame.midY < $1.frame.midY }
+        XCTAssertNotNil(back); back?.tap()
+        let done = app.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10)); done.tap()
+        XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
+    }
+
     func testSwipesAndButtonsBrowseEveryDocumentForOnlyThisJob() {
         continueAfterFailure = false
         let app = XCUIApplication()
