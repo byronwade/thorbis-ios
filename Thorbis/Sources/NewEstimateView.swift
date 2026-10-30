@@ -28,12 +28,26 @@ struct NewEstimateView: View {
     @FocusState private var focus: EstimateBuilderFocus?
     /// Set once the server created the estimate, so a retry only links it and never creates a duplicate.
     @State private var created: EstimateRecord?
+    @State private var uncertainOutcome: String?
+    @State private var confirmUncertainExit = false
+    @State private var editorPresented = false
+    @Binding private var parentJob: JobRecord?
+    private let expectedJob: JobRecord?
+    #if DEBUG
+    @State private var previewCreateResponse = false
+    @State private var previewLinkAttempts = 0
+    #endif
     private let jobID: String?
     private let onCreated: (EstimateRecord) -> Void
 
-    init(customerID: String = "", jobID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
+    init(customerID: String = "", jobID: String? = nil, title: String = "", parentJob: Binding<JobRecord?>? = nil,
+         expectedJob: JobRecord? = nil, ownerScope: DescriptionCanvasScope? = nil,
+         onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
         _customerID = State(initialValue: customerID)
         _title = State(initialValue: title)
+        _parentJob = parentJob ?? .constant(expectedJob)
+        _descriptionOwnerScope = State(initialValue: ownerScope)
+        self.expectedJob = expectedJob
         self.jobID = jobID
         self.onCreated = onCreated
     }
@@ -45,12 +59,45 @@ struct NewEstimateView: View {
                                                         generation: session.generation, authority: session.authorityRevision)
     }
 
+    private var jobScopeCurrent: Bool {
+        guard let jobID else { return expectedJob == nil }
+        guard let expectedJob else {
+            #if DEBUG
+            return PaperPreview.enabled && PaperPreview.screen == "new-estimate"
+            #else
+            return false
+            #endif
+        }
+        guard let current = parentJob else { return false }
+        return current.id == jobID && current.id == expectedJob.id && current.organizationId == expectedJob.organizationId &&
+            current.customerId == expectedJob.customerId && current.organizationId == session.activeOrganization?.id &&
+            customerID == expectedJob.customerId && session.can("job.view", feature: "jobs")
+    }
+
+    private var hasUnconfirmedServerResult: Bool {
+        uncertainOutcome != nil || (created != nil && jobID != nil)
+    }
+
+    private var waitingForJob: Bool {
+        expectedJob != nil && parentJob == nil && editorScopeCurrent && session.can("estimate.create", feature: "estimates")
+    }
+
+    private func ownerStillCurrent(_ owner: DescriptionCanvasScope, apiGeneration: UUID, origin: String?) -> Bool {
+        editorPresented && editorScopeCurrent && descriptionOwnerScope == owner &&
+            session.can("estimate.create", feature: "estimates") && api.requestGeneration == apiGeneration && api.normalizedOrigin == origin
+    }
+
+    private func couldHaveReachedServer(_ error: Error) -> Bool {
+        guard let status = (error as? Problem)?.status else { return true }
+        return status < 400 || status == 408 || status == 409 || status >= 500
+    }
+
     private var canUsePriceBook: Bool { session.can("pricebook.view", feature: "price_book") }
     private var searching: Bool { focus == .search || !query.isEmpty }
     private var total: Int? { lines.isEmpty ? nil : lines.subtotal() }
 
     var valid: Bool {
-        editorScopeCurrent && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
+        editorScopeCurrent && jobScopeCurrent && uncertainOutcome == nil && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
         lines.allSatisfy { line in
             !line.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             (Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)).map { (1...100_000).contains($0) } ?? false) &&
@@ -61,9 +108,11 @@ struct NewEstimateView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if !editorScopeCurrent {
+                if !editorScopeCurrent || !jobScopeCurrent {
                     ContentUnavailableView("Estimate unavailable", systemImage: "lock",
-                        description: Text("Access changed. Close this editor to start again."))
+                        description: Text(!editorScopeCurrent && uncertainOutcome != nil
+                            ? "The estimate may have been created. Check existing estimates before creating another."
+                            : (uncertainOutcome ?? (waitingForJob ? "Waiting for the current job. Your edits stay here." : "Access or the job changed. Close this editor to start again."))))
                         .padding(20)
                 } else if searching {
                     PriceBookResultsList(
@@ -85,16 +134,26 @@ struct NewEstimateView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
+                    Button("Cancel") {
+                        if hasUnconfirmedServerResult { confirmUncertainExit = true }
+                        else if lines.isEmpty || created != nil { dismiss() }
+                        else { confirmDiscard = true }
+                    }.disabled(busy)
                 }
             }
-            .discardChangesGuard(hasChanges: (!lines.isEmpty || descriptionDirty) && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+            .discardChangesGuard(hasChanges: ((!lines.isEmpty || descriptionDirty) && created == nil) || hasUnconfirmedServerResult,
+                                 busy: busy, isPresented: $confirmDiscard) { dismiss() }
+            .thorbisConfirm("Leave before checking?",
+                            message: "The estimate may already exist or be linked. Check the job and existing estimates before creating another.",
+                            isPresented: $confirmUncertainExit,
+                            actions: [ThorbisConfirmAction("Leave anyway", role: .destructive) { dismiss() }])
             .sheet(item: $descriptionTarget) { target in
                 DescriptionCanvas(
                     text: Binding(get: { lines.first(where: { $0.id == target.id })?.description ?? target.original }, set: { _ in }),
                     title: "Line description", applyTitle: "Apply to estimate", limit: .utf16(200),
                     scope: target.scope, accessRetired: $descriptionAccessRetired, hasUnappliedChanges: $descriptionDirty,
-                    targetAvailable: descriptionTargetAvailable(target), originalText: target.original,
+                    targetAvailable: descriptionTargetAvailable(target), temporaryParentUnavailable: waitingForJob && !busy && created == nil,
+                    originalText: target.original,
                     apply: { original, value in
                         guard descriptionTargetAvailable(target), !descriptionAccessRetired,
                               target.scope.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
@@ -105,7 +164,7 @@ struct NewEstimateView: View {
                 ).presentationDetents([.large])
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if editorScopeCurrent { VStack(spacing: 0) {
+                if editorScopeCurrent && jobScopeCurrent { VStack(spacing: 0) {
                     EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
                                       prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
                                       finish: finishSearch)
@@ -116,7 +175,7 @@ struct NewEstimateView: View {
                 } }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if editorScopeCurrent { VStack(spacing: 0) {
+                if editorScopeCurrent && jobScopeCurrent { VStack(spacing: 0) {
                     if let removed {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
                     }
@@ -128,8 +187,26 @@ struct NewEstimateView: View {
                 } }
             }
             .onAppear {
+                editorPresented = true
                 if descriptionOwnerScope == nil { descriptionOwnerScope = DescriptionCanvasScope.current(session) }
                 if descriptionOwnerScope == nil { editorAccessRetired = true }
+            }
+            #if DEBUG
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewRevokeDuringEstimateCreate"))) { _ in
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") { session.previewSetEstimateEditing(false) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewEstimateCreateResponse"))) { _ in previewCreateResponse = true }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewEstimateLinkAttempt"))) { _ in previewLinkAttempts += 1 }
+            .overlay(alignment: .top) {
+                if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response")) {
+                    Text("Response \(previewCreateResponse ? "delivered" : "pending"); links \(previewLinkAttempts)")
+                        .accessibilityIdentifier("preview-estimate-create-receipt")
+                }
+            }
+            #endif
+            .onDisappear { editorPresented = false }
+            .onChange(of: parentJob) { _, current in
+                if expectedJob != nil && current != nil && !jobScopeCurrent { editorAccessRetired = true }
             }
             .onChange(of: session.authorityRevision) { _, _ in
                 if descriptionOwnerScope != nil && !editorScopeCurrent { editorAccessRetired = true }
@@ -146,12 +223,12 @@ struct NewEstimateView: View {
     }
 
     private func descriptionTargetAvailable(_ target: NewEstimateDescriptionTarget) -> Bool {
-        !busy && editorScopeCurrent && created == nil && session.can("estimate.create", feature: "estimates") &&
+        !busy && editorScopeCurrent && jobScopeCurrent && created == nil && session.can("estimate.create", feature: "estimates") &&
         lines.contains(where: { $0.id == target.id })
     }
 
     private func showDescription(_ id: UUID) {
-        guard !busy, editorScopeCurrent, created == nil, session.can("estimate.create", feature: "estimates"),
+        guard !busy, editorScopeCurrent, jobScopeCurrent, created == nil, session.can("estimate.create", feature: "estimates"),
               let actor = session.user?.id, let organization = session.activeOrganization?.id,
               let line = lines.first(where: { $0.id == id }) else { return }
         let scope = DescriptionCanvasScope(actor: actor, organization: organization, generation: session.generation, authority: session.authorityRevision)
@@ -263,14 +340,18 @@ struct NewEstimateView: View {
     }
 
     private func save() async {
-        guard valid else { return }
+        guard valid, let owner = descriptionOwnerScope, session.can("estimate.create", feature: "estimates") else { return }
+        let apiGeneration = api.requestGeneration
+        let origin = api.normalizedOrigin
+        guard origin != nil, ownerStillCurrent(owner, apiGeneration: apiGeneration, origin: origin), jobScopeCurrent else { return }
         busy = true
         defer { busy = false }
-        do {
-            let estimate: EstimateRecord
-            if let created {
-                estimate = created
-            } else {
+
+        let estimate: EstimateRecord
+        if let created {
+            estimate = created
+        } else {
+            do {
                 estimate = try await api.createFieldEstimate(.init(
                     customerId: customerID,
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -280,22 +361,55 @@ struct NewEstimateView: View {
                               unitPrice: .init(amount: MoneyInput.cents($0.unitPrice) ?? 0, currency: "USD"),
                               source: $0.source ?? .manual)
                     }))
-                created = estimate
-                // On a job, the estimate opens only once it's attached; an unattached one in job
-                // context would never count as the job's estimate.
-                if jobID == nil { onCreated(estimate) }
-            }
-            if let jobID {
-                do { _ = try await api.linkFieldEstimate(jobID: jobID, estimateID: estimate.id) }
-                catch is CancellationError { return }
-                catch {
-                    self.error = "The estimate was saved but could not be added to the job. \(error.localizedDescription)"
-                    return
+            } catch {
+                if couldHaveReachedServer(error) {
+                    uncertainOutcome = "The estimate may have been created. Check existing estimates before creating another."
+                    self.error = uncertainOutcome
+                } else if ownerStillCurrent(owner, apiGeneration: apiGeneration, origin: origin) {
+                    self.error = error.localizedDescription
                 }
-                onCreated(estimate)
+                return
             }
-            dismiss()
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+            guard UUID(uuidString: estimate.id) != nil, estimate.organizationId == owner.organization,
+                  estimate.customerId == customerID else {
+                uncertainOutcome = "The estimate may have been created, but its response could not be verified. Check existing estimates."
+                self.error = uncertainOutcome
+                return
+            }
+            // Retain the confirmed ID only in this editor; it is never published under another owner.
+            created = estimate
+            guard ownerStillCurrent(owner, apiGeneration: apiGeneration, origin: origin) else {
+                uncertainOutcome = "The estimate may have been created. Check existing estimates before creating another."
+                return
+            }
+        }
+
+        guard ownerStillCurrent(owner, apiGeneration: apiGeneration, origin: origin) else {
+            uncertainOutcome = "The estimate may have been created. Check existing estimates before creating another."
+            return
+        }
+        guard jobScopeCurrent else {
+            error = "The estimate was created. Return to the same job to finish adding it."
+            return
+        }
+        if let jobID {
+            let link: JobEstimateLink
+            do {
+                link = try await api.linkFieldEstimate(jobID: jobID, estimateID: estimate.id)
+            } catch {
+                uncertainOutcome = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was created, but its job link may have succeeded. Check this job before trying again."
+                self.error = uncertainOutcome
+                return
+            }
+            guard ownerStillCurrent(owner, apiGeneration: apiGeneration, origin: origin), jobScopeCurrent,
+                  link.jobId == jobID, link.estimateId == estimate.id, UUID(uuidString: link.id) != nil else {
+                uncertainOutcome = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was created, but its job link could not be verified. Check this job before trying again."
+                return
+            }
+        }
+        guard ownerStillCurrent(owner, apiGeneration: apiGeneration, origin: origin), jobScopeCurrent else { return }
+        onCreated(estimate)
+        dismiss()
     }
 }
 

@@ -123,6 +123,14 @@ struct DescriptionCanvas: View {
                         }
                     }
                 }
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-new-estimate-job") {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        Button { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewLoseEstimateJob"), object: nil) }
+                            label: { Image(systemName: "pause.circle") }.accessibilityLabel("Test job loss")
+                        Button { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewReturnEstimateJob"), object: nil) }
+                            label: { Image(systemName: "arrow.uturn.backward.circle") }.accessibilityLabel("Test job return")
+                    }
+                }
                 if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-parent-loss") {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         Button { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewLoseDocumentParent"), object: nil) }

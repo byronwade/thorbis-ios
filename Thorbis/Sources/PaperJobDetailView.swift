@@ -1,6 +1,12 @@
 import SwiftUI
 import UIKit
 
+private struct JobNewEstimatePresentation: Identifiable {
+    let id = UUID()
+    let job: JobRecord
+    let owner: DescriptionCanvasScope
+}
+
 struct JobDetailView: View {
     let jobId: String
     let showsBack: Bool
@@ -19,6 +25,9 @@ struct JobDetailView: View {
     @EnvironmentObject var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
+    #if DEBUG
+    @State private var previewEstimateJob: JobRecord?
+    #endif
     @State private var showCustomerMode = false
     @State private var showCommercialDocuments = false
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
@@ -48,7 +57,7 @@ struct JobDetailView: View {
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
     private var estimatesLoaded: Bool { estimateRead != nil }
     private var estimatesFailed: Bool { estimateRead?.isComplete == false }
-    @State private var showNewEstimate = false
+    @State private var newEstimatePresentation: JobNewEstimatePresentation?
     @State private var committed = 0
     @State private var creatingInvoice = false
     @State private var reviewInvoiceID: String?
@@ -57,6 +66,8 @@ struct JobDetailView: View {
     @State private var openEstimate: OpenedEstimate?
     /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
     @State private var createdEstimateID: String?
+    @State private var createdEstimateOwner: DescriptionCanvasScope?
+    @State private var createdEstimateJob: JobRecord?
     @State private var showWrapUp = false
     /// The customer’s locations are account records, not verified job-site associations.
     @State private var locations: [ServiceLocationRecord] = []
@@ -203,15 +214,37 @@ struct JobDetailView: View {
         .navigationDestination(isPresented: $showFollowUps) {
             JobFollowUpsView(jobID: jobId).onDisappear { Task { await loadFollowUps() } }
         }
-        .sheet(isPresented: $showNewEstimate, onDismiss: {
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewLoseEstimateJob"))) { _ in
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-new-estimate-job") { previewEstimateJob = job; job = nil }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewReturnEstimateJob"))) { _ in
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-new-estimate-job") { job = previewEstimateJob }
+            #endif
+        }
+        .sheet(item: $newEstimatePresentation, onDismiss: {
             // A saved estimate opens next, so the tech reviews it and hands it over (TF-06).
-            if let id = createdEstimateID { createdEstimateID = nil; openEstimate = OpenedEstimate(id: id, present: false) }
-        }) {
-            if let job {
-                NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { estimate in
-                    createdEstimateID = estimate.id
-                    Task { await loadJobEstimates(job) }
-                }
+            defer { createdEstimateID = nil; createdEstimateOwner = nil; createdEstimateJob = nil }
+            if let id = createdEstimateID, let owner = createdEstimateOwner, let expected = createdEstimateJob,
+               session.phase == .ready, owner.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
+                                                    generation: session.generation, authority: session.authorityRevision),
+               session.can("job.view", feature: "jobs"), session.can("estimate.view", feature: "estimates"),
+               let job, job.id == expected.id, job.organizationId == expected.organizationId, job.customerId == expected.customerId {
+                openEstimate = OpenedEstimate(id: id, present: false)
+            }
+        }) { presentation in
+            NewEstimateView(customerID: presentation.job.customerId, jobID: presentation.job.id, title: presentation.job.title,
+                            parentJob: $job, expectedJob: presentation.job, ownerScope: presentation.owner) { estimate in
+                guard session.phase == .ready, presentation.owner.matches(actor: session.user?.id,
+                    organization: session.activeOrganization?.id, generation: session.generation, authority: session.authorityRevision),
+                    let job, job.id == presentation.job.id, job.organizationId == presentation.job.organizationId,
+                    job.customerId == presentation.job.customerId else { return }
+                createdEstimateID = estimate.id
+                createdEstimateOwner = presentation.owner
+                createdEstimateJob = presentation.job
+                Task { await loadJobEstimates(presentation.job) }
             }
         }
         .task(id: customerAuthorityToken) {
@@ -1096,8 +1129,9 @@ struct JobDetailView: View {
     }
 
     private func buildEstimate() {
-        guard canBuildEstimate, let job, scope(for: job) != nil else { return }
-        showNewEstimate = true
+        guard canBuildEstimate, let job, scope(for: job) != nil, session.can("job.view", feature: "jobs"),
+              let owner = DescriptionCanvasScope.current(session) else { return }
+        newEstimatePresentation = JobNewEstimatePresentation(job: job, owner: owner)
     }
 
     private func run(_ step: TechJobStep) {

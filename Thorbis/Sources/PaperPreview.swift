@@ -548,6 +548,28 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-success") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response")),
+           request.httpMethod == "POST", url.path == "/v1/estimates" {
+            let revoke = { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewRevokeDuringEstimateCreate"), object: nil) }
+            if ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") {
+                if Thread.isMainThread { revoke() } else { DispatchQueue.main.sync(execute: revoke) }
+            }
+            if let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
+                let data = ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response")
+                    ? Data("{}".utf8) : (try! JSONEncoder().encode(PaperPreview.draftEstimate))
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+                DispatchQueue.main.async { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewEstimateCreateResponse"), object: nil) }
+            }
+            return
+        }
+        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response")),
+           request.httpMethod == "POST", url.path.hasSuffix("/link") {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewEstimateLinkAttempt"), object: nil)
+            }
+        }
         if PaperPreview.screen == "customer-records",
            ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup"),
            request.httpMethod == "GET",
@@ -563,7 +585,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if PaperPreview.screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--canvas-test-issue-retry"),
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--canvas-test-create-success"),
+           request.httpMethod == "POST", url.path.hasSuffix("/link") {
+            status = 200
+            payload = ["id": "00000000-0000-4000-8000-000000009301", "jobId": PaperPreview.jobID,
+                       "estimateId": PaperPreview.draftEstimate.id, "linkedAt": "2026-10-30T12:00:00Z"]
+        } else if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail"),
+           request.httpMethod == "POST", url.path.hasSuffix("/link") {
+            status = 503
+            payload = ["status": 503, "title": "Preview link outcome unavailable"]
+        } else if PaperPreview.screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--canvas-test-issue-retry"),
            request.httpMethod == "POST", url.path == "/v2/invoices/\(PaperPreview.invoice.id)/lines" {
             status = 200
             payload = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.canvasSavedInvoice))
