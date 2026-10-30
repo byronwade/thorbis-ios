@@ -297,11 +297,12 @@ final class JobCommercialDocumentsTests: XCTestCase {
         APIClient(session: URLProtocolFixture.session(replies), baseURL: "https://app.thorbis.com")
     }
 
-    func testEstimateCreationWaitsForReadableDocumentsButKeepsCreateOnlyRoles() {
-        XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: true, canView: true, estimatesComplete: false))
-        XCTAssertTrue(JobEstimateCreation.canOpen(canCreate: true, canView: true, estimatesComplete: true))
-        XCTAssertTrue(JobEstimateCreation.canOpen(canCreate: true, canView: false, estimatesComplete: false))
-        XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: false, canView: true, estimatesComplete: true))
+    func testJobEstimateCreationRequiresReadableDocumentsAndEstimateView() {
+        XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: true, canView: true, canEditJob: true, estimatesComplete: false))
+        XCTAssertTrue(JobEstimateCreation.canOpen(canCreate: true, canView: true, canEditJob: true, estimatesComplete: true))
+        XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: true, canView: false, canEditJob: true, estimatesComplete: true))
+        XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: true, canView: true, canEditJob: false, estimatesComplete: true))
+        XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: false, canView: true, canEditJob: true, estimatesComplete: true))
     }
 
     func testFixedEstimateSummarySeparatesStatusAndCurrencyAndExcludesOptions() throws {

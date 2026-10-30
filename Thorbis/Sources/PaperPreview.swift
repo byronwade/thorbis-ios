@@ -548,8 +548,32 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
-        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-success") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss")),
+        if PaperPreview.enabled, (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-success") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-location")),
            request.httpMethod == "POST", url.path == "/v1/estimates" {
+            if ProcessInfo.processInfo.arguments.contains("--canvas-test-create-location") {
+                let raw: Data?
+                if let data = request.httpBody { raw = data }
+                else if let stream = request.httpBodyStream {
+                    stream.open(); defer { stream.close() }
+                    var collected = Data(), buffer = [UInt8](repeating: 0, count: 1024)
+                    while stream.hasBytesAvailable {
+                        let count = stream.read(&buffer, maxLength: buffer.count)
+                        if count <= 0 { break }
+                        collected.append(contentsOf: buffer[..<count])
+                    }
+                    raw = collected
+                } else { raw = nil }
+                let body = raw.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+                let matches = body?["locationId"] as? String == "00000000-0000-4000-8000-000000007001"
+                let outcome = body == nil ? "body unavailable" : (matches ? "matching" : "mismatch")
+                DispatchQueue.main.async { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewEstimateLocation"), object: outcome) }
+                let response = HTTPURLResponse(url: url, statusCode: 400, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+                let data = Data(#"{"title":"Location fixture stopped after inspecting request","status":400}"#.utf8)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+                return
+            }
             let revoke = { NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewRevokeDuringEstimateCreate"), object: nil) }
             if ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") {
                 if Thread.isMainThread { revoke() } else { DispatchQueue.main.sync(execute: revoke) }
@@ -923,6 +947,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if ProcessInfo.processInfo.arguments.contains("--canvas-test-no-job-edit") { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
@@ -1266,12 +1291,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2201", "0412", "Drain cleaning", "completed", 8, 30)
         ]
         return rows.filter { !arguments.contains("--paper-preview-customer-no-jobs") || $0.1 != "0412" }.map { ref, customer, title, status, hour, minute in
-            ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
+            var row: [String: Any] = ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
              "customerId": "00000000-0000-4000-8000-00000000\(customer)", "title": title, "status": status,
              "assignedToUserId": PaperPreview.actorID, "scheduledFor": today(hour: hour, minute: minute),
              "createdAt": "2026-07-20T12:00:00Z", "updatedAt": today(hour: 9, minute: 0),
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
-             "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
+             "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])]
+            if ref == "2214" && arguments.contains("--canvas-test-create-location") { row["locationId"] = "00000000-0000-4000-8000-000000007001" }
+            return row
         }
     }
     private static func customers() -> [[String: Any]] {

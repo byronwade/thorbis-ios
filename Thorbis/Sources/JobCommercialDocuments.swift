@@ -77,8 +77,8 @@ struct JobDocumentScope: Equatable {
 }
 
 enum JobEstimateCreation {
-    static func canOpen(canCreate: Bool, canView: Bool, estimatesComplete: Bool) -> Bool {
-        canCreate && (!canView || estimatesComplete)
+    static func canOpen(canCreate: Bool, canView: Bool, canEditJob: Bool, estimatesComplete: Bool) -> Bool {
+        canCreate && canView && canEditJob && estimatesComplete
     }
 }
 

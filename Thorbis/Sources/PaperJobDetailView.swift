@@ -231,7 +231,8 @@ struct JobDetailView: View {
                session.phase == .ready, owner.matches(actor: session.user?.id, organization: session.activeOrganization?.id,
                                                     generation: session.generation, authority: session.authorityRevision),
                session.can("job.view", feature: "jobs"), session.can("estimate.view", feature: "estimates"),
-               let job, job.id == expected.id, job.organizationId == expected.organizationId, job.customerId == expected.customerId {
+               let job, job.id == expected.id, job.organizationId == expected.organizationId, job.customerId == expected.customerId,
+               job.locationId == expected.locationId, session.can("job.edit", feature: "jobs") {
                 openEstimate = OpenedEstimate(id: id, present: false)
             }
         }) { presentation in
@@ -240,7 +241,8 @@ struct JobDetailView: View {
                 guard session.phase == .ready, presentation.owner.matches(actor: session.user?.id,
                     organization: session.activeOrganization?.id, generation: session.generation, authority: session.authorityRevision),
                     let job, job.id == presentation.job.id, job.organizationId == presentation.job.organizationId,
-                    job.customerId == presentation.job.customerId else { return }
+                    job.customerId == presentation.job.customerId, job.locationId == presentation.job.locationId,
+                    session.can("job.edit", feature: "jobs"), session.can("estimate.view", feature: "estimates") else { return }
                 createdEstimateID = estimate.id
                 createdEstimateOwner = presentation.owner
                 createdEstimateJob = presentation.job
@@ -1094,7 +1096,7 @@ struct JobDetailView: View {
     private var nextStep: TechJobStep? {
         guard let job else { return nil }
         let can = TechJobAbilities(
-            createEstimate: session.can("estimate.create", feature: "estimates"),
+            createEstimate: session.can("estimate.create", feature: "estimates") && session.can("estimate.view", feature: "estimates") && session.can("job.edit", feature: "jobs"),
             sendEstimate: session.can("estimate.send", feature: "estimates"),
             approveEstimate: session.can("estimate.approve", feature: "estimates"),
             createInvoice: session.can("invoice.create", feature: "invoicing"),
@@ -1109,6 +1111,7 @@ struct JobDetailView: View {
     private var canBuildEstimate: Bool {
         JobEstimateCreation.canOpen(canCreate: session.can("estimate.create", feature: "estimates"),
                                     canView: session.can("estimate.view", feature: "estimates"),
+                                    canEditJob: session.can("job.edit", feature: "jobs"),
                                     estimatesComplete: estimateRead?.isComplete == true)
     }
 

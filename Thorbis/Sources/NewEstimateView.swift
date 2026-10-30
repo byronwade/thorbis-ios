@@ -36,6 +36,7 @@ struct NewEstimateView: View {
     #if DEBUG
     @State private var previewCreateResponse = false
     @State private var previewLinkAttempts = 0
+    @State private var previewLocationResult = "pending"
     #endif
     private let jobID: String?
     private let onCreated: (EstimateRecord) -> Void
@@ -70,8 +71,10 @@ struct NewEstimateView: View {
         }
         guard let current = parentJob else { return false }
         return current.id == jobID && current.id == expectedJob.id && current.organizationId == expectedJob.organizationId &&
-            current.customerId == expectedJob.customerId && current.organizationId == session.activeOrganization?.id &&
-            customerID == expectedJob.customerId && session.can("job.view", feature: "jobs")
+            current.customerId == expectedJob.customerId && current.locationId == expectedJob.locationId &&
+            current.organizationId == session.activeOrganization?.id && customerID == expectedJob.customerId &&
+            session.can("job.view", feature: "jobs") && session.can("job.edit", feature: "jobs") &&
+            session.can("estimate.view", feature: "estimates")
     }
 
     private var hasUnconfirmedServerResult: Bool {
@@ -80,6 +83,20 @@ struct NewEstimateView: View {
 
     private var waitingForJob: Bool {
         expectedJob != nil && parentJob == nil && editorScopeCurrent && session.can("estimate.create", feature: "estimates")
+    }
+
+    private var unavailableDescription: String {
+        if !editorScopeCurrent && (created != nil || uncertainOutcome != nil) {
+            return "The estimate may have been created. Check existing estimates before creating another."
+        }
+        if let uncertainOutcome { return uncertainOutcome }
+        if created != nil && waitingForJob {
+            return "Your estimate was created. Return to this job to finish adding it. Check existing estimates before creating another."
+        }
+        if created != nil {
+            return "The estimate may have been created. Check existing estimates before creating another."
+        }
+        return waitingForJob ? "Waiting for the current job. Your edits stay here." : "Access or the job changed. Close this editor to start again."
     }
 
     private func ownerStillCurrent(_ owner: DescriptionCanvasScope, apiGeneration: UUID, origin: String?) -> Bool {
@@ -103,7 +120,8 @@ struct NewEstimateView: View {
     var valid: Bool {
         guard editorScopeCurrent, jobScopeCurrent, uncertainOutcome == nil else { return false }
         if let created {
-            return UUID(uuidString: created.id) != nil && created.organizationId == session.activeOrganization?.id && created.customerId == customerID
+            return UUID(uuidString: created.id) != nil && created.organizationId == session.activeOrganization?.id && created.customerId == customerID &&
+                (jobID == nil || created.locationId == expectedJob?.locationId)
         }
         return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
             lines.allSatisfy { line in
@@ -118,9 +136,7 @@ struct NewEstimateView: View {
             ScrollView {
                 if !editorScopeCurrent || !jobScopeCurrent {
                     ContentUnavailableView("Estimate unavailable", systemImage: "lock",
-                        description: Text(!editorScopeCurrent && uncertainOutcome != nil
-                            ? "The estimate may have been created. Check existing estimates before creating another."
-                            : (uncertainOutcome ?? (waitingForJob ? "Waiting for the current job. Your edits stay here." : "Access or the job changed. Close this editor to start again."))))
+                        description: Text(unavailableDescription))
                         .padding(20)
                 } else if let created {
                     createdSummary(created)
@@ -215,7 +231,11 @@ struct NewEstimateView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewEstimateCreateResponse"))) { _ in previewCreateResponse = true }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewEstimateLinkAttempt"))) { _ in previewLinkAttempts += 1 }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewEstimateLocation"))) { note in previewLocationResult = note.object as? String ?? "unknown" }
             .overlay(alignment: .top) {
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-create-location") {
+                    Text("Location \(previewLocationResult)").accessibilityIdentifier("preview-estimate-location")
+                }
                 if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--canvas-test-create-owner-loss") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-link-fail") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-invalid-response") || ProcessInfo.processInfo.arguments.contains("--canvas-test-create-job-loss")) {
                     Text("Response \(previewCreateResponse ? "delivered" : "pending"); links \(previewLinkAttempts)")
                         .accessibilityIdentifier("preview-estimate-create-receipt")
@@ -398,7 +418,7 @@ struct NewEstimateView: View {
                               quantity: Int($0.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1,
                               unitPrice: .init(amount: MoneyInput.cents($0.unitPrice) ?? 0, currency: "USD"),
                               source: $0.source ?? .manual)
-                    }))
+                    }, locationId: expectedJob?.locationId))
             } catch {
                 if couldHaveReachedServer(error) {
                     uncertainOutcome = "The estimate may have been created. Check existing estimates before creating another."
@@ -409,7 +429,7 @@ struct NewEstimateView: View {
                 return
             }
             guard UUID(uuidString: estimate.id) != nil, estimate.organizationId == owner.organization,
-                  estimate.customerId == customerID else {
+                  estimate.customerId == customerID, (jobID == nil || estimate.locationId == expectedJob?.locationId) else {
                 uncertainOutcome = "The estimate may have been created, but its response could not be verified. Check existing estimates."
                 self.error = uncertainOutcome
                 return

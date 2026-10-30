@@ -2,6 +2,59 @@ import XCTest
 
 @MainActor
 final class DescriptionCanvasUITests: XCTestCase {
+    func testCreatedEstimateShowsRecoveryGuidanceWhileJobIsUnavailable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-catalog-pages", "--canvas-test-new-estimate-job", "--canvas-test-create-job-loss"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Estimates"].waitForExistence(timeout: 30)); app.buttons["Estimates"].tap()
+        XCTAssertTrue(app.buttons["Add estimate"].waitForExistence(timeout: 20)); app.buttons["Add estimate"].tap()
+        let search = app.textFields["Search price book or type a line"]
+        XCTAssertTrue(search.waitForExistence(timeout: 15)); search.tap(); search.typeText("Replace capacitor")
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
+        XCTAssertTrue(item.waitForExistence(timeout: 15)); item.tap(); app.buttons["Review estimate · 1 item"].tap()
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        let guidance = app.staticTexts["Your estimate was created. Return to this job to finish adding it. Check existing estimates before creating another."]
+        XCTAssertTrue(guidance.waitForExistence(timeout: 10))
+    }
+    func testJobEstimateRequiresJobEditButStandaloneCreateRemainsAvailable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--canvas-test-no-job-edit"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Estimates"].waitForExistence(timeout: 30)); app.buttons["Estimates"].tap()
+        XCTAssertFalse(app.buttons["Add estimate"].exists)
+        app.terminate()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimates", "--canvas-test-no-job-edit"]
+        app.launch()
+        let create = app.buttons["New estimate"]
+        XCTAssertTrue(create.waitForExistence(timeout: 30)); create.tap()
+        XCTAssertTrue(app.textFields["Search price book or type a line"].waitForExistence(timeout: 15))
+    }
+    func testJobEstimateCreateUsesJobLocation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-catalog-pages", "--canvas-test-new-estimate-job", "--canvas-test-create-location"]
+        app.launch()
+        XCTAssertTrue(app.buttons["job-customer-link"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons["Estimates"].waitForExistence(timeout: 30)); app.buttons["Estimates"].tap()
+        let add = app.buttons["Add estimate"]
+        if !add.waitForExistence(timeout: 5) {
+            if app.buttons["Close menu"].exists { app.buttons["Close menu"].tap() }
+            app.buttons["Estimates"].tap()
+        }
+        XCTAssertTrue(add.waitForExistence(timeout: 20)); add.tap()
+        let search = app.textFields["Search price book or type a line"]
+        XCTAssertTrue(search.waitForExistence(timeout: 15)); search.tap(); search.typeText("Replace capacitor")
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
+        XCTAssertTrue(item.waitForExistence(timeout: 15)); item.tap(); app.buttons["Review estimate · 1 item"].tap()
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        let receipt = app.staticTexts["preview-estimate-location"]
+        let accepted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Location matching"), object: receipt)
+        XCTAssertEqual(XCTWaiter.wait(for: [accepted], timeout: 10), .completed, "Expected job location in create request; \(receipt.label)")
+    }
     private func makeDescriptionLong(_ app: XCUIApplication, label: String) {
         let field = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
         for _ in 0..<6 where !field.isHittable { app.swipeUp() }
