@@ -94,6 +94,7 @@ struct EstimateDetailView: View {
                 if let record {
                     commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased())", context: store.customerName(record.customerId), title: record.title,
                                       status: record.status, date: record.createdAt)
+                    DocumentCustomerLink(customerID: record.customerId)
                     // MF-04: an estimate leads with its total.
                     if let total = paperLinesTotal(record.lines), !record.lines.isEmpty {
                         MoneyFigure(label: "Total", cents: total, currency: record.lines.first?.unitPrice.currency ?? "USD")
@@ -393,6 +394,7 @@ struct InvoiceDetailView: View {
                     // Who it's for and what's owed come first; the line revision is bookkeeping, not for people.
                     commercialHeading(ref: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
                                       status: record.status, date: record.issuedAt ?? record.createdAt)
+                    DocumentCustomerLink(customerID: record.customerId)
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                     let due = max(total - record.amountPaid, 0)
                     // MF-04: what's owed now is the largest thing on the invoice; Total and Paid sit under it.

@@ -433,7 +433,7 @@ struct CustomerDetailView: View {
     @ViewBuilder private var metadataChips: some View {
         if record?.archived == true { Chip(text: "Archived", icon: "archivebox") }
         if jobs.contains(where: { $0.status == "in_progress" }) { Chip(text: "Job in progress", icon: "circle.lefthalf.filled", tint: Theme.warning, bg: Theme.warningSurface) }
-        if session.can("job.view", feature: "jobs") { Chip(text: "\(jobs.count) jobs", icon: "clock") }
+        if session.can("job.view", feature: "jobs") { Chip(text: "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")", icon: "clock") }
         if let type = record?.accountType { Chip(text: type.statusLabel) }
         MemberChip(customerID: customer.id)
     }
@@ -779,18 +779,22 @@ struct CustomerDetailView: View {
     private var jobsSection: some View {
         VStack(alignment: .leading, spacing: 2) {
             sectionTitle("All jobs", count: jobs.count)
-            ForEach(jobs) { job in
+            // Open work first, soonest first; then finished jobs, newest first. Same words as Next visit.
+            ForEach(CustomerJobOrder.sorted(jobs)) { job in
                 NavigationLink(value: job) {
                     HStack(spacing: 12) {
                         Image(systemName: statusIcon(job.status).0).foregroundStyle(statusIcon(job.status).1).frame(width: 16)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(job.title).font(Theme.font(15, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                            Text(job.status.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                            Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet", job.status.statusLabel]
+                                .joined(separator: " · "))
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 8)
                         PaperDisclosure()
                     }.frame(minHeight: 44).contentShape(Rectangle())
                 }.buttonStyle(RowPressStyle())
+                .accessibilityHint("Opens the job")
             }
             if jobs.isEmpty { emptyText("No jobs") }
         }
@@ -994,5 +998,19 @@ private struct CustomerContactIcon: View {
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel("\(isPhone ? "Call" : "Email") \(value)")
         }
+    }
+}
+
+/// A customer's jobs in reading order: open ones by visit time (unscheduled last), then closed ones newest first.
+enum CustomerJobOrder {
+    static func sorted(_ jobs: [Job]) -> [Job] {
+        let closed: Set<String> = ["completed", "canceled"]
+        let open = jobs.filter { !closed.contains($0.status) }.sorted {
+            (JobFiltering.date($0.scheduledFor) ?? .distantFuture, $0.id) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture, $1.id)
+        }
+        let done = jobs.filter { closed.contains($0.status) }.sorted {
+            (JobFiltering.date($0.scheduledFor) ?? .distantPast, $0.id) > (JobFiltering.date($1.scheduledFor) ?? .distantPast, $1.id)
+        }
+        return open + done
     }
 }
