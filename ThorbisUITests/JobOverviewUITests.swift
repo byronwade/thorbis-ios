@@ -161,16 +161,30 @@ final class JobOverviewUITests: XCTestCase {
         let directions = app.buttons["Directions"]
         let primary = app.buttons["On my way"]
         XCTAssertTrue(call.waitForExistence(timeout: 15))
-        XCTAssertTrue(primary.waitForExistence(timeout: 5))
         capture(app, name: "Job Overview with accessible text")
         XCTAssertGreaterThanOrEqual(text.frame.minY, call.frame.maxY)
         XCTAssertGreaterThanOrEqual(directions.frame.minY, text.frame.maxY)
-        XCTAssertGreaterThan(primary.frame.height, 50)
-        XCTAssertTrue(primary.isHittable)
         let content = app.scrollViews.containing(.button, identifier: "Directions").firstMatch
         for _ in 0..<3 where !directions.isHittable { content.swipeUp() }
         XCTAssertTrue(directions.isHittable, "Directions must remain reachable below the enlarged header")
+        for _ in 0..<4 where !primary.isHittable { content.swipeUp() }
+        XCTAssertTrue(primary.isHittable, "The primary action must remain reachable")
+        XCTAssertGreaterThan(primary.frame.height, 50)
         capture(app, name: "Accessible contact actions after scrolling")
+    }
+
+    func testAccessiblePaymentActionScrollsWithTheJob() {
+        continueAfterFailure = false
+        let app = preview("job", accessibleText: true, working: true)
+        let collect = button(startingWith: "Collect ", in: app)
+        let content = app.scrollViews.firstMatch
+        XCTAssertTrue(content.waitForExistence(timeout: 20))
+        for _ in 0..<5 where !collect.isHittable { content.swipeUp() }
+        XCTAssertTrue(collect.isHittable, "Collection must remain reachable")
+        let initialY = collect.frame.minY
+        content.swipeUp()
+        XCTAssertTrue(!collect.exists || collect.frame.minY < initialY - 20,
+                      "At large text the collection action must scroll away with the job")
     }
 
     private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false) -> XCUIApplication {

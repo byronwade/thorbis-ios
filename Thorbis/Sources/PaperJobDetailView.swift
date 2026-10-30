@@ -107,6 +107,9 @@ struct JobDetailView: View {
                     // never means scrolling back to the top first.
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     header(job, compact: selectedTab != "Overview")
+                    // At accessibility sizes a fixed action can cover most of a small screen.
+                    // Keep the same action early in the scrollable content instead.
+                    if typeSize.isAccessibilitySize { primaryAction }
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedTab {
@@ -274,29 +277,7 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
-            if selectedTab == "Overview", let step = nextStep {
-                // TF-01: the bar always carries the one next step of the call, money steps included.
-                PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
-                               busy: busy || creatingInvoice) {
-                    run(step)
-                }
-            } else if selectedTab == "Estimates" {
-                if !jobEstimates.isEmpty {
-                    PaperActionBar(title: "Present estimates", symbol: "person.crop.rectangle", action: presentEstimates)
-                } else if canBuildEstimate {
-                    PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
-                }
-            } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
-                      session.can("invoice.view", feature: "invoicing") {
-                // A draft is reviewed (lines) and issued on its own screen, then collected here.
-                PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
-            } else if selectedTab == "Invoice",
-                      session.can("invoice.payment.create", feature: "payments"),
-                      let invoice = selectedInvoice,
-                      let model = invoicePaymentModel,
-                      loadedInvoiceModelID == invoice.id {
-                PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
-            }
+            if !typeSize.isAccessibilitySize { primaryAction }
         }
         .sheet(isPresented: $showPause) {
             // MA-16: Cancel leading, the commit trailing where the thumb is; the form keeps what was typed.
@@ -651,6 +632,28 @@ struct JobDetailView: View {
 
     private var tabBar: some View {
         PaperTabs(options: tabs, selection: $selectedTab, wrapOverflow: true).padding(.bottom, 4)
+    }
+
+    @ViewBuilder private var primaryAction: some View {
+        if selectedTab == "Overview", let step = nextStep {
+            PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
+                           busy: busy || creatingInvoice) { run(step) }
+        } else if selectedTab == "Estimates" {
+            if !jobEstimates.isEmpty {
+                PaperActionBar(title: "Present estimates", symbol: "person.crop.rectangle", action: presentEstimates)
+            } else if canBuildEstimate {
+                PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
+            }
+        } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
+                  session.can("invoice.view", feature: "invoicing") {
+            PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
+        } else if selectedTab == "Invoice",
+                  session.can("invoice.payment.create", feature: "payments"),
+                  let invoice = selectedInvoice,
+                  let model = invoicePaymentModel,
+                  loadedInvoiceModelID == invoice.id {
+            PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
+        }
     }
 
     /// JS-01: the body is for reading, in the order a tech needs it at the door. Every action that
