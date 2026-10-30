@@ -352,10 +352,10 @@ struct CustomerDetailView: View {
             actions {
                 if canEdit {
                     Button { showCustomerMode = true } label: {
-                        // One line always: the short word takes over when the full one won't fit.
+                        // Keep the customer handoff clear even when space is tight.
                         ViewThatFits(in: .horizontal) {
-                            Label("Customer view", systemImage: "person.crop.rectangle").fixedSize()
-                            Label("Customer", systemImage: "person.crop.rectangle").fixedSize()
+                            Label("Customer checks details", systemImage: "person.crop.rectangle").fixedSize()
+                            Label("Customer review", systemImage: "person.crop.rectangle").fixedSize()
                         }
                         .font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }

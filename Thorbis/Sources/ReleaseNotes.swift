@@ -18,6 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "briefcase", title: "Find visit details faster",
                       detail: "Find notes, photos and follow-ups near the top of a job."),
+                .init(symbol: "person.crop.circle", title: "See customers at a glance",
+                      detail: "Find the next visit and contact actions, with all jobs in one place."),
             ]
         ),
         ReleaseNote(
