@@ -643,7 +643,7 @@ struct CompanyDetailsView: View {
 
     private func form(_ profile: OrganizationProfile) -> some View {
         // Hours, tax and terms have their own screen with real controls.
-        let entries = profile.catalog.filter { !OperatingFacts.keys.contains($0.factKey) }
+        let entries = profile.catalog.filter { !OperatingFacts.keys.contains($0.factKey) && $0.factKey != "logo" }
         let needed = entries.filter { CompanyFact.group($0) == 0 }
         let shown = entries.filter { CompanyFact.group($0) == 1 }
         let legal = entries.filter { CompanyFact.group($0) == 2 }
@@ -659,6 +659,9 @@ struct CompanyDetailsView: View {
             Section {
                 ForEach(needed, id: \.factKey) { row($0) }
             } header: { Text("Needed for setup") }
+            if profile.catalog.contains(where: { $0.factKey == "logo" }) {
+                Section { CompanyLogoPicker().padding(.vertical, 4) }
+            }
             Section {
                 ForEach(shown, id: \.factKey) { row($0) }
             } header: { Text("What customers see") } footer: {

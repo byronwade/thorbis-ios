@@ -18,6 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "clock", title: "Hours, tax and terms in setup",
                       detail: "Set your open hours, time zone, sales tax rate and payment terms. Saved offline too."),
+                .init(symbol: "photo", title: "Add your logo",
+                      detail: "Pick your company logo from Photos in setup or in Company details."),
             ]
         ),
         ReleaseNote(

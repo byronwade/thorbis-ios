@@ -296,6 +296,7 @@ struct SetupWizardView: View {
         case .company:
             VStack(alignment: .leading, spacing: 16) {
                 factField("legal_name", "Business name", placeholder: "Wade Plumbing & Heating LLC", required: true)
+                if facts.profile?.catalog.contains(where: { $0.factKey == "logo" }) == true { CompanyLogoPicker() }
                 factField("dba_names", "Also known as", placeholder: "The name on your trucks, if different")
                 factField("primary_phone", "Business phone", placeholder: "(555) 555-0123", required: true)
                 factField("primary_email", "Business email", placeholder: "office@company.com")
