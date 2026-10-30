@@ -167,7 +167,7 @@ struct JobDetailView: View {
         }) {
             CustomerModeContainer(onUnlocked: { showCommercialDocuments = false }) { handBack in
                 if let job, let scope = scope(for: job) {
-                    JobCustomerDocumentsView(scope: scope, documents: documents, jobTitle: job.title,
+                    JobCustomerDocumentsView(scope: scope, documents: documents, sourceGeneration: documentGeneration, jobTitle: job.title,
                         customerName: store.customerName(job.customerId), handBack: handBack,
                         onUnlocked: { showCommercialDocuments = false },
                         requestPayment: { id in
@@ -227,6 +227,13 @@ struct JobDetailView: View {
                 contactsFailed = false
             }
             if documentGeneration != session.generation {
+                #if DEBUG
+                if PaperPreview.isJobDocumentsPreview, documentGeneration != nil,
+                   ProcessInfo.processInfo.arguments.contains("--paper-preview-description-replace-session") {
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled else { return }
+                }
+                #endif
                 documentGeneration = session.generation
                 documents.reset()
                 selectedInvoiceID = nil

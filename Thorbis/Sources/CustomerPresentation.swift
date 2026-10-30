@@ -881,12 +881,13 @@ struct CustomerAmountRow: Hashable {
     let emphasis: Bool
 }
 
-/// Lines as name, then "Qty × Each" under it, amount on the right; no truncation (CP-06).
+/// Lines, quantity and amount; consent screens keep the full description inline.
 struct CustomerLinesCard: View {
     let lines: [FieldLine]
     let currency: String
     let type: CustomerType
     let rows: [CustomerAmountRow]
+    var readingAccess: DocumentDescriptionAccess? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -908,7 +909,7 @@ struct CustomerLinesCard: View {
                     }
                 }
                 .padding(.vertical, 14)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
                 Rectangle().fill(Theme.border).frame(height: 1)
             }
             if lines.isEmpty {
@@ -941,8 +942,12 @@ struct CustomerLinesCard: View {
 
     private func lineDetails(_ line: FieldLine) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(line.description).font(Theme.font(type.body))
-                .fixedSize(horizontal: false, vertical: true)
+            if let readingAccess {
+                ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+            } else {
+                Text(line.description).font(Theme.font(type.body))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
                 .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)

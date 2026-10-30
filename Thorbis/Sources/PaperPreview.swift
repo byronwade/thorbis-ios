@@ -26,6 +26,23 @@ enum PaperPreview {
     }
     static var isJobEstimateHandoff: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-handoff") }
     static var isJobDocumentsPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents") }
+    static func replacedDescriptionEstimate(_ estimate: EstimateRecord) -> EstimateRecord {
+        changed(estimate, ["currentRevisionNumber": (estimate.currentRevisionNumber ?? 0) + 1])
+    }
+    @MainActor static func expireDocumentSessionForTesting(_ session: SessionController) async {
+        let args = ProcessInfo.processInfo.arguments
+        guard isJobDocumentsPreview, args.contains("--paper-preview-description-expire-session") || args.contains("--paper-preview-description-revoke-permission") || args.contains("--paper-preview-description-replace-session") else { return }
+        try? await Task.sleep(for: .seconds(10))
+        guard !Task.isCancelled else { return }
+        if args.contains("--paper-preview-description-revoke-permission") {
+            PaperPreviewProtocol.revokeDocumentEstimateView()
+            await session.revalidate()
+        } else if args.contains("--paper-preview-description-replace-session") {
+            Task { await session.restore() }
+        } else {
+            await session.signOut()
+        }
+    }
     static var isJobDocumentsMoneyPreview: Bool {
         isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents-money")
     }
@@ -48,6 +65,10 @@ enum PaperPreview {
     }
     static var jobDocumentEstimates: [EstimateRecord] {
         var draft = changed(estimate, ["id": "00000000-0000-4000-8000-000000002238", "title": "Water heater add-ons", "status": "draft", "options": NSNull()])
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-long-document-description") {
+            let line = FieldLine(id: "00000000-0000-4000-8000-000000009298", description: "First paragraph: inspect the entire installation before beginning work. Confirm all existing connections and document their condition.\n\nSecond paragraph: carefully complete the repair, test the system, and explain the results to the customer. Final detail: return the work area to its original condition.", quantity: 1, unitPrice: FieldMoney(amount: 12000, currency: "USD"), source: nil)
+            draft = changed(draft, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([line]))])
+        }
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-invalid-money") {
             let invalid = FieldLine(id: "00000000-0000-4000-8000-000000009299", description: "Unverifiable sample amount", quantity: 2,
                                     unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)
@@ -58,6 +79,10 @@ enum PaperPreview {
     }
     static var jobDocumentInvoices: [InvoiceRecord] {
         var primary = issuedInvoice
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-long-document-description"), let first = primary.lines.first {
+            let longLine = FieldLine(id: first.id, description: "Invoice first paragraph: inspect the installation and document the existing condition before work starts.\n\nInvoice second paragraph: complete the service, test all connections, and explain the outcome. Final invoice detail: leave the site clean.", quantity: first.quantity, unitPrice: first.unitPrice, source: first.source)
+            primary = changed(primary, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([longLine] + Array(primary.lines.dropFirst())))])
+        }
         if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-signed") {
             primary.customerAuthorization = .init(id: "00000000-0000-4000-8000-000000009501", signerName: "Preview customer",
                 signedAt: "2026-10-27T12:00:00Z", imageMediaId: "00000000-0000-4000-8000-000000009502", linesRevision: primary.linesRevision)
@@ -480,6 +505,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
         var priceBookViewRevoked = false
+        var documentEstimateViewRevoked = false
         var priceBookReads = 0
         var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
@@ -487,7 +513,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -497,6 +523,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
+    static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
     static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
     static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
     static func switchSavedWorkWorkspace() {
@@ -865,6 +892,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
+            if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }

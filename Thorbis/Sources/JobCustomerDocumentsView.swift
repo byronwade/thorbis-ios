@@ -9,6 +9,8 @@ private enum CustomerJobPaper: Hashable {
 struct JobCustomerDocumentsView: View {
     let scope: JobDocumentScope
     @ObservedObject var documents: JobDocumentCollections
+    /// Generation under which the shared job-document collection was loaded.
+    let sourceGeneration: UUID?
     let jobTitle: String
     let customerName: String
     let handBack: () -> Void
@@ -29,7 +31,7 @@ struct JobCustomerDocumentsView: View {
     @State private var error: String?
     @State private var unlocking = false
 
-    private var currentWorkspace: Bool { session.activeOrganization?.id == scope.organizationID }
+    private var currentWorkspace: Bool { sourceGeneration == session.generation && session.user != nil && session.activeOrganization?.id == scope.organizationID }
     private var canViewEstimates: Bool { session.can("estimate.view", feature: "estimates") }
     private var canViewInvoices: Bool { session.can("invoice.view", feature: "invoicing") }
 
@@ -68,43 +70,48 @@ struct JobCustomerDocumentsView: View {
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.background)
         }
         .navigationDestination(item: $book) { initial in
-            CustomerJobDocumentBook(scope: scope,
-                estimates: canViewEstimates && estimates?.scope == scope ? estimates?.records ?? [] : [],
-                invoices: canViewInvoices && invoices?.scope == scope ? invoices?.records ?? [] : [],
-                freshEstimates: estimates?.scope == scope ? estimates?.freshIDs ?? [] : [],
-                freshInvoices: invoices?.scope == scope ? invoices?.freshIDs ?? [] : [],
-                unavailableEstimates: canViewEstimates && estimates?.scope == scope ? estimates?.unavailableIDs ?? [] : [],
-                initial: initial, actionError: error, refresh: refresh,
-                reviewEstimate: { id in Task { await openEstimate(id, decision: true) } },
-                signInvoice: { id in Task { await openInvoice(id, decision: true, sign: true) } },
-                payInvoice: { id in Task { await openInvoice(id, payment: true) } },
-                canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
-                canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
-                .disabled(unlocking || openingID != nil)
-                .navigationDestination(item: $paper) { destination in
-                    destinationView(destination)
-                        .disabled(unlocking)
-                        .navigationTitle(reference(destination))
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button { Task { await unlock() } } label: {
-                                    Image(systemName: "lock").font(.system(size: 20))
-                                        .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target)
-                                        .contentShape(Rectangle())
+            if currentWorkspace {
+                CustomerJobDocumentBook(scope: scope, sourceGeneration: sourceGeneration,
+                    estimates: canViewEstimates && estimates?.scope == scope ? estimates?.records ?? [] : [],
+                    invoices: canViewInvoices && invoices?.scope == scope ? invoices?.records ?? [] : [],
+                    freshEstimates: estimates?.scope == scope ? estimates?.freshIDs ?? [] : [],
+                    freshInvoices: invoices?.scope == scope ? invoices?.freshIDs ?? [] : [],
+                    unavailableEstimates: canViewEstimates && estimates?.scope == scope ? estimates?.unavailableIDs ?? [] : [],
+                    initial: initial, actionError: error, refresh: refresh,
+                    reviewEstimate: { id in Task { await openEstimate(id, decision: true) } },
+                    signInvoice: { id in Task { await openInvoice(id, decision: true, sign: true) } },
+                    payInvoice: { id in Task { await openInvoice(id, payment: true) } },
+                    canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
+                    canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
+                    .disabled(unlocking || openingID != nil)
+                    .navigationDestination(item: $paper) { destination in
+                        destinationView(destination)
+                            .disabled(unlocking)
+                            .navigationTitle(reference(destination))
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button { Task { await unlock() } } label: {
+                                        Image(systemName: "lock").font(.system(size: 20))
+                                            .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .accessibilityLabel("Technician: unlock to leave customer mode")
+                                    .disabled(unlocking)
                                 }
-                                .accessibilityLabel("Technician: unlock to leave customer mode")
-                                .disabled(unlocking)
                             }
-                        }
-                }
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { Task { await unlock() } } label: {
-                            Image(systemName: "lock").font(.system(size: 20))
-                                .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target)
-                        }.accessibilityLabel("Technician: unlock to leave customer mode")
                     }
-                }
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button { Task { await unlock() } } label: {
+                                Image(systemName: "lock").font(.system(size: 20))
+                                    .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target)
+                            }.accessibilityLabel("Technician: unlock to leave customer mode")
+                        }
+                    }
+            } else {
+                Text("Hand the device back to your technician to reload this job.")
+                    .font(Theme.font(20)).padding(Theme.gutter)
+            }
         }
         .task(id: session.generation) {
             paper = nil

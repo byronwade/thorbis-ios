@@ -2,6 +2,81 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookUITests: XCTestCase {
+    func testLongEstimateDescriptionOpensReadOnlyAndReturnsToSameJobDocument() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-long-document-description"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
+        app.buttons["Job actions"].tap()
+        app.buttons["Show to customer"].tap()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        let more = app.buttons["Show more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10)); more.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final detail: return the work area to its original condition.")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textViews.firstMatch.exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Water heater add-ons"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
+    }
+
+    func testDescriptionClosesOnSameOrganizationSessionReplacement() {
+        assertDescriptionClosesOnAuthorityChange("--paper-preview-description-replace-session")
+    }
+
+    func testDescriptionClosesWhenEstimatePermissionIsRevokedInSameSession() {
+        assertDescriptionClosesOnAuthorityChange("--paper-preview-description-revoke-permission")
+    }
+
+    func testDescriptionClosesWhenSessionAuthorityIsRevoked() {
+        assertDescriptionClosesOnAuthorityChange("--paper-preview-description-expire-session")
+    }
+
+    private func assertDescriptionClosesOnAuthorityChange(_ flag: String) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-long-document-description", flag]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15)); app.buttons["Job actions"].tap()
+        app.buttons["Show to customer"].tap()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        XCTAssertTrue(app.buttons["Show more"].waitForExistence(timeout: 5)); app.buttons["Show more"].tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Description"])
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 20), .completed)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final detail: return the work area to its original condition.")).firstMatch.exists)
+    }
+
+    func testDescriptionClosesWhenDocumentBecomesStale() {
+        assertDescriptionClosesAfterChange("--paper-preview-description-stale", canReopen: false)
+    }
+
+    func testDescriptionClosesWhenSameTextBelongsToNewRevision() {
+        assertDescriptionClosesAfterChange("--paper-preview-description-replaced", canReopen: true)
+    }
+
+    private func assertDescriptionClosesAfterChange(_ flag: String, canReopen: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-long-document-description", flag]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15)); app.buttons["Job actions"].tap()
+        app.buttons["Show to customer"].tap()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        XCTAssertTrue(app.buttons["Show more"].waitForExistence(timeout: 5)); app.buttons["Show more"].tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Description"])
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 20), .completed)
+        if canReopen {
+            XCTAssertTrue(app.buttons["Show more"].waitForExistence(timeout: 5))
+        } else {
+            XCTAssertFalse(app.buttons["Show more"].exists)
+        }
+    }
+
     func testEstimateReviewAndInvoiceSignatureLeaveTheSwipeSurface() {
         continueAfterFailure = false
         let app = XCUIApplication()
