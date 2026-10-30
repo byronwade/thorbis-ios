@@ -60,15 +60,22 @@ struct ScorecardView: View {
                 .font(Theme.font(13)).foregroundStyle(Theme.warning).padding(.bottom, 8)
         }
 
+        // TG-13: a number this role can't see shows a dash, never a zero and never a missing row.
         if let collected = me.collected {
             row("Collected", money(collected, currency: card.currency), route: .invoices)
+        } else {
+            row("Collected", "—", route: nil)
         }
         row("Jobs done", "\(me.jobsDone)", route: nil)
         if let average = me.averageTicket, let invoices = me.invoices {
             row("Average ticket", invoices == 0 ? "—" : money(average, currency: card.currency), route: .invoices)
+        } else {
+            row("Average ticket", "—", route: nil)
         }
         if let rate = me.closeRateBps, let presented = me.estimatesPresented, let approved = me.estimatesApproved {
             row("Close rate", presented == 0 ? "—" : "\(rate / 100)%", detail: presented == 0 ? nil : "\(approved) of \(presented) estimates", route: .estimates)
+        } else {
+            row("Close rate", "—", route: nil)
         }
         // TG-13: review requests appear once they are measured (BYR-1566).
 
