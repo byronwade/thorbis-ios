@@ -275,15 +275,8 @@ struct CustomerDetailView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
-                        Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Text(record?.name ?? customer.name).font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                        .accessibilityAddTraits(.isHeader)
-                }.padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 12)
+                customerIdentity
+                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 16)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { metadataChips }.fixedSize()
                     VStack(alignment: .leading, spacing: 6) { metadataChips }
@@ -295,6 +288,9 @@ struct CustomerDetailView: View {
                 // Next visit sits above everything else: it's why most people open a customer.
                 if tab == "Overview" && session.can("job.view", feature: "jobs") {
                     nextVisit.padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                }
+                if typeSize.isAccessibilitySize {
+                    customerPrimaryActions
                 }
                 if let error {
                     ErrorBanner(message: error) { await load() }.padding(.horizontal, Theme.gutter).padding(.bottom, 12)
@@ -335,6 +331,8 @@ struct CustomerDetailView: View {
         }
         .foregroundStyle(Theme.foreground).background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if canEdit {
@@ -348,43 +346,7 @@ struct CustomerDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
-            actions {
-                if canEdit {
-                    Button { showCustomerMode = true } label: {
-                        // Keep the customer handoff clear even when space is tight.
-                        Group {
-                            if typeSize.isAccessibilitySize {
-                                Text("Customer review")
-                                    .multilineTextAlignment(.center)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            } else {
-                                ViewThatFits(in: .horizontal) {
-                                    Label("Customer checks details", systemImage: "person.crop.rectangle").fixedSize()
-                                    Text("Customer review")
-                                        .multilineTextAlignment(.center)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        }
-                        .font(Theme.font(17, weight: .medium))
-                        .padding(.horizontal, 12).padding(.vertical, typeSize.isAccessibilitySize ? 10 : 8)
-                        .frame(maxWidth: .infinity, minHeight: Theme.commitHeight)
-                        .foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Show to customer")
-                    .accessibilityHint("Hands the device to the customer to check and fix their details")
-                    .accessibilityIdentifier("customer-handoff-action")
-                }
-                if session.can("job.create", feature: "jobs") {
-                    Button { showNewJob = true } label: {
-                        Label("New job", systemImage: "plus").inkCommit()
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("customer-new-job-action")
-                }
-            }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
+            if !typeSize.isAccessibilitySize { customerPrimaryActions }
         }
         .task { await load() }
         .task { await loadSmsConsent() }
@@ -453,6 +415,71 @@ struct CustomerDetailView: View {
         if let type = record?.accountType { Chip(text: type.statusLabel) }
         MemberChip(customerID: customer.id)
     }
+    private var customerPrimaryActions: some View {
+        let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        return actions {
+            if canEdit {
+                Button { showCustomerMode = true } label: {
+                    // Keep the customer handoff clear even when space is tight.
+                    Group {
+                        if typeSize.isAccessibilitySize {
+                            Text("Customer review")
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            ViewThatFits(in: .horizontal) {
+                                Label("Customer checks details", systemImage: "person.crop.rectangle").fixedSize()
+                                Text("Customer review")
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .font(Theme.font(17, weight: .medium))
+                    .padding(.horizontal, 12).padding(.vertical, typeSize.isAccessibilitySize ? 10 : 8)
+                    .frame(maxWidth: .infinity, minHeight: Theme.commitHeight)
+                    .foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Show to customer")
+                .accessibilityHint("Hands the device to the customer to check and fix their details")
+                .accessibilityIdentifier("customer-handoff-action")
+            }
+            if session.can("job.create", feature: "jobs") {
+                Button { showNewJob = true } label: {
+                    Label("New job", systemImage: "plus").inkCommit()
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("customer-new-job-action")
+            }
+        }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
+    }
+    private var customerIdentity: some View {
+        let name = record?.name ?? customer.name
+        let initial = name.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() }
+        return HStack(alignment: .top, spacing: 14) {
+            if !typeSize.isAccessibilitySize, let initial {
+                Text(initial)
+                    .font(Theme.font(20, weight: .semibold))
+                    .foregroundStyle(Theme.brandText)
+                    .frame(width: 48, height: 48)
+                    .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(Theme.font(26, weight: .semibold)).tracking(-0.4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
+                    Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let record {
@@ -475,13 +502,13 @@ struct CustomerDetailView: View {
         let open = jobs.filter { !["completed", "canceled"].contains($0.status) }
             .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
         if let job = open.first {
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
                 PaperGroupHeader(title: open.count > 1 ? "Next visit · \(open.count) open" : "Next visit")
                 NavigationLink(value: job) {
-                    HStack(spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
                         StatusRing(status: job.status).accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(job.title).font(Theme.font(16, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
                             Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
                                   job.status.statusLabel].joined(separator: " · "))
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -489,9 +516,14 @@ struct CustomerDetailView: View {
                         Spacer(minLength: 8)
                         PaperDisclosure()
                     }
-                    .frame(minHeight: 52).contentShape(Rectangle())
+                    .padding(16)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("customer-next-visit")
             }
         }
     }

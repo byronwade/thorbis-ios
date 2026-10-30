@@ -2,6 +2,47 @@ import XCTest
 
 @MainActor
 final class CustomerClarityUITests: XCTestCase {
+    func testNextVisitStaysReadableAndOpensItsJob() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "-thorbis.appearance", "dark"]
+        app.launch()
+        let visit = app.buttons["customer-next-visit"]
+        XCTAssertTrue(visit.waitForExistence(timeout: 30))
+        XCTAssertTrue(visit.isHittable)
+        capture("Customer dark overview")
+        visit.tap()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 10))
+    }
+
+    func testCustomerNavigationRemainsUsableAfterScrolling() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "-thorbis.appearance", "dark"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        app.swipeUp()
+        XCTAssertTrue(app.navigationBars.buttons.firstMatch.isHittable)
+        capture("Customer dark scrolled navigation")
+    }
+
+    func testLongCustomerAndVisitRemainReadableAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-name-long", "--paper-preview-customer-long-job", "-thorbis.appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let name = app.staticTexts["Birch Community Hall and Neighborhood Services Center"]
+        XCTAssertTrue(name.waitForExistence(timeout: 30))
+        XCTAssertGreaterThan(name.frame.height, 40)
+        let visit = app.buttons["customer-next-visit"]
+        for _ in 0..<10 where !visit.isHittable { app.swipeUp() }
+        XCTAssertTrue(visit.isHittable)
+        let title = app.staticTexts["Air conditioning is not cooling the upstairs rooms after several hours of running"]
+        XCTAssertTrue(title.exists)
+        XCTAssertGreaterThan(title.frame.height, 40)
+        capture("Customer long name and visit, largest text")
+        visit.tap()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 10))
+    }
     func testCustomerOverviewUsesOneClearRouteToJobsAndKeepsDetails() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -44,8 +85,9 @@ final class CustomerClarityUITests: XCTestCase {
         let title = app.staticTexts["Air conditioning is not cooling the upstairs rooms after several hours of running"]
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         XCTAssertGreaterThan(title.frame.height, 40)
-        for _ in 0..<8 where !title.isHittable { app.swipeUp() }
-        XCTAssertTrue(title.isHittable)
+        let visit = app.buttons["customer-next-visit"]
+        for _ in 0..<8 where !visit.isHittable { app.swipeUp() }
+        XCTAssertTrue(visit.isHittable)
         capture("Customer overview large text")
     }
 
@@ -56,19 +98,14 @@ final class CustomerClarityUITests: XCTestCase {
         app.launch()
         let customerAction = app.buttons["customer-handoff-action"]
         let newJob = app.buttons["customer-new-job-action"]
-        XCTAssertTrue(customerAction.waitForExistence(timeout: 30))
-        XCTAssertTrue(newJob.waitForExistence(timeout: 10))
-        let screen = app.windows.firstMatch.frame
-        for action in [customerAction, newJob] {
-            XCTAssertGreaterThanOrEqual(action.frame.minX, screen.minX)
-            XCTAssertLessThanOrEqual(action.frame.maxX, screen.maxX)
-            XCTAssertGreaterThanOrEqual(action.frame.minY, screen.minY)
-            XCTAssertLessThanOrEqual(action.frame.maxY, screen.maxY)
-            XCTAssertTrue(action.isHittable)
-        }
+        XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        for _ in 0..<30 where !customerAction.isHittable { app.swipeUp() }
+        XCTAssertTrue(customerAction.isHittable)
         XCTAssertEqual(customerAction.label, "Show to customer")
         XCTAssertGreaterThan(customerAction.frame.height, 80)
-        capture("Customer bottom actions large text")
+        for _ in 0..<4 where !newJob.isHittable { app.swipeUp() }
+        XCTAssertTrue(newJob.isHittable)
+        capture("Customer actions large text")
     }
 
     func testBottomActionsFitAtLargestStandardText() {

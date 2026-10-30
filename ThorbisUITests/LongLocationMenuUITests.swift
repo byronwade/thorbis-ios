@@ -17,8 +17,8 @@ final class LongLocationMenuUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-many-locations"] + extraArguments
         app.launch()
         let add = app.buttons["Add equipment"]
-        XCTAssertTrue(add.waitForExistence(timeout: 30), app.debugDescription)
-        for _ in 0..<24 where !add.isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        for _ in 0..<40 where !add.isHittable { app.swipeUp() }
         XCTAssertTrue(add.isHittable, app.debugDescription)
         add.tap()
         let select = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Location,")).firstMatch
