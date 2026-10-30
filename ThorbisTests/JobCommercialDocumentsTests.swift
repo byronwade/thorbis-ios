@@ -8,6 +8,23 @@ final class JobCommercialDocumentsTests: XCTestCase {
         .init(jobID: id(job), organizationID: id(1), customerID: id(2), originEstimateID: origin.map(id))
     }
 
+    func testApprovedOptionEstimateDoesNotShowBaseLinesAsAcceptedAmount() throws {
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
+        payload["status"] = "approved"
+        payload["lines"] = [["id": id(901), "description": "Base work", "quantity": 1,
+                             "unitPrice": ["amount": 10000, "currency": "USD"]]]
+        payload["options"] = [["id": id(902), "title": "Complete replacement", "description": "",
+                               "lines": [], "totalAmount": 25000, "currency": "USD"]]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let record = try JSONDecoder().decode(EstimateRecord.self, from: data)
+        let row = JobDocumentRow(estimate: record, fresh: true)
+        XCTAssertNil(row.amount, "The aggregate base lines do not identify which option was accepted")
+        XCTAssertNotNil(row.detail)
+        let customerRow = JobDocumentRow(estimate: record, fresh: true, customerFacing: true)
+        XCTAssertNil(customerRow.amount)
+        XCTAssertEqual(customerRow.detail, "View estimate details")
+    }
+
     func testEstimateMembershipDeduplicatesAndRejectsAnotherJobForSameCustomer() async throws {
         let client = api([
             .init(200, page([link(11), link(11), link(12, job: 101)])),

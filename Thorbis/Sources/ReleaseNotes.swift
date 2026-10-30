@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-10-30-job-document-clarity",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.text", title: "Find job documents faster",
+                      detail: "Recognize estimates and invoices in the job and open each for its details."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-setup-check-retry",
             date: "2026-10-30",
             highlights: [
