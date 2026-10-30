@@ -1,0 +1,11 @@
+# Job media paging evidence — 2026-10-30
+
+The original implementation followed all continuation pages before returning. On the unmodified implementation, `testJobMediaFirstPageDoesNotEagerlyFetchTheRest` failed with two requests where one was expected (`/private/tmp/thorbis-media-paging-red.xcresult`).
+
+At source `cd5bf78`, the exact focused test run (`/private/tmp/thorbis-media-paging-exact.xcresult`) passed nine API, page integrity, grouping and preview-controller cleanup tests plus the UI journey loading a later matching photo and document. It failed the existing dated-photo UI test on iPhone SE at the pre-scroll assertion that “Finished unit” exists. The original test was not changed. An untouched staging baseline `26f0eec` run on iPhone 16 (`/private/tmp/thorbis-media-date-baseline-16.xcresult`) also failed the original test, at a different post-swipe assertion for the undated photo; its saved hierarchy shows the scroll bar at 0% and the undated group below the viewport. An earlier baseline SE attempt failed during simulator startup (`/private/tmp/thorbis-media-date-baseline-se.xcresult`).
+
+At `0311f94` (test-only addition over the same app source), a separate narrow iPhone SE UI test deliberately scrolled to both the later dated and undated photo and passed (`/private/tmp/thorbis-media-reachability.xcresult`). This does not make the failed original test pass.
+
+At `cb1e829`, two DEBUG Paper Preview UI scenarios passed (`/private/tmp/thorbis-media-revoke-ui.xcresult`): a later media page was withheld after job access revocation, and a synthetic open preview closed after revocation. These are deterministic simulated authority changes, not a real-server end-to-end or a same-session regrant test. The tests use DEBUG-only fixtures and flags; Release exclusion must be checked before shipping.
+
+Source review found no remaining definite blocker after changes for preview ownership and cleanup, retag identity, scoped pending metadata, media-count ordering, and cancelled upload-drain tasks. Full performance measurements, physical devices, VoiceOver, long-running real-server paging, cancellation races, same-session regrant, thumbnail derivatives, customer-wide aggregation, and a complete scheme remain untested. The original failing dated-photo check remains open. No TestFlight upload or distribution-archive audit is claimed.
