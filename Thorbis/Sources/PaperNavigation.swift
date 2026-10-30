@@ -39,6 +39,8 @@ struct RootView: View {
     @State private var typedJobsPath: [PaperTypedJobsRoute] = []
     @StateObject private var typedJobsOwner = PaperTypedJobsOwner()
     @State private var customersPath = NavigationPath()
+    @State private var typedCustomersPath: [PaperTypedJobsRoute] = []
+    @StateObject private var typedCustomersOwner = PaperTypedJobsOwner()
     @State private var morePath = NavigationPath()
     @State private var search = false
     @State private var settings = false
@@ -617,7 +619,7 @@ struct RootView: View {
             case "customer", "customer-activity", "customer-records":
                 if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
                     primaryTab = .customers
-                    customersPath.append(customer)
+                    pushCustomersCustomer(customer)
                 }
             default: break
             }
@@ -637,7 +639,7 @@ struct RootView: View {
         switch selectedTab {
         case PrimaryTab.schedule.rawValue: typedJobsExperiment ? typedSchedulePath.isEmpty : schedulePath.isEmpty
         case PrimaryTab.jobs.rawValue: typedJobsExperiment ? typedJobsPath.isEmpty : jobsPath.isEmpty
-        case PrimaryTab.customers.rawValue: customersPath.isEmpty
+        case PrimaryTab.customers.rawValue: typedJobsExperiment ? typedCustomersPath.isEmpty : customersPath.isEmpty
         case PrimaryTab.more.rawValue: morePath.isEmpty
         case PrimaryTab.search.rawValue: false
         default: customPaths[selectedTab]?.isEmpty ?? true
@@ -698,7 +700,22 @@ struct RootView: View {
             } else {
                 NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.paperDestinations() }
             }
-        case .customers: NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.paperDestinations() }
+        case .customers:
+            if typedJobsExperiment {
+                NavigationStack(path: Binding(get: { typedCustomersPath }, set: { next in
+                    let old = typedCustomersPath
+                    typedCustomersPath = next
+                    typedCustomersOwner.changed(from: old, to: next)
+                })) {
+                    gated(.customers) { CustomersView() }
+                        .environment(\.paperTypedJobsOwner, typedCustomersOwner)
+                        .navigationDestination(for: PaperTypedJobsRoute.self) { route in
+                            PaperTypedDestination(route: route).environment(\.paperTypedJobsOwner, typedCustomersOwner)
+                        }
+                }
+            } else {
+                NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.paperDestinations() }
+            }
         default:
             NavigationStack(path: Binding(get: { customPaths[item.rawValue] ?? NavigationPath() },
                                           set: { customPaths[item.rawValue] = $0 })) {
@@ -709,6 +726,16 @@ struct RootView: View {
 
     private func resetTabletPath() {
         if typedJobsExperiment { typedTabletOwner.discardPendingPop(); typedTabletPath = [] } else { path = NavigationPath() }
+    }
+
+    private func resetCustomersPath() {
+        if typedJobsExperiment { typedCustomersOwner.discardPendingPop(); typedCustomersPath = [] }
+        else { customersPath = NavigationPath() }
+    }
+
+    private func pushCustomersCustomer(_ customer: Customer) {
+        if typedJobsExperiment { typedCustomersOwner.discardPendingPop(); typedCustomersPath.append(.customer(customer)) }
+        else { customersPath.append(customer) }
     }
 
     private func pushTabletJob(_ job: Job) {
@@ -789,7 +816,10 @@ struct RootView: View {
         if phone {
             if case .customer = record, layout.visibleTabs(session).contains(.customers) {
                 primaryTab = .customers
-                customersPath = target
+                if typedJobsExperiment, case let .customer(id) = record {
+                    resetCustomersPath()
+                    pushCustomersCustomer(store.customers.first { $0.id == id } ?? Customer(id: id, name: "Customer", archived: nil, createdAt: nil))
+                } else { customersPath = target }
             } else {
                 primaryTab = .more
                 morePath = target
