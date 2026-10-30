@@ -102,6 +102,9 @@ struct PaperTabs: View {
             // The job's five tabs need this on a 402pt phone; a cut-off "Acti" reads as a bug.
             row(padding: 6).padding(.horizontal, Theme.gutter - 6)
             if wrapOverflow {
+                // Keep all destinations in one row when modestly tighter spacing suffices.
+                // Each tab retains its 44-point minimum height and full label.
+                row(padding: 3).padding(.horizontal, Theme.gutter - 6)
                 FlowRow(spacing: 2, lineSpacing: 0) {
                     ForEach(options, id: \.self) { option in
                         tab(option, padding: 8)
@@ -165,7 +168,7 @@ struct PaperTabs: View {
                 .padding(.horizontal, padding).padding(.vertical, 6)
                 .frame(minHeight: Theme.chipHeight + 4)
                 .background(selection == option ? Theme.fill : .clear, in: Capsule())
-                .frame(minHeight: 44).contentShape(Rectangle())
+                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
         .id(option)

@@ -104,6 +104,9 @@ struct JobDetailView: View {
                     tabBar
                     JobMediaView(jobID: jobId)
                 } else {
+                    // At accessibility sizes, the full job header can be taller than the
+                    // screen. Keep the section chooser reachable above the scrolling content.
+                    if typeSize.isAccessibilitySize { tabBar }
                     ScrollView {
                     // The tabs pin under the nav bar, so switching Overview, Invoice or Activity
                     // never means scrolling back to the top first.
@@ -125,7 +128,7 @@ struct JobDetailView: View {
                         .padding(.top, selectedTab == "Invoice" ? 4 : selectedTab == "Estimates" ? 8 : 22)
                         .padding(.bottom, 28)
                     } header: {
-                        tabBar.background(Theme.background)
+                        if !typeSize.isAccessibilitySize { tabBar.background(Theme.background) }
                     }
                     }
                     }
