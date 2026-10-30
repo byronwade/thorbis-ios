@@ -1,0 +1,9 @@
+Open a job's Photos and documents. With no connection, take a photo or scan a job document. Check its saved/queued state, leave the screen and reopen the app; the same file and capture time should remain. Reconnect and retry: it should upload once and leave the waiting list only after the service confirms the stored file.
+
+Try Photos import and PDF import, before/after tags and previews. Open another job and verify its waiting list stays separate. If you have multiple workspaces, switch between them and verify each shows only its own saved work. Check the sign-out warning counts unsynced work; cancel to keep it.
+
+If older saved photos are present, open recovery from the matching job while online. Confirm the named job and company before adoption. Original capture time is preserved; recovery does not automatically preview or upload photos. Unmatched or unreadable files stay preserved.
+
+Browse all estimates/invoices for one job. Check discounts, paid/due amounts and dated payment/refund history per invoice. Existing secure payment links and receipt methods remain available. Large text and dark mode should retain clear controls.
+
+Manual keyed-card entry and private bank-check capture/deposit are not enabled in this build. Tap to Pay awaits distribution qualification.

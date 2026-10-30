@@ -67,6 +67,15 @@ final class WorkspaceAPITests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "limit" })?.value, "50")
     }
 
+    func testFreshPriceBookCollectionBypassesLocalCache() async throws {
+        let payload = #"{"schemaVersion":1,"items":[],"nextCursor":null,"planId":"plan","resourceId":"price_book_items","viewId":null,"purpose":"collection","localMode":"complete"}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")
+        _ = try await api.priceBookItems(requireFresh: true)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+    }
+
     /// `price_book.item_revisions.sell_price_amount` is a Postgres bigint. node-pg (the API's
     /// driver) serializes int8 as a JSON string, which is what GET /v1/query actually returns.
     func testPriceBookCollectionDecodesPostgresBigintSellPrice() async throws {

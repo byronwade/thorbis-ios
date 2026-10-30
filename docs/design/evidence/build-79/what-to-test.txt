@@ -1,0 +1,9 @@
+Build 79 — present and approve estimates together
+
+From a job’s Estimates tab, tap Present estimates. The customer sees every verified estimate for that job together and can select more than one. Review the selected work and discounts, then sign each estimate within the same protected presentation. Each document keeps its own approval and signature. Already-approved estimates stay visible without another approval. Add estimate and individual document actions remain available.
+
+Please test two sent estimates, and an approved estimate alongside a sent estimate. Select either or both independent estimates, go Back during review, and check the separate approval results. Test an interrupted connection and returning the phone to the technician.
+
+Report any selection, Continue or Approve tap that does not respond; earlier simulator automation missed taps, and physical iPhone interaction still needs your testing. Existing job-specific invoice swiping, discounts and payment/refund history remain available.
+
+Tap to Pay distribution qualification, secure manual card entry, and private check scanning/deposit remain separate work in progress and are not newly enabled by this build.

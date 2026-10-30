@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 @testable import Thorbis
 
 @MainActor
@@ -34,6 +35,86 @@ final class SessionControllerTests: XCTestCase {
     private func controller(_ replies: [URLProtocolFixture.Reply]) -> (SessionController, APIClient) {
         let api = APIClient(session: URLProtocolFixture.session(replies), baseURL: "https://app.thorbis.com")
         return (SessionController(api: api, defaults: isolatedDefaults()), api)
+    }
+
+    func testActivityRetirementNotifiedOnRevalidationRevocation() async {
+        let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["customer.view"]"#)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, revoked), .init(200, features),
+            .init(200, activeSession), .init(200, catalog), .init(200, features)
+        ])
+        await session.restore()
+        var retirementCount = 0
+        session.onJobAuthorityRevoked = { retirementCount += 1 }
+        await session.revalidate()
+        XCTAssertEqual(retirementCount, 1)
+        await session.revalidate()
+        XCTAssertEqual(retirementCount, 1, "Regrant must not retire newly authorized activity")
+    }
+
+    func testMediaAuthorityRevisionChangesBeforeSameVersionRevokeAndRegrant() async {
+        let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["customer.view"]"#)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, revoked), .init(200, features),
+            .init(200, activeSession), .init(200, catalog), .init(200, features)
+        ])
+        await session.restore()
+        let generation = session.generation
+        let initialRevision = session.authorityRevision
+        var revokeRevision: UUID?
+        var grantRevision: UUID?
+        let subscription = session.$capabilities.dropFirst().sink { capabilities in
+            if capabilities.contains("job.view") { grantRevision = session.authorityRevision }
+            else { revokeRevision = session.authorityRevision }
+        }
+        await session.revalidate()
+        XCTAssertFalse(session.can("job.view", feature: "jobs"))
+        XCTAssertNotNil(revokeRevision)
+        XCTAssertNotEqual(revokeRevision, initialRevision, "The media revision must change before revocation is published")
+        let afterRevoke = session.authorityRevision
+        await session.revalidate()
+        XCTAssertTrue(session.can("job.view", feature: "jobs"))
+        XCTAssertEqual(session.generation, generation)
+        XCTAssertNotNil(grantRevision)
+        XCTAssertNotEqual(grantRevision, afterRevoke, "Regrant must force a fresh media authorization")
+        withExtendedLifetime(subscription) {}
+    }
+
+    func testCustomerRecordsScopeRejectsStaleCompletionAfterSameVersionRevokeAndRegrant() async {
+        let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
+        let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, enabledFeatures),
+            .init(200, activeSession), .init(200, revoked), .init(200, enabledFeatures),
+            .init(200, activeSession), .init(200, catalog), .init(200, enabledFeatures)
+        ])
+        await session.restore()
+        let oldScope = CustomerRecordsScope.capture(session: session, customerID: first)
+        XCTAssertNotNil(oldScope)
+        let (completion, continuation) = AsyncStream<Void>.makeStream()
+        var stalePublished = false
+        let oldRequest = Task { @MainActor in
+            for await _ in completion {
+                if oldScope!.isCurrent(session: session) { stalePublished = true }
+                break
+            }
+        }
+        await session.revalidate()
+        XCTAssertNil(CustomerRecordsScope.capture(session: session, customerID: first))
+        await session.revalidate()
+        let newScope = CustomerRecordsScope.capture(session: session, customerID: first)
+        XCTAssertNotNil(newScope)
+        XCTAssertNotEqual(oldScope, newScope, "A completion captured before revocation cannot publish after regrant")
+        XCTAssertFalse(oldScope!.isCurrent(session: session), "An old in-flight request must fail the same guard used by the view")
+        XCTAssertTrue(newScope!.isCurrent(session: session))
+        XCTAssertEqual(oldScope?.generation, newScope?.generation)
+        XCTAssertEqual(oldScope?.policyVersion, newScope?.policyVersion)
+        continuation.yield(())
+        continuation.finish()
+        await oldRequest.value
+        XCTAssertFalse(stalePublished, "A request that completes after regrant must not publish its old data")
     }
 
     func testRestoreNullSessionLeavesNoAuthority() async {

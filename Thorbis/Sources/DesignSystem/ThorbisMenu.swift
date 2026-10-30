@@ -79,12 +79,21 @@ struct ThorbisMenu<Label: View>: View {
     @State private var model = ThorbisMenuModel()
 
     var body: some View {
+        Group {
+            if let accessibilityLabel {
+                button.accessibilityLabel(accessibilityLabel)
+            } else {
+                button
+            }
+        }
+        .sheet(isPresented: $model.isPresented) {
+            ThorbisMenuCard(items: items, title: title) { model.select($0) }
+        }
+    }
+
+    private var button: some View {
         Button { model.isPresented = true } label: { label() }
             .buttonStyle(PressStyle())
-            .accessibilityLabel(accessibilityLabel ?? "")
-            .sheet(isPresented: $model.isPresented) {
-                ThorbisMenuCard(items: items, title: title) { model.select($0) }
-            }
     }
 }
 
@@ -93,32 +102,41 @@ struct ThorbisMenuCard: View {
     let items: [ThorbisMenuItem]
     var title: String? = nil
     let onSelect: (ThorbisMenuItem) -> Void
-    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var estimatedHeight: CGFloat {
         let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? 50 : 62) }
         let header: CGFloat = title == nil ? 0 : 32
         // Bias up with Dynamic Type so a fitted-height sheet never clips at large text; over-
         // estimating only leaves dim space above the bottom-anchored card.
-        return (rows + header + 40) * typeSize.sheetHeightScale
+        return (rows + header + 40) * dynamicTypeSize.sheetHeightScale
+    }
+
+    private var detents: Set<PresentationDetent> {
+        if verticalSizeClass == .compact { return [.large] }
+        return estimatedHeight <= 420 && !dynamicTypeSize.isAccessibilitySize
+            ? [.height(estimatedHeight)] : [.medium, .large]
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let title {
-                Text(title)
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 2)
-            }
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                Button { onSelect(item) } label: { row(item) }
-                    .buttonStyle(RowPressStyle())
-                    .disabled(item.isDisabled)
-                    .opacity(item.isDisabled ? 0.4 : 1)
-                if index < items.count - 1 {
-                    Divider().overlay(Theme.border)
-                        .padding(.leading, item.icon == nil ? 14 : 44)
+        ScrollView {
+            VStack(spacing: 0) {
+                if let title {
+                    Text(title)
+                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 2)
+                }
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    Button { onSelect(item) } label: { row(item) }
+                        .buttonStyle(RowPressStyle())
+                        .disabled(item.isDisabled)
+                        .opacity(item.isDisabled ? 0.4 : 1)
+                    if index < items.count - 1 {
+                        Divider().overlay(Theme.border)
+                            .padding(.leading, item.icon == nil ? 14 : 44)
+                    }
                 }
             }
         }
@@ -130,9 +148,7 @@ struct ThorbisMenuCard: View {
         .frame(maxWidth: 460)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, 10)
-        // Fitted height for the common case; `.large` is the escape hatch if an AX size still
-        // overflows, so rows stay reachable instead of clipping.
-        .presentationDetents([.height(estimatedHeight), .large])
+        .presentationDetents(detents)
         .presentationBackground(.clear)
         .presentationDragIndicator(.hidden)
     }

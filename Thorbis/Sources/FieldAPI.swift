@@ -977,6 +977,11 @@ private struct FieldPage<T: Decodable>: Decodable {
     let nextCursor: String?
 }
 
+struct JobMediaPage: Decodable {
+    let items: [MediaAssetRecord]
+    let nextCursor: String?
+}
+
 @MainActor
 extension APIClient {
     private func fieldPath(_ base: String, id: String, suffix: String = "") throws -> String {
@@ -1009,7 +1014,7 @@ extension APIClient {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await allFieldPages("/v1/jobs", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
     }
-    func fieldJob(_ id: String) async throws -> JobRecord { try await send("GET", fieldPath("/v1/jobs", id: id)) }
+    func fieldJob(_ id: String, requireFresh: Bool = false) async throws -> JobRecord { try await send("GET", fieldPath("/v1/jobs", id: id), requireFresh: requireFresh) }
     func createFieldJob(_ request: FieldJobCreate) async throws -> JobRecord {
         try await send("POST", "/v1/jobs", body: request)
     }
@@ -1124,8 +1129,17 @@ extension APIClient {
         try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/completion-invoice"), body: EmptyObject())
     }
 
-    func fieldMedia(_ jobID: String) async throws -> [MediaAssetRecord] {
-        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"))
+    func fieldMedia(_ jobID: String, includeArchived: Bool = false) async throws -> [MediaAssetRecord] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : [])
+    }
+
+    func fieldMediaPage(_ jobID: String, cursor: String? = nil, kind: String? = nil) async throws -> JobMediaPage {
+        guard cursor.map({ !$0.isEmpty }) ?? true else {
+            throw Problem(title: "Invalid media cursor", status: nil, detail: "The continuation is empty.")
+        }
+        var query = [URLQueryItem(name: "limit", value: "50")]
+        if let kind { query.append(URLQueryItem(name: "kind", value: kind)) }
+        return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: query, cursor: cursor)
     }
 
     func registerFieldMedia(_ jobID: String, request: FieldMediaRegistrationRequest) async throws -> FieldMediaRegistration {

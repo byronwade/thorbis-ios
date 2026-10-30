@@ -1,10 +1,21 @@
 import SwiftUI
 
+extension AppBottomBar.Sync {
+    static func savedWork(_ snapshot: SavedWorkSnapshot?) -> Self? {
+        guard let snapshot, snapshot.hasPendingWork else { return nil }
+        if snapshot.hasListingWarning { return .needsChecking }
+        if snapshot.attentionCount > 0 { return .needsReview(snapshot.attentionCount) }
+        if snapshot.isSending { return .syncing(snapshot.totalCount) }
+        return .waiting(snapshot.totalCount)
+    }
+}
+
 struct RootView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var pendingMedia: PendingMediaStore
     @State private var tab: TabletSection = .more
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject private var whatsNew: WhatsNew
@@ -23,7 +34,7 @@ struct RootView: View {
     @State private var barQuery = ""
     @State private var newCustomer = false
     @State private var newEstimate = false
-    @State private var reviewOutbox = false
+    @State private var reviewScope: SavedWorkScope?
     @ObservedObject private var recents = RecentItems.shared
     /// The phone's width, which sizes the pop-up menu against the bar.
     @State private var phoneWidth: CGFloat = 0
@@ -341,12 +352,19 @@ struct RootView: View {
         return PaperWorkGroups.inProgress(store.jobs).first { $0.assignedToUserId == nil || $0.assignedToUserId == me }
     }
 
-    private var barSync: AppBottomBar.Sync? {
-        if !outbox.needsReview.isEmpty { return .needsReview(outbox.needsReview.count) }
-        if outbox.syncing { return .syncing(outbox.pending.count) }
-        if !outbox.pending.isEmpty { return .waiting(outbox.pending.count) }
-        return nil
+    private var savedWorkScope: SavedWorkScope? {
+        .capture(session: session, api: api, media: pendingMedia, outbox: outbox)
     }
+
+    private var savedWorkSnapshot: SavedWorkSnapshot? {
+        guard let scope = savedWorkScope else { return nil }
+        return .make(scope: scope, entries: outbox.entries, media: pendingMedia.items,
+                     mediaErrors: pendingMedia.errors, unverifiedMediaIDs: pendingMedia.unverifiedIDs,
+                     uploadingMediaID: pendingMedia.uploadingID, commandsSyncing: outbox.syncing,
+                     jobs: store.jobs, listingWarning: pendingMedia.storageWarning)
+    }
+
+    private var barSync: AppBottomBar.Sync? { .savedWork(savedWorkSnapshot) }
 
     /// Long-press Search: the last records opened here, and the outbox when it holds anything.
     private var searchActions: [[AppBottomBar.QuickAction]] {
@@ -354,13 +372,11 @@ struct RootView: View {
             AppBottomBar.QuickAction(title: item.title, symbol: item.kind == .job ? "briefcase" : "person") { openRecent(item) }
         }
         var sync: [AppBottomBar.QuickAction] = []
-        if !outbox.needsReview.isEmpty {
-            let count = outbox.needsReview.count
-            sync.append(.init(title: "Review \(count) change\(count == 1 ? "" : "s")", symbol: "exclamationmark.triangle") { reviewOutbox = true })
-        } else if !outbox.pending.isEmpty {
-            let count = outbox.pending.count
-            sync.append(.init(title: "\(count) change\(count == 1 ? "" : "s") waiting to sync", symbol: "arrow.triangle.2.circlepath",
-                              enabled: false) {})
+        if let snapshot = savedWorkSnapshot, snapshot.hasPendingWork {
+            sync.append(.init(title: "Review saved work", symbol: snapshot.attentionCount > 0 || snapshot.hasListingWarning
+                              ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath") {
+                reviewScope = savedWorkScope
+            })
         }
         return [Array(recent), sync].filter { !$0.isEmpty }
     }
@@ -478,7 +494,10 @@ struct RootView: View {
         .sheet(isPresented: $search) { PaperGlobalSearch() }
         .sheet(isPresented: $newCustomer) { NewCustomerSheet() }
         .sheet(isPresented: $newEstimate) { NewEstimateView() }
-        .sheet(isPresented: $reviewOutbox) { OutboxReviewSheet() }
+        .sheet(item: $reviewScope) { SavedWorkReviewView(scope: $0) }
+        .onChange(of: reviewScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
+            if !valid { reviewScope = nil }
+        }
         .background(Theme.background)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }

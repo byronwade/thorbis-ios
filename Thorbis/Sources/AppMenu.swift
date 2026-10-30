@@ -114,6 +114,7 @@ struct AppBottomBar: View {
         case syncing(Int)
         case waiting(Int)
         case needsReview(Int)
+        case needsChecking
     }
 
     let pinned: [MenuItem]
@@ -209,6 +210,7 @@ struct AppBottomBar: View {
             .opacity(menuOpen ? 0 : 1)
             .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
             circle("magnifyingglass", label: searchLabel, actions: searchActions, action: search)
+                .accessibilityIdentifier("bottom-bar-search")
                 .overlay { syncRing }
                 .overlay(alignment: .topTrailing) { syncBadge }
                 .matchedGeometryEffect(id: "search", in: pill)
@@ -253,9 +255,10 @@ struct AppBottomBar: View {
 
     private var searchLabel: String {
         switch sync {
-        case .syncing(let count): "Search. Syncing \(count) change\(count == 1 ? "" : "s")"
-        case .waiting(let count): "Search. \(count) change\(count == 1 ? "" : "s") waiting to sync"
-        case .needsReview(let count): "Search. \(count) change\(count == 1 ? "" : "s") couldn't sync"
+        case .syncing(let count): count == 0 ? "Search. Syncing saved work" : "Search. Syncing \(count) saved item\(count == 1 ? "" : "s")"
+        case .waiting(let count): "Search. \(count) saved item\(count == 1 ? "" : "s") waiting to sync"
+        case .needsReview(let count): "Search. \(count) saved item\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") attention"
+        case .needsChecking: "Search. Saved work needs checking"
         case nil: "Search"
         }
     }
@@ -281,6 +284,17 @@ struct AppBottomBar: View {
                 .padding(.horizontal, count > 9 ? 4 : 0)
                 .background(refused ? Theme.destructive : Theme.warningSurface, in: Capsule())
                 .overlay(Capsule().strokeBorder(Theme.background, lineWidth: 2))
+                .offset(x: 4, y: -4)
+                .transition(.scale.combined(with: .opacity))
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        case .needsChecking:
+            Image(systemName: "exclamationmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.white)
+                .frame(width: 20, height: 20)
+                .background(Theme.destructive, in: Circle())
+                .overlay(Circle().strokeBorder(Theme.background, lineWidth: 2))
                 .offset(x: 4, y: -4)
                 .transition(.scale.combined(with: .opacity))
                 .allowsHitTesting(false)

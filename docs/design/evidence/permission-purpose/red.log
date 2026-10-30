@@ -1,0 +1,105 @@
+test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) ... 
+  test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSBluetoothAlwaysUsageDescription', value='') ... FAIL
+  test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSBluetoothAlwaysUsageDescription', value=' \n\t') ... FAIL
+  test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSBluetoothAlwaysUsageDescription', value=True) ... FAIL
+  test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSLocationWhenInUseUsageDescription', value='') ... FAIL
+  test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSLocationWhenInUseUsageDescription', value=' \n\t') ... FAIL
+  test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSLocationWhenInUseUsageDescription', value=True) ... FAIL
+test_disabled_reader_build_still_refuses_each_missing_sdk_purpose (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_still_refuses_each_missing_sdk_purpose) ... 
+  test_disabled_reader_build_still_refuses_each_missing_sdk_purpose (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_still_refuses_each_missing_sdk_purpose) (key='NSBluetoothAlwaysUsageDescription') ... FAIL
+  test_disabled_reader_build_still_refuses_each_missing_sdk_purpose (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_still_refuses_each_missing_sdk_purpose) (key='NSLocationWhenInUseUsageDescription') ... FAIL
+test_valid_purposes_keep_disabled_reader_entitlement_and_profile_skip (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_valid_purposes_keep_disabled_reader_entitlement_and_profile_skip) ... ok
+test_a_grant_for_another_app_or_team_is_refused (test_tap_to_pay_build_audit.TapBuildAuditTests.test_a_grant_for_another_app_or_team_is_refused) ... ok
+test_development_profile_is_not_distribution_approval (test_tap_to_pay_build_audit.TapBuildAuditTests.test_development_profile_is_not_distribution_approval) ... ok
+test_disabled_build_needs_no_reader_grant (test_tap_to_pay_build_audit.TapBuildAuditTests.test_disabled_build_needs_no_reader_grant) ... ok
+test_enabled_policy_cannot_replace_a_signed_entitlement (test_tap_to_pay_build_audit.TapBuildAuditTests.test_enabled_policy_cannot_replace_a_signed_entitlement) ... ok
+test_matching_distribution_identity_passes (test_tap_to_pay_build_audit.TapBuildAuditTests.test_matching_distribution_identity_passes) ... ok
+test_matching_signed_and_profile_grants_pass (test_tap_to_pay_build_audit.TapBuildAuditTests.test_matching_signed_and_profile_grants_pass) ... ok
+test_missing_build_policy_does_not_certify_a_legacy_binary (test_tap_to_pay_build_audit.TapBuildAuditTests.test_missing_build_policy_does_not_certify_a_legacy_binary) ... ok
+test_only_boolean_grants_count (test_tap_to_pay_build_audit.TapBuildAuditTests.test_only_boolean_grants_count) ... ok
+test_signed_claim_needs_a_profile_allowance (test_tap_to_pay_build_audit.TapBuildAuditTests.test_signed_claim_needs_a_profile_allowance) ... ok
+
+======================================================================
+FAIL: test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSBluetoothAlwaysUsageDescription', value='')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/thorbis-ios-payment-ux/scripts/tests/test_tap_to_pay_build_audit.py", line 103, in test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Tap to Pay audit passed: disabled in this build
+
+
+======================================================================
+FAIL: test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSBluetoothAlwaysUsageDescription', value=' \n\t')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/thorbis-ios-payment-ux/scripts/tests/test_tap_to_pay_build_audit.py", line 103, in test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Tap to Pay audit passed: disabled in this build
+
+
+======================================================================
+FAIL: test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSBluetoothAlwaysUsageDescription', value=True)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/thorbis-ios-payment-ux/scripts/tests/test_tap_to_pay_build_audit.py", line 103, in test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Tap to Pay audit passed: disabled in this build
+
+
+======================================================================
+FAIL: test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSLocationWhenInUseUsageDescription', value='')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/thorbis-ios-payment-ux/scripts/tests/test_tap_to_pay_build_audit.py", line 103, in test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Tap to Pay audit passed: disabled in this build
+
+
+======================================================================
+FAIL: test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSLocationWhenInUseUsageDescription', value=' \n\t')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/thorbis-ios-payment-ux/scripts/tests/test_tap_to_pay_build_audit.py", line 103, in test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Tap to Pay audit passed: disabled in this build
+
+
+======================================================================
+FAIL: test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes) (key='NSLocationWhenInUseUsageDescription', value=True)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/thorbis-ios-payment-ux/scripts/tests/test_tap_to_pay_build_audit.py", line 103, in test_disabled_reader_build_refuses_empty_whitespace_or_nontext_purposes
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Tap to Pay audit passed: disabled in this build
+
+
+======================================================================
+FAIL: test_disabled_reader_build_still_refuses_each_missing_sdk_purpose (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_still_refuses_each_missing_sdk_purpose) (key='NSBluetoothAlwaysUsageDescription')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/thorbis-ios-payment-ux/scripts/tests/test_tap_to_pay_build_audit.py", line 93, in test_disabled_reader_build_still_refuses_each_missing_sdk_purpose
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Tap to Pay audit passed: disabled in this build
+
+
+======================================================================
+FAIL: test_disabled_reader_build_still_refuses_each_missing_sdk_purpose (test_tap_to_pay_build_audit.SDKPurposeArtifactAuditTests.test_disabled_reader_build_still_refuses_each_missing_sdk_purpose) (key='NSLocationWhenInUseUsageDescription')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/thorbis-ios-payment-ux/scripts/tests/test_tap_to_pay_build_audit.py", line 93, in test_disabled_reader_build_still_refuses_each_missing_sdk_purpose
+    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : Tap to Pay audit passed: disabled in this build
+
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.679s
+
+FAILED (failures=8)

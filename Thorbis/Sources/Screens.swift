@@ -674,6 +674,7 @@ struct MoreView: View {
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject var api: APIClient
     @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var pendingMedia: PendingMediaStore
     @State private var showWorkspaces = false
     @State private var showNewJob = false
     @State private var confirmSignOut = false
@@ -753,7 +754,7 @@ struct MoreView: View {
         .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
         .sheet(isPresented: $showNewJob) { NewJobSheet() }
         .thorbisConfirm("Sign out of Thorbis?",
-                        message: outbox.signOutWarning,
+                        message: pendingMedia.signOutWarning(outboxWarning: outbox.signOutWarning),
                         isPresented: $confirmSignOut,
                         actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
     }

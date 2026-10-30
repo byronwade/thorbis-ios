@@ -1,0 +1,9 @@
+Open a job and choose Show to customer. Browse all of that job's estimates and invoices with swipes, Previous/Next or All documents. Returning from review or signing should keep your place.
+
+Check each invoice's discounts and credits, total, paid amount and remaining balance. Expand Payments and refunds to see each payment's method and date, plus refunds and the amount received after a refund. Switch invoices and confirm the details belong to that invoice.
+
+Review an estimate's current work and price before signing. Paid invoices can still be signed when needed; existing signer information remains visible and paid invoices do not offer another payment. Payment hand-back requires the technician to unlock.
+
+Try large text and dark mode. If a document needs refreshing, restore the connection and use Refresh documents without leaving its page. Other jobs' documents should never appear.
+
+Tap to Pay remains disabled pending distribution qualification. Existing secure payment links and received-payment methods remain available.

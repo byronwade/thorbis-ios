@@ -7,6 +7,27 @@ final class FieldAPITests: XCTestCase {
     private let customerID = "00000000-0000-4000-8000-000000000003"
     private let jobID = "00000000-0000-4000-8000-000000000001"
 
+    func testJobMediaFirstPageDoesNotEagerlyFetchTheRest() async throws {
+        let fixture = URLProtocolFixture.session([.init(200, #"{"items":[],"nextCursor":"next"}"#), .init(200, #"{"items":[]}"#)])
+        let client = APIClient(session: fixture, baseURL: "https://app.thorbis.com")
+        let page = try await client.fieldMediaPage(jobID)
+        XCTAssertEqual(page.nextCursor, "next")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "Opening media must not fetch every page")
+        XCTAssertEqual(URLComponents(url: try XCTUnwrap(URLProtocolFixture.recorded.first?.url), resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "limit", value: "50")])
+    }
+
+    func testJobMediaPageFollowsOnlyTheRequestedContinuation() async throws {
+        let fixture = URLProtocolFixture.session([.init(200, #"{"items":[],"nextCursor":"next"}"#), .init(200, #"{"items":[]}"#)])
+        let client = APIClient(session: fixture, baseURL: "https://app.thorbis.com")
+        let first = try await client.fieldMediaPage(jobID)
+        _ = try await client.fieldMediaPage(jobID, cursor: try XCTUnwrap(first.nextCursor))
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.last?.url)
+        XCTAssertEqual(URLComponents(url: request, resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "limit", value: "50"), URLQueryItem(name: "cursor", value: "next")])
+    }
+
     func testArchivedCustomerListRequestsArchivedRecordsAndDecodesArchiveCycle() async throws {
         let firstPage = #"{"items":[{"id":"00000000-0000-4000-8000-000000000003","organizationId":"00000000-0000-4000-8000-000000000002","name":"Archived customer","archived":true,"archiveCycleAuditId":"00000000-0000-4000-8000-000000000005","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"}],"nextCursor":"opaque-cursor"}"#
         let secondPage = #"{"items":[{"id":"00000000-0000-4000-8000-000000000004","organizationId":"00000000-0000-4000-8000-000000000002","name":"Active customer","archived":false,"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-27T12:00:00Z"}] }"#

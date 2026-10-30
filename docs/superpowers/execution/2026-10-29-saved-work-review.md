@@ -1,0 +1,39 @@
+# Saved-work review execution
+
+Implementation starts at 7568abd030ab2cae1fb826eaf2d15fd4ff0164d9, on top of the separately delivered media cleanup. Approved specification and plan remain unchanged. Build77 and cleanup evidence are immutable.
+
+This task projects the existing command and media queues into one current-workspace review. It keeps original command IDs, holds, retry/dismiss behavior, media ownership and previews/tags in the existing Photos flow. Job links use the existing ID route inside one sheet-local navigation stack, including jobs absent from the loaded list. The banner counts both queues and never certifies all work synced while a sender or listing warning remains.
+
+Command delivery now checks captured actor/workspace binding, normalized origin, request generation, task cancellation and a live capability callback before requests and after awaits, including REST fallback and conflict reads. Only review-triggered delivery supplies the new current-scope capability callback; this does not certify broader legacy call-site permission behavior. Media exposes one read-only exact matching-context accessor; its cleanup/persistence/transfer implementation is unchanged.
+
+Two bounded plan additions were approved by the coordinator: a DEBUG-only explicit session UUID preview factory retains real queue files across relaunch; the existing API request generation publishes changes for native sheet retirement. Production App construction/resync/router behavior and generation/auth/transport semantics are preserved. Existing SessionController expiry handling remains the only authority clock.
+
+Native visual review of an intermediate render found the Done toolbar outside the active stack and repetitive recovery guidance. Done now belongs to the review's real navigation content. Held explanation is shorter, unverified media correctly says it will be checked before upload, and Photos guidance appears once per job group. Planar sections use the existing Paper73/74 typography, spacing, neutral surfaces and minimum 44pt actions, with larger text adaptations.
+
+## Verification record
+
+Meaningful behavioral REDs were observed after compiling test scaffolds, before implementing behavior: command guard: 17 cases, 16 assertion failures; projection/media accessor: 53 cases, 27 assertion failures, 1 skip; old-banner native: 1 case, 1 assertion failure. Core GREEN subsequently ran 53 cases, 52 passed, 1 simulator protection skip. Artifacts and exact commands are in the private execution ledger. Intermediate integrated units ran 107 cases, 106 passed, 1 skipped, but its native relaunch case failed; that run is not an aggregate pass.
+
+The historical native relaunch failure remains an open qualification concern: real queue files retained 4 items, but a tap on the visible banner did not present the sheet. Its screenshot/AX record is preserved. Two purposeful diagnostic runs passed with valid capture/selection transitions; these passes alone do not establish the earlier failure's cause. Temporary diagnostics were removed, no delays or weaker authorization assertions added. Expanded diagnostic-free navigation/retirement qualification is recorded below when finished.
+
+## Additional authority and confirmation fixes
+
+Code review identified a command-owner gap beyond filtering rows: a ready Session A and media A could still authorize an independently bound command queue B, and a command-only A→B→A round trip could revive an old review lease. Two behavioral tests reproduced seven assertions, including an actual fifth request against four setup reads. The fix captures an opaque read-only FieldOutbox actor/workspace/binding token, requires that store in every capture/current/capability check, and compares both queue contexts. Empty foreign queues cannot pass by vacuous row checks. There is no persistence schema change.
+
+The expanded native run executed eight cases: six passed and two failed. Real Done, direct API invalidation, existing authority expiry, large-text dark recovery, strict no-reseed online relaunch, and workspace retirement passed. A real adaptive confirmation popover exposed Discard without Cancel on iOS26; this is replaced by a native alert with explicit Cancel and Discard. The destructive action still re-fetches and validates the current refused ID/scope. The other failure was an ambiguous test query: pushed-job and hidden original Schedule banners shared an identifier. The corrected test requires exactly one hittable banner and preserves actual Back/Done/route assertions. This query correction does not explain the earlier separate relaunch miss.
+
+## Final qualification and review handoff
+
+The frozen core/native iPhone run passed 122 cases (121 passed, one simulator file-protection skip), terminal 0. It contains 112 affected unit cases and 10 native journeys. A further native RED reproduced edit-only capability revocation leaving an alert open. The bounded view observation now clears pending confirmation and cancels view-owned work when editing access disappears while retaining valid read-only review. Final targeted iPhone checks passed 3/3; iPad on iOS 18.2 passed 9/9. Actual revocation receipts on both devices prove seven isolated queue/media files byte-identical by SHA256 and zero attempted mutation requests, with the same actor/workspace/current view lease and editing access false.
+
+Full-screen comparison showed the malformed landscape app image was a screenshot crop artifact; actual landscape alert/layout is correct. The intermediate blank workspace-dismissal frame was preserved as an evidence gap. Strengthened original-Schedule hittability checks passed 1/1 on each device, with final screenshots showing no blocking sheet or previous-workspace jobs. No fixed delay or runtime change was introduced for that verification.
+
+Final source/runtime/changed-file manifests, exact completed result-bundle hashes, review patch, selected screenshots and clean fixture receipts are indexed in `.superpowers/sdd/2026-10-29-saved-work-review/task-1-report.md`. Both owned simulator fixture namespaces contain zero saved-work files. `git diff --check` passes. No archive/commit/push/upload was performed; fresh whole-task review and signing remain coordinator work. The historical initial relaunch miss remains unexplained despite subsequent strict passes and must remain explicit in review. Disabled recovery links remain dark despite actual disabled state; coordinator requested affordance assessment without altering authority.
+
+## Independent whole-task review
+
+Fresh reviewer `/root/saved_work_whole_review` reviewed all15 changed production/test/document inputs, exact patch SHA256 `efae1e244a1f7f887336c7e3a9d60f9e96c5341dd686fa74b401057da1d7fa11` and nine-file runtime aggregate `916323f0edc1fa1f46d61f880cee53e41fec86d9d6f9769e03121b0172b3defa`. Verdict: ready for scoped release qualification; no Critical or Important findings. Root independently rehashed all15 files and the patch, read the actual completed result-bundle summaries, and inspected representative iPhone/iPad renders.
+
+Deferred Minor/P3: disabled Retry/Dismiss controls retain their dark foreground and can look enabled. Current access explanation, actual disabled controls and unchanged seven-file/zero-mutation receipts make this a visual affordance issue. Improve their shared disabled appearance in the next UI slice. The historical initial relaunch miss remains unexplained, explicitly retained as an intermittent-risk limitation; later strict passes are not its causal repair. No speculative delay or weaker predicate was introduced.
+
+The review does not certify physical-device file protection/accessibility, full-scheme testing, Release exclusion/signing, TestFlight processing or unrelated backend/payments. Those distribution checks follow separately.

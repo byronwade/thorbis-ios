@@ -1,0 +1,7 @@
+# Job document rows: visual and amount clarity
+
+A field technician opens every job-linked estimate or invoice from these rows. Keep each existing action and the job/tenant scoped loader unchanged. Customer presentation is a separate surface and keeps its own layout and decision rules.
+
+Paper Thorbis Mobile artboards 23 and 24 present document name and amount as the primary row, with status secondary; adapt the layout to SwiftUI Dynamic Type and add a restrained document-type cue in response to the user's request for more visuals. [Fresha's iOS invoice](https://mobbin.com/screens/fbc0a44a-e375-4604-a6c8-a4ddb6fb3693) separates total and received payment; [PayPal's iOS invoice](https://mobbin.com/screens/cde6d072-da3a-4680-90b4-b87f86bc62f8) presents item information and customer notes distinctly. These are structural references; never copy fake payment information or imply a total includes values not present in the aggregate.
+
+Approved estimate options have an immutable accepted scope that is not exposed in the aggregate EstimateRecord; do not present base-line price as the selected option's amount. Preserve all documents and navigation, but prompt opening the document for its actual accepted terms. Tests must cover an approved option with a base price differing from the accepted option, other rows, customer/technician paths, large text, long titles, and screenshots. Signed/discounted paper remains authoritative for customer decisions.

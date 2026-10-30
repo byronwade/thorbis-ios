@@ -22,6 +22,30 @@ final class MediaTransferTests: XCTestCase {
         #"{"asset":\#(pendingAsset),"uploadTarget":{"url":"\#(url)","method":"\#(method)","expiresAt":"\#(expiresAt)","headers":{"content-type":"image/jpeg","x-amz-checksum-sha256":"\#(helloChecksumHeader)","x-custom":"preserve"}}}"#
     }
 
+    func testWrappedStorageTransportAndServerFailureCanRecoverWithoutChangingLegacyErrors() async throws {
+        for reply in [URLProtocolFixture.offline, URLProtocolFixture.Reply(503, "{}")] {
+            let session = URLProtocolFixture.session([.init(201, registration()), reply])
+            let transfer = MediaTransfer(api: APIClient(session: session, baseURL: "https://app.thorbis.com"), storageSession: session)
+            do {
+                _ = try await transfer.upload(jobID: jobID, clientAssetID: clientAssetID, kind: "photo", mime: "image/jpeg", originalFilename: "work.jpg", data: Data("hello".utf8))
+                XCTFail("Failed storage must never confirm")
+            } catch {
+                let problem = try XCTUnwrap(error as? Problem)
+                XCTAssertEqual(problem.title, "Storage upload failed", "Legacy thrown type/text stays unchanged")
+                XCTAssertTrue(MediaTransfer.isRetryableStorageUploadFailure(error))
+                XCTAssertTrue(customerEstimatePreparationCanRetry(error))
+            }
+            XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        }
+    }
+    func testStorageRecoveryExcludesRefusalUnsafeTargetsCollisionAndCancellation() {
+        let failures: [Error] = [CancellationError(), Problem(title: "Unsafe storage URL", status: nil, detail: nil),
+            Problem(title: "Client asset ID collision", status: nil, detail: nil), Problem(title: "Media not confirmed", status: nil, detail: nil)] + [400,401,403,409,422,429].map { Problem(title: "Storage upload failed", status: $0, detail: nil) }
+        for error in failures {
+            XCTAssertFalse(MediaTransfer.isRetryableStorageUploadFailure(error))
+            XCTAssertFalse(customerEstimatePreparationCanRetry(error))
+        }
+    }
     func testSinglePUTPreservesTargetHeadersAndConfirmsMatchingSHA256() async throws {
         let session = URLProtocolFixture.session([
             .init(201, registration()), .init(200, "{}"), .init(200, storedAsset),
@@ -202,6 +226,39 @@ final class MediaTransferTests: XCTestCase {
         } catch is Problem {}
         catch { XCTFail("Unexpected error: \(error)") }
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+
+    func testChangingAPIOriginDuringPUTCannotConfirmInAnotherOrigin() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let network = URLProtocolFixture.session([.init(201, registration()), .init(200, "{}", gate: gate), .init(200, storedAsset)])
+        let api = APIClient(session: network, baseURL: "https://app.thorbis.com")
+        let task = Task { try await MediaTransfer(api: api, storageSession: network).upload(jobID: jobID,
+            clientAssetID: clientAssetID, kind: "photo", mime: "image/jpeg", originalFilename: "work.jpg", data: Data("hello".utf8)) }
+        try await waitForRequestCount(2)
+        api.baseURL = "http://localhost:3000"
+        gate.release()
+        do { _ = try await task.value; XCTFail("Changed origin must retire the in-flight upload") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+    }
+
+    func testUnstoredOrMismatchedConfirmationIsRejected() async throws {
+        let invalidReplies = [pendingAsset,
+            storedAsset.replacingOccurrences(of: assetID, with: "66666666-6666-4666-8666-666666666666"),
+            storedAsset.replacingOccurrences(of: jobID, with: "77777777-7777-4777-8777-777777777777"),
+            storedAsset.replacingOccurrences(of: "44444444-4444-4444-8444-444444444444", with: "88888888-8888-4888-8888-888888888888"),
+            storedAsset.replacingOccurrences(of: "image/jpeg", with: "application/pdf"),
+            storedAsset.replacingOccurrences(of: helloHash, with: String(repeating: "a", count: 64)),
+            storedAsset.replacingOccurrences(of: #""sizeBytes":5"#, with: #""sizeBytes":6"#)]
+        for reply in invalidReplies {
+            let session = URLProtocolFixture.session([.init(201, registration()), .init(200, "{}"), .init(200, reply)])
+            let api = APIClient(session: session, baseURL: "https://app.thorbis.com")
+            do {
+                _ = try await MediaTransfer(api: api, storageSession: session).upload(jobID: jobID,
+                    clientAssetID: clientAssetID, kind: "photo", mime: "image/jpeg", originalFilename: "work.jpg", data: Data("hello".utf8))
+                XCTFail("Unverified confirmation must not permit deletion of local media")
+            } catch is Problem {} catch { XCTFail("Unexpected error: \(error)") }
+        }
     }
 
     private func waitForRequestCount(_ count: Int) async throws {

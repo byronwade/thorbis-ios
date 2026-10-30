@@ -3,7 +3,6 @@ import UIKit
 
 /// Native translation of Paper's Customers and Customer detail artboards.
 struct CustomersView: View {
-    @Environment(\.dynamicTypeSize) private var typeSize
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
@@ -45,6 +44,7 @@ struct CustomersView: View {
     }
 
     var body: some View {
+        let jobGroups = CustomerJobGroups(jobs: store.jobs)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", search: { withMotion { showSearch.toggle() } })
@@ -54,15 +54,17 @@ struct CustomersView: View {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
                 }
                 if recordsLoading && records.isEmpty { SkeletonRows() }
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(sections, id: \.0) { letter, customers in
-                        PaperGroupHeader(title: letter).padding(.top, 6)
+                ForEach(sections, id: \.0) { letter, customers in
+                    Section {
                         ForEach(customers) { customer in
-                            customerRow(customer)
+                            customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
+                                .padding(.horizontal, Theme.gutter)
                         }
+                    } header: {
+                        PaperGroupHeader(title: letter).padding(.top, 6)
+                            .padding(.horizontal, Theme.gutter)
                     }
                 }
-                .padding(.horizontal, Theme.gutter)
                 if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
                         PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: search.isEmpty ? "Archived customers will appear here." : "Try a different search.")
@@ -90,24 +92,42 @@ struct CustomersView: View {
         }
         .sheet(item: $newJobFor) { customer in NewJobSheet(preselected: customer) }
     }
-    private func customerRow(_ customer: CustomerRecord) -> some View {
-        let open = store.jobs.first { $0.customerId == customer.id && !["completed", "canceled"].contains($0.status) }
-        let jobCount = store.jobs.filter { $0.customerId == customer.id }.count
+    private func customerRow(_ customer: CustomerRecord, jobs: [Job]) -> some View {
+        let now = Date()
+        let summaryJob = JobFiltering.customerJobSummary(jobs, customerID: customer.id, now: now)?.job
+        let jobCount = jobs.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
         return NavigationLink(value: listCustomer) {
-            HStack(spacing: 12) {
-                Avatar(name: customer.name, size: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(customer.name).font(Theme.font(15, weight: .medium)).foregroundStyle(customer.archived ? Theme.muted : Theme.foreground).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
-                    // The open job's state as a word next to the count (a mark alone was a guess).
-                    Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: open))
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+            HStack(alignment: .center, spacing: 12) {
+                Text(initials(customer.name))
+                    .font(Theme.font(16, weight: .semibold))
+                    .foregroundStyle(customer.archived ? Theme.muted : Theme.brandText)
+                    .frame(width: 42, height: 42)
+                    .background(customer.archived ? Theme.fill : Theme.brandSurface,
+                                in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .dynamicTypeSize(...DynamicTypeSize.large)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(customer.name)
+                        .font(Theme.font(16, weight: .semibold))
+                        .foregroundStyle(customer.archived ? Theme.muted : Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .top, spacing: 5) {
+                        if let summaryJob, !customer.archived {
+                            StatusRing(status: summaryJob.status, size: 12).accessibilityHidden(true)
+                        }
+                        Text(customer.archived ? "Archived" : rowDetail(jobCount: jobCount, open: summaryJob, now: now))
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 4)
-                if let open { StatusRing(status: open.status).accessibilityHidden(true) }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
             }
-            .padding(.horizontal, 8)
-            .frame(minHeight: 56).contentShape(Rectangle())
+            .padding(.horizontal, 8).padding(.vertical, 10)
+            .frame(minHeight: 64).contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         // MA-12: the common actions on long-press; each also exists on the customer.
@@ -127,12 +147,15 @@ struct CustomersView: View {
         .padding(.horizontal, -8)
     }
 
-    private func rowDetail(jobCount: Int, open: Job?) -> String {
+    private func rowDetail(jobCount: Int, open: Job?, now: Date) -> String {
         let count = "\(jobCount) \(jobCount == 1 ? "job" : "jobs")"
         guard let open else { return count }
         if let date = JobFiltering.date(open.scheduledFor), ["scheduled", "dispatched"].contains(open.status) {
+            if date < now {
+                return "\(count) · Past scheduled time · \(open.status.statusLabel) · \(date.visitLabel(now: now))"
+            }
             // Same words as the Jobs list ("Today 4:00 PM", "In progress"), so a visit reads alike everywhere.
-            return "\(count) · \(date.visitLabel())"
+            return "\(count) · \(open.status.statusLabel) · \(date.visitLabel(now: now))"
         }
         return "\(count) · \(open.status.statusLabel)"
     }
@@ -201,6 +224,31 @@ private enum CustomerContactSheetItem: Identifiable {
     }
 }
 
+/// Identity and authority that authorized a compiled customer record.
+struct CustomerRecordsScope: Equatable {
+    let actorID: String
+    let organizationID: String
+    let customerID: String
+    let generation: UUID
+    let authorityRevision: UUID
+    let policyVersion: Int?
+    let access: CustomerRecordAccess
+
+    @MainActor func isCurrent(session: SessionController) -> Bool {
+        Self.capture(session: session, customerID: customerID) == self
+    }
+
+    @MainActor static func capture(session: SessionController, customerID: String) -> CustomerRecordsScope? {
+        guard session.can("customer.view", feature: "core_crm"),
+              let actorID = session.user?.id, let organizationID = session.activeOrganization?.id else { return nil }
+        return CustomerRecordsScope(actorID: actorID, organizationID: organizationID, customerID: customerID,
+            generation: session.generation, authorityRevision: session.authorityRevision, policyVersion: session.policyVersion,
+            access: CustomerRecordAccess(jobs: session.can("job.view", feature: "jobs"),
+                estimates: session.can("estimate.view", feature: "estimates"),
+                invoices: session.can("invoice.view", feature: "invoicing")))
+    }
+}
+
 struct CustomerDetailView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
@@ -232,6 +280,9 @@ struct CustomerDetailView: View {
     @State private var recordsLoading = false
     @State private var recordsError: String?
     @State private var recordsLoadGeneration = 0
+    @State private var recordsPublishedScope: CustomerRecordsScope?
+    @State private var recordsRequestedScope: CustomerRecordsScope?
+    private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
     @State private var smsConsentKey = UUID().uuidString
@@ -247,13 +298,8 @@ struct CustomerDetailView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
-                        PaperEyebrow(text: "Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
-                    }
-                    Text(record?.name ?? customer.name).font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                        .accessibilityAddTraits(.isHeader)
-                }.padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 12)
+                customerIdentity
+                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 16)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { metadataChips }.fixedSize()
                     VStack(alignment: .leading, spacing: 6) { metadataChips }
@@ -263,7 +309,12 @@ struct CustomerDetailView: View {
                                   directions: (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
                     .padding(.horizontal, Theme.gutter).padding(.bottom, 14)
                 // Next visit sits above everything else: it's why most people open a customer.
-                if session.can("job.view", feature: "jobs") { nextVisit.padding(.horizontal, Theme.gutter).padding(.bottom, 8) }
+                if tab == "Overview" && session.can("job.view", feature: "jobs") {
+                    nextVisit.padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                }
+                if typeSize.isAccessibilitySize {
+                    customerPrimaryActions
+                }
                 if let error {
                     ErrorBanner(message: error) { await load() }.padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 }
@@ -276,13 +327,17 @@ struct CustomerDetailView: View {
                         if record == nil && error == nil {
                             SkeletonRows(count: 4, leading: false, inset: 0)
                         } else {
-                            details
+                            DisclosureGroup("Customer details") {
+                                details
+                            }
+                            .font(Theme.font(15, weight: .medium))
+                            .tint(Theme.foreground)
+                            .accessibilityIdentifier("customer-details-disclosure")
                         }
                         CustomerMembershipSection(customerID: customer.id)
                         contactsSection
                         locationsSection
                         CustomerEquipmentSection(customerID: customer.id, locations: locations.filter { $0.kind == "service" })
-                        if session.can("job.view", feature: "jobs") { jobsSection }
                     case "Jobs":
                         if session.can("job.view", feature: "jobs") { jobsSection }
                         else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
@@ -299,6 +354,8 @@ struct CustomerDetailView: View {
         }
         .foregroundStyle(Theme.foreground).background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if canEdit {
@@ -312,30 +369,18 @@ struct CustomerDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 8) {
-                if canEdit {
-                    Button { showCustomerMode = true } label: {
-                        // One line always: the short word takes over when the full one won't fit.
-                        ViewThatFits(in: .horizontal) {
-                            Label("Show to customer", systemImage: "person.crop.rectangle").fixedSize()
-                            Label("Show", systemImage: "person.crop.rectangle").fixedSize()
-                        }
-                        .font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Show to customer")
-                    .accessibilityHint("Hands the device to the customer to check and fix their details")
-                }
-                if session.can("job.create", feature: "jobs") {
-                    Button { showNewJob = true } label: {
-                        Label("New job", systemImage: "plus").inkCommit()
-                    }
-                    .buttonStyle(PressStyle())
-                }
-            }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
+            if !typeSize.isAccessibilitySize { customerPrimaryActions }
         }
         .task { await load() }
         .task { await loadSmsConsent() }
+        .task(id: recordsScope) {
+            if recordsPublishedScope != recordsScope {
+                records = nil
+                recordsPublishedScope = nil
+                recordsError = nil
+            }
+            if tab == "Records" { await loadRecords() }
+        }
         .onAppear {
             RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
             #if DEBUG
@@ -393,9 +438,73 @@ struct CustomerDetailView: View {
         if let type = record?.accountType { Chip(text: type.statusLabel) }
         MemberChip(customerID: customer.id)
     }
+    private var customerPrimaryActions: some View {
+        let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        return actions {
+            if canEdit {
+                Button { showCustomerMode = true } label: {
+                    // Keep the customer handoff clear even when space is tight.
+                    Group {
+                        if typeSize.isAccessibilitySize {
+                            Text("Customer review")
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            ViewThatFits(in: .horizontal) {
+                                Label("Customer checks details", systemImage: "person.crop.rectangle").fixedSize()
+                                Text("Customer review")
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .font(Theme.font(17, weight: .medium))
+                    .padding(.horizontal, 12).padding(.vertical, typeSize.isAccessibilitySize ? 10 : 8)
+                    .frame(maxWidth: .infinity, minHeight: Theme.commitHeight)
+                    .foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Show to customer")
+                .accessibilityHint("Hands the device to the customer to check and fix their details")
+                .accessibilityIdentifier("customer-handoff-action")
+            }
+            if session.can("job.create", feature: "jobs") {
+                Button { showNewJob = true } label: {
+                    Label("New job", systemImage: "plus").inkCommit()
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("customer-new-job-action")
+            }
+        }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
+    }
+    private var customerIdentity: some View {
+        let name = record?.name ?? customer.name
+        let initial = name.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() }
+        return HStack(alignment: .top, spacing: 14) {
+            if !typeSize.isAccessibilitySize, let initial {
+                Text(initial)
+                    .font(Theme.font(20, weight: .semibold))
+                    .foregroundStyle(Theme.brandText)
+                    .frame(width: 48, height: 48)
+                    .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(Theme.font(26, weight: .semibold)).tracking(-0.4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
+                    Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionTitle("Details")
             if let record {
                 if let phone = record.phone { detailRow("Phone", value: phone) }
                 if let email = record.email {
@@ -413,16 +522,15 @@ struct CustomerDetailView: View {
     }
     /// The customer's open job first: what a dispatcher or tech opens a customer to find.
     @ViewBuilder private var nextVisit: some View {
-        let open = jobs.filter { !["completed", "canceled"].contains($0.status) }
-            .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
-        if let job = open.first {
-            VStack(alignment: .leading, spacing: 0) {
-                PaperGroupHeader(title: open.count > 1 ? "Next visit · \(open.count) open" : "Next visit")
+        if let summary = JobFiltering.customerJobSummary(jobs, customerID: customer.id) {
+            let job = summary.job
+            VStack(alignment: .leading, spacing: 8) {
+                PaperGroupHeader(title: summary.openCount > 1 ? "\(summary.heading) · \(summary.openCount) open" : summary.heading)
                 NavigationLink(value: job) {
-                    HStack(spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
                         StatusRing(status: job.status).accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(job.title).font(Theme.font(16, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
                             Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
                                   job.status.statusLabel].joined(separator: " · "))
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -430,9 +538,14 @@ struct CustomerDetailView: View {
                         Spacer(minLength: 8)
                         PaperDisclosure()
                     }
-                    .frame(minHeight: 52).contentShape(Rectangle())
+                    .padding(16)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.border))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("customer-next-visit")
             }
         }
     }
@@ -641,16 +754,17 @@ struct CustomerDetailView: View {
     }
     private var jobsSection: some View {
         VStack(alignment: .leading, spacing: 2) {
-            sectionTitle("Job history", count: jobs.count)
+            sectionTitle("All jobs", count: jobs.count)
             ForEach(jobs) { job in
                 NavigationLink(value: job) {
                     HStack(spacing: 12) {
                         Image(systemName: statusIcon(job.status).0).foregroundStyle(statusIcon(job.status).1).frame(width: 16)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                            Text(job.title).font(Theme.font(15, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                             Text(job.status.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         }
-                        Spacer()
+                        Spacer(minLength: 8)
+                        PaperDisclosure()
                     }.frame(minHeight: 44).contentShape(Rectangle())
                 }.buttonStyle(RowPressStyle())
             }
@@ -658,20 +772,22 @@ struct CustomerDetailView: View {
         }
     }
     private var recordsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !session.can("customer.view", feature: "core_crm") {
+        let scope = recordsScope
+        let visible = scope != nil && recordsPublishedScope == scope ? records : nil
+        let visibleError = scope != nil && recordsRequestedScope == scope ? recordsError : nil
+        return VStack(alignment: .leading, spacing: 10) {
+            if scope == nil {
                 emptyText("You don’t have access to this customer’s records.")
             } else {
-                if let recordsError {
-                    ErrorBanner(message: records == nil ? "Records did not load. \(recordsError)" : recordsError) {
+                if let visibleError {
+                    ErrorBanner(message: visible == nil ? "Records did not load. \(visibleError)" : visibleError) {
                         await loadRecords()
-                    }
-                    .accessibilityIdentifier("customer-records-retry")
+                    }.accessibilityIdentifier("customer-records-retry")
                 }
-                if recordsLoading && records == nil {
+                if visible == nil && visibleError == nil {
                     SkeletonRows(count: 4, inset: 0)
-                } else if let records {
-                    CustomerRecordsView(compilation: records, customerID: customer.id)
+                } else if let visible {
+                    CustomerRecordsView(compilation: visible, customerID: customer.id) { await loadRecords() }
                         .accessibilityIdentifier("customer-records")
                 }
             }
@@ -679,24 +795,24 @@ struct CustomerDetailView: View {
     }
 
     private func loadRecords() async {
-        guard session.can("customer.view", feature: "core_crm"), !recordsLoading else { return }
+        guard let scope = recordsScope else { return }
+        guard !recordsLoading || recordsRequestedScope != scope else { return }
         recordsLoadGeneration += 1
         let request = recordsLoadGeneration
         recordsLoading = true
+        recordsRequestedScope = scope
+        recordsError = nil
         defer { if recordsLoadGeneration == request { recordsLoading = false } }
         do {
-            let access = CustomerRecordAccess(
-                jobs: session.can("job.view", feature: "jobs"),
-                estimates: session.can("estimate.view", feature: "estimates"),
-                invoices: session.can("invoice.view", feature: "invoicing")
-            )
-            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer.id, api: api, access: access)
-            guard recordsLoadGeneration == request else { return }
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: scope.customerID,
+                organizationID: scope.organizationID, api: api, access: scope.access)
+            guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
             records = compiled
+            recordsPublishedScope = scope
             recordsError = nil
         } catch is CancellationError {
         } catch {
-            guard recordsLoadGeneration == request else { return }
+            guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
             recordsError = error.localizedDescription
         }
     }

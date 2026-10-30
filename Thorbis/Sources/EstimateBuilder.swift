@@ -57,9 +57,11 @@ extension Array where Element == EstimateRevisionLineDraft {
     @discardableResult
     mutating func addPriceBookItem(_ item: PriceBookListItem, to group: EstimateLineGroup? = nil) -> UUID? {
         let price = EstimateRevisionEditorState.priceText(item.sellPrice.amount)
+        let targetGroup = group ?? .forKind(item.kind)
         if let index = firstIndex(where: { line in
             guard case .priceBookSelection(let id, let revision) = line.source else { return false }
-            return id == item.id && revision == item.revision && line.description == item.description && line.unitPrice == price
+            return id == item.id && revision == item.revision && line.group == targetGroup &&
+                line.description == item.description && line.unitPrice == price
         }), let quantity = Int(self[index].quantity), quantity < 100_000 {
             self[index].quantity = String(quantity + 1)
             return self[index].id
@@ -68,7 +70,7 @@ extension Array where Element == EstimateRevisionLineDraft {
         let line = EstimateRevisionLineDraft(
             description: item.description, quantity: "1", unitPrice: price,
             source: .priceBookSelection(itemID: item.id, revision: item.revision),
-            group: group ?? .forKind(item.kind),
+            group: targetGroup,
             priceBookOriginal: PriceBookLineOriginal(description: item.description, unitPrice: price)
         )
         insert(line, at: insertionIndex(for: line.group))
@@ -208,6 +210,7 @@ struct EstimateSearchBar: View {
     let focus: FocusState<EstimateBuilderFocus?>.Binding
     let searching: Bool
     let prompt: String
+    var keepFiltersVisible = false
     let finish: () -> Void
 
     var body: some View {
@@ -222,7 +225,7 @@ struct EstimateSearchBar: View {
                         .submitLabel(.done)
                         .focused(focus, equals: .search)
                         .onSubmit(finish)
-                        .accessibilityLabel("Search price book or type a line")
+                        .accessibilityLabel(prompt)
                     if !query.isEmpty {
                         Button { query = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
@@ -242,7 +245,7 @@ struct EstimateSearchBar: View {
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            if searching {
+            if searching || keepFiltersVisible {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(PriceBookKindFilter.allCases) { filter in
@@ -272,22 +275,33 @@ struct EstimateSearchBar: View {
 
 struct PriceBookResultsList: View {
     @ObservedObject var catalog: PriceBookCatalog
+    let context: PriceBookCatalogContext
     let query: String
     let kind: PriceBookKindFilter
     let canUsePriceBook: Bool
-    let quantityOnEstimate: (String) -> Int?
+    let quantityInCurrentDraft: (String) -> Int?
+    let secondaryPriceText: (PriceBookListItem) -> String?
     let addItem: (PriceBookListItem) -> Void
-    let addCustom: (String) -> Void
+    let addCustomLine: ((String) -> Void)?
     let retry: () -> Void
+
+    @State private var pageOffset = 0
+    @State private var usageSnapshot: [String: PriceBookUsage] = [:]
+    @State private var rankingTime = Date()
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        let results = canUsePriceBook ? catalog.index.search(query, kind: kind, usage: catalog.usage) : []
-        let recent = canUsePriceBook && trimmedQuery.isEmpty ? catalog.index.recent(kind: kind, usage: catalog.usage) : []
-        LazyVStack(alignment: .leading, spacing: 0) {
-            if canUsePriceBook, catalog.items.isEmpty {
-                if catalog.loading {
+        let current = catalog.context == context
+        let recent = canUsePriceBook && current && trimmedQuery.isEmpty ? catalog.index.recent(kind: kind, usage: usageSnapshot, now: rankingTime) : []
+        let page = canUsePriceBook && current
+            ? catalog.index.page(query, kind: kind, usage: usageSnapshot, now: rankingTime,
+                                 excludingIDs: Set(recent.map(\.id)), limit: PriceBookSearchIndex.resultLimit, offset: pageOffset)
+            : PriceBookSearchPage(results: [], total: 0, offset: 0)
+        let remaining = max(0, page.total - page.offset - page.results.count)
+        VStack(alignment: .leading, spacing: 0) {
+            if canUsePriceBook, !current || catalog.items.isEmpty {
+                if !current || catalog.loading {
                     ForEach(0..<6, id: \.self) { _ in skeletonRow }
                 } else if let error = catalog.error {
                     VStack(alignment: .leading, spacing: 8) {
@@ -297,14 +311,17 @@ struct PriceBookResultsList: View {
                     .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
                 }
             }
+            if canUsePriceBook, current, !catalog.items.isEmpty, let error = catalog.error {
+                ErrorBanner(message: "Couldn't refresh the price book. Showing saved items. \(error)") { retry() }
+                    .padding(.horizontal, Theme.gutter)
+            }
             if !recent.isEmpty {
                 header("Recent")
                 ForEach(recent) { item in row(PriceBookSearchResult(item: item, highlights: [])) }
                 header("Price book")
             }
-            ForEach(results.filter { result in !recent.contains { $0.id == result.id } }) { row($0) }
-            if !trimmedQuery.isEmpty {
-                Button { addCustom(trimmedQuery) } label: {
+            if !trimmedQuery.isEmpty, let addCustomLine {
+                Button { addCustomLine(trimmedQuery) } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "plus").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
                             .frame(width: 24)
@@ -316,18 +333,68 @@ struct PriceBookResultsList: View {
                     .padding(.horizontal, Theme.gutter).frame(minHeight: 56).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("price-book-add-custom")
             }
-            if canUsePriceBook, trimmedQuery.isEmpty, catalog.index.count > PriceBookSearchIndex.resultLimit {
-                Text("Type to search all \(catalog.index.count) items")
+            if page.total > PriceBookSearchIndex.resultLimit, !page.results.isEmpty {
+                Text("Items \(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, Theme.gutter).padding(.vertical, 14)
-            } else if !canUsePriceBook {
+                    .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
+                    .accessibilityIdentifier("price-book-page-range")
+            }
+            if page.offset > 0 {
+                Button("Previous items") {
+                    pageOffset = max(0, page.offset - PriceBookSearchIndex.resultLimit)
+                }
+                .font(Theme.font(15, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                .padding(.horizontal, Theme.gutter)
+                .accessibilityIdentifier("price-book-previous")
+            }
+            if remaining > 0 {
+                Button {
+                    pageOffset = page.offset + PriceBookSearchIndex.resultLimit
+                } label: {
+                    HStack {
+                        Text("Next items")
+                        Spacer()
+                        Text("\(remaining) remaining").foregroundStyle(Theme.muted)
+                    }
+                    .font(Theme.font(15, weight: .medium))
+                    .padding(.horizontal, Theme.gutter).frame(minHeight: 56).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("price-book-show-more")
+            }
+            ForEach(page.results, content: row)
+            if canUsePriceBook, current, !catalog.loading, catalog.error == nil,
+               page.results.isEmpty, recent.isEmpty, addCustomLine == nil {
+                ContentUnavailableView(
+                    catalog.items.isEmpty ? "No active Price Book items" : "No matching items",
+                    systemImage: "book.closed",
+                    description: Text(catalog.items.isEmpty
+                        ? "Add items to your Price Book to use them here."
+                        : "Try another search or choose a different category."))
+            }
+            if !canUsePriceBook, addCustomLine != nil {
                 Text("Type a line and add it. This account can't use the price book.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, Theme.gutter).padding(.vertical, 14)
             }
         }
         .padding(.bottom, 24)
+        .onAppear { resetPage() }
+        .onChange(of: query) { _, _ in resetPage() }
+        .onChange(of: kind) { _, _ in resetPage() }
+        .onChange(of: context) { _, _ in resetPage() }
+        .onChange(of: catalog.context) { _, newContext in
+            if newContext == context { resetPage() }
+        }
+    }
+
+    private func resetPage() {
+        pageOffset = 0
+        usageSnapshot = catalog.usage
+        rankingTime = Date()
     }
 
     private func header(_ title: String) -> some View {
@@ -337,35 +404,8 @@ struct PriceBookResultsList: View {
     }
 
     private func row(_ result: PriceBookSearchResult) -> some View {
-        let item = result.item
-        let added = quantityOnEstimate(item.id)
-        return Button { addItem(item) } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(Self.highlighted(item.description, result.highlights))
-                        .font(Theme.font(17)).foregroundStyle(Theme.foreground)
-                        .multilineTextAlignment(.leading)
-                    Text("\(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized) · \(item.unit)")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                        .font(Theme.monoFont(17, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                    if let added {
-                        Label("× \(added)", systemImage: "checkmark")
-                            .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .labelStyle(.titleAndIcon)
-                    }
-                }
-            }
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-            .frame(minHeight: 56).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityHint(added == nil ? "Adds this to the estimate" : "Adds one more")
+        PriceBookCatalogResultRow(result: result, quantity: quantityInCurrentDraft(result.id),
+                                  secondaryPrice: secondaryPriceText(result.item)) { addItem(result.item) }
     }
 
     private var skeletonRow: some View {
@@ -388,6 +428,50 @@ struct PriceBookResultsList: View {
             attributed[attributedRange].font = Theme.font(17, weight: .medium)
         }
         return attributed
+    }
+}
+
+private struct PriceBookCatalogResultRow: View {
+    let result: PriceBookSearchResult
+    let quantity: Int?
+    let secondaryPrice: String?
+    let addItem: () -> Void
+
+    var body: some View {
+        let item = result.item
+        let added = quantity
+        Button(action: addItem) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(PriceBookResultsList.highlighted(item.description, result.highlights))
+                        .font(Theme.font(17)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                    Text("\(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized) · \(item.unit)")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
+                        .font(Theme.monoFont(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    if let secondary = secondaryPrice {
+                        Text(secondary).font(Theme.moneyFont(.line)).foregroundStyle(Theme.muted)
+                    }
+                    if let added {
+                        Label("× \(added)", systemImage: "checkmark")
+                            .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .labelStyle(.titleAndIcon)
+                    }
+                }
+            }
+            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+            .frame(minHeight: 56).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("price-book-item-\(item.id)")
+        .accessibilityValue(added.map { "\($0) in draft" } ?? "Not added")
+        .accessibilityHint("Adds one to the current draft")
     }
 }
 

@@ -33,6 +33,22 @@ final class EstimateBuilderTests: XCTestCase {
         XCTAssertEqual(lines.quantity(ofPriceBookItem: capacitor.id), 2)
     }
 
+    func testCatalogAddsStayInTheRequestedGroup() throws {
+        var lines: [EstimateRevisionLineDraft] = []
+        let capacitor = item(1, "Capacitor", kind: "material", cents: 14_500)
+        let workID = try XCTUnwrap(lines.addPriceBookItem(capacitor, to: .work))
+        let materialID = try XCTUnwrap(lines.addPriceBookItem(capacitor, to: .material))
+        XCTAssertNotEqual(workID, materialID)
+        XCTAssertEqual(lines.lines(in: .work).map(\.quantity), ["1"])
+        XCTAssertEqual(lines.lines(in: .material).map(\.quantity), ["1"])
+        XCTAssertEqual(lines.addPriceBookItem(capacitor, to: .material), materialID)
+        XCTAssertEqual(lines.lines(in: .material).map(\.quantity), ["2"])
+        XCTAssertEqual(lines.lines(in: .work).map(\.quantity), ["1"])
+        XCTAssertEqual(lines.lines(in: .work).quantity(ofPriceBookItem: capacitor.id), 1)
+        XCTAssertEqual(lines.lines(in: .material).quantity(ofPriceBookItem: capacitor.id), 2)
+        XCTAssertEqual(lines.quantity(ofPriceBookItem: capacitor.id), 3)
+    }
+
     func testAnEditedLineIsNotBumpedAndCanResetToThePriceBook() throws {
         var lines: [EstimateRevisionLineDraft] = []
         let capacitor = item(1, "Capacitor", kind: "material", cents: 14_500)

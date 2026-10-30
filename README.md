@@ -3,6 +3,11 @@
 Native field app: sign in, Schedule, Jobs (grouped by status), Job details with status transitions,
 Customers (A–Z) and customer detail, More menu. Design source: Paper → "Thorbis Mobile".
 
+All iOS work follows the [app-wide golden rules](docs/design/ios-golden-rules.md)
+and [implementation/review process](docs/design/ios-implementation-process.md).
+The full user-supplied field-management design guidelines are retained as context;
+existing implementation gaps remain explicit in [design coverage](docs/design/README.md).
+
 ```sh
 cd apps/ios
 xcodegen

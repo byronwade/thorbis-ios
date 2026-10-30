@@ -23,13 +23,25 @@ struct TeamInvitation: Codable, Identifiable, Hashable {
 private struct InvitationPage: Decodable { let items: [TeamInvitation]; let nextCursor: String? }
 
 extension APIClient {
-    func pendingInvitations() async throws -> [TeamInvitation] {
+    func pendingInvitations(requireComplete: Bool = false, whileCurrent: (() -> Bool)? = nil) async throws -> [TeamInvitation] {
         var items: [TeamInvitation] = []
         var cursor: String?
+        var seen: Set<String> = []
+        var pages = 0
         repeat {
             let page: InvitationPage = try await send("GET", "/v1/organization/invitations",
-                                                      queryItems: [URLQueryItem(name: "limit", value: "100")], cursor: cursor)
-            items += page.items
+                                                      queryItems: [URLQueryItem(name: "limit", value: "100")], cursor: cursor, requireFresh: requireComplete)
+            guard whileCurrent?() ?? true else {
+                throw CancellationError()
+            }
+            pages += 1
+            items += requireComplete ? page.items.filter { $0.status == "pending" } : page.items
+            if requireComplete && !items.isEmpty { return items }
+            if let next = page.nextCursor, requireComplete {
+                guard pages < 500, seen.insert(next).inserted, items.count < 500 else {
+                    throw Problem(title: "Incomplete invitations", status: nil, detail: "Could not check every invitation.")
+                }
+            }
             guard page.nextCursor != cursor else { break }
             cursor = page.nextCursor
         } while cursor != nil && items.count < 500

@@ -103,6 +103,54 @@ final class InvoiceLineEditorTests: XCTestCase {
         XCTAssertEqual(revision, 7)
     }
 
+    func testRepeatedPriceBookSelectionKeepsSeparateLinesAndReportsQuantity() throws {
+        let item = PriceBookListItem(id: "11111111-1111-4111-8111-111111111111", description: "Repair",
+            unit: "each", kind: "service", taxClassification: "taxable",
+            sellPrice: .init(amount: 1250, currency: "USD"), revision: 7, archivedAt: nil)
+        var state = InvoiceLineEditorState(invoice: try makeInvoice())
+        try state.addPriceBookItem(item)
+        try state.addPriceBookItem(item)
+        let added = Array(state.lines.suffix(2))
+        XCTAssertEqual(state.lines.count, 3)
+        XCTAssertEqual(Set(added.map(\.id)).count, 2)
+        XCTAssertEqual(added.map(\.quantity), ["1", "1"])
+        for line in added {
+            guard case .priceBookSelection(let id, let revision)? = line.source else {
+                return XCTFail("Each tap must retain catalog selection provenance")
+            }
+            XCTAssertEqual(id, item.id)
+            XCTAssertEqual(revision, 7)
+        }
+        XCTAssertEqual(state.quantity(ofPriceBookItem: item.id), 2, "The manual Repair line must not count")
+        state.lines.append(.init(description: "Edited retained Repair", quantity: " 3 ", unitPrice: "12.50",
+            source: .retainedPriceBook(.init(kind: "price_book", priceBookItemId: item.id, priceBookRevision: 3))))
+        XCTAssertEqual(state.quantity(ofPriceBookItem: item.id), 5)
+        XCTAssertEqual(state.lines.last?.quantity, " 3 ", "Looking up a badge must preserve pending edits")
+        XCTAssertNil(state.quantity(ofPriceBookItem: "22222222-2222-4222-8222-222222222222"))
+    }
+
+    func testCatalogQuantityIgnoresInvalidQuantitiesAndNonCatalogProvenance() throws {
+        let id = "11111111-1111-4111-8111-111111111111"
+        let other = "22222222-2222-4222-8222-222222222222"
+        var state = InvoiceLineEditorState(invoice: try makeInvoice())
+        let sources: [FieldInvoiceLineSourceInput?] = [nil, .manual, .unsupported("future_source"),
+            .estimate(id: other, revision: 1, lineID: id, snapshot: nil),
+            .priceBookSelection(itemID: other, revision: 7), .priceBookSelection(itemID: id, revision: 0),
+            .retainedPriceBook(.init(kind: "manual", priceBookItemId: id, priceBookRevision: 7)),
+            .retainedPriceBook(.init(kind: "price_book", priceBookItemId: id))]
+        for source in sources {
+            state.lines.append(.init(description: "Repair", quantity: "9", unitPrice: "12.50", source: source))
+        }
+        for invalid in ["0", "-1", "0.5", "invalid", "100001", String(Int.max)] {
+            state.lines.append(.init(description: "Repair", quantity: invalid, unitPrice: "12.50",
+                source: .priceBookSelection(itemID: id, revision: 7)))
+        }
+        XCTAssertNil(state.quantity(ofPriceBookItem: id))
+        state.lines.append(.init(description: "Repair", quantity: "100000", unitPrice: "12.50",
+            source: .priceBookSelection(itemID: id, revision: 7)))
+        XCTAssertEqual(state.quantity(ofPriceBookItem: id), 100000)
+    }
+
     func testEditorRefusesUnknownLineProvenanceInsteadOfDroppingIt() throws {
         let line = #"{"id":"00000000-0000-4000-8000-00000000000c","description":"Protected line","quantity":1,"unitPrice":{"amount":1000,"currency":"USD"},"source":{"kind":"future_source"}}"#
         let state = InvoiceLineEditorState(invoice: try makeInvoice(line))

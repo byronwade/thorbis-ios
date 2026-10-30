@@ -1,0 +1,155 @@
+Test Suite 'Selected tests' started at 2026-10-28 23:53:04.146.
+Test Suite 'ThorbisTests.xctest' started at 2026-10-28 23:53:04.146.
+Test Suite 'APIClientTests' started at 2026-10-28 23:53:04.146.
+Test Case '-[ThorbisTests.APIClientTests testArrivedProgressIncludesManualEvidence]' started.
+Test Case '-[ThorbisTests.APIClientTests testArrivedProgressIncludesManualEvidence]' passed (0.241 seconds).
+Test Case '-[ThorbisTests.APIClientTests testAuthenticationEndpoint401DoesNotInvokeUnauthorizedCallback]' started.
+Test Case '-[ThorbisTests.APIClientTests testAuthenticationEndpoint401DoesNotInvokeUnauthorizedCallback]' passed (0.007 seconds).
+Test Case '-[ThorbisTests.APIClientTests testBetterAuthErrorMessageIsPreserved]' started.
+Test Case '-[ThorbisTests.APIClientTests testBetterAuthErrorMessageIsPreserved]' passed (0.004 seconds).
+Test Case '-[ThorbisTests.APIClientTests testCancelledURLSessionRequestPropagatesCancellation]' started.
+Test Case '-[ThorbisTests.APIClientTests testCancelledURLSessionRequestPropagatesCancellation]' passed (0.014 seconds).
+Test Case '-[ThorbisTests.APIClientTests testClearingSessionCookiesAffectsOnlyCurrentAPIOrigin]' started.
+Test Case '-[ThorbisTests.APIClientTests testClearingSessionCookiesAffectsOnlyCurrentAPIOrigin]' passed (0.002 seconds).
+Test Case '-[ThorbisTests.APIClientTests testCookieBackedMutationsSendCanonicalOrigin]' started.
+Test Case '-[ThorbisTests.APIClientTests testCookieBackedMutationsSendCanonicalOrigin]' passed (0.002 seconds).
+Test Case '-[ThorbisTests.APIClientTests testCustomersFollowKeysetCursorAndIncludeEveryPage]' started.
+Test Case '-[ThorbisTests.APIClientTests testCustomersFollowKeysetCursorAndIncludeEveryPage]' passed (0.004 seconds).
+Test Case '-[ThorbisTests.APIClientTests testDebugMutationOriginRetainsValidatedLoopbackPort]' started.
+Test Case '-[ThorbisTests.APIClientTests testDebugMutationOriginRetainsValidatedLoopbackPort]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testDefaultOriginUsesProduction]' started.
+Test Case '-[ThorbisTests.APIClientTests testDefaultOriginUsesProduction]' passed (0.002 seconds).
+Test Case '-[ThorbisTests.APIClientTests testDevIdentityIsRejectedForProduction]' started.
+Test Case '-[ThorbisTests.APIClientTests testDevIdentityIsRejectedForProduction]' passed (0.006 seconds).
+Test Case '-[ThorbisTests.APIClientTests testExactLoopbackReceivesDebugIdentity]' started.
+Test Case '-[ThorbisTests.APIClientTests testExactLoopbackReceivesDebugIdentity]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testHostileLoopbackLikeHostnameNeverReceivesRequest]' started.
+Test Case '-[ThorbisTests.APIClientTests testHostileLoopbackLikeHostnameNeverReceivesRequest]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testHTTPProblemRetainsStatusAndDetail]' started.
+Test Case '-[ThorbisTests.APIClientTests testHTTPProblemRetainsStatusAndDetail]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testInvalidatedLaterPageCannotReturnPartialJobs]' started.
+Test Case '-[ThorbisTests.APIClientTests testInvalidatedLaterPageCannotReturnPartialJobs]' passed (0.013 seconds).
+Test Case '-[ThorbisTests.APIClientTests testInvalidatedSingleRequestCannotReturnStaleJob]' started.
+Test Case '-[ThorbisTests.APIClientTests testInvalidatedSingleRequestCannotReturnStaleJob]' passed (0.011 seconds).
+Test Case '-[ThorbisTests.APIClientTests testIPv6LoopbackIsRecognized]' started.
+Test Case '-[ThorbisTests.APIClientTests testIPv6LoopbackIsRecognized]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testJobListDecodesSchedulingAndAssignmentWithoutBreakingOlderRows]' started.
+Test Case '-[ThorbisTests.APIClientTests testJobListDecodesSchedulingAndAssignmentWithoutBreakingOlderRows]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testJobsFollowKeysetCursorAndIncludeEveryPage]' started.
+Test Case '-[ThorbisTests.APIClientTests testJobsFollowKeysetCursorAndIncludeEveryPage]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testLaterPageHTTPFailureDoesNotReturnPartialJobs]' started.
+Test Case '-[ThorbisTests.APIClientTests testLaterPageHTTPFailureDoesNotReturnPartialJobs]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testReadRequestsDoNotDeclareMutationOrigin]' started.
+Test Case '-[ThorbisTests.APIClientTests testReadRequestsDoNotDeclareMutationOrigin]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.APIClientTests testRepeatingCursorFailsBeforeReturningIncompleteList]' started.
+Test Case '-[ThorbisTests.APIClientTests testRepeatingCursorFailsBeforeReturningIncompleteList]' passed (0.001 seconds).
+Test Suite 'APIClientTests' passed at 2026-10-28 23:53:04.470.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.319 (0.324) seconds
+Test Suite 'FieldOutboxTests' started at 2026-10-28 23:53:04.471.
+Test Case '-[ThorbisTests.FieldOutboxTests testARejectedChangeHoldsLaterChangesToTheSameJobOnly]' started.
+Test Case '-[ThorbisTests.FieldOutboxTests testARejectedChangeHoldsLaterChangesToTheSameJobOnly]' passed (0.044 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testAStalePermissionSnapshotFallsBackToTheRESTRoute]' started.
+Test Case '-[ThorbisTests.FieldOutboxTests testAStalePermissionSnapshotFallsBackToTheRESTRoute]' passed (0.012 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testATimedOutStepThatAlreadyLandedIsClearedNotRefused]' started.
+Test Case '-[ThorbisTests.FieldOutboxTests testATimedOutStepThatAlreadyLandedIsClearedNotRefused]' passed (0.010 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testBatchesAreCappedAtFiftyCommands]' started.
+2026-10-28 23:53:04.575020-0400 Thorbis[38348:22909154] [Default] Task <A23ADB7A-36F9-409C-A7B9-0C6CC135CE91>.<2> finished with error [-1009] Error Domain=NSURLErrorDomain Code=-1009 "(null)" UserInfo={_NSURLErrorRelatedURLSessionTaskErrorKey=(
+    "LocalDataTask <A23ADB7A-36F9-409C-A7B9-0C6CC135CE91>.<2>"
+), _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <A23ADB7A-36F9-409C-A7B9-0C6CC135CE91>.<2>}
+Test Case '-[ThorbisTests.FieldOutboxTests testBatchesAreCappedAtFiftyCommands]' passed (0.039 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testCommandEnvelopesMatchTheServerContractAndAppliedOrDuplicateClearTheQueue]' started.
+Test Case '-[ThorbisTests.FieldOutboxTests testCommandEnvelopesMatchTheServerContractAndAppliedOrDuplicateClearTheQueue]' passed (0.006 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testDismissingARefusedChangeReleasesTheJobsHeldChanges]' started.
+Test Case '-[ThorbisTests.FieldOutboxTests testDismissingARefusedChangeReleasesTheJobsHeldChanges]' passed (0.004 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testNoSignalKeepsEverythingQueued]' started.
+2026-10-28 23:53:04.590164-0400 Thorbis[38348:22909136] [Default] Task <80B662DF-2089-4989-BE50-A8CCA90ED489>.<1> finished with error [-1009] Error Domain=NSURLErrorDomain Code=-1009 "(null)" UserInfo={_NSURLErrorRelatedURLSessionTaskErrorKey=(
+    "LocalDataTask <80B662DF-2089-4989-BE50-A8CCA90ED489>.<1>"
+), _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <80B662DF-2089-4989-BE50-A8CCA90ED489>.<1>}
+Test Case '-[ThorbisTests.FieldOutboxTests testNoSignalKeepsEverythingQueued]' passed (0.004 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testOfflineStepsOnlyOfferWhatTheServerAllowedFromThatStatus]' started.
+Test Case '-[ThorbisTests.FieldOutboxTests testOfflineStepsOnlyOfferWhatTheServerAllowedFromThatStatus]' passed (0.005 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testQueuedChangesSurviveRelaunchAndStayBoundToTheirIdentity]' started.
+Test Case '-[ThorbisTests.FieldOutboxTests testQueuedChangesSurviveRelaunchAndStayBoundToTheirIdentity]' passed (0.009 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testRESTReplayRejectsAClientErrorAndStopsOnNoSignal]' started.
+2026-10-28 23:53:04.614487-0400 Thorbis[38348:22909136] [Default] Task <0FA29AAB-445E-4043-A733-4A3E10AFC9BC>.<3> finished with error [-1009] Error Domain=NSURLErrorDomain Code=-1009 "(null)" UserInfo={_NSURLErrorRelatedURLSessionTaskErrorKey=(
+    "LocalDataTask <0FA29AAB-445E-4043-A733-4A3E10AFC9BC>.<3>"
+), _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <0FA29AAB-445E-4043-A733-4A3E10AFC9BC>.<3>}
+Test Case '-[ThorbisTests.FieldOutboxTests testRESTReplayRejectsAClientErrorAndStopsOnNoSignal]' passed (0.011 seconds).
+Test Case '-[ThorbisTests.FieldOutboxTests testSignOutWarningCountsChangesQueuedInOtherWorkspaces]' started.
+Test Case '-[ThorbisTests.FieldOutboxTests testSignOutWarningCountsChangesQueuedInOtherWorkspaces]' passed (0.005 seconds).
+Test Suite 'FieldOutboxTests' passed at 2026-10-28 23:53:04.621.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.147 (0.150) seconds
+Test Suite 'MediaCaptureTests' started at 2026-10-28 23:53:04.621.
+Test Case '-[ThorbisTests.MediaCaptureTests testCapturedPhotosAreDownscaledJPEGUnderTheSinglePutLimit]' started.
+Test Case '-[ThorbisTests.MediaCaptureTests testCapturedPhotosAreDownscaledJPEGUnderTheSinglePutLimit]' passed (0.160 seconds).
+Test Case '-[ThorbisTests.MediaCaptureTests testRegistrationCarriesStageTagsAndOmitsEmptyTags]' started.
+Test Case '-[ThorbisTests.MediaCaptureTests testRegistrationCarriesStageTagsAndOmitsEmptyTags]' passed (0.004 seconds).
+Test Suite 'MediaCaptureTests' passed at 2026-10-28 23:53:04.786.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.164 (0.165) seconds
+Test Suite 'MediaTransferTests' started at 2026-10-28 23:53:04.786.
+Test Case '-[ThorbisTests.MediaTransferTests testChangingAPIOriginDuringPUTCannotConfirmInAnotherOrigin]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testChangingAPIOriginDuringPUTCannotConfirmInAnotherOrigin]' passed (0.029 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testConflictingUploadMethodsAreRejectedBeforeStorageRequest]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testConflictingUploadMethodsAreRejectedBeforeStorageRequest]' passed (0.007 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testDownloadWritesNativePreviewFileWithoutStorageCookies]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testDownloadWritesNativePreviewFileWithoutStorageCookies]' passed (0.005 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testIdentityInvalidationDuringPUTPreventsConfirm]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testIdentityInvalidationDuringPUTPreventsConfirm]' passed (0.012 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testMediaDownloadReturnsValidatedExpiringURL]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testMediaDownloadReturnsValidatedExpiringURL]' passed (0.002 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testRefusesMediaLargerThanSinglePUTLimitBeforeRegistration]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testRefusesMediaLargerThanSinglePUTLimitBeforeRegistration]' passed (0.001 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testRejectsExpiredStorageTargetBeforePUT]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testRejectsExpiredStorageTargetBeforePUT]' passed (0.002 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testRejectsInsecureAndUserInfoStorageTargetsBeforePUT]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testRejectsInsecureAndUserInfoStorageTargetsBeforePUT]' passed (0.002 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testRetryWithSameClientAssetIDRejectsDifferentRegisteredBytes]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testRetryWithSameClientAssetIDRejectsDifferentRegisteredBytes]' passed (0.002 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testSinglePUTPreservesTargetHeadersAndConfirmsMatchingSHA256]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testSinglePUTPreservesTargetHeadersAndConfirmsMatchingSHA256]' passed (0.005 seconds).
+Test Case '-[ThorbisTests.MediaTransferTests testUnstoredOrMismatchedConfirmationIsRejected]' started.
+Test Case '-[ThorbisTests.MediaTransferTests testUnstoredOrMismatchedConfirmationIsRejected]' passed (0.010 seconds).
+Test Suite 'MediaTransferTests' passed at 2026-10-28 23:53:04.866.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.077 (0.080) seconds
+Test Suite 'PendingMediaStoreTests' started at 2026-10-28 23:53:04.866.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testActorOrganizationOriginIsolationAndUnbindRetainOriginalWork]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testActorOrganizationOriginIsolationAndUnbindRetainOriginalWork]' passed (0.014 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testAmbiguousConfirmationAndRetryPreserveBytesAndClientID]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testAmbiguousConfirmationAndRetryPreserveBytesAndClientID]' passed (0.009 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testCapabilityRevokedDuringTransferPreservesSavedMedia]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testCapabilityRevokedDuringTransferPreservesSavedMedia]' passed (0.017 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testCommittedFilesUseProtectionUntilFirstUnlock]' started.
+/tmp/thorbis-ios-payment-ux/ThorbisTests/PendingMediaStoreTests.swift:132: -[ThorbisTests.PendingMediaStoreTests testCommittedFilesUseProtectionUntilFirstUnlock] : Test skipped - Simulator does not expose data-protection attributes; verify on physical iPhone.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testCommittedFilesUseProtectionUntilFirstUnlock]' skipped (0.012 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testConcurrentDrainsSendOneStableOperationAndOnlyStoredConfirmationDeletes]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testConcurrentDrainsSendOneStableOperationAndOnlyStoredConfirmationDeletes]' passed (0.018 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testCorruptMetadataWarnsWithoutErasingCommittedUnit]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testCorruptMetadataWarnsWithoutErasingCommittedUnit]' passed (0.005 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testDelayedCaptureCannotAdoptReboundWorkspaceEvenAfterReturning]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testDelayedCaptureCannotAdoptReboundWorkspaceEvenAfterReturning]' passed (0.002 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testFailedCommitDoesNotPublishSavedItemOrEraseExistingQueue]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testFailedCommitDoesNotPublishSavedItemOrEraseExistingQueue]' passed (0.004 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testForeignRegistrationNeverSendsLocalBytes]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testForeignRegistrationNeverSendsLocalBytes]' passed (0.019 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testInterruptedCommitRemainsRecoverableAndNeverUploadsAsSaved]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testInterruptedCommitRemainsRecoverableAndNeverUploadsAsSaved]' passed (0.004 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testInvalidScopeAndDeniedCapabilityNeverRegister]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testInvalidScopeAndDeniedCapabilityNeverRegister]' passed (0.005 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testMetadataEncodingFailureRemovesOnlyItsStagingPayload]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testMetadataEncodingFailureRemovesOnlyItsStagingPayload]' passed (0.006 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testMissingAndCorruptPayloadKeepMetadataAndReportFailure]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testMissingAndCorruptPayloadKeepMetadataAndReportFailure]' passed (0.007 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testPhotoAndScanRecoverExactBytesAndCaptureIdentityAfterRelaunch]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testPhotoAndScanRecoverExactBytesAndCaptureIdentityAfterRelaunch]' passed (0.010 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testProtectionBackupExclusionAndSignOutLossAcrossScopesAndLegacy]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testProtectionBackupExclusionAndSignOutLossAcrossScopesAndLegacy]' passed (0.009 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testTrustedOriginNormalizationDoesNotBroadenAPITrust]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testTrustedOriginNormalizationDoesNotBroadenAPITrust]' passed (0.006 seconds).
+Test Case '-[ThorbisTests.PendingMediaStoreTests testWorkspaceChangeDuringFirstUploadStopsSecondAndPreservesBoth]' started.
+Test Case '-[ThorbisTests.PendingMediaStoreTests testWorkspaceChangeDuringFirstUploadStopsSecondAndPreservesBoth]' passed (0.020 seconds).
+Test Suite 'PendingMediaStoreTests' passed at 2026-10-28 23:53:05.036.
+	 Executed 17 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.166 (0.170) seconds
+Test Suite 'ThorbisTests.xctest' passed at 2026-10-28 23:53:05.036.
+	 Executed 62 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.873 (0.890) seconds
+Test Suite 'Selected tests' passed at 2026-10-28 23:53:05.037.
+	 Executed 62 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.873 (0.891) seconds
