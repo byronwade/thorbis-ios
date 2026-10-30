@@ -162,6 +162,14 @@ struct EstimateDetailView: View {
                             .buttonStyle(CommercialSecondaryButtonStyle())
                             .disabled(busy)
                     }
+                    if record.status == "draft",
+                       session.can("estimate.create", feature: "estimates") {
+                        Button { showRevisionEditor = true } label: {
+                            commercialAction("Edit lines", icon: "square.and.pencil")
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(busy)
+                    }
                     if (record.status == "sent" || record.status == "declined"),
                        session.can("estimate.create", feature: "estimates") {
                         Button { showRevisionEditor = true } label: {
@@ -190,9 +198,8 @@ struct EstimateDetailView: View {
         .toolbar(.visible, for: .navigationBar)
         .safeAreaInset(edge: .bottom) { estimateBar }
         .sensoryFeedback(.success, trigger: succeeded)
-        .confirmationDialog("\(action) this estimate?", isPresented: $confirm, titleVisibility: .visible) {
-            Button(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }
-        }
+        .thorbisConfirm("\(action) this estimate?", isPresented: $confirm,
+                        actions: [ThorbisConfirmAction(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }])
         .sheet(isPresented: $showRevisionEditor) {
             if let record {
                 EstimateRevisionEditorView(estimate: record) { revised in
@@ -476,9 +483,8 @@ struct InvoiceDetailView: View {
             }
         }
         .sensoryFeedback(.success, trigger: issued)
-        .confirmationDialog("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue, titleVisibility: .visible) {
-            Button(issueCollects ? "Issue and collect" : "Issue invoice") { Task { await issueThenCollect() } }
-        }
+        .thorbisConfirm("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue,
+                        actions: [ThorbisConfirmAction(issueCollects ? "Issue and collect" : "Issue invoice") { Task { await issueThenCollect() } }])
         .sheet(isPresented: $showEditDraft) {
             if let record {
                 NavigationStack {

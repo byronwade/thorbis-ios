@@ -7,6 +7,8 @@ struct ScorecardView: View {
     @EnvironmentObject private var session: SessionController
     @State private var period = ScorecardPeriod.week.rawValue
     @State private var card: Scorecard?
+    /// The period `card` was loaded for, so a card is never shown under another period's tab.
+    @State private var loadedPeriod: ScorecardPeriod?
     @State private var asOf: Date?
     @State private var error: String?
     private let cache = ScorecardCache()
@@ -24,7 +26,7 @@ struct ScorecardView: View {
                 PaperTabs(options: ScorecardPeriod.allCases.map(\.rawValue), selection: $period)
                 if let error, card == nil { ErrorBanner(message: error) { await load() } }
                 Group {
-                    if let card { content(card) } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
+                    if let card, loadedPeriod == selected { content(card) } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
                 }
                 .padding(.horizontal, Theme.gutter)
             }
@@ -47,7 +49,7 @@ struct ScorecardView: View {
                 Text("—").moneyStyle(.hero).accessibilityLabel("Not available for your role")
             }
             // TG-03: with no goal set, the number stands alone; never an invented target.
-            Text(asOf.map { "As of \($0.formatted(date: .omitted, time: .shortened))" } ?? selected.label(now: Date()))
+            Text(asOf.map { cachedLabel(card, savedAt: $0) } ?? selected.label(now: Date()))
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
         }
         .padding(.top, 12).padding(.bottom, 16)
@@ -72,6 +74,25 @@ struct ScorecardView: View {
 
         Text("Sold counts invoices issued on your jobs. Collected counts payments recorded on them.")
             .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 16)
+    }
+
+    /// TG-14: a cached card names its own dates and when it was saved, so yesterday's
+    /// Today never reads as today's.
+    private func cachedLabel(_ card: Scorecard, savedAt: Date) -> String {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let day = Date.FormatStyle().weekday(.abbreviated).month(.abbreviated).day()
+        var range = ""
+        if let from = iso.date(from: card.from), let to = iso.date(from: card.to) {
+            let last = to.addingTimeInterval(-1)
+            range = Calendar.current.isDate(from, inSameDayAs: last)
+                ? from.formatted(day)
+                : "\(from.formatted(day)) – \(last.formatted(day))"
+        }
+        let saved = Calendar.current.isDateInToday(savedAt)
+            ? savedAt.formatted(date: .omitted, time: .shortened)
+            : savedAt.formatted(day.hour().minute())
+        return range.isEmpty ? "As of \(saved)" : "\(range) · As of \(saved)"
     }
 
     @ViewBuilder private func row(_ label: String, _ value: String, detail: String? = nil, route: PaperRoute?) -> some View {
@@ -101,10 +122,16 @@ struct ScorecardView: View {
         let generation = session.generation
         let period = selected
         guard let user = session.user?.id, let org = session.activeOrganization?.id else { return }
+        if loadedPeriod != period {
+            card = nil
+            asOf = nil
+            error = nil
+        }
         do {
             let loaded = try await api.scorecard(period)
             guard session.generation == generation, period == selected else { return }
             card = loaded
+            loadedPeriod = period
             asOf = nil
             error = nil
             cache.save(loaded, user: user, org: org, period: period)
@@ -113,6 +140,7 @@ struct ScorecardView: View {
             // TG-14: offline shows the last numbers this phone loaded, with their time.
             if let cached = cache.load(user: user, org: org, period: period) {
                 card = cached.card
+                loadedPeriod = period
                 asOf = cached.savedAt
             } else {
                 card = nil

@@ -178,6 +178,7 @@ struct PaperJobInvoiceContent: View {
 
             VStack(alignment: .leading, spacing: 11) {
                 ForEach(Array(activityItems.enumerated()), id: \.offset) { index, event in
+                    ActivityLink(destination: ActivityDestinationMapping.destination(for: event.subject)) {
                     HStack(alignment: .top, spacing: 10) {
                         ZStack {
                             Circle().stroke(Theme.border, lineWidth: 1.4).frame(width: 9, height: 9)
@@ -205,6 +206,7 @@ struct PaperJobInvoiceContent: View {
                                 .padding(.bottom, -11)
                         }
                     }
+                    }
                 }
             }
         }
@@ -213,17 +215,18 @@ struct PaperJobInvoiceContent: View {
     private var activityItems: [PaperInvoiceActivity] {
         var items = [PaperInvoiceActivity(
             title: displayedInvoice.sourceEstimateId.map { "Invoice created from E-\($0.suffix(4).uppercased())" } ?? "Invoice created",
-            date: JobFiltering.date(displayedInvoice.createdAt)
+            date: JobFiltering.date(displayedInvoice.createdAt),
+            subject: ActivityFeedSubject(kind: "created", subjectID: displayedInvoice.id, invoiceID: displayedInvoice.id)
         )]
         if let issuedAt = displayedInvoice.issuedAt {
-            items.append(PaperInvoiceActivity(title: "Invoice issued", date: JobFiltering.date(issuedAt)))
+            items.append(PaperInvoiceActivity(title: "Invoice issued", date: JobFiltering.date(issuedAt), subject: ActivityFeedSubject(kind: "issued", invoiceID: displayedInvoice.id)))
         }
         for payment in paymentModel.payments {
             let amount = payment.netAmount ?? payment.amount
             let title = payment.status == .refunded
                 ? "Payment refunded · \(money(amount.amount, currency: amount.currency))"
                 : "\(payment.method.capitalized) payment · \(money(amount.amount, currency: amount.currency))"
-            items.append(PaperInvoiceActivity(title: title, date: JobFiltering.date(payment.recordedAt)))
+            items.append(PaperInvoiceActivity(title: title, date: JobFiltering.date(payment.recordedAt), subject: ActivityFeedSubject(kind: "payment", subjectID: payment.id, invoiceID: displayedInvoice.id)))
         }
         return items.sorted { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }
     }
@@ -255,4 +258,5 @@ struct PaperInvoiceCollectionFooter: View {
 private struct PaperInvoiceActivity {
     let title: String
     let date: Date?
+    let subject: ActivityFeedSubject
 }

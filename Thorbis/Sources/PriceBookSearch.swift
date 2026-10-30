@@ -318,7 +318,7 @@ final class PriceBookCatalog: ObservableObject {
         } catch is CancellationError {
         } catch {
             guard self.organizationID == organizationID else { return }
-            self.error = error.localizedDescription
+            self.error = PriceBookLoadError.message(for: error)
         }
     }
 

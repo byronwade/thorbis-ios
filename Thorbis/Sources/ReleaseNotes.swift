@@ -13,11 +13,136 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
-            id: "2026-10-28-my-scorecard",
-            date: "2026-10-28",
+            id: "2026-10-30-my-scorecard",
+            date: "2026-10-30",
             highlights: [
                 .init(symbol: "target", title: "See what you sold this week",
                       detail: "My scorecard in More shows your sold, collected, jobs done, average ticket and close rate."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-tablet-invoice",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.plaintext", title: "Invoices open from iPad Schedule",
+                      detail: "On iPad, a job's invoice opens from Schedule and stays the one you picked when you come back."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-10-30-modern-pass-1",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "textformat", title: "Cleaner screens, easier numbers",
+                      detail: "Amounts and times use the same clean type as the rest of the app, and the job header is lighter."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
+            id: "2026-10-30-bottom-search",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Search from the bottom",
+                      detail: "Search opens in the bar under your thumb, with recent records and results rising above it."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-10-30-bar-live",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "record.circle", title: "Your current job, one tap away",
+                      detail: "The job you are on floats above the bar on every screen. Tap it to open the job."),
+                .init(symbol: "arrow.triangle.2.circlepath", title: "See what is still syncing",
+                      detail: "Search shows how many changes are waiting on this phone, and turns red if one needs a look."),
+                .init(symbol: "hand.tap", title: "Hold + or Search for shortcuts",
+                      detail: "Hold + to start a job, estimate or customer. Hold Search for what you opened last."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-bottom-bar-menu",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "dock.rectangle", title: "Get around from the bottom bar",
+                      detail: "Your places sit in a bar at the bottom. Tap the last one again to open every place."),
+                .init(symbol: "building.2", title: "Switch business from the menu",
+                      detail: "Your business name sits on top of the menu. Tap it to switch to another business or add one."),
+                .init(symbol: "arrow.up.arrow.down", title: "Arrange your bar and menu",
+                      detail: "Tap the sliders in the menu, then drag places to reorder them or move them into the bar."),
+                .init(symbol: "magnifyingglass", title: "Search in one tap",
+                      detail: "Search sits next to New job at the bottom and opens ready to type."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-menu-layout",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "A menu with room to tap",
+                      detail: "Places are a plain list. Pull the menu down to search. Your account opens Settings."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-price-book-loads",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "book.closed", title: "Price book loads your prices",
+                      detail: "The price book opens with your items. If it cannot, it says so in plain words."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-records-activity",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "chevron.right", title: "Open activity on the customer file",
+                      detail: "Activity on the Records tab opens the job, estimate, invoice, contact, or location it names."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-photo-stage",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "tag", title: "Mark a photo before or after",
+                      detail: "Change a saved job photo to Before, After, or Other without taking it again."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-search-pages",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "text.magnifyingglass", title: "Search keeps later matches",
+                      detail: "Company search includes matches from every page the server returns."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-activity-opens",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "arrow.up.right", title: "Open the record behind activity",
+                      detail: "Activity rows open the job, estimate, invoice, note, photo, contact, or location they name."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-draft-lines",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "book.closed", title: "Edit draft lines in the price book",
+                      detail: "Search the price book on a draft estimate or invoice, then change the quantity, price, or remove the line."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-customer-records",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "rectangle.stack", title: "A customer's jobs in one place",
+                      detail: "See every job's photos, notes, documents, estimates, invoices, and activity together, still grouped by job."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-29-menu-room",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Search sits at the top of the menu",
+                      detail: "Search has its own row under the company, and the account opens Settings with room to tap."),
             ]
         ),
         ReleaseNote(
