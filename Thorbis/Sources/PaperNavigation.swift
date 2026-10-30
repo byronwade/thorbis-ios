@@ -140,6 +140,10 @@ struct RootView: View {
             await store.refresh(api)
             #if DEBUG
             if PaperPreview.enabled {
+                if ProcessInfo.processInfo.arguments.contains("--typed-tablet-job-deep-link") {
+                    store.requestedJobID = "00000000-0000-4000-8000-000000002212"
+                    return
+                }
                 if PaperPreview.screen == "invoice-editor" {
                     previewInvoiceEditor = true
                     return

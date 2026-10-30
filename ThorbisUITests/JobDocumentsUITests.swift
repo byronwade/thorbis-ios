@@ -336,6 +336,31 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
     }
 
+    func testTypedTabletScheduleJobSwitchClearsPriorInvoice() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment"], screen: "my-day")
+        let invoiceTab = app.buttons["Invoice"]
+        XCTAssertTrue(invoiceTab.waitForExistence(timeout: 15)); invoiceTab.tap()
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5))
+        app.navigationBars["Invoice"].buttons["Back"].tap()
+        XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
+        let otherJob = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Kitchen sink backup'" )).firstMatch
+        XCTAssertTrue(otherJob.waitForExistence(timeout: 5)); otherJob.tap()
+        XCTAssertTrue(invoiceTab.waitForExistence(timeout: 10)); invoiceTab.tap()
+        XCTAssertFalse(first.exists, "The prior job's invoice must not remain visible")
+        XCTAssertFalse(app.buttons["Collect payment"].isHittable, "The prior job's invoice must not be collectable")
+    }
+
+    func testTypedTabletJobDeepLinkOpensRequestedJob() {
+        let app = launch(["--invoice-route-owner-experiment", "--typed-tablet-job-deep-link"], screen: "my-day")
+        let heading = app.staticTexts["Kitchen sink backup — Petrov"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.navigationBars.buttons["Back"].waitForExistence(timeout: 10), "Deep link must navigate to the requested job")
+        app.navigationBars.buttons["Back"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Kitchen sink backup'" )).firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testTypedJobsRouteRetainsSelectedInvoiceAfterReturn() {
         let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]
