@@ -47,6 +47,29 @@ struct PriceBookSearchIndex {
         let words: [String]
     }
 
+    // Each immutable index owns a single bounded result cache. Catalog refreshes build a
+    // new index, so cached prices and revisions cannot outlive the snapshot they came from.
+    private struct CacheKey: Equatable {
+        let query: String
+        let kind: PriceBookKindFilter
+        let usage: [String: PriceBookUsage]
+        let now: Date
+        let excluded: Set<String>
+    }
+
+    private final class Cache {
+        private let lock = NSLock()
+        private var value: (CacheKey, [Entry])?
+
+        func get(_ key: CacheKey) -> [Entry]? {
+            lock.withLock { value?.0 == key ? value?.1 : nil }
+        }
+
+        func put(_ key: CacheKey, entries: [Entry]) {
+            lock.withLock { value = (key, entries) }
+        }
+    }
+
     /// Quality of one typed word against one item word. Higher is better.
     private enum WordMatch: Int, Comparable {
         case typo = 1, contains = 2, prefix = 3, exact = 4
@@ -57,6 +80,7 @@ struct PriceBookSearchIndex {
     static let recentLimit = 12
 
     private let entries: [Entry]
+    private let cache = Cache()
 
     /// Archived items and other currencies never appear (EB-08).
     init(items: [PriceBookListItem], currency: String = "USD") {
@@ -87,14 +111,28 @@ struct PriceBookSearchIndex {
               usage: [String: PriceBookUsage] = [:], now: Date = Date(),
               excludingIDs: Set<String> = [], limit: Int? = nil, offset: Int = 0) -> PriceBookSearchPage {
         let queryWords = Self.words(query)
+        let key = CacheKey(query: query, kind: kind, usage: usage, now: now, excluded: excludingIDs)
+        let ordered: [Entry]
+        if let cached = cache.get(key) {
+            ordered = cached
+        } else {
+            ordered = orderedEntries(queryWords: queryWords, kind: kind, usage: usage, now: now, excludingIDs: excludingIDs)
+            cache.put(key, entries: ordered)
+        }
+        let pageSize = max(1, limit ?? max(1, ordered.count))
+        let start = min(max(0, offset), ordered.isEmpty ? 0 : ((ordered.count - 1) / pageSize) * pageSize)
+        let results = ordered.dropFirst(start).prefix(pageSize).map {
+            PriceBookSearchResult(item: $0.item, highlights: Self.highlights(in: $0.item.description, words: queryWords))
+        }
+        return PriceBookSearchPage(results: results, total: ordered.count, offset: start)
+    }
+
+    private func orderedEntries(queryWords: [String], kind: PriceBookKindFilter,
+                                usage: [String: PriceBookUsage], now: Date,
+                                excludingIDs: Set<String>) -> [Entry] {
         let candidates = entries.filter { kind.includes($0.item) && !excludingIDs.contains($0.item.id) }
         guard !queryWords.isEmpty else {
-            let sorted = candidates.sorted { $0.item.description.localizedStandardCompare($1.item.description) == .orderedAscending }
-            let pageSize = max(1, limit ?? max(1, sorted.count))
-            let start = min(max(0, offset), sorted.isEmpty ? 0 : ((sorted.count - 1) / pageSize) * pageSize)
-            return PriceBookSearchPage(results: sorted.dropFirst(start).prefix(pageSize).map {
-                PriceBookSearchResult(item: $0.item, highlights: [])
-            }, total: sorted.count, offset: start)
+            return candidates.sorted { $0.item.description.localizedStandardCompare($1.item.description) == .orderedAscending }
         }
         // "R-410A" typed against a book that writes "R410A": try the query with each letter word
         // joined to its neighbouring number too, the same join the index makes.
@@ -112,12 +150,7 @@ struct PriceBookSearchIndex {
             if lhsLength != rhsLength { return lhsLength < rhsLength }
             return lhs.entry.item.description.localizedStandardCompare(rhs.entry.item.description) == .orderedAscending
         }
-        let pageSize = max(1, limit ?? max(1, scored.count))
-        let start = min(max(0, offset), scored.isEmpty ? 0 : ((scored.count - 1) / pageSize) * pageSize)
-        let results = scored.dropFirst(start).prefix(pageSize).map {
-            PriceBookSearchResult(item: $0.entry.item, highlights: Self.highlights(in: $0.entry.item.description, words: queryWords))
-        }
-        return PriceBookSearchPage(results: results, total: scored.count, offset: start)
+        return scored.map(\.entry)
     }
 
     /// EB-04: the items this device adds most often and most recently.
