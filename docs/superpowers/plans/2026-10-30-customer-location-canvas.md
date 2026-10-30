@@ -1,0 +1,5 @@
+# Customer locations: compact overview and full detail
+
+Technicians opening a customer need to identify a location and navigate quickly, while retaining long site notes and every existing action. Paper 48 uses quiet, aligned location rows; adapt this into address-first summaries with a full-height detail drawer. Long notes remain available without filling the overview. Keep the location edit and removal menu, add-location button, direct address link, and the full existing editor. The drawer shows the same notes, parking, dogs and map-pin status as the overview; editing uses the existing permission-gated location form and authoritative save path. No job site is inferred.
+
+A focused native test must open the details drawer and existing editor. Verify large text and non-editing access, scope invalidation, and real-device/VoiceOver separately. Preserve failure states and disallow stale detail across session/authority changes. This increment does not redesign every customer or job page or change document editing.

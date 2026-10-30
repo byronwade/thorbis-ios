@@ -4,6 +4,7 @@ import UIKit
 struct ServiceLocationSheet: View {
     let customerID: String
     let location: ServiceLocationRecord?
+    let fullHeight: Bool
     let onSaved: (ServiceLocationRecord) -> Void
 
     @EnvironmentObject private var api: APIClient
@@ -18,9 +19,10 @@ struct ServiceLocationSheet: View {
         case label, address, notes, latitude, longitude, gateCode, alarmCode, dogOnSite, parking
     }
 
-    init(customerID: String, location: ServiceLocationRecord?, onSaved: @escaping (ServiceLocationRecord) -> Void) {
+    init(customerID: String, location: ServiceLocationRecord?, fullHeight: Bool = false, onSaved: @escaping (ServiceLocationRecord) -> Void) {
         self.customerID = customerID
         self.location = location
+        self.fullHeight = fullHeight
         self.onSaved = onSaved
         _draft = State(initialValue: ServiceLocationDraft(
             label: location?.label ?? "",
@@ -119,7 +121,7 @@ struct ServiceLocationSheet: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.card)
         .toolbar(.hidden, for: .navigationBar)
-        .presentationDetents([.height(600), .large])
+        .presentationDetents(fullHeight ? [.large] : [.height(600), .large])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(Theme.cardRadius)
         .presentationBackground(Theme.card)

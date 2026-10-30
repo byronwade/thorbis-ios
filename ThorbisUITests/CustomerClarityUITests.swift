@@ -2,6 +2,41 @@ import XCTest
 
 @MainActor
 final class CustomerClarityUITests: XCTestCase {
+    func testLocationDetailsOpenInDrawerAndCanBeEdited() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer"]
+        app.launch()
+        let details = app.buttons["location-details-00000000-0000-4000-8000-000000007001"]
+        for _ in 0..<8 where !details.isHittable { app.swipeUp() }
+        XCTAssertTrue(details.waitForExistence(timeout: 15))
+        XCTAssertTrue(details.isHittable)
+        details.tap()
+        XCTAssertTrue(app.staticTexts["Sample location for design preview"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Driveway on the left"].exists)
+        capture("Customer location details")
+        let edit = app.buttons["Edit location details"]
+        XCTAssertTrue(edit.exists)
+        edit.tap()
+        XCTAssertTrue(app.staticTexts["Edit location"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Save changes"].exists)
+    }
+
+    func testLongLocationDetailsRemainReadableWithoutEditPermission() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-read-only", "--paper-preview-location-long-notes", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let details = app.buttons["location-details-00000000-0000-4000-8000-000000007001"]
+        for _ in 0..<18 where !details.isHittable { app.swipeUp() }
+        XCTAssertTrue(details.waitForExistence(timeout: 15))
+        XCTAssertTrue(details.isHittable)
+        details.tap()
+        let notes = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final paragraph: lock the side gate when you leave.")).firstMatch
+        XCTAssertTrue(notes.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Edit location details"].exists)
+        capture("Long location details read only")
+    }
     func testNextVisitStaysReadableAndOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -864,6 +864,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-read-only") { capabilities.removeAll { $0 == "customer.edit" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
@@ -1148,7 +1149,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
                                     "label": "Home", "kind": "service", "address": address,
-                                    "notes": "Sample location for design preview",
+                                    "notes": ProcessInfo.processInfo.arguments.contains("--paper-preview-location-long-notes") ? "First paragraph: use the side entrance and check in before beginning work.\n\nSecond paragraph: the customer has detailed access instructions that should remain available when the overview is compact.\n\nFinal paragraph: lock the side gate when you leave." : "Sample location for design preview",
                                     "coordinates": previewCoordinates(customerID: id),
                                     "gateCode": "4821#", "alarmCode": "7350",
                                     "dogOnSite": "Rusty — friendly, stays in the back yard",

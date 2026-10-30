@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-customer-location-details",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "mappin.and.ellipse", title: "Open location details",
+                      detail: "Scan locations quickly and open full site notes and details."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-setup-check-retry",
             date: "2026-10-30",
             highlights: [

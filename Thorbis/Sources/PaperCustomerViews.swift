@@ -204,6 +204,87 @@ private enum CustomerLocationSheet: Identifiable {
     }
 }
 
+/// The location shown in a drawer is bound to the authority that opened it.
+private struct CustomerLocationCanvas: Identifiable {
+    let location: ServiceLocationRecord
+    let actorID: String
+    let organizationID: String
+    let generation: UUID
+    let authorityRevision: UUID
+    let requestGeneration: UUID
+    var id: String { location.id }
+}
+
+private struct CustomerLocationCanvasView: View {
+    let item: CustomerLocationCanvas
+    let onSaved: (ServiceLocationRecord) -> Void
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
+    @Environment(\.dismiss) private var dismiss
+    @State private var editing = false
+
+    private var isCurrent: Bool {
+        session.generation == item.generation && session.authorityRevision == item.authorityRevision &&
+        api.requestGeneration == item.requestGeneration && session.user?.id == item.actorID &&
+        session.activeOrganization?.id == item.organizationID &&
+        session.can("customer.view", feature: "core_crm")
+    }
+
+    var body: some View {
+        Group {
+            if !isCurrent {
+                VStack(spacing: 16) {
+                    Text("Location details are no longer available.")
+                        .font(Theme.font(17, weight: .medium))
+                    Button("Close") { dismiss() }.frame(minHeight: 44)
+                }.padding(Theme.gutter)
+            } else if editing && session.can("customer.edit", feature: "core_crm") {
+                ServiceLocationSheet(customerID: item.location.customerId, location: item.location,
+                                     fullHeight: true, onSaved: onSaved)
+            } else {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            Label(item.location.kind.statusLabel, systemImage: "mappin.and.ellipse")
+                                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                            AddressLink(address: item.location.address, coordinates: item.location.coordinates)
+                                .font(Theme.font(16))
+                            detail("Notes", item.location.notes)
+                            detail("Parking", item.location.parking)
+                            detail("Dogs on site", item.location.dogOnSite)
+                            detail("Map pin", item.location.coordinates.map {
+                                String(format: "%.4f, %.4f", $0.latitude, $0.longitude)
+                            } ?? "No map pin")
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.gutter)
+                    }
+                    .background(Theme.background)
+                    .navigationTitle(item.location.label)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                        if session.can("customer.edit", feature: "core_crm") {
+                            ToolbarItem(placement: .primaryAction) {
+                                Button("Edit") { editing = true }
+                                    .accessibilityLabel("Edit location details")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    @ViewBuilder private func detail(_ title: String, _ value: String?) -> some View {
+        if let value, !value.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.muted)
+                Text(value).font(Theme.font(16)).fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 private enum CustomerContactSheetItem: Identifiable {
     case add
     case edit(CustomerContactRecord)
@@ -269,6 +350,7 @@ struct CustomerDetailView: View {
     @State private var isMutatingContact = false
     @State private var contactMutationError: String?
     @State private var locationSheet: CustomerLocationSheet?
+    @State private var locationCanvas: CustomerLocationCanvas?
     @State private var locationToRemove: ServiceLocationRecord?
     @State private var isRemovingLocation = false
     @State private var locationError: String?
@@ -407,6 +489,19 @@ struct CustomerDetailView: View {
         }
         .sheet(item: $locationSheet) { item in
             ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
+                locationState.save(saved)
+                locationError = nil
+            }
+        }
+        .sheet(item: $locationCanvas) { item in
+            CustomerLocationCanvasView(item: item) { saved in
+                guard session.generation == item.generation,
+                      session.authorityRevision == item.authorityRevision,
+                      api.requestGeneration == item.requestGeneration,
+                      session.user?.id == item.actorID,
+                      session.activeOrganization?.id == item.organizationID,
+                      saved.organizationId == item.organizationID,
+                      saved.customerId == customer.id else { return }
                 locationState.save(saved)
                 locationError = nil
             }
@@ -672,11 +767,20 @@ struct CustomerDetailView: View {
                     .accessibilityIdentifier("location-mutation-error")
             }
             ForEach(locations) { location in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text(location.label).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Theme.brandText)
+                            .frame(width: 36, height: 36)
+                            .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(location.label).font(Theme.font(16, weight: .semibold))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(location.kind.statusLabel).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        }
                         Spacer(minLength: 4)
-                        Text(location.kind.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         if canEdit {
                             ThorbisMenu(items: locationMenuItems(location),
                                         accessibilityLabel: "Options for \(location.label)") {
@@ -687,16 +791,27 @@ struct CustomerDetailView: View {
                             }
                         }
                     }
-                    AddressLink(address: location.address, coordinates: location.coordinates).font(Theme.font(13))
-                    if let notes = location.notes { Text(notes).font(Theme.font(13)) }
-                    if let parking = location.parking { detailRow("Parking", value: parking) }
-                    if let dogs = location.dogOnSite { detailRow("Dogs on site", value: dogs) }
-                    HStack(spacing: 5) {
-                        Image(systemName: location.coordinates == nil ? "mappin.slash" : "mappin.and.ellipse")
-                        Text(location.coordinates.map { String(format: "%.4f, %.4f", $0.latitude, $0.longitude) } ?? "No map pin")
+                    AddressLink(address: location.address, coordinates: location.coordinates).font(Theme.font(15))
+                    if let notes = location.notes, !notes.isEmpty {
+                        Text(notes).font(Theme.font(14)).foregroundStyle(Theme.muted).lineLimit(2)
                     }
-                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                }.padding(.vertical, 5)
+                    Button {
+                        guard let actorID = session.user?.id, let organizationID = session.activeOrganization?.id,
+                              session.can("customer.view", feature: "core_crm"),
+                              organizationID == location.organizationId, location.customerId == customer.id else { return }
+                        locationCanvas = CustomerLocationCanvas(location: location, actorID: actorID,
+                            organizationID: organizationID, generation: session.generation,
+                            authorityRevision: session.authorityRevision, requestGeneration: api.requestGeneration)
+                    } label: {
+                        Label("Show location details", systemImage: "text.alignleft")
+                            .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("location-details-\(location.id)")
+                }
+                .padding(.vertical, 12)
+                if location.id != locations.last?.id { Divider().overlay(Theme.border) }
             }
             if locations.isEmpty { emptyText("No locations") }
         }
