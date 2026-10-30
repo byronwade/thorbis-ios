@@ -277,7 +277,9 @@ struct CustomerDetailView: View {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
-                        PaperEyebrow(text: "Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
+                        Text("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Text(record?.name ?? customer.name).font(Theme.font(24, weight: .medium)).tracking(-0.36)
                         .accessibilityAddTraits(.isHeader)
@@ -291,7 +293,9 @@ struct CustomerDetailView: View {
                                   directions: (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
                     .padding(.horizontal, Theme.gutter).padding(.bottom, 14)
                 // Next visit sits above everything else: it's why most people open a customer.
-                if session.can("job.view", feature: "jobs") { nextVisit.padding(.horizontal, Theme.gutter).padding(.bottom, 8) }
+                if tab == "Overview" && session.can("job.view", feature: "jobs") {
+                    nextVisit.padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                }
                 if let error {
                     ErrorBanner(message: error) { await load() }.padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 }
@@ -304,13 +308,17 @@ struct CustomerDetailView: View {
                         if record == nil && error == nil {
                             SkeletonRows(count: 4, leading: false, inset: 0)
                         } else {
-                            details
+                            DisclosureGroup("Customer details") {
+                                details
+                            }
+                            .font(Theme.font(15, weight: .medium))
+                            .tint(Theme.foreground)
+                            .accessibilityIdentifier("customer-details-disclosure")
                         }
                         CustomerMembershipSection(customerID: customer.id)
                         contactsSection
                         locationsSection
                         CustomerEquipmentSection(customerID: customer.id, locations: locations.filter { $0.kind == "service" })
-                        if session.can("job.view", feature: "jobs") { jobsSection }
                     case "Jobs":
                         if session.can("job.view", feature: "jobs") { jobsSection }
                         else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
@@ -340,13 +348,14 @@ struct CustomerDetailView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 8) {
+            let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+            actions {
                 if canEdit {
                     Button { showCustomerMode = true } label: {
                         // One line always: the short word takes over when the full one won't fit.
                         ViewThatFits(in: .horizontal) {
-                            Label("Show to customer", systemImage: "person.crop.rectangle").fixedSize()
-                            Label("Show", systemImage: "person.crop.rectangle").fixedSize()
+                            Label("Customer view", systemImage: "person.crop.rectangle").fixedSize()
+                            Label("Customer", systemImage: "person.crop.rectangle").fixedSize()
                         }
                         .font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
@@ -431,7 +440,6 @@ struct CustomerDetailView: View {
     }
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionTitle("Details")
             if let record {
                 if let phone = record.phone { detailRow("Phone", value: phone) }
                 if let email = record.email {
@@ -458,7 +466,7 @@ struct CustomerDetailView: View {
                     HStack(spacing: 12) {
                         StatusRing(status: job.status).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                            Text(job.title).font(Theme.font(15, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                             Text([JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
                                   job.status.statusLabel].joined(separator: " · "))
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -677,16 +685,17 @@ struct CustomerDetailView: View {
     }
     private var jobsSection: some View {
         VStack(alignment: .leading, spacing: 2) {
-            sectionTitle("Job history", count: jobs.count)
+            sectionTitle("All jobs", count: jobs.count)
             ForEach(jobs) { job in
                 NavigationLink(value: job) {
                     HStack(spacing: 12) {
                         Image(systemName: statusIcon(job.status).0).foregroundStyle(statusIcon(job.status).1).frame(width: 16)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                            Text(job.title).font(Theme.font(15, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                             Text(job.status.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
                         }
-                        Spacer()
+                        Spacer(minLength: 8)
+                        PaperDisclosure()
                     }.frame(minHeight: 44).contentShape(Rectangle())
                 }.buttonStyle(RowPressStyle())
             }
