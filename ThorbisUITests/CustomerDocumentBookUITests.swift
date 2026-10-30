@@ -252,7 +252,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(review.waitForExistence(timeout: 10))
         changeSampleStatuses(app)
         thorbisStableButton(app, "customer-book-review-sign").tap()
-        XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
+        XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForNonExistence(timeout: 5), "The review must replace the document pages")
         let handBack = app.buttons["Hand back to the technician"]
         XCTAssertTrue(handBack.waitForExistence(timeout: 10)); handBack.tap()
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
@@ -268,7 +268,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(sign.waitForExistence(timeout: 10))
         changeSampleStatuses(app)
         sign.tap()
-        XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
+        XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForNonExistence(timeout: 5), "The review must replace the document pages")
         let handBack = app.buttons["Hand back to the technician"]
         XCTAssertTrue(handBack.waitForExistence(timeout: 10)); handBack.tap()
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))

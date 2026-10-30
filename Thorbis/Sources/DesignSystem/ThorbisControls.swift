@@ -139,8 +139,10 @@ struct ThorbisConfirmCard: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
-        ScrollView {
+        // Only the words scroll. The choices stay pinned under them, so at an accessibility size a
+        // long title or message can never push Cancel or the action below the screen.
         VStack(spacing: 14) {
+            ScrollView {
             VStack(spacing: 6) {
                 Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
                     .multilineTextAlignment(.center)
@@ -153,6 +155,8 @@ struct ThorbisConfirmCard: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 4)
+            }
+            .scrollBounceBehavior(.basedOnSize)
 
             VStack(spacing: 8) {
                 ForEach(actions) { action in
@@ -175,8 +179,6 @@ struct ThorbisConfirmCard: View {
             }
         }
         .padding(16)
-        }
-        .scrollBounceBehavior(.basedOnSize)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
         .shadow(color: .black.opacity(0.18), radius: 24, y: 10)

@@ -406,19 +406,27 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Add estimate"].exists)
         let present = app.buttons["Present estimates"]
         XCTAssertTrue(present.exists)
-        let tabs = app.buttons["Estimates"]
+        // At accessibility sizes the section row is one pinned chooser (a40f825), not tabs.
+        let tabs = app.buttons["job-section-chooser"]
         XCTAssertTrue(tabs.exists)
+        XCTAssertTrue(tabs.label.contains("Estimates"))
+        // At accessibility sizes Present scrolls with the content (a40f825) instead of pinning
+        // above the bottom edge, so the card must fit between the pinned chooser and the screen's
+        // bottom; while Present is still pinned below the card, it must clear that too.
+        func bottom() -> CGFloat {
+            present.frame.minY > tabs.frame.maxY && present.frame.minY >= first.frame.minY ? min(present.frame.minY, app.frame.maxY) : app.frame.maxY
+        }
         for _ in 0..<8 {
             let frame = first.frame
-            if first.isHittable && frame.minY >= tabs.frame.maxY && frame.maxY <= present.frame.minY { break }
-            let upward = frame.maxY > present.frame.minY
+            if first.isHittable && frame.minY >= tabs.frame.maxY && frame.maxY <= bottom() { break }
+            let upward = frame.maxY > bottom()
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.7 : 0.4))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.5 : 0.6))
             start.press(forDuration: 0.1, thenDragTo: end)
         }
         XCTAssertTrue(first.isHittable, app.debugDescription)
         XCTAssertGreaterThanOrEqual(first.frame.minY, tabs.frame.maxY)
-        XCTAssertLessThanOrEqual(first.frame.maxY, present.frame.minY)
+        XCTAssertLessThanOrEqual(first.frame.maxY, bottom())
         capture(app, "Job estimates at largest text")
     }
 
