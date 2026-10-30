@@ -307,9 +307,12 @@ struct CustomerCommitButton: View {
             HStack(spacing: 8) {
                 if busy { ProgressView().tint(Theme.background) } else if let icon { Image(systemName: icon) }
                 Text(title).font(Theme.font(CustomerModeStyle.body, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.horizontal, 16).padding(.vertical, 12)
             .frame(maxWidth: .infinity)
-            .frame(height: sizeClass == .regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
+            .frame(minHeight: sizeClass == .regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
             .foregroundStyle(Theme.background)
             .background(Theme.foreground, in: RoundedRectangle(cornerRadius: 14))
         }
