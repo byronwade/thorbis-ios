@@ -104,7 +104,7 @@ final class TapToPayController: ObservableObject {
 
     func reset() { if !busy { phase = .idle } }
 
-    private static func message(for error: Error) -> String {
+    static func message(for error: Error) -> String {
         if let problem = error as? Problem {
             switch problem.status {
             case 403: return "Tap to Pay isn't turned on for this workspace yet."
@@ -119,7 +119,7 @@ final class TapToPayController: ObservableObject {
             case .canceled: return "Payment canceled."
             case .declinedByStripeAPI, .declinedByReader: return "The card was declined. Try another card."
             case .tapToPayReaderTOSAcceptanceRequiresiCloudSignIn, .tapToPayReaderTOSNotYetAccepted:
-                return "Accept Apple's Tap to Pay terms to start taking cards on this iPhone."
+                return "Tap to Pay needs setup. Ask your business administrator to complete the merchant terms, or use another payment method."
             case .commandNotAllowed:
                 return "Tap to Pay isn't available on this iPhone with the current setup. Use a payment link or another method."
             default: break
@@ -162,8 +162,15 @@ final class TerminalSetup: NSObject {
         if Terminal.shared.connectedReader != nil { return }
         let discovery = try TapToPayDiscoveryConfigurationBuilder().build()
         let reader = try await Discovery().first(discovery)
-        let config = try TapToPayConnectionConfigurationBuilder(delegate: ReaderEvents.shared, locationId: locationID).build()
+        let config = try Self.connectionConfiguration(locationID: locationID)
         _ = try await Terminal.shared.connectReader(reader, connectionConfig: config)
+    }
+
+    static func connectionConfiguration(locationID: String) throws -> TapToPayConnectionConfiguration {
+        // Invoice collection authority does not include accepting merchant terms.
+        try TapToPayConnectionConfigurationBuilder(delegate: ReaderEvents.shared, locationId: locationID)
+            .setTosAcceptancePermitted(false)
+            .build()
     }
 }
 
