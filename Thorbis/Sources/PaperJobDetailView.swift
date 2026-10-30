@@ -78,6 +78,7 @@ struct JobDetailView: View {
     @State private var showAssign = false
     @State private var showFollowUps = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private let tabs = ["Overview", "Estimates", "Invoice", "Photos", "Activity"]
 
@@ -97,7 +98,9 @@ struct JobDetailView: View {
             }
             if let job {
                 if selectedTab == "Photos" {
-                    header(job, compact: true, showActions: false)
+                    // At larger text sizes the full fixed header can crowd the media viewport.
+                    // Job details and actions remain available on Overview.
+                    if !typeSize.isAccessibilitySize { header(job, compact: true, showActions: false) }
                     tabBar
                     JobMediaView(jobID: jobId)
                 } else {
@@ -106,6 +109,9 @@ struct JobDetailView: View {
                     // never means scrolling back to the top first.
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     header(job, compact: selectedTab != "Overview")
+                    // At accessibility sizes a fixed action can cover most of a small screen.
+                    // Keep the same action early in the scrollable content instead.
+                    if typeSize.isAccessibilitySize { primaryAction }
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedTab {
@@ -143,6 +149,8 @@ struct JobDetailView: View {
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .sensoryFeedback(.success, trigger: committed)
@@ -271,29 +279,7 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
-            if selectedTab == "Overview", let step = nextStep {
-                // TF-01: the bar always carries the one next step of the call, money steps included.
-                PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
-                               busy: busy || creatingInvoice) {
-                    run(step)
-                }
-            } else if selectedTab == "Estimates" {
-                if !jobEstimates.isEmpty {
-                    PaperActionBar(title: "Present estimates", symbol: "person.crop.rectangle", action: presentEstimates)
-                } else if canBuildEstimate {
-                    PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
-                }
-            } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
-                      session.can("invoice.view", feature: "invoicing") {
-                // A draft is reviewed (lines) and issued on its own screen, then collected here.
-                PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
-            } else if selectedTab == "Invoice",
-                      session.can("invoice.payment.create", feature: "payments"),
-                      let invoice = selectedInvoice,
-                      let model = invoicePaymentModel,
-                      loadedInvoiceModelID == invoice.id {
-                PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
-            }
+            if !typeSize.isAccessibilitySize { primaryAction }
         }
         .sheet(isPresented: $showPause) {
             // MA-16: Cancel leading, the commit trailing where the thumb is; the form keeps what was typed.
@@ -347,14 +333,10 @@ struct JobDetailView: View {
                 .accessibilityLabel("Share job")
                 let groups = menuGroups(job)
                 if !groups.isEmpty {
-                    Menu {
-                        ForEach(groups.indices, id: \.self) { index in
-                            Section { ForEach(groups[index], id: \.self) { menuItem($0, job: job) } }
-                        }
-                    } label: {
+                    ThorbisMenu(items: groups.flatMap { $0 }.map { menuActionItem($0, job: job) },
+                                title: "Job actions", accessibilityLabel: "Job actions") {
                         Image(systemName: "ellipsis")
                     }
-                    .accessibilityLabel("Job actions")
                 }
             }
         }
@@ -376,36 +358,28 @@ struct JobDetailView: View {
             canEditCustomer: session.can("customer.edit", feature: "core_crm")))
     }
 
-    @ViewBuilder
-    private func menuItem(_ action: JobMenuAction, job: JobRecord) -> some View {
+    private func menuActionItem(_ action: JobMenuAction, job: JobRecord) -> ThorbisMenuItem {
         switch action {
         case .transition(let target):
-            Button(transitionTitle(target), systemImage: transitionSymbol(target)) { runTransition(target) }.disabled(busy)
+            return ThorbisMenuItem(transitionTitle(target), icon: transitionSymbol(target), isDisabled: busy) { runTransition(target) }
         case .schedule:
-            Button(job.scheduledFor == nil ? "Schedule" : "Reschedule", systemImage: "calendar") { showSchedule = true }
+            return ThorbisMenuItem(job.scheduledFor == nil ? "Schedule" : "Reschedule", icon: "calendar") { showSchedule = true }
         case .assign:
-            Button(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", systemImage: "person.crop.circle.badge.plus") { showAssign = true }
+            return ThorbisMenuItem(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", icon: "person.crop.circle.badge.plus") { showAssign = true }
         case .billWithoutEstimate:
-            Button { run(.createInvoice) } label: {
-                Label { Text("Create invoice"); Text("Bill without an estimate") } icon: { Image(systemName: "doc.plaintext") }
-            }
-            .disabled(creatingInvoice)
+            return ThorbisMenuItem("Create invoice", icon: "doc.plaintext", subtitle: "Bill without an estimate", isDisabled: creatingInvoice) { run(.createInvoice) }
         case .deposit:
-            Button { showDeposit = true } label: {
-                Label { Text("Request a deposit"); Text("Bill part up front") } icon: { Image(systemName: "banknote") }
-            }
+            return ThorbisMenuItem("Request a deposit", icon: "banknote", subtitle: "Bill part up front") { showDeposit = true }
         case .wrapUp:
-            Button { showWrapUp = true } label: {
-                Label { Text("Wrap up"); Text("Closeout checklist") } icon: { Image(systemName: "checkmark.seal") }
-            }
+            return ThorbisMenuItem("Wrap up", icon: "checkmark.seal", subtitle: "Closeout checklist") { showWrapUp = true }
         case .followUps:
-            Button("Follow-ups", systemImage: "list.bullet") { showFollowUps = true }
+            return ThorbisMenuItem("Follow-ups", icon: "list.bullet") { showFollowUps = true }
         case .showToCustomer:
-            Button("Show to customer", systemImage: "person.crop.rectangle") { showCommercialDocuments = true }
+            return ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCommercialDocuments = true }
         case .customerDetails:
-            Button("Customer details", systemImage: "person.crop.circle") { showCustomerMode = true }
+            return ThorbisMenuItem("Customer details", icon: "person.crop.circle") { showCustomerMode = true }
         case .copyID:
-            Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id }
+            return ThorbisMenuItem("Copy job ID", icon: "doc.on.doc") { UIPasteboard.general.string = job.id }
         }
     }
 
@@ -415,7 +389,13 @@ struct JobDetailView: View {
                session.can("customer.view", feature: "core_crm") {
                 NavigationLink(value: customer) {
                     HStack(alignment: .center, spacing: 6) {
-                        Label(customer.name, systemImage: "person.crop.circle")
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.brandText)
+                            .frame(width: 28, height: 28)
+                            .background(Theme.brandSurface, in: Circle())
+                            .accessibilityHidden(true)
+                        Text(customer.name)
                             .fixedSize(horizontal: false, vertical: true)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
@@ -435,8 +415,8 @@ struct JobDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text(job.title)
-                .font(Theme.font(24, weight: .medium))
-                .tracking(-0.36)
+                .font(Theme.font(26, weight: .semibold))
+                .tracking(-0.39)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             // One wrapping row of chips instead of two fixed rows (chips are pills).
@@ -479,12 +459,38 @@ struct JobDetailView: View {
                 // MF-01/MF-03: what's owed on the job is a labelled figure, not a chip. It jumps to
                 // the Invoice tab, where it can be collected.
                 Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 12)
-                        Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
+                    Group {
+                        if typeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Theme.brandText)
+                                        .accessibilityHidden(true)
+                                }
+                                Text(money(balance, currency: "USD"))
+                                    .moneyStyle(.total).foregroundStyle(Theme.foreground)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+                                Spacer(minLength: 8)
+                                Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Theme.brandText)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                     }
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
                 .padding(.top, 8)
@@ -560,14 +566,11 @@ struct JobDetailView: View {
         if transitions.isEmpty {
             statusChip(job, tint: tint, showsMenu: false)
         } else {
-            Menu {
-                ForEach(transitions, id: \.self) { target in
-                    Button(transitionTitle(target)) { runTransition(target) }
-                }
-            } label: {
+            ThorbisMenu(items: transitions.map { target in
+                ThorbisMenuItem(transitionTitle(target)) { runTransition(target) }
+            }, title: "Change status") {
                 statusChip(job, tint: tint, showsMenu: true)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -630,7 +633,59 @@ struct JobDetailView: View {
     }
 
     private var tabBar: some View {
-        PaperTabs(options: tabs, selection: $selectedTab).padding(.bottom, 4)
+        Group {
+            if typeSize.isAccessibilitySize {
+                Menu {
+                    ForEach(tabs, id: \.self) { tab in
+                        Button { selectedTab = tab } label: {
+                            if tab == selectedTab { Label(tab, systemImage: "checkmark") }
+                            else { Text(tab) }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(selectedTab).font(Theme.font(15, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(Theme.foreground)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                }
+                .padding(.horizontal, Theme.gutter)
+                .accessibilityLabel("Job sections, \(selectedTab)")
+                .accessibilityHint("Choose a job section")
+                .accessibilityIdentifier("job-section-chooser")
+            } else {
+                PaperTabs(options: tabs, selection: $selectedTab, wrapOverflow: true)
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    @ViewBuilder private var primaryAction: some View {
+        if selectedTab == "Overview", let step = nextStep {
+            PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
+                           busy: busy || creatingInvoice) { run(step) }
+        } else if selectedTab == "Estimates" {
+            if !jobEstimates.isEmpty {
+                PaperActionBar(title: "Present estimates", symbol: "person.crop.rectangle", action: presentEstimates)
+            } else if canBuildEstimate {
+                PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
+            }
+        } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
+                  session.can("invoice.view", feature: "invoicing") {
+            PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
+        } else if selectedTab == "Invoice",
+                  session.can("invoice.payment.create", feature: "payments"),
+                  let invoice = selectedInvoice,
+                  let model = invoicePaymentModel,
+                  loadedInvoiceModelID == invoice.id {
+            PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
+        }
     }
 
     /// JS-01: the body is for reading, in the order a tech needs it at the door. Every action that

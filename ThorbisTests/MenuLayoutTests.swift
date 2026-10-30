@@ -62,4 +62,18 @@ final class MenuLayoutTests: XCTestCase {
         XCTAssertEqual(layout.tabs.compactMap(MenuItem.init(serverTab:)), [.jobs, .money])
         XCTAssertEqual(layout.moreMenu?.filter(\.hidden).compactMap { MenuItem(serverTab: $0.id) }, [.reports])
     }
+
+    func testPhoneMenuListsTabBarPlacesFirstThenTheRest() {
+        let places = SideMenuContent.places(
+            tabs: [.schedule, .jobs, .customers],
+            hidden: [.team],
+            permitted: { $0 != .notices }
+        )
+        XCTAssertEqual(Array(places.prefix(3)), [.schedule, .jobs, .customers])
+        XCTAssertEqual(places.filter { $0 == .schedule }.count, 1)
+        XCTAssertTrue(places.contains(.estimates))
+        XCTAssertTrue(places.contains(.priceBook))
+        XCTAssertFalse(places.contains(.team), "Hidden places stay out of the menu")
+        XCTAssertFalse(places.contains(.notices), "Places the role cannot open stay out")
+    }
 }

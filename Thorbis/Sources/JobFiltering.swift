@@ -12,6 +12,59 @@ enum JobFiltering {
         return formatter.date(from: raw)
     }
 
+    /// A list summary can call a visit upcoming only when it has a valid future time.
+    static func nextScheduledVisit(_ jobs: [Job], customerID: String, now: Date = Date()) -> Job? {
+        let candidates: [(job: Job, time: Date)] = jobs.compactMap { job in
+            guard job.customerId == customerID,
+                  ["scheduled", "dispatched"].contains(job.status),
+                  let time = date(job.scheduledFor), time >= now else { return nil }
+            return (job, time)
+        }
+        return candidates.min { left, right in
+            left.time == right.time ? left.job.id < right.job.id : left.time < right.time
+        }?.job
+    }
+
+    /// When there is no active or upcoming visit, keep an earlier open appointment visible.
+    static func overdueScheduledVisit(_ jobs: [Job], customerID: String, now: Date = Date()) -> Job? {
+        let candidates: [(job: Job, time: Date)] = jobs.compactMap { job in
+            guard job.customerId == customerID,
+                  ["scheduled", "dispatched"].contains(job.status),
+                  let time = date(job.scheduledFor), time < now else { return nil }
+            return (job, time)
+        }
+        return candidates.min { left, right in
+            left.time == right.time ? left.job.id < right.job.id : left.time < right.time
+        }?.job
+    }
+
+    /// Prefer an active job in the list summary; ties use ID so refresh order cannot change it.
+    static func activeCustomerJob(_ jobs: [Job], customerID: String) -> Job? {
+        let priorities = ["in_progress": 0, "arrived": 1, "en_route": 2, "paused": 3]
+        return jobs.filter { $0.customerId == customerID && priorities[$0.status] != nil }.min { left, right in
+            let leftPriority = priorities[left.status] ?? Int.max
+            let rightPriority = priorities[right.status] ?? Int.max
+            return leftPriority == rightPriority ? left.id < right.id : leftPriority < rightPriority
+        }
+    }
+
+    /// The same customer-scoped summary drives both the customer list and the detail page.
+    static func customerJobSummary(_ jobs: [Job], customerID: String, now: Date = Date()) -> (job: Job, heading: String, openCount: Int)? {
+        let open = jobs.filter { $0.customerId == customerID && !["completed", "canceled"].contains($0.status) }
+        guard !open.isEmpty else { return nil }
+        if let active = activeCustomerJob(open, customerID: customerID) {
+            return (active, "Open job", open.count)
+        }
+        if let next = nextScheduledVisit(open, customerID: customerID, now: now) {
+            return (next, "Next visit", open.count)
+        }
+        if let past = overdueScheduledVisit(open, customerID: customerID, now: now) {
+            return (past, "Past scheduled time", open.count)
+        }
+        guard let fallback = open.min(by: { $0.id < $1.id }) else { return nil }
+        return (fallback, "Open job", open.count)
+    }
+
     static func schedule(_ jobs: [Job], range: ScheduleRange, now: Date = Date(), calendar: Calendar = .current) -> [Job] {
         jobs.filter { job in
             guard !["completed", "canceled"].contains(job.status) else { return false }

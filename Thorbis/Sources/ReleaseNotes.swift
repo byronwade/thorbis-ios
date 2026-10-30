@@ -13,6 +13,16 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-29-customer-visual",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "person.crop.square", title: "See the next visit clearly",
+                      detail: "Customer profiles make the next visit easier to find and open."),
+                .init(symbol: "briefcase", title: "Find your work faster",
+                      detail: "Search jobs from the list and see job sections more clearly."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-29-pricebook-at-a-glance",
             date: "2026-10-29",
             highlights: [
@@ -68,6 +78,14 @@ enum ReleaseNotes {
                       detail: "See the work, price and status first, with totals and actions close at hand."),
             ],
             fixes: 0
+        ),
+        ReleaseNote(
+            id: "2026-10-29-menu-layout",
+            date: "2026-10-29",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "A menu with room to tap",
+                      detail: "Places are a plain list. Pull the menu down to search. Your account opens Settings."),
+            ]
         ),
         ReleaseNote(
             id: "2026-10-29-price-book-loads",

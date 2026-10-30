@@ -493,6 +493,7 @@ struct JobsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Jobs", subtitle: subtitle) { showDisplay = true }
                 OfflineBanner()
+                PaperSearchField(text: $search, prompt: "Search title or job number")
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 VStack(alignment: .leading, spacing: 14) {
@@ -532,8 +533,7 @@ struct JobsView: View {
         .sheet(isPresented: $showDisplay) { displaySheet }
     }
 
-    /// Search, ordering, and status filters for the board — the jobs homepage's custom
-    /// filter sheet, in place of a stock picker or an inline search bar.
+    /// Ordering and status filters remain available alongside the direct list search.
     private var displaySheet: some View {
         ThorbisSheetScaffold(title: "Display", onClose: { showDisplay = false }) {
             HStack(spacing: 8) {
@@ -601,7 +601,7 @@ struct JobsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(job.title).font(Theme.font(15, weight: .medium))
                                     .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
-                                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
                                 Text(detail(job, customer: customer))
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                                     .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
@@ -618,7 +618,7 @@ struct JobsView: View {
                                     .accessibilityLabel("Assigned to you")
                             }
                         }
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 8).padding(.vertical, 6)
                         .frame(minHeight: 56)
                         .contentShape(Rectangle())
                     }

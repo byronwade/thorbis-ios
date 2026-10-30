@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "side-menu", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "side-menu", "side-menu-search", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -1140,7 +1140,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     private static func customers() -> [[String: Any]] {
         let shortName = ProcessInfo.processInfo.arguments.contains("--paper-preview-short-customer-name")
-        let rows = [("0412", shortName ? "I" : "Danielle Marlowe", "412 Birchwood Ln"), ("0413", "Alex Petrov", "88 Larch Ave"), ("0414", "David Chen", "245 Rosemont Dr"), ("0415", "Elena Alvarez", "19 Fenwick Ct"), ("0416", "Mei Nakamura", "731 Cassia Way")]
+        let longName = ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-name-long")
+        let firstName = shortName ? "I" : (longName ? "Birch Community Hall and Neighborhood Services Center" : "Danielle Marlowe")
+        let rows = [("0412", firstName, "412 Birchwood Ln"), ("0413", "Alex Petrov", "88 Larch Ave"), ("0414", "David Chen", "245 Rosemont Dr"), ("0415", "Elena Alvarez", "19 Fenwick Ct"), ("0416", "Mei Nakamura", "731 Cassia Way")]
         return rows.map { ref, name, address in
             ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID, "name": name, "address": address,
              "accountType": "residential", "archived": false, "createdAt": "2022-03-01T12:00:00Z", "updatedAt": "2026-07-20T12:00:00Z", "billingTerms": "Due on receipt"] as [String: Any]

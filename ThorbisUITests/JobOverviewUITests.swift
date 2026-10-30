@@ -2,6 +2,57 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testJobHeaderKeepsTitleClearOfNavigationAndBalanceOpensInvoice() {
+        let app = preview("job", working: true)
+        let title = app.staticTexts["AC not cooling"]
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        let bar = app.navigationBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(title.frame.minY, bar.frame.maxY,
+                                    "The job title must not sit behind navigation controls")
+        let balance = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Balance due")).firstMatch
+        XCTAssertTrue(balance.waitForExistence(timeout: 20))
+        XCTAssertTrue(balance.isHittable)
+        capture(app, name: "Job header before invoice")
+        balance.tap()
+        XCTAssertTrue(app.staticTexts["Invoices"].waitForExistence(timeout: 10), "Tapping the balance should open invoice content")
+    }
+
+    func testDarkJobHeaderKeepsWorkAndPaymentVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "-thorbis.appearance", "dark"]
+        app.launch()
+        let title = app.staticTexts["AC not cooling"]
+        let collect = button(startingWith: "Collect ", in: app)
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        XCTAssertTrue(collect.waitForExistence(timeout: 20))
+        XCTAssertTrue(title.isHittable)
+        XCTAssertTrue(collect.isHittable)
+        XCTAssertGreaterThanOrEqual(title.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        capture(app, name: "Dark job overview")
+    }
+
+    func testAllJobTabsRemainReachableAtStandardAndLargeText() {
+        for accessible in [false, true] {
+            let app = preview("job", accessibleText: accessible, working: true)
+            if accessible {
+                let chooser = app.buttons["job-section-chooser"]
+                for _ in 0..<4 where !chooser.isHittable { app.swipeUp() }
+                XCTAssertTrue(chooser.isHittable)
+                chooser.tap()
+            }
+            let activity = app.buttons["Activity"]
+            if !accessible { for _ in 0..<4 where !activity.isHittable { app.swipeUp() } }
+            XCTAssertTrue(activity.waitForExistence(timeout: 10))
+            XCTAssertTrue(activity.isHittable, "Activity should be visible without horizontal scrolling")
+            XCTAssertLessThanOrEqual(activity.frame.maxX, app.frame.maxX)
+            capture(app, name: accessible ? "Job tabs at large text" : "Job tabs on narrow phone")
+            activity.tap()
+            XCTAssertTrue(app.buttons["Notes"].waitForExistence(timeout: 10))
+            app.terminate()
+        }
+    }
+
     func testCustomerLinkIsComfortableAndOpensCustomerProfile() {
         let app = preview("job", working: true)
         let customer = app.buttons["job-customer-link"]
@@ -116,16 +167,48 @@ final class JobOverviewUITests: XCTestCase {
         let directions = app.buttons["Directions"]
         let primary = app.buttons["On my way"]
         XCTAssertTrue(call.waitForExistence(timeout: 15))
-        XCTAssertTrue(primary.waitForExistence(timeout: 5))
         capture(app, name: "Job Overview with accessible text")
         XCTAssertGreaterThanOrEqual(text.frame.minY, call.frame.maxY)
         XCTAssertGreaterThanOrEqual(directions.frame.minY, text.frame.maxY)
-        XCTAssertGreaterThan(primary.frame.height, 50)
-        XCTAssertTrue(primary.isHittable)
         let content = app.scrollViews.containing(.button, identifier: "Directions").firstMatch
         for _ in 0..<3 where !directions.isHittable { content.swipeUp() }
         XCTAssertTrue(directions.isHittable, "Directions must remain reachable below the enlarged header")
+        for _ in 0..<4 where !primary.isHittable { content.swipeUp() }
+        XCTAssertTrue(primary.isHittable, "The primary action must remain reachable")
+        XCTAssertGreaterThan(primary.frame.height, 50)
         capture(app, name: "Accessible contact actions after scrolling")
+    }
+
+    func testAccessiblePaymentActionScrollsWithTheJob() {
+        continueAfterFailure = false
+        let app = preview("job", accessibleText: true, working: true)
+        let collect = button(startingWith: "Collect ", in: app)
+        let content = app.scrollViews.firstMatch
+        XCTAssertTrue(content.waitForExistence(timeout: 20))
+        for _ in 0..<5 where !collect.isHittable { content.swipeUp() }
+        XCTAssertTrue(collect.isHittable, "Collection must remain reachable")
+        let initialY = collect.frame.minY
+        content.swipeUp()
+        XCTAssertTrue(!collect.exists || collect.frame.minY < initialY - 20,
+                      "At large text the collection action must scroll away with the job")
+    }
+
+    func testAccessibleSectionChooserKeepsPhotosAndActivityReachable() {
+        continueAfterFailure = false
+        let app = preview("job", accessibleText: true, working: true)
+        let chooser = app.buttons["job-section-chooser"]
+        let content = app.scrollViews.firstMatch
+        for _ in 0..<5 where !chooser.isHittable { content.swipeUp() }
+        XCTAssertTrue(chooser.isHittable)
+        XCTAssertTrue(chooser.label.contains("Overview"))
+        chooser.tap()
+        app.buttons["Photos"].tap()
+        XCTAssertTrue(chooser.waitForExistence(timeout: 10))
+        XCTAssertTrue(chooser.isHittable, "The chooser must remain reachable on Photos")
+        XCTAssertTrue(chooser.label.contains("Photos"))
+        chooser.tap()
+        app.buttons["Activity"].tap()
+        XCTAssertTrue(app.buttons["Notes"].waitForExistence(timeout: 10))
     }
 
     private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false) -> XCUIApplication {

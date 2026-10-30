@@ -17,8 +17,18 @@ final class LongLocationMenuUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-many-locations"] + extraArguments
         app.launch()
         let add = app.buttons["Add equipment"]
-        XCTAssertTrue(add.waitForExistence(timeout: 30), app.debugDescription)
-        for _ in 0..<24 where !add.isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        for attempt in 0..<24 where !add.isHittable {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            start.press(forDuration: 0.05, thenDragTo: end)
+            if [3, 7, 15, 23].contains(attempt) {
+                let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                image.name = "Location test scroll \(attempt + 1)"
+                image.lifetime = .keepAlways
+                self.add(image)
+            }
+        }
         XCTAssertTrue(add.isHittable, app.debugDescription)
         add.tap()
         let select = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Location,")).firstMatch

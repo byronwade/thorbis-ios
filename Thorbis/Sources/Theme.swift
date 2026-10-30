@@ -152,11 +152,12 @@ struct Chip: View {
 struct Avatar: View {
     let name: String
     var size: CGFloat = 24
+    var fill: Color = Theme.fill
     var body: some View {
         Text(initials(name)).font(Theme.font(size * 0.38, weight: .medium))
             .foregroundStyle(Theme.muted)
             .frame(width: size, height: size)
-            .background(Theme.fill, in: Circle())
+            .background(fill, in: Circle())
             .dynamicTypeSize(...DynamicTypeSize.large)
     }
 }

@@ -62,6 +62,9 @@ struct PaperCircleButton: View {
     let symbol: String
     let label: String
     var size: CGFloat = 36
+    /// Canvas fill; use `Theme.card` with `bordered` on a cream ground so the circle reads as a button.
+    var fill: Color = Theme.fill
+    var bordered = false
     let action: () -> Void
 
     var body: some View {
@@ -69,7 +72,9 @@ struct PaperCircleButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.foreground)
-                .frame(width: size, height: size).background(Theme.fill, in: Circle())
+                .frame(width: size, height: size)
+                .background(fill, in: Circle())
+                .overlay { if bordered { Circle().strokeBorder(Theme.border, lineWidth: 1) } }
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -81,33 +86,44 @@ struct PaperCircleButton: View {
 struct PaperTabs: View {
     let options: [String]
     @Binding var selection: String
+    /// Keep every destination visible when a compact screen cannot fit one row.
+    var wrapOverflow = false
     /// True while tabs remain past the trailing edge; the fade shows only then, so the
     /// last tab is never left dimmed once you've scrolled to it.
     @State private var moreTrailing = true
     var body: some View {
-        // Every tab shows in full when it can: first at the normal padding, then a little
-        // tighter, then tighter still (five job tabs on a 6.1" phone). Only past that does the row scroll, and
-        // then the chosen tab scrolls fully into view and the cut edge fades out.
+        // Fit one row where possible. Compact layouts can wrap; other callers keep
+        // the scrolling fallback and its trailing fade.
         ViewThatFits(in: .horizontal) {
             row(padding: 12).padding(.horizontal, Theme.gutter - 4)
             row(padding: 8).padding(.horizontal, Theme.gutter - 8)
             // The job's five tabs need this on a 402pt phone; a cut-off "Acti" reads as a bug.
             row(padding: 6).padding(.horizontal, Theme.gutter - 6)
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    row(padding: 12).padding(.horizontal, Theme.gutter - 4)
+            if wrapOverflow {
+                FlowRow(spacing: 2, lineSpacing: 0) {
+                    ForEach(options, id: \.self) { option in
+                        tab(option, padding: 8)
+                    }
                 }
-                .scrollIndicators(.hidden)
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentOffset.x + geometry.containerSize.width < geometry.contentSize.width - 1
-                } action: { _, value in
-                    moreTrailing = value
-                }
-                .mask(LinearGradient(stops: [.init(color: .black, location: 0.88),
-                                             .init(color: moreTrailing ? .clear : .black, location: 1)],
-                                     startPoint: .leading, endPoint: .trailing))
-                .onChange(of: selection) { _, value in
-                    withMotion(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+                .padding(.horizontal, Theme.gutter - 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        row(padding: 12).padding(.horizontal, Theme.gutter - 4)
+                    }
+                    .scrollIndicators(.hidden)
+                    .onScrollGeometryChange(for: Bool.self) { geometry in
+                        geometry.contentOffset.x + geometry.containerSize.width < geometry.contentSize.width - 1
+                    } action: { _, value in
+                        moreTrailing = value
+                    }
+                    .mask(LinearGradient(stops: [.init(color: .black, location: 0.88),
+                                                 .init(color: moreTrailing ? .clear : .black, location: 1)],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .onChange(of: selection) { _, value in
+                        withMotion(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+                    }
                 }
             }
         }
@@ -118,20 +134,24 @@ struct PaperTabs: View {
     private func row(padding: CGFloat) -> some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { option in
-                Button { selection = option } label: {
-                    Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
-                        .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                        .padding(.horizontal, padding).padding(.vertical, 6)
-                        .frame(minHeight: Theme.chipHeight + 4)
-                        .background(selection == option ? Theme.fill : .clear, in: Capsule())
-                        .frame(minHeight: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .id(option)
-                .accessibilityAddTraits(selection == option ? .isSelected : [])
+                tab(option, padding: padding)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tab(_ option: String, padding: CGFloat) -> some View {
+        Button { selection = option } label: {
+            Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
+                .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
+                .padding(.horizontal, padding).padding(.vertical, 6)
+                .frame(minHeight: Theme.chipHeight + 4)
+                .background(selection == option ? Theme.fill : .clear, in: Capsule())
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .id(option)
+        .accessibilityAddTraits(selection == option ? .isSelected : [])
     }
 }
 
