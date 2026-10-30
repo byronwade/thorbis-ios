@@ -3,6 +3,8 @@ import SwiftUI
 struct WorkspaceNoticesView: View {
     @ObservedObject var api: APIClient
     let available: Bool
+    /// The office call log (web Inbox calls), when call_recording is on for this role.
+    var calls = false
 
     @State private var items: [StaffNotice] = []
     @State private var nextCursor: String?
@@ -12,6 +14,13 @@ struct WorkspaceNoticesView: View {
     @State private var error: String?
 
     @State private var filter = "All"
+    /// Bumped by pull to refresh on the Calls tab, so the log reloads.
+    @State private var callsGeneration = 0
+
+    private var tabs: [String] {
+        guard available else { return calls ? ["Calls"] : [] }
+        return calls ? ["All", "Unread", "Calls"] : ["All", "Unread"]
+    }
 
     private var visible: [StaffNotice] { filter == "Unread" ? items.filter { !$0.read } : items }
 
@@ -24,11 +33,14 @@ struct WorkspaceNoticesView: View {
                     Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
-                if !available {
+                if !available && !calls {
                     PaperEmptyState(symbol: "bell.slash", title: "Inbox is off for your role",
                                     message: "Job notices need the notices permission. An owner can turn it on in Team.")
+                } else if filter == "Calls" || !available {
+                    if tabs.count > 1 { PaperTabs(options: tabs, selection: $filter) }
+                    CallLogList().id(callsGeneration)
                 } else {
-                    PaperTabs(options: ["All", "Unread"], selection: $filter)
+                    PaperTabs(options: tabs, selection: $filter)
                     if let error { ErrorBanner(message: error) { await refresh() } }
                     if loading && items.isEmpty && error == nil { SkeletonRows(count: 5) }
                     ForEach(visible) { notice in
@@ -80,7 +92,7 @@ struct WorkspaceNoticesView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if available && (unreadState == .present || readCursor != nil) {
+            if available && filter != "Calls" && (unreadState == .present || readCursor != nil) {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Task { await markReadBatch() } } label: { Image(systemName: "checkmark.circle") }
                         .accessibilityLabel(readCursor == nil ? "Mark all read" : "Continue marking read")
@@ -88,11 +100,14 @@ struct WorkspaceNoticesView: View {
                 }
             }
         }
-        .refreshable { await refresh() }
+        .refreshable {
+            if filter == "Calls" || !available { callsGeneration += 1 } else { await refresh() }
+        }
         .task { await refresh() }
     }
 
     private var subtitle: String {
+        if filter == "Calls" || (!available && calls) { return "Calls to your business" }
         if !available { return "Job notices" }
         switch unreadState {
         case .present: return "Unread notices waiting"
