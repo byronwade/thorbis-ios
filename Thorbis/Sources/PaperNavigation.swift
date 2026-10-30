@@ -343,8 +343,9 @@ struct RootView: View {
 
     private var barSync: AppBottomBar.Sync? {
         if !outbox.needsReview.isEmpty { return .needsReview(outbox.needsReview.count) }
-        if outbox.syncing { return .syncing(outbox.pending.count) }
-        if !outbox.pending.isEmpty { return .waiting(outbox.pending.count) }
+        // Waiting photos count beside queued changes, as in the offline line (OF-03).
+        if outbox.syncing { return .syncing(outbox.waitingCount) }
+        if outbox.waitingCount > 0 { return .waiting(outbox.waitingCount) }
         return nil
     }
 

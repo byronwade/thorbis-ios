@@ -431,34 +431,48 @@ extension EnvironmentValues {
     }
 }
 
-/// Paper 73 / 74: offline, syncing and needs-review states. Queued is never shown as done.
+/// design.thorbis.com/offline OF-03: one line says it, in the web strip's words. Waiting is
+/// counted (queued changes and photos), never shown as done (OF-02). A healthy connection shows
+/// nothing; leaving a bad phase earns one short "all changes synced" beat.
 struct OfflineBanner: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var outbox: FieldOutbox
     @State private var showReview = false
+    @State private var recovered = false
+
+    private func changes(_ count: Int) -> String { "\(count) change\(count == 1 ? "" : "s")" }
 
     var body: some View {
+        let waiting = outbox.waitingCount
         Group {
             if !outbox.needsReview.isEmpty {
                 Button { showReview = true } label: {
                     banner(symbol: "exclamationmark.triangle", tint: Theme.destructive, ground: Theme.destructiveSurface,
-                           text: "\(outbox.needsReview.count) change\(outbox.needsReview.count == 1 ? "" : "s") couldn't sync",
-                           trailing: "Review")
+                           text: "\(changes(outbox.needsReview.count)) couldn't sync", trailing: "Review")
                 }
                 .buttonStyle(.plain)
             } else if session.isOffline {
                 banner(symbol: "wifi.slash", tint: Theme.warning, ground: Theme.warningSurface,
-                       text: outbox.pending.isEmpty ? "Offline · showing \(store.cachedAt.map { "work saved " + $0.formatted(.relative(presentation: .named)) } ?? "your last copy")"
-                                                    : "Offline · changes save on this phone",
-                       trailing: outbox.pending.isEmpty ? nil : "\(outbox.pending.count) queued")
-            } else if outbox.syncing || !outbox.pending.isEmpty {
+                       text: "Offline, showing what's on this phone" + (store.cachedAt.map { " · saved " + $0.formatted(.relative(presentation: .named)) } ?? ""),
+                       trailing: waiting == 0 ? nil : "\(changes(waiting)) waiting")
+            } else if outbox.syncing || waiting > 0 {
                 banner(symbol: "arrow.triangle.2.circlepath", tint: Theme.success, ground: Theme.successSurface,
-                       text: outbox.syncing ? "Back online · syncing changes" : "Waiting to sync",
-                       trailing: "\(outbox.pending.count) left")
+                       text: "Back online, syncing \(changes(max(waiting, 1)))…", trailing: nil)
+            } else if recovered {
+                banner(symbol: "checkmark.circle", tint: Theme.success, ground: Theme.successSurface,
+                       text: "Back online, all changes synced", trailing: nil)
             }
         }
         .padding(.horizontal, Theme.gutter).padding(.bottom, 10)
+        .onChange(of: outbox.syncing || waiting > 0 || session.isOffline) { wasBusy, busy in
+            guard wasBusy, !busy, outbox.needsReview.isEmpty else { return }
+            recovered = true
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                recovered = false
+            }
+        }
         .sheet(isPresented: $showReview) { OutboxReviewSheet() }
     }
 
@@ -477,7 +491,8 @@ struct OfflineBanner: View {
     }
 }
 
-/// Changes the server refused, with its reason. Dismissing removes the local copy only.
+/// OF-07: changes the server refused, each with what it was, which job, when, and the server's
+/// reason. Discarding removes the local copy only.
 struct OutboxReviewSheet: View {
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var store: Store
@@ -487,7 +502,7 @@ struct OutboxReviewSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("These changes were made without signal and the server didn't accept them. Open the job to redo what's still needed.")
+                    Text("These changes were made without signal and the server didn't accept them. Retry sends one again; Discard removes it from this phone.")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 12)
                     ForEach(outbox.needsReview) { entry in
                         HStack(alignment: .top, spacing: 12) {
@@ -503,7 +518,7 @@ struct OutboxReviewSheet: View {
                                 VStack(spacing: 0) {
                                     Button("Retry") { outbox.retry(entry) }
                                         .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
-                                    Button("Dismiss", role: .destructive) { outbox.dismiss(entry) }
+                                    Button("Discard", role: .destructive) { outbox.dismiss(entry) }
                                         .font(Theme.font(13, weight: .medium)).frame(minHeight: 44)
                                 }
                             }
@@ -528,6 +543,16 @@ struct OutboxReviewSheet: View {
         case .held: "Waiting on an earlier change to this job that didn't sync."
         case .pending: "Waiting to sync."
         }
+    }
+}
+
+/// OF-02: the small mark under a step saved on this phone and not yet on the server.
+struct WaitingToSyncLabel: View {
+    var text = "Waiting to sync"
+    var body: some View {
+        Label(text, systemImage: "clock.arrow.circlepath")
+            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            .labelStyle(.titleAndIcon)
     }
 }
 

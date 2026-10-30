@@ -66,7 +66,8 @@ struct WorkspaceCache {
     }
 }
 
-/// Job details and notes as last read, so a job opened before still opens without signal.
+/// Job details, notes, the closeout checklist, invoices and payments as last read, so a job
+/// opened before still opens and can be worked without signal (OF-04).
 enum JobDetailCache {
     private static var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -87,7 +88,15 @@ enum JobDetailCache {
 
     static func save(_ job: JobRecord) { write(job, "\(job.id).job.json") }
     static func save(notes: [JobNoteRecord], jobID: String) { write(notes, "\(jobID).notes.json") }
+    static func save(closeout: FieldCloseout, jobID: String) { write(closeout, "\(jobID).closeout.json") }
+    static func save(invoices: [InvoiceRecord], jobID: String) { write(invoices, "\(jobID).invoices.json") }
+    static func save(invoice: InvoiceRecord) { write(invoice, "\(invoice.id).invoice.json") }
+    static func save(payments: [FieldPaymentRecord], invoiceID: String) { write(payments, "\(invoiceID).payments.json") }
     static func job(_ id: String) -> JobRecord? { read(JobRecord.self, "\(id).job.json") }
+    static func closeout(_ jobID: String) -> FieldCloseout? { read(FieldCloseout.self, "\(jobID).closeout.json") }
+    static func invoices(_ jobID: String) -> [InvoiceRecord]? { read([InvoiceRecord].self, "\(jobID).invoices.json") }
+    static func invoice(_ id: String) -> InvoiceRecord? { read(InvoiceRecord.self, "\(id).invoice.json") }
+    static func payments(_ invoiceID: String) -> [FieldPaymentRecord]? { read([FieldPaymentRecord].self, "\(invoiceID).payments.json") }
     static func notes(_ id: String) -> [JobNoteRecord] { read([JobNoteRecord].self, "\(id).notes.json") ?? [] }
     static func clearAll() { try? FileManager.default.removeItem(at: directory) }
 }
