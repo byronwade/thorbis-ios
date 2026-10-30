@@ -17,3 +17,15 @@ final class DescriptionCanvasLimitTests: XCTestCase {
         XCTAssertEqual(DescriptionCanvasLimit.unicodeScalars(211).count(text), 211)
     }
 }
+
+final class DescriptionCanvasScopeTests: XCTestCase {
+    func testOnlyOriginalAuthorityCanRevealUnsavedContent() {
+        let generation = UUID(), authority = UUID()
+        let captured = DescriptionCanvasScope(actor: "actor", organization: "org", generation: generation, authority: authority)
+        XCTAssertTrue(captured.matches(actor: "actor", organization: "org", generation: generation, authority: authority))
+        XCTAssertFalse(captured.matches(actor: "actor", organization: "org", generation: generation, authority: UUID()))
+        XCTAssertFalse(captured.matches(actor: "other", organization: "org", generation: generation, authority: authority))
+        XCTAssertFalse(captured.matches(actor: "actor", organization: "other", generation: generation, authority: authority))
+        XCTAssertFalse(captured.matches(actor: "actor", organization: "org", generation: UUID(), authority: authority))
+    }
+}

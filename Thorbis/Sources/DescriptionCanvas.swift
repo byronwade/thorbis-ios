@@ -23,21 +23,33 @@ struct DescriptionCanvasLink: View {
     let limit: DescriptionCanvasLimit?
     let identifier: String
     @Environment(\.isEnabled) private var isEnabled
+    @EnvironmentObject private var session: SessionController
     @State private var showing = false
+    @State private var accessRetired = false
+    @State private var scope: DescriptionCanvasScope?
 
     var body: some View {
-        Button("Show more") { showing = true }
+        Button("Show more") {
+            guard let actor = session.user?.id, let organization = session.activeOrganization?.id else { return }
+            scope = DescriptionCanvasScope(actor: actor, organization: organization,
+                                           generation: session.generation, authority: session.authorityRevision)
+            accessRetired = false
+            showing = true
+        }
             .font(Theme.font(14, weight: .medium))
             .foregroundStyle(Theme.brandText)
             .frame(minHeight: 44)
             .accessibilityLabel("Show more \(title.lowercased())")
             .accessibilityIdentifier(identifier)
             .sheet(isPresented: $showing) {
-                DescriptionCanvas(text: $text, title: title, applyTitle: applyTitle, limit: limit, canApply: isEnabled)
-                    .presentationDetents([.large])
+                if let scope {
+                    DescriptionCanvas(text: $text, title: title, applyTitle: applyTitle, limit: limit,
+                                      scope: scope, accessRetired: $accessRetired)
+                        .presentationDetents([.large])
+                }
             }
             .onChange(of: isEnabled) { _, enabled in
-                if !enabled { showing = false }
+                if !enabled { accessRetired = true }
             }
     }
 }
@@ -47,27 +59,37 @@ private struct DescriptionCanvas: View {
     let title: String
     let applyTitle: String
     let limit: DescriptionCanvasLimit?
-    let canApply: Bool
+    let scope: DescriptionCanvasScope
+    @Binding var accessRetired: Bool
+    @EnvironmentObject private var session: SessionController
     @State private var working: String
     @State private var original: String
     @State private var confirmDiscard = false
     @Environment(\.dismiss) private var dismiss
 
-    init(text: Binding<String>, title: String, applyTitle: String, limit: DescriptionCanvasLimit?, canApply: Bool) {
+    init(text: Binding<String>, title: String, applyTitle: String, limit: DescriptionCanvasLimit?,
+         scope: DescriptionCanvasScope, accessRetired: Binding<Bool>) {
         _text = text
         self.title = title
         self.applyTitle = applyTitle
         self.limit = limit
-        self.canApply = canApply
+        self.scope = scope
+        _accessRetired = accessRetired
         _working = State(initialValue: text.wrappedValue)
         _original = State(initialValue: text.wrappedValue)
     }
 
     private var count: Int { limit?.count(working) ?? 0 }
     private var exceedsLimit: Bool { limit.map { count > $0.maximum } ?? false }
+    private var accessValid: Bool {
+        !accessRetired && session.phase == .ready && scope.matches(actor: session.user?.id,
+            organization: session.activeOrganization?.id, generation: session.generation, authority: session.authorityRevision)
+    }
 
     var body: some View {
         NavigationStack {
+            Group {
+                if accessValid {
             GeometryReader { geometry in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
@@ -98,9 +120,14 @@ private struct DescriptionCanvas: View {
                     .padding(20)
                 }
             }
+                } else {
+                    ContentUnavailableView("Editor unavailable", systemImage: "lock", description: Text("Access changed. Your unapplied text remains here until you discard it."))
+                        .padding(20)
+                }
+            }
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
-            .navigationTitle(title)
+            .navigationTitle(accessValid ? title : "Description")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -112,7 +139,7 @@ private struct DescriptionCanvas: View {
                     Button("Apply") { text = working; dismiss() }
                         .accessibilityLabel(applyTitle)
                         .accessibilityInputLabels(["Apply"])
-                        .disabled(exceedsLimit || !canApply || text != original)
+                        .disabled(!accessValid || exceedsLimit || text != original)
                 }
             }
             .confirmationDialog("Discard changes to this description?", isPresented: $confirmDiscard, titleVisibility: .visible) {
@@ -121,7 +148,21 @@ private struct DescriptionCanvas: View {
             } message: {
                 Text("Your changes in this editor haven't been applied.")
             }
+            .onChange(of: accessValid) { _, valid in
+                if !valid { accessRetired = true }
+            }
             .interactiveDismissDisabled(working != original)
         }
+    }
+}
+
+struct DescriptionCanvasScope: Equatable {
+    let actor: String
+    let organization: String
+    let generation: UUID
+    let authority: UUID
+
+    func matches(actor: String?, organization: String?, generation: UUID, authority: UUID) -> Bool {
+        self.actor == actor && self.organization == organization && self.generation == generation && self.authority == authority
     }
 }
