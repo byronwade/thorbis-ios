@@ -5,3 +5,5 @@ Thorbis/Sources/MediaView.swift	1	Menu {
 Thorbis/Sources/CustomerJobDocumentBook.swift	1	Menu {
 Thorbis/Sources/SavedWorkReviewView.swift	1	.buttonStyle(.borderedProminent).tint(Theme.foreground)
 Thorbis/Sources/LegacyMediaRecoveryView.swift	1	.confirmationDialog("Recover this photo?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), titleVisibility: .visible) {
+Thorbis/Sources/PaperComponents.swift	1	ToolbarItemGroup(placement: .keyboard) {
+Thorbis/Sources/InvoicePaymentCollection.swift	1	ToolbarItemGroup(placement: .keyboard) {

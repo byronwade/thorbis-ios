@@ -82,16 +82,29 @@ struct PaperCircleButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.foreground)
-                .frame(width: size, height: size)
-                .background(fill, in: Circle())
-                .overlay { if bordered { Circle().strokeBorder(Theme.border, lineWidth: 1) } }
-                .frame(width: 44, height: 44).contentShape(Rectangle())
+            PaperCircleLabel(symbol: symbol, size: size, fill: fill, bordered: bordered)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(label)
+    }
+}
+
+/// The look of `PaperCircleButton` on its own, for controls that are not a plain `Button`
+/// (a `ShareLink`, a `ThorbisMenu`): a filled circle inside a 44pt hit area.
+struct PaperCircleLabel: View {
+    let symbol: String
+    var size: CGFloat = 36
+    var fill: Color = Theme.fill
+    var bordered = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(Theme.foreground)
+            .frame(width: size, height: size)
+            .background(fill, in: Circle())
+            .overlay { if bordered { Circle().strokeBorder(Theme.border, lineWidth: 1) } }
+            .frame(width: 44, height: 44).contentShape(Rectangle())
     }
 }
 

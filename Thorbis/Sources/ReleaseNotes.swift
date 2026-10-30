@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-10-30-custom-buttons",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "circle.circle", title: "Clearer buttons on every screen",
+                      detail: "Back, share, more, Done and Cancel now use Thorbis buttons that match the menu and filters."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-calendar-contacts-mail",
             date: "2026-10-30",
             highlights: [

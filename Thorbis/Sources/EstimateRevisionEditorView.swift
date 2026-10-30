@@ -148,7 +148,7 @@ struct EstimateRevisionEditorView: View {
             .navigationTitle(editingDraft ? "Edit estimate" : "Revise estimate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ThorbisToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
             }

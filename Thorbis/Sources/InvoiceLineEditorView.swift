@@ -186,7 +186,7 @@ struct InvoiceLineEditorView: View {
         .navigationTitle("Edit invoice")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
+            ThorbisToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
             }
         }
@@ -631,7 +631,7 @@ struct PaperPriceBookPicker: View {
         .navigationTitle("Add from Price Book")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+            ThorbisToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
         }
         .task(id: context) {
             memberPricing = nil

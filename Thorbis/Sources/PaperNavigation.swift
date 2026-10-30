@@ -122,10 +122,10 @@ struct RootView: View {
             .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
             .background(Theme.background)
             .paperDestinations()
-            .navigationDestination(isPresented: $priceBook) {
+            .thorbisDestination(isPresented: $priceBook) {
                 WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
             }
-            .navigationDestination(isPresented: $drafts) {
+            .thorbisDestination(isPresented: $drafts) {
                 if let actor = session.user?.id, let org = session.activeOrganization?.id {
                     InboxLocalDraftView(actorID: actor, organizationID: org)
                 }
@@ -829,9 +829,9 @@ private struct PaperDestinations: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
-            .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
-            .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
+            .thorbisDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
+            .thorbisDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+            .thorbisDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
     }
 }
 
@@ -1003,7 +1003,7 @@ struct PaperGlobalSearch: View {
                     }
                     .toolbar {
                         if !embedded {
-                            ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                            ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Done") { dismiss() } }
                         }
                     }
                     .paperDestinations()

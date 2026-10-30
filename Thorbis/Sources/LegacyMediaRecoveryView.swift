@@ -59,7 +59,7 @@ struct LegacyMediaRecoveryView: View {
             }
             .scrollContentBackground(.hidden).background(Theme.background).foregroundStyle(Theme.foreground)
             .navigationTitle("Recover older photos").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.disabled(busy) } }
+            .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.disabled(busy) } }
             .task { await load() }
             .confirmationDialog("Recover this photo?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), titleVisibility: .visible) {
                 if let candidate = selected {

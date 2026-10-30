@@ -69,7 +69,7 @@ struct JobCustomerDocumentsView: View {
             CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: handBack)
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.background)
         }
-        .navigationDestination(item: $book) { initial in
+        .thorbisDestination(item: $book) { initial in
             if currentWorkspace {
                 CustomerJobDocumentBook(scope: scope, sourceGeneration: sourceGeneration,
                     estimates: canViewEstimates && estimates?.scope == scope ? estimates?.records ?? [] : [],
@@ -84,12 +84,12 @@ struct JobCustomerDocumentsView: View {
                     canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
                     canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
                     .disabled(unlocking || openingID != nil)
-                    .navigationDestination(item: $paper) { destination in
+                    .thorbisDestination(item: $paper) { destination in
                         destinationView(destination)
                             .disabled(unlocking)
                             .navigationTitle(reference(destination))
                             .toolbar {
-                                ToolbarItem(placement: .topBarTrailing) {
+                                ThorbisToolbarItem(placement: .topBarTrailing) {
                                     Button { Task { await unlock() } } label: {
                                         Image(systemName: "lock").font(.system(size: 20))
                                             .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target)
@@ -101,7 +101,7 @@ struct JobCustomerDocumentsView: View {
                             }
                     }
                     .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
+                        ThorbisToolbarItem(placement: .topBarTrailing) {
                             Button { Task { await unlock() } } label: {
                                 Image(systemName: "lock").font(.system(size: 20))
                                     .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target)

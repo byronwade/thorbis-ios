@@ -137,8 +137,8 @@ struct EquipmentEditor: View {
             .navigationTitle(existing == nil ? "Add equipment" : "Equipment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ToolbarItem(placement: .topBarTrailing) {
+                ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ThorbisToolbarItem(placement: .topBarTrailing) {
                     Button("Save") { Task { await save() } }
                         .disabled(busy || input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -299,7 +299,7 @@ struct CustomerMembershipSection: View {
             .background(Theme.background)
             .navigationTitle("Choose a plan")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Cancel") { choosing = false } } }
+            .toolbar { ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { choosing = false } } }
         }
         .presentationDetents([.medium, .large])
     }

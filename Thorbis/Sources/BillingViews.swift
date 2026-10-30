@@ -201,7 +201,7 @@ struct BillingScheduleDetailView: View {
                         .accessibilityElement(children: .combine)
                     }
                     if let createdInvoiceID {
-                        NavigationLink { InvoiceDetailView(id: createdInvoiceID) } label: {
+                        NavigationLink { InvoiceDetailView(id: createdInvoiceID).thorbisBackButton() } label: {
                             PaperMenuRow("Open the new draft invoice", symbol: "doc.plaintext")
                         }
                         .buttonStyle(.plain).padding(.top, 8)
@@ -310,7 +310,7 @@ struct JobDepositSheet: View {
             .foregroundStyle(Theme.foreground)
             .background(Theme.background)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .safeAreaInset(edge: .bottom) {
                 PaperActionBar(title: cents.map { "Create \(money($0, currency: "USD")) deposit invoice" } ?? "Enter an amount",
                                symbol: "banknote", busy: busy, disabled: cents == nil) { Task { await create() } }

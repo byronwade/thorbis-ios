@@ -84,7 +84,7 @@ struct ReadOnlyDocumentDescription: View {
                     }
                     .navigationTitle("Description")
                     .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { opening = nil } } }
+                    .toolbar { ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Done") { opening = nil } } }
                     .background(Theme.background)
                 }
                 .presentationDetents([.large])

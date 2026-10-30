@@ -177,7 +177,7 @@ struct SignUpView: View {
             .navigationTitle("New account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
             .interactiveDismissDisabled(dirty || busy)
             .onAppear { focused = .name }
@@ -247,7 +247,7 @@ struct WorkspaceGateView: View {
                         }
                     } header: { Text("Your companies") }
                     Section {
-                        NavigationLink { CreateCompanyForm(firstCompany: false) } label: {
+                        NavigationLink { CreateCompanyForm(firstCompany: false).thorbisBackButton() } label: {
                             Label("Create a company", systemImage: "plus").foregroundStyle(Theme.foreground)
                         }
                     } footer: {
@@ -264,7 +264,7 @@ struct WorkspaceGateView: View {
                 .navigationTitle("Choose company")
                 .toolbar {
                     if session.phase == .ready {
-                        ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                        ThorbisToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                     }
                 }
             }
@@ -606,7 +606,7 @@ struct CompanyDetailsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if canEdit, model.profile != nil {
-                ToolbarItem(placement: .confirmationAction) {
+                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                     if model.saving {
                         ProgressView()
                     } else {
@@ -650,7 +650,7 @@ struct CompanyDetailsView: View {
                 } footer: { Text("Optional. Payment providers may ask for these.") }
             }
             Section {
-                NavigationLink { CompanyFeaturesView() } label: {
+                NavigationLink { CompanyFeaturesView().thorbisBackButton() } label: {
                     Label("Plan and features", systemImage: "square.grid.2x2").foregroundStyle(Theme.foreground)
                 }
             }
@@ -962,7 +962,7 @@ struct BusinessSetupView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if presented {
-                ToolbarItem(placement: .cancellationAction) { Button("Later") { dismiss() } }
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Later") { dismiss() } }
             }
         }
         .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
@@ -997,13 +997,13 @@ struct BusinessSetupView: View {
 
         switch step {
         case .details:
-            NavigationLink { CompanyDetailsView() } label: { label }.buttonStyle(RowPressStyle())
+            NavigationLink { CompanyDetailsView().thorbisBackButton() } label: { label }.buttonStyle(RowPressStyle())
         case .payments:
-            NavigationLink { PaymentsSetupView() } label: { label }.buttonStyle(RowPressStyle())
+            NavigationLink { PaymentsSetupView().thorbisBackButton() } label: { label }.buttonStyle(RowPressStyle())
         case .services:
             NavigationLink {
                 WorkspacePriceBookView(api: api, canList: true,
-                                       canViewDetail: session.can("organization.settings.edit", feature: "price_book"))
+                                       canViewDetail: session.can("organization.settings.edit", feature: "price_book")).thorbisBackButton()
             } label: { label }.buttonStyle(RowPressStyle())
         case .team:
             Button { inviting = true } label: { label }.buttonStyle(RowPressStyle())

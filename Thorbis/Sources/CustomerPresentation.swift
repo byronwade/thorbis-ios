@@ -483,8 +483,8 @@ struct CustomerEstimatePresentation: View {
             .navigationTitle("What's included")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close") { detailsFor = nil }.font(Theme.font(type.small, weight: .medium)).frame(minHeight: 44)
+                ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) {
+                    Button("Close") { detailsFor = nil }
                 }
             }
             .safeAreaInset(edge: .bottom) {

@@ -6,7 +6,9 @@ from pathlib import Path
 import re
 import sys
 
-PATTERN = re.compile(r"(?<![.a-zA-Z])Menu \{| Picker\(|\.confirmationDialog\(|\.buttonStyle\(\.bordered|\.borderedProminent")
+# Stock bar items too: use ThorbisToolbarItem so bar buttons are Thorbis controls (rule 11).
+PATTERN = re.compile(r"(?<![.a-zA-Z])Menu \{| Picker\(|\.confirmationDialog\(|\.buttonStyle\(\.bordered|\.borderedProminent"
+                     r"|(?<![.a-zA-Z])ToolbarItem(?:Group)?\(")
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "Thorbis/Sources"
 BASELINE = ROOT / "scripts/.stock-controls-allowlist"

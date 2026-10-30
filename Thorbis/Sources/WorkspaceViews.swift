@@ -104,9 +104,9 @@ struct WorkspaceNoticesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if available && (unreadState == .present || readCursor != nil) {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { Task { await markReadBatch() } } label: { Image(systemName: "checkmark.circle") }
-                        .accessibilityLabel(readCursor == nil ? "Mark all read" : "Continue marking read")
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    PaperCircleButton(symbol: "checkmark.circle", label: readCursor == nil ? "Mark all read" : "Continue marking read",
+                                      fill: Theme.card, bordered: true) { Task { await markReadBatch() } }
                         .disabled(loading)
                 }
             }
@@ -456,7 +456,7 @@ struct WorkspacePriceBookView: View {
                                         ForEach(grouped) { item in
                                             if canViewDetail {
                                                 NavigationLink {
-                                                    WorkspacePriceBookDetailView(api: api, id: item.id, canEdit: canEdit)
+                                                    WorkspacePriceBookDetailView(api: api, id: item.id, canEdit: canEdit).thorbisBackButton()
                                                 } label: { row(item, showFullDescription: showingPreviousItems) }
                                                 .buttonStyle(.plain)
                                             } else if showingPreviousItems {
@@ -517,7 +517,7 @@ struct WorkspacePriceBookView: View {
                 #if DEBUG
                 .toolbar {
                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-authority") {
-                        ToolbarItem(placement: .topBarTrailing) {
+                        ThorbisToolbarItem(placement: .topBarTrailing) {
                             Button("Change sample access shortly") {
                                 Task { @MainActor in
                                     try? await Task.sleep(for: .seconds(5))
@@ -708,7 +708,7 @@ private struct PriceBookLocalDetail: View {
             }
             .navigationTitle("Price book item")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
     }
 }
@@ -751,7 +751,7 @@ private struct WorkspacePriceBookDetailView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
             if canEdit, detail?.item.status == "active" {
-                ToolbarItem(placement: .topBarTrailing) { Button("Edit") { editing = true } }
+                ThorbisToolbarItem(placement: .topBarTrailing) { Button("Edit") { editing = true } }
             }
         }
         .sheet(isPresented: $editing) {
@@ -818,8 +818,8 @@ struct PriceBookItemEditor: View {
             .navigationTitle(existing == nil ? "New price book item" : "Edit item")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(!valid || busy) }
+                ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ThorbisToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(!valid || busy) }
             }
             .onAppear {
                 guard let existing, content.description.isEmpty else { return }

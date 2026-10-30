@@ -311,8 +311,8 @@ private struct LocalWorkspaceEditor: View {
             }
             .navigationTitle(draft.values.isEmpty ? "New \(section.title)" : "Edit \(section.title)")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                     Button("Save") {
                         do { try onSave(draft); dismiss() }
                         catch { self.error = error.localizedDescription }

@@ -68,7 +68,7 @@ struct NewEstimateView: View {
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ThorbisToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
                 }
             }

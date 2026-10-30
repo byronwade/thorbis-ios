@@ -38,7 +38,7 @@ struct JobEstimateHandoffView: View {
         .onChange(of: model.approvalAuthority) { _, allowed in
             if !allowed { checkpointID = nil; reviewing = false; model.cancelApprovals() }
         }
-        .navigationDestination(item: $checkpointID) { id in checkpoint(id) }
+        .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
     }
 
     private var overview: some View {
@@ -270,7 +270,7 @@ struct JobEstimateHandoffView: View {
                 })
                 .id(context.id)
                 .navigationTitle("EST-\(item.id.suffix(4).uppercased())")
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { CustomerModeOwnerUnlockButton() } }
+                .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { CustomerModeOwnerUnlockButton() } }
         } else {
             Text("Return to your estimates and refresh before deciding.").font(Theme.font(type.body)).padding(Theme.gutter)
         }

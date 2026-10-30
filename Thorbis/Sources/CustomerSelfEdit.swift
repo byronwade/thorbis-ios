@@ -397,7 +397,7 @@ struct CustomerModeContainer<Content: View>: View {
     }
 
     @ToolbarContentBuilder private var ownerToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
+        ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) {
             Button { Task { await unlock() } } label: {
                 Group {
                     if let ownerControlTitle { HStack(spacing: 8) { Image(systemName: "lock"); Text(ownerControlTitle) }.font(Theme.font(17, weight: .medium)) }

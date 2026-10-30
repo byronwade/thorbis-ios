@@ -113,7 +113,7 @@ struct RoleEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ThorbisToolbarItem(placement: .topBarTrailing) {
                 Button("Save") { Task { await save() } }
                     .disabled(busy || detail == nil || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }

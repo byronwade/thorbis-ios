@@ -36,7 +36,7 @@ struct SettingsView: View {
                     Button { showWorkspaces = true } label: {
                         row("Company", symbol: "building.2", value: session.activeOrganization?.name ?? "Choose", opens: true)
                     }
-                    NavigationLink { CustomizeMenuView() } label: {
+                    NavigationLink { CustomizeMenuView().thorbisBackButton() } label: {
                         row("Customize menu", symbol: "slider.horizontal.3", value: nil)
                     }
                     // Owners reach the business screens here, now that the More screen is off the menu.
@@ -70,7 +70,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    NavigationLink { WhatsNewHistoryView() } label: {
+                    NavigationLink { WhatsNewHistoryView().thorbisBackButton() } label: {
                         row("What's new", symbol: "sparkles", value: nil)
                     }
                 }
@@ -91,7 +91,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .paperDestinations()
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
             .thorbisConfirm("Sign out of Thorbis?",
                             message: signOutWarning,
