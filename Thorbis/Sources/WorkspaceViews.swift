@@ -37,8 +37,12 @@ struct WorkspaceNoticesView: View {
                     let notices = visible
                     let displayCalendar = calendarWithTimeZone
                     ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
-                        if let heading = InboxNoticeDay.header(notice.at, after: index > 0 ? notices[index - 1].at : nil,
-                                                               hasPrevious: index > 0, calendar: displayCalendar, locale: locale) {
+                        let heading = InboxNoticeDay.header(notice.at, after: index > 0 ? notices[index - 1].at : nil,
+                                                            hasPrevious: index > 0, calendar: displayCalendar, locale: locale)
+                        // One card per day: a run ends where the next notice starts a new day.
+                        let endsRun = index == notices.count - 1 || InboxNoticeDay.header(notices[index + 1].at, after: notice.at,
+                                                                                         hasPrevious: true, calendar: displayCalendar, locale: locale) != nil
+                        if let heading {
                             PaperGroupHeader(title: heading)
                                 .padding(.horizontal, Theme.gutter).padding(.top, 10)
                                 .accessibilityAddTraits(.isHeader)
@@ -47,13 +51,9 @@ struct WorkspaceNoticesView: View {
                         // Each notice opens the job it is about.
                         NavigationLink(value: PaperRoute.job(notice.jobId)) {
                         HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: notice.read ? "bell" : "bell.badge.fill")
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(notice.read ? Theme.muted : Theme.brandText)
-                                .frame(width: 40, height: 40)
-                                .background(notice.read ? Theme.fill : Theme.brandSurface,
-                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .accessibilityHidden(true)
+                            IconTile(symbol: notice.read ? "bell" : "bell.badge.fill",
+                                     tint: notice.read ? Theme.muted : Theme.brandText,
+                                     fill: notice.read ? Theme.fill : Theme.brandSurface)
                             VStack(alignment: .leading, spacing: 4) {
                                 if !notice.read {
                                     Text("Unread").font(Theme.font(14, weight: .semibold))
@@ -67,18 +67,19 @@ struct WorkspaceNoticesView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Theme.muted).padding(.top, 4).accessibilityHidden(true)
+                            PaperDisclosure().padding(.top, 4)
                         }
-                        .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
                         .frame(minHeight: 60)
                         .contentShape(Rectangle())
                         }
-                        .buttonStyle(PressStyle())
+                        .buttonStyle(RowPressStyle())
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel([notice.title, notice.meta, timeLabel(notice.at), notice.read ? "Read" : "Unread"]
                             .filter { !$0.isEmpty }.joined(separator: ", "))
                         .accessibilityHint("Opens the job")
+                        .paperCardSlot(first: heading != nil || index == 0, last: endsRun)
+                        .paperCardMargin()
                     }
                     if nextCursor != nil {
                         Button("Load older notices") { Task { await loadMore() } }
@@ -262,22 +263,23 @@ struct WorkspaceRevenueView: View {
 
         // The tiles open the invoices behind the numbers, so nobody has to go looking for them.
         NavigationLink(value: PaperRoute.invoices) {
-        HStack(spacing: 10) {
-            tile("Outstanding", money(report.receivable.balance, currency: "USD"),
-                 detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")", alert: nil)
-            tile("Overdue", money(report.receivable.overdueBalance, currency: "USD"),
-                 detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
-                 alert: report.receivable.overdueInvoices > 0 ? Theme.destructive : nil)
+            PaperStatRow(stats: [
+                .init(label: "Outstanding", value: money(report.receivable.balance, currency: "USD"),
+                      detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")"),
+                .init(label: "Overdue", value: money(report.receivable.overdueBalance, currency: "USD"),
+                      detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
+                      detailTint: report.receivable.overdueInvoices > 0 ? Theme.destructive : Theme.muted),
+            ])
         }
-        }
-        .buttonStyle(.plain)
+        .buttonStyle(RowPressStyle())
         .accessibilityHint("Opens invoices")
         .padding(.bottom, 18)
 
         PaperGroupHeader(title: "By month", count: months.count)
-        ForEach(months.reversed()) { month in
+        PaperCardList(data: Array(months.reversed())) { month in
             // Month and what was invoiced on the left, what came in on the right: one amount per side.
             HStack(alignment: .center, spacing: 12) {
+                IconTile(symbol: "calendar")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(monthName(month.month, long: true)).font(Theme.font(15, weight: .medium))
                     Text("Invoiced \(money(month.revenue, currency: "USD"))")
@@ -286,8 +288,8 @@ struct WorkspaceRevenueView: View {
                 Spacer(minLength: 12)
                 Text(money(month.collected, currency: "USD")).moneyStyle(.row)
             }
-            .padding(.vertical, 8)
-            .frame(minHeight: 56)
+            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
+            .frame(minHeight: 60)
             .accessibilityElement(children: .combine)
         }
     }
@@ -310,19 +312,6 @@ struct WorkspaceRevenueView: View {
         .frame(height: 70, alignment: .bottom)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Collected by month: " + months.map { "\(monthName($0.month, long: true)) \(money($0.collected, currency: "USD"))" }.joined(separator: ", "))
-    }
-
-    private func tile(_ title: String, _ value: String, detail: String, alert: Color?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).moneyStyle(.total)
-            Text(detail).font(Theme.font(12, weight: alert == nil ? .regular : .medium)).foregroundStyle(alert ?? Theme.muted)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-        .accessibilityElement(children: .combine)
     }
 
     private func monthName(_ raw: String, long: Bool) -> String {
@@ -433,7 +422,7 @@ struct WorkspacePriceBookView: View {
                 .scrollIndicators(.hidden)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
-                        if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() }.padding(.horizontal, -Theme.gutter) }
+                        if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() }.padding(.horizontal, -PaperCardMetrics.margin) }
                         if showingPreviousItems {
                             HStack {
                                 Text("Showing previously loaded items. Refresh to update.")
@@ -441,7 +430,7 @@ struct WorkspacePriceBookView: View {
                                 Spacer()
                                 Button("Refresh") { Task { await refresh() } }
                                     .disabled(loading)
-                            }.frame(minHeight: 44)
+                            }.frame(minHeight: 44).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                         }
                         if (loading || !hasCurrentOwner) && currentItems.isEmpty && error == nil { SkeletonRows(count: 6, leading: false, inset: 0) }
                         ForEach(categories.filter { $0 != "All" && (category == "All" || category == $0) }, id: \.self) { groupName in
@@ -459,25 +448,26 @@ struct WorkspacePriceBookView: View {
                                         Text("\(grouped.count)\(currentCursor == nil ? "" : " loaded")").font(Theme.monoFont(12))
                                     }
                                     .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
+                                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("\(groupName), \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
                                 .accessibilityValue(collapsedGroups.contains(groupName) ? "Collapsed" : "Expanded")
                                 if !collapsedGroups.contains(groupName) {
                                     LazyVStack(spacing: 0) {
-                                        ForEach(grouped) { item in
+                                        PaperCardList(data: grouped) { item in
                                             if canViewDetail {
                                                 NavigationLink {
                                                     WorkspacePriceBookDetailView(api: api, id: item.id, canEdit: canEdit)
                                                 } label: { row(item, showFullDescription: showingPreviousItems) }
-                                                .buttonStyle(.plain)
+                                                .buttonStyle(RowPressStyle())
                                             } else if showingPreviousItems {
                                                 // Preserve the previously visible description without opening new detail under stale authority.
                                                 row(item, showFullDescription: true)
                                             } else {
                                                 Button {
                                                     if let scope = localScope { localDetail = PriceBookLocalSelection(item: item, scope: scope) }
-                                                } label: { row(item) }.buttonStyle(.plain)
+                                                } label: { row(item) }.buttonStyle(RowPressStyle())
                                             }
                                         }
                                     }
@@ -508,7 +498,7 @@ struct WorkspacePriceBookView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 100)
+                    .paperCardMargin().padding(.top, 8).padding(.bottom, 100)
                 }
                 .refreshable { await refresh() }
                 .task(id: localScope) {
@@ -565,12 +555,7 @@ struct WorkspacePriceBookView: View {
 
     private func row(_ item: PriceBookListItem, showFullDescription: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: priceBookSymbol(for: item.kind))
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.brandText)
-                .frame(width: 36, height: 36)
-                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 10))
-                .accessibilityHidden(true)
+            IconTile(symbol: priceBookSymbol(for: item.kind), tint: Theme.brandText, fill: Theme.brandSurface)
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 6) {
                     itemTitle(item, showFullDescription: showFullDescription)
@@ -588,7 +573,7 @@ struct WorkspacePriceBookView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.vertical, 8).frame(minHeight: 52)
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10).frame(minHeight: 60)
         .contentShape(Rectangle())
         // MA-12: the quick copies people reach for while quoting on the phone.
         .contextMenu {

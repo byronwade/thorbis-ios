@@ -36,6 +36,7 @@ struct NeedsAttentionView: View {
     @State private var estimates: [EstimateRecord] = []
     @State private var loaded = false
     @State private var error: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let unpaid = NeedsAttention.unpaid(invoices)
@@ -53,31 +54,41 @@ struct NeedsAttentionView: View {
                 .foregroundStyle(Theme.foreground)
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 if let error { ErrorBanner(message: error) }
+                // Each row names its state in words ("Unpaid", "Waiting", "No time"); the tile reinforces it.
                 if !unpaid.isEmpty {
                     PaperGroupHeader(title: "Unpaid invoices", count: unpaid.count).padding(.horizontal, Theme.gutter).padding(.top, 8)
-                    ForEach(unpaid, id: \.0.id) { invoice, balance in
-                        NavigationLink(value: PaperRoute.invoice(invoice.id)) {
-                            row(title: store.customerName(invoice.customerId), detail: since("Issued", invoice.issuedAt),
-                                trailing: money(balance, currency: invoice.currency), tint: Theme.foreground)
-                        }.buttonStyle(.plain)
-                    }
+                    VStack(spacing: 0) {
+                        PaperCardList(data: unpaid.map { AttentionInvoice(invoice: $0.0, balance: $0.1) }) { item in
+                            NavigationLink(value: PaperRoute.invoice(item.invoice.id)) {
+                                row(tile: DocumentTile(symbol: "doc.plaintext", status: "issued"),
+                                    title: store.customerName(item.invoice.customerId), detail: "Unpaid · \(since("Issued", item.invoice.issuedAt))",
+                                    trailing: money(item.balance, currency: item.invoice.currency), tint: Theme.foreground)
+                            }.buttonStyle(RowPressStyle())
+                        }
+                    }.paperCardMargin()
                 }
                 if !waiting.isEmpty {
-                    PaperGroupHeader(title: "Estimates waiting on the customer", count: waiting.count).padding(.horizontal, Theme.gutter).padding(.top, 16)
-                    ForEach(waiting) { estimate in
-                        NavigationLink(value: PaperRoute.estimate(estimate.id)) {
-                            row(title: estimate.title, detail: "\(store.customerName(estimate.customerId)) · \(since("Sent", estimate.sentAt))",
-                                trailing: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? "", tint: Theme.foreground)
-                        }.buttonStyle(.plain)
-                    }
+                    PaperGroupHeader(title: "Estimates waiting on the customer", count: waiting.count).padding(.horizontal, Theme.gutter).padding(.top, 18)
+                    VStack(spacing: 0) {
+                        PaperCardList(data: waiting) { estimate in
+                            NavigationLink(value: PaperRoute.estimate(estimate.id)) {
+                                row(tile: DocumentTile(symbol: "doc.text", status: estimate.status),
+                                    title: estimate.title, detail: "\(since("Sent", estimate.sentAt)) · \(store.customerName(estimate.customerId))",
+                                    trailing: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? "", tint: Theme.foreground)
+                            }.buttonStyle(RowPressStyle())
+                        }
+                    }.paperCardMargin()
                 }
                 if !unscheduled.isEmpty {
-                    PaperGroupHeader(title: "Jobs without a time", count: unscheduled.count).padding(.horizontal, Theme.gutter).padding(.top, 16)
-                    ForEach(unscheduled) { job in
-                        NavigationLink(value: job) {
-                            row(title: job.title, detail: "\(job.shortRef) · \(store.customerName(job.customerId))", trailing: "", tint: Theme.muted)
-                        }.buttonStyle(.plain)
-                    }
+                    PaperGroupHeader(title: "Jobs without a time", count: unscheduled.count).padding(.horizontal, Theme.gutter).padding(.top, 18)
+                    VStack(spacing: 0) {
+                        PaperCardList(data: unscheduled) { job in
+                            NavigationLink(value: job) {
+                                row(tile: StatusTile(status: job.status),
+                                    title: job.title, detail: "\(job.status.statusLabel) · \(store.customerName(job.customerId)) · \(job.shortRef)", trailing: "", tint: Theme.muted)
+                            }.buttonStyle(RowPressStyle())
+                        }
+                    }.paperCardMargin()
                 }
                 if loaded && unpaid.isEmpty && waiting.isEmpty && unscheduled.isEmpty {
                     PaperEmptyState(symbol: "checkmark.circle", title: "Nothing needs attention",
@@ -107,18 +118,19 @@ struct NeedsAttentionView: View {
         }
     }
 
-    private func row(title: String, detail: String, trailing: String, tint: Color) -> some View {
+    private func row<Tile: View>(tile: Tile, title: String, detail: String, trailing: String, tint: Color) -> some View {
         HStack(spacing: 12) {
+            tile
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
             }
             Spacer(minLength: 8)
-            if !trailing.isEmpty { Text(trailing).moneyStyle(.row).foregroundStyle(tint) }
-            Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle)
+            if !trailing.isEmpty { Text(trailing).moneyStyle(.row).foregroundStyle(tint).fixedSize() }
+            PaperDisclosure()
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-        .frame(minHeight: 52)
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+        .frame(minHeight: 60)
         .contentShape(Rectangle())
     }
 
@@ -135,4 +147,11 @@ struct NeedsAttentionView: View {
         }
         loaded = true
     }
+}
+
+/// An unpaid invoice and what is still owed, keyed for a card list.
+private struct AttentionInvoice: Identifiable {
+    let invoice: InvoiceRecord
+    let balance: Int
+    var id: String { invoice.id }
 }

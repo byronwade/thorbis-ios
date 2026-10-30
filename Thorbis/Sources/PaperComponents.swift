@@ -323,11 +323,15 @@ struct PaperMenuRow<Trailing: View>: View {
     var tint: Color = Theme.foreground
     /// A softly tinted mark, so a long menu scans by color after the word.
     var tile: Color? = nil
+    /// Inside a card the mark sits in an `IconTile` well, like every other card row.
+    var filled = false
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 14) {
-            if let tile {
+        HStack(spacing: filled ? 12 : 14) {
+            if filled {
+                IconTile(symbol: symbol, tint: tile ?? (tint == Theme.foreground ? Theme.foreground : tint))
+            } else if let tile {
                 // D-020 outline mark at rest; quiet hue on the mark only, never a filled tile.
                 Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(tile)
                     .frame(width: 22)
@@ -337,19 +341,23 @@ struct PaperMenuRow<Trailing: View>: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(tint)
-                if let subtitle { Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted) }
+                if let subtitle {
+                    Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .lineLimit(filled ? 2 : nil)
+                }
             }
             Spacer(minLength: 8)
             trailing
         }
-        .frame(minHeight: 48).contentShape(Rectangle())
+        .padding(.horizontal, filled ? PaperCardMetrics.inset : 0).padding(.vertical, filled ? 8 : 0)
+        .frame(minHeight: filled ? 60 : 48).contentShape(Rectangle())
     }
 }
 
 extension PaperMenuRow where Trailing == AnyView {
     /// A navigable row with a chevron.
-    init(_ title: String, symbol: String, subtitle: String? = nil, value: String? = nil, tile: Color? = nil) {
-        self.init(title: title, symbol: symbol, subtitle: subtitle, tile: tile) {
+    init(_ title: String, symbol: String, subtitle: String? = nil, value: String? = nil, tile: Color? = nil, filled: Bool = false) {
+        self.init(title: title, symbol: symbol, subtitle: subtitle, tile: tile, filled: filled) {
             AnyView(HStack(spacing: 6) {
                 if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted) }
                 PaperDisclosure()
@@ -759,5 +767,248 @@ extension PaperEmptyState {
     static func search(_ text: String) -> PaperEmptyState {
         PaperEmptyState(symbol: "magnifyingglass", title: "No results for \u{201C}\(text)\u{201D}",
                         message: "Check the spelling or try a different word.")
+    }
+}
+
+// MARK: - Planar card groups (approved visual design, 2026-10-30)
+//
+// Groups of rows sit on one planar panel: `Theme.card`, radius 14, a 1px `Theme.border` rim that
+// follows the radius, no shadow and no hairlines between rows (design.thorbis.com: "a border is a
+// use case, never a separator"; golden rule 9). Rows are separated by spacing and lead with an icon
+// tile; a status is always a word, the tile's colour only reinforces it.
+
+enum PaperCardMetrics {
+    /// design.thorbis.com sheet radius.
+    static let radius: CGFloat = Theme.cardRadius
+    /// Rows inside a card pad by this, so their text lines up with the card's edge.
+    static let inset: CGFloat = 14
+    /// The card's distance from the screen edge; group headers add 4 so they align with the gutter.
+    static let margin: CGFloat = 16
+    /// Breathing room above the first and below the last row, instead of a rule between rows.
+    static let edge: CGFloat = 4
+}
+
+/// Rows pad horizontally by this. Outside a card it is the screen gutter, so a row used on the
+/// bare background is unchanged; inside a card it is the card's inset.
+private struct PaperRowInsetKey: EnvironmentKey { static let defaultValue: CGFloat = Theme.gutter }
+extension EnvironmentValues {
+    var paperRowInset: CGFloat {
+        get { self[PaperRowInsetKey.self] }
+        set { self[PaperRowInsetKey.self] = newValue }
+    }
+}
+
+/// A planar panel holding a group of rows or one block of content.
+struct PaperCard<Content: View>: View {
+    /// Inner padding for free-form content; rows pass 0 and pad themselves by `paperRowInset`.
+    var padding: CGFloat = 0
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .circular)
+        VStack(alignment: .leading, spacing: 0) { content }
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: shape)
+            .overlay(shape.strokeBorder(Theme.border, lineWidth: 1))
+            .environment(\.paperRowInset, PaperCardMetrics.inset)
+    }
+}
+
+extension View {
+    /// A label-and-value row inside a `PaperCard`: padded to the card's edge, 48 tall.
+    func cardRow() -> some View {
+        padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 48)
+    }
+
+    /// One row of a card that is built row by row, so long lists stay lazy. The first row draws
+    /// the card's top, the last its bottom; rows between carry only the side rims, never a line.
+    func paperCardSlot(first: Bool, last: Bool) -> some View {
+        modifier(PaperCardSlot(first: first, last: last))
+    }
+
+    /// Cards sit 16 from the screen edge.
+    func paperCardMargin() -> some View { padding(.horizontal, PaperCardMetrics.margin) }
+}
+
+private struct PaperCardSlot: ViewModifier {
+    let first: Bool
+    let last: Bool
+
+    func body(content: Content) -> some View {
+        let r = PaperCardMetrics.radius
+        content
+            .environment(\.paperRowInset, PaperCardMetrics.inset)
+            .padding(.top, first ? PaperCardMetrics.edge : 0)
+            .padding(.bottom, last ? PaperCardMetrics.edge : 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
+                                                               bottomTrailingRadius: last ? r : 0, topTrailingRadius: first ? r : 0,
+                                                               style: .circular))
+            .overlay(PaperCardSliceRim(first: first, last: last, radius: r).stroke(Theme.border, lineWidth: 1))
+    }
+}
+
+/// The card's 1px rim for one slice: sides always, the top arc on the first slice and the bottom
+/// arc on the last, so a stack of slices reads as one panel with no rule between rows.
+private struct PaperCardSliceRim: Shape {
+    let first: Bool
+    let last: Bool
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let box = rect.insetBy(dx: 0.5, dy: 0.5)
+        let r = min(radius, box.width / 2, box.height / 2)
+        var path = Path()
+        // Leading side, bottom to top (through the bottom arc when last).
+        if last {
+            path.move(to: CGPoint(x: box.midX, y: box.maxY))
+            path.addArc(tangent1End: CGPoint(x: box.minX, y: box.maxY), tangent2End: CGPoint(x: box.minX, y: box.minY), radius: r)
+        } else {
+            path.move(to: CGPoint(x: box.minX, y: rect.maxY))
+        }
+        if first {
+            path.addArc(tangent1End: CGPoint(x: box.minX, y: box.minY), tangent2End: CGPoint(x: box.maxX, y: box.minY), radius: r)
+            path.addArc(tangent1End: CGPoint(x: box.maxX, y: box.minY), tangent2End: CGPoint(x: box.maxX, y: box.maxY), radius: r)
+        } else {
+            path.addLine(to: CGPoint(x: box.minX, y: rect.minY))
+            path.move(to: CGPoint(x: box.maxX, y: rect.minY))
+        }
+        if last {
+            path.addArc(tangent1End: CGPoint(x: box.maxX, y: box.maxY), tangent2End: CGPoint(x: box.minX, y: box.maxY), radius: r)
+            path.addLine(to: CGPoint(x: box.midX, y: box.maxY))
+        } else {
+            path.addLine(to: CGPoint(x: box.maxX, y: rect.maxY))
+        }
+        return path
+    }
+}
+
+/// A group of rows on one card, built lazily row by row.
+struct PaperCardList<Data: RandomAccessCollection, Row: View>: View where Data.Element: Identifiable {
+    let data: Data
+    @ViewBuilder var row: (Data.Element) -> Row
+
+    var body: some View {
+        let items = Array(data)
+        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+            row(item).paperCardSlot(first: index == 0, last: index == items.count - 1)
+        }
+    }
+}
+
+/// A rounded square holding a symbol: the leading mark on a row, so rows scan by shape and colour.
+/// Decorative; the row's words carry the meaning.
+struct IconTile: View {
+    let symbol: String
+    var tint: Color = Theme.foreground
+    var fill: Color = Theme.fill
+    static let size: CGFloat = 36
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(tint)
+            .frame(width: Self.size, height: Self.size)
+            .background(fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+/// A job's status as a tinted tile. The status word is always in the row beside it.
+struct StatusTile: View {
+    let status: String
+    /// A step saved on the phone and waiting to sync.
+    var pending = false
+
+    var body: some View {
+        let (symbol, color) = statusIcon(status)
+        IconTile(symbol: pending ? "clock.arrow.circlepath" : symbol,
+                 tint: pending ? Theme.warning : color == Theme.muted ? Theme.foreground : color,
+                 fill: Self.surface(status, pending: pending))
+    }
+
+    static func surface(_ status: String, pending: Bool = false) -> Color {
+        if pending { return Theme.warningSurface }
+        switch status {
+        case "completed": return Theme.successSurface
+        case "in_progress", "arrived", "paused": return Theme.warningSurface
+        case "en_route", "dispatched": return Theme.brandSurface
+        default: return Theme.fill
+        }
+    }
+}
+
+/// A document's kind as a tile tinted by its status (approved green, waiting amber, void red).
+struct DocumentTile: View {
+    let symbol: String
+    let status: String
+
+    var body: some View {
+        let (tint, fill): (Color, Color) = switch status {
+        case "approved", "paid", "completed": (Theme.success, Theme.successSurface)
+        case "sent", "issued", "open": (Theme.warning, Theme.warningSurface)
+        case "declined", "void", "canceled": (Theme.destructive, Theme.destructiveSurface)
+        default: (Theme.foreground, Theme.fill)
+        }
+        IconTile(symbol: symbol, tint: tint, fill: fill)
+    }
+}
+
+/// A plain fact beside a status pill: a small icon and words, no pill. Only what you can tap or
+/// what carries state is a pill.
+struct Fact: View {
+    let text: String
+    var icon: String? = nil
+    var tint: Color = Theme.muted
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)).foregroundStyle(tint).accessibilityHidden(true) }
+            Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(tint).lineLimit(1).fixedSize()
+        }
+        .frame(minHeight: Theme.chipHeight)
+    }
+}
+
+/// Headline numbers at the top of a screen: two to four figures on one card, label over value,
+/// separated by space rather than rules. Stacks at accessibility sizes instead of shrinking.
+struct PaperStatRow: View {
+    struct Stat: Identifiable {
+        let label: String
+        let value: String
+        var detail: String? = nil
+        var tint: Color = Theme.foreground
+        var detailTint: Color = Theme.muted
+        var id: String { label }
+    }
+    let stats: [Stat]
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+                             : AnyLayout(HStackLayout(alignment: .top, spacing: 0))
+        PaperCard {
+            layout {
+                ForEach(stats) { stat in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(stat.label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                            .lineLimit(stacked ? nil : 1)
+                        Text(stat.value).font(Theme.font(20, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(stat.tint)
+                            .lineLimit(stacked ? nil : 1).minimumScaleFactor(stacked ? 1 : 0.8)
+                        if let detail = stat.detail {
+                            Text(detail).font(Theme.font(12, weight: stat.detailTint == Theme.muted ? .regular : .medium))
+                                .foregroundStyle(stat.detailTint)
+                                .lineLimit(stacked ? nil : 2)
+                        }
+                    }
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
     }
 }

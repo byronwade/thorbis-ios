@@ -92,12 +92,14 @@ struct BillingSchedulesView: View {
                     Text("Billing").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text("Progress billing and deposits by job").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
+                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 .padding(.bottom, 12)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
                 if loading && schedules.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 ForEach(paperDocumentGroups(schedules, status: \.status, order: ["open", "closed"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status == "open" ? "Open" : "Closed", count: group.count).padding(.top, 6)
-                    ForEach(group) { schedule in
+                    PaperGroupHeader(title: status == "open" ? "Open" : "Closed", count: group.count).padding(.top, 10)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                    PaperCardList(data: group) { schedule in
                         NavigationLink(value: PaperRoute.billingSchedule(schedule.id)) {
                             PaperDocumentRow(kind: .billingSchedule, reference: "SOV-\(schedule.id.suffix(4).uppercased())",
                                              title: store.customerName(schedule.customerId),
@@ -112,7 +114,7 @@ struct BillingSchedulesView: View {
                                     message: "A schedule appears when a job is billed in stages or takes a deposit.")
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)

@@ -689,11 +689,11 @@ struct MoreView: View {
                         group(section.rawValue) {
                             ForEach(items) { item in
                                 if let route = item.route {
-                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint) }
+                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint, filled: true) }
                                 }
                             }
                             ForEach(local, id: \.self) { section in
-                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt) }
+                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt, filled: true) }
                             }
                         }
                     }
@@ -701,7 +701,7 @@ struct MoreView: View {
                 group("Account") {
                     Button { showSettings = true } label: {
                         PaperMenuRow("Settings", symbol: "gearshape",
-                                     subtitle: "Account, company, payments, menu and appearance", tile: Theme.markAccent)
+                                     subtitle: "Account, company, payments, menu and appearance", tile: Theme.markAccent, filled: true)
                     }
                 }
                 Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
@@ -721,11 +721,15 @@ struct MoreView: View {
         PaperHeader(title: "More", subtitle: session.activeOrganization?.name ?? "Workspace")
     }
 
+    /// A titled group of places on one planar card; rows are separated by space, not rules.
     private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: title).padding(.top, 14)
-            content()
+            PaperGroupHeader(title: title).padding(.top, 14).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+            PaperCard {
+                VStack(alignment: .leading, spacing: 0) { content() }
+                    .padding(.vertical, PaperCardMetrics.edge)
+            }
         }
-        .padding(.horizontal, Theme.gutter)
+        .paperCardMargin()
     }
 }

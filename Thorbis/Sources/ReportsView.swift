@@ -125,17 +125,17 @@ struct ReportsView: View {
                 Text("of presented estimates approved").font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
             .padding(.bottom, 10)
-            HStack(spacing: 10) {
-                tile("Presented", report.estimates.presented)
-                tile("Approved", report.estimates.approved)
-                tile("Declined", report.estimates.declined)
-            }
+            PaperStatRow(stats: [
+                stat("Presented", report.estimates.presented),
+                stat("Approved", report.estimates.approved),
+                stat("Declined", report.estimates.declined),
+            ])
             PaperGroupHeader(title: "Jobs").padding(.top, 18)
-            HStack(spacing: 10) {
-                tile("Booked", report.jobs.booked)
-                tile("Completed", report.jobs.completed)
-                tile("Open", report.jobs.open)
-            }
+            PaperStatRow(stats: [
+                stat("Booked", report.jobs.booked),
+                stat("Completed", report.jobs.completed),
+                stat("Open", report.jobs.open),
+            ])
             if !report.months.isEmpty {
                 PaperGroupHeader(title: "Jobs by month", count: report.months.count).padding(.top, 18)
                 ForEach(report.months.suffix(6).reversed()) { month in
@@ -155,10 +155,10 @@ struct ReportsView: View {
         if report.truncated { incomplete }
         else {
             PaperGroupHeader(title: "Needs attention")
-            HStack(spacing: 10) {
-                tile("Unscheduled", report.backlog.unscheduledOpenJobs, alert: report.backlog.unscheduledOpenJobs > 0)
-                tile("Past due", report.backlog.overdueScheduledJobs, alert: report.backlog.overdueScheduledJobs > 0)
-            }
+            PaperStatRow(stats: [
+                stat("Unscheduled", report.backlog.unscheduledOpenJobs, alert: report.backlog.unscheduledOpenJobs > 0),
+                stat("Past due", report.backlog.overdueScheduledJobs, alert: report.backlog.overdueScheduledJobs > 0),
+            ])
             let recent = Array(report.days.suffix(14).reversed())
             if !recent.isEmpty {
                 PaperGroupHeader(title: "By day", count: recent.count).padding(.top, 18)
@@ -244,16 +244,8 @@ struct ReportsView: View {
                         message: "The server reached its scan limit, so these counts would understate the totals. Open the report on the web.")
     }
 
-    private func tile(_ label: String, _ value: Int, alert: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text("\(value)").font(Theme.monoFont(22, weight: .semibold)).foregroundStyle(alert ? Theme.warning : Theme.foreground)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-        .accessibilityElement(children: .combine)
+    private func stat(_ label: String, _ value: Int, alert: Bool = false) -> PaperStatRow.Stat {
+        .init(label: label, value: "\(value)", tint: alert ? Theme.warning : Theme.foreground)
     }
 
     private func footer(_ version: Int, _ generatedAt: String) -> some View {

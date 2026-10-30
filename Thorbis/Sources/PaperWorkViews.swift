@@ -170,23 +170,51 @@ struct ScheduleView: View {
         jobs.first { ScheduleLead.activeStatuses.contains($0.status) } ?? jobs.first
     }
 
+    /// The day at a glance: how many, how many under way, and when the next one starts (or how
+    /// many are done once nothing is left to start).
+    private var todayStats: [PaperStatRow.Stat] {
+        let active = jobs.filter { ScheduleLead.activeStatuses.contains($0.status) }.count
+        let done = jobs.filter { $0.status == "completed" }.count
+        let next = jobs.filter { ["scheduled", "dispatched"].contains($0.status) }
+            .compactMap { JobFiltering.date($0.scheduledFor) }.filter { $0 > .now }.min()
+        return [
+            .init(label: "Jobs", value: "\(jobs.count)"),
+            .init(label: "Under way", value: "\(active)", tint: active > 0 ? Theme.warning : Theme.foreground),
+            next.map { .init(label: "Next", value: $0.formatted(.dateTime.hour().minute())) }
+                ?? .init(label: "Done", value: "\(done)", tint: done > 0 ? Theme.success : Theme.foreground),
+        ]
+    }
+
     @ViewBuilder private var dayContent: some View {
         if let first = leadJob {
             let isActive = ScheduleLead.activeStatuses.contains(first.status)
+            if range == .today {
+                PaperStatRow(stats: todayStats).paperCardMargin().padding(.top, 4).padding(.bottom, 18)
+            }
             PaperGroupHeader(title: range == .unscheduled ? "Needs a time" : isActive ? "Now" : "Next up")
-                .padding(.horizontal, Theme.gutter).padding(.top, 4)
+                .padding(.horizontal, Theme.gutter).padding(.top, range == .today ? 0 : 4)
             ScheduleHero(job: first, customer: store.customerName(first.customerId), pendingStatus: outbox.pendingStatus(for: first.id)) { commit(for: first) }
-                .padding(.bottom, 16)
+                .paperCardMargin()
+                .padding(.bottom, 18)
                 .task(id: "\(first.id)|\(first.status)|\(first.updatedAt ?? "")") { await loadHero(first) }
-            if jobs.count > 1 {
-                PaperGroupHeader(title: range == .today ? (isActive ? "Also today" : "Later today") : "More jobs", count: jobs.count - 1)
+            let rest = jobs.filter { $0.id != first.id }
+            if !rest.isEmpty {
+                PaperGroupHeader(title: range == .today ? (isActive ? "Also today" : "Later today") : "More jobs", count: rest.count)
                     .padding(.horizontal, Theme.gutter)
-                ForEach(jobs.filter { $0.id != first.id }) { job in
-                    ScheduleCompactRow(job: job, customer: store.customerName(job.customerId),
-                                       timeStyle: range == .unscheduled ? .age : .time)
-                }
+                jobCard(rest, timeStyle: range == .unscheduled ? .age : .time)
             }
         }
+    }
+
+    /// A card of compact job rows, separated by space rather than rules.
+    private func jobCard(_ list: [Job], timeStyle: ScheduleCompactRow.TimeStyle = .time) -> some View {
+        VStack(spacing: 0) {
+            PaperCardList(data: list) { job in
+                ScheduleCompactRow(job: job, customer: store.customerName(job.customerId), timeStyle: timeStyle)
+            }
+        }
+        .paperCardMargin()
+        .padding(.bottom, 18)
     }
 
     /// Paper 79: one section per day with a count.
@@ -196,10 +224,8 @@ struct ScheduleView: View {
         ForEach(days.keys.sorted(), id: \.self) { day in
             let dayJobs = days[day] ?? []
             PaperGroupHeader(title: dayTitle(day), count: dayJobs.count)
-                .padding(.horizontal, Theme.gutter).padding(.top, 8)
-            ForEach(dayJobs) { job in
-                ScheduleCompactRow(job: job, customer: store.customerName(job.customerId), timeStyle: .time)
-            }
+                .padding(.horizontal, Theme.gutter).padding(.top, 4)
+            jobCard(dayJobs)
         }
     }
 
@@ -353,83 +379,45 @@ struct ScheduleView: View {
     }
 }
 
-/// The "Next up" band: inset surface, mono time lane, title, chips, one commit.
+/// The "Next up" card: status tile, title and customer, the time and status as words, one commit.
 private struct ScheduleHero<Commit: View>: View {
     let job: Job
     let customer: String
     var pendingStatus: String? = nil
     @ViewBuilder var commit: () -> Commit
-    @ScaledMetric(relativeTo: .caption) private var laneWidth: CGFloat = 60
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
-        layout {
-            VStack(alignment: .leading, spacing: 8) {
-                ScheduleVisitMarker(status: pendingStatus ?? job.status, pending: pendingStatus != nil)
-                Group {
-                    if let date = JobFiltering.date(job.scheduledFor) {
-                        Text(date.formatted(.dateTime.hour().minute()))
-                    } else { Text("No time") }
-                }
-                .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(width: typeSize.isAccessibilitySize ? nil : laneWidth, alignment: .leading)
-            VStack(alignment: .leading, spacing: 10) {
-                NavigationLink(value: job) {
-                    HStack(alignment: .top) {
+        PaperCard(padding: 16) {
+            NavigationLink(value: job) {
+                let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                                                          : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+                layout {
+                    StatusTile(status: pendingStatus ?? job.status, pending: pendingStatus != nil)
+                    HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(job.title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                             Text(customer).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                         }
                         Spacer(minLength: 0)
                         PaperDisclosure().padding(.top, 4)
                     }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .jobContextMenu(job, customer: customer)
-                .accessibilityLabel("\(job.title), \(customer), \(job.status.statusLabel)")
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) { chips }
-                    VStack(alignment: .leading, spacing: 6) { chips }
-                }
-                commit()
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .jobContextMenu(job, customer: customer)
+            .accessibilityLabel("\(job.title), \(customer), \(job.status.statusLabel)")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { chips }
+                VStack(alignment: .leading, spacing: 6) { chips }
+            }
+            .padding(.top, 12)
+            commit().padding(.top, 12)
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface)
-        .overlay(alignment: .top) { Theme.border.frame(height: 1) }
-        .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
-    }
-}
-
-/// Reinforces the actual job status with a consistent symbol and color; the status remains in words.
-private struct ScheduleVisitMarker: View {
-    let status: String
-    var pending = false
-
-    private var background: Color {
-        if pending { return Theme.warningSurface }
-        switch status {
-        case "completed": return Theme.successSurface
-        case "in_progress", "arrived", "paused": return Theme.warningSurface
-        case "en_route", "dispatched": return Theme.brandSurface
-        default: return Theme.fill
-        }
-    }
-
-    var body: some View {
-        let (symbol, color) = statusIcon(status)
-        Image(systemName: pending ? "clock.arrow.circlepath" : symbol)
-            .font(.system(size: 17, weight: .medium))
-            .foregroundStyle(pending ? Theme.warning : color)
-            .frame(width: 36, height: 36)
-            .background(background, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .accessibilityHidden(true)
     }
 }
 
@@ -437,13 +425,18 @@ private extension ScheduleHero {
     @ViewBuilder var chips: some View {
         let status = pendingStatus ?? job.status
         let (symbol, color) = statusIcon(status)
+        if let date = JobFiltering.date(job.scheduledFor) {
+            Fact(text: date.formatted(.dateTime.hour().minute()), icon: "clock", tint: Theme.foreground)
+        } else {
+            Fact(text: "No time", icon: "clock")
+        }
         Chip(text: pendingStatus == nil ? status.statusLabel : "\(status.statusLabel) · waiting to sync", icon: pendingStatus == nil ? symbol : "clock.arrow.circlepath",
              tint: pendingStatus == nil ? color : Theme.warning,
              bg: pendingStatus != nil ? Theme.warningSurface : status == "en_route" || status == "dispatched" ? Theme.brandSurface : Theme.fill)
-        Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+        // The reference is a fact, not a second pill.
+        Text(job.shortRef).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted)
             .lineLimit(1).fixedSize()
-            .padding(.horizontal, 10).frame(minHeight: Theme.chipHeight)
-            .background(Theme.fill, in: Capsule())
+            .frame(minHeight: Theme.chipHeight)
     }
 }
 
@@ -453,23 +446,23 @@ struct ScheduleCompactRow: View {
     let job: Job
     let customer: String
     var timeStyle: TimeStyle = .time
-    @ScaledMetric(relativeTo: .caption) private var laneWidth: CGFloat = 60
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.paperRowInset) private var inset
 
-    private var time: some View {
-        Group {
-            if timeStyle == .age, let created = JobFiltering.date(job.createdAt) {
-                Text(Self.age(since: created))
-                    .accessibilityLabel("Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
-            } else if let date = JobFiltering.date(job.scheduledFor) {
-                Text(date.formatted(.dateTime.hour().minute()))
-            } else { Text("No time").foregroundStyle(Theme.muted) }
+    private var time: Text {
+        let text: Text
+        if timeStyle == .age, let created = JobFiltering.date(job.createdAt) {
+            text = Text(Self.age(since: created)).foregroundStyle(Theme.foreground)
+                .accessibilityLabel("Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
+        } else if let date = JobFiltering.date(job.scheduledFor) {
+            text = Text(date.formatted(.dateTime.hour().minute())).foregroundStyle(Theme.foreground)
+        } else {
+            text = Text("No time").foregroundStyle(Theme.muted)
         }
-        .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
-        .lineLimit(1).minimumScaleFactor(0.8)
+        return text.font(Theme.monoFont(13, weight: .medium))
     }
 
-    /// "Today", "2d", "3w": short enough for the 60pt lane.
+    /// "Today", "2d", "3w": short enough to lead the row's second line.
     nonisolated static func age(since date: Date, now: Date = .now) -> String {
         let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: date),
                                                    to: Calendar.current.startOfDay(for: now)).day ?? 0
@@ -483,22 +476,20 @@ struct ScheduleCompactRow: View {
 
     var body: some View {
         NavigationLink(value: job) {
-            HStack(alignment: .center, spacing: 10) {
-                if !typeSize.isAccessibilitySize {
-                    time.frame(width: laneWidth, alignment: .leading)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    if typeSize.isAccessibilitySize { time }
+            HStack(alignment: .center, spacing: 12) {
+                StatusTile(status: job.status)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                         .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                    Text("\(job.status.statusLabel) · \(customer)")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    // When, then the status as a word, then who: two lines at most.
+                    (time + Text(" · \(job.status.statusLabel) · \(customer)").font(Theme.font(13)).foregroundStyle(Theme.muted))
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 }
                 Spacer(minLength: 0)
-                ScheduleVisitMarker(status: job.status)
+                PaperDisclosure()
             }
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 5)
-            .frame(minHeight: 52)
+            .padding(.horizontal, inset).padding(.vertical, 10)
+            .frame(minHeight: 60)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
@@ -547,7 +538,7 @@ struct JobsView: View {
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 VStack(alignment: .leading, spacing: 14) {
                     if store.loading && store.jobs.isEmpty {
-                        SkeletonRows().padding(.horizontal, -Theme.gutter)
+                        SkeletonRows().padding(.horizontal, -PaperCardMetrics.margin)
                     } else if tab == "Recent" {
                         group("Recently updated", jobs: Array(jobs.prefix(25)), first: true)
                     } else {
@@ -566,7 +557,7 @@ struct JobsView: View {
                         )
                     }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 4)
+                .paperCardMargin().padding(.top, 4)
             }
             .padding(.bottom, 24)
         }
@@ -624,15 +615,13 @@ struct JobsView: View {
         }
     }
 
-    /// Customer, then when (or the state when there is no time), then the job number.
+    /// The status as a word, then who, then when. The job number lives on the job and in search;
+    /// in a row it only pushed the time off the end.
     private func detail(_ job: Job, customer: String) -> String {
-        var parts = [customer]
+        var parts = [job.status.statusLabel, customer]
         if let date = JobFiltering.date(job.scheduledFor), !["completed", "canceled"].contains(job.status) {
             parts.append(date.visitLabel())
-        } else {
-            parts.append(job.status.statusLabel)
         }
-        parts.append(job.shortRef)
         return parts.joined(separator: " · ")
     }
 
@@ -640,20 +629,20 @@ struct JobsView: View {
     @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool = false) -> some View {
         if !jobs.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                PaperGroupHeader(title: title, count: jobs.count)
-                ForEach(jobs) { job in
+                PaperGroupHeader(title: title, count: jobs.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                PaperCardList(data: jobs) { job in
                     let customer = store.customerName(job.customerId)
                     NavigationLink(value: job) {
-                        // MA-11: what, then who and when, on two lines; same record, same row.
+                        // MA-11: what, then its status, who and when; same record, same row.
                         HStack(spacing: 12) {
-                            StatusRing(status: job.status)
+                            StatusTile(status: job.status)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(job.title).font(Theme.font(15, weight: .medium))
                                     .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
-                                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+                                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                                 Text(detail(job, customer: customer))
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                             }
                             Spacer(minLength: 0)
                             // On Assigned every row is yours, so the badge would only repeat itself.
@@ -666,14 +655,14 @@ struct JobsView: View {
                                     .dynamicTypeSize(...DynamicTypeSize.large)
                                     .accessibilityLabel("Assigned to you")
                             }
+                            PaperDisclosure()
                         }
-                        .padding(.horizontal, 8).padding(.vertical, 6)
-                        .frame(minHeight: 56)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                        .frame(minHeight: 60)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(RowPressStyle())
                     .jobContextMenu(job, customer: customer)
-                    .padding(.horizontal, -8)
                 }
             }
         }
