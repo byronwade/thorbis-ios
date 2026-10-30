@@ -97,6 +97,8 @@ struct JobEstimateSummary {
         var sums: [String: [String: Int]] = [:]
         var options = 0
         for record in records {
+            // An absent options field does not establish what an approved customer accepted.
+            if record.status == "approved", record.options == nil { return nil }
             if record.options?.isEmpty == false { options += 1; continue }
             guard ["approved", "sent"].contains(record.status) else { continue }
             let currency = record.lines.first?.unitPrice.currency ?? "USD"
