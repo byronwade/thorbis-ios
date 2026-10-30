@@ -46,6 +46,8 @@ struct RootView: View {
     @State private var customersPath = NavigationPath()
     @State private var morePath = NavigationPath()
     @State private var search = false
+    /// Words a Siri or Shortcuts search asked for, typed into the iPad search sheet.
+    @State private var searchSeed = ""
     @State private var settings = false
     @State private var workspace = false
     @State private var createJob = false
@@ -131,7 +133,7 @@ struct RootView: View {
                 }
             }
         }
-        .sheet(isPresented: $search) { PaperGlobalSearch() }
+        .sheet(isPresented: $search, onDismiss: { searchSeed = "" }) { PaperGlobalSearch(initialQuery: searchSeed) }
         .sheet(isPresented: $settings) { NavigationStack { MoreView().paperDestinations().safeAreaInset(edge: .top) { HStack { Spacer(); Button("Done") { settings = false }.font(Theme.font(15, weight: .medium)).frame(minWidth: 44, minHeight: 44) }.padding(.horizontal, Theme.gutter) } } }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
@@ -186,6 +188,7 @@ struct RootView: View {
         .onChange(of: store.jobs) { openRequestedJob(phone: false) }
         .onChange(of: store.requestedSchedule) { path = NavigationPath(); tab = .schedule }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord(phone: false) }
+        .onChange(of: store.requestedSearch, initial: true) { openRequestedSearch(phone: false) }
         .onAppear {
             if session.can("job.view", feature: "jobs") { path = NavigationPath(); tab = .schedule }
             else if session.can("customer.view", feature: "core_crm") { path = NavigationPath(); tab = .customers }
@@ -473,10 +476,8 @@ struct RootView: View {
 
     private func closeMenu() { setMenu(open: false) }
 
-    /// Every place this launch has opened, kept alive and stacked; only the selected one shows.
-    private func phonePlaces() -> some View {
-        let ids = (menuPlaces.map(\.rawValue) + [PrimaryTab.more.rawValue]).filter { visited.contains($0) || $0 == selectedTab }
-        return ZStack {
+    private func placeStack(_ ids: [String]) -> some View {
+        ZStack {
             ForEach(ids, id: \.self) { id in
                 let here = id == selectedTab
                 place(id)
@@ -486,6 +487,14 @@ struct RootView: View {
                     .zIndex(here ? 1 : 0)
             }
         }
+        // Kept off phonePlaces' long modifier chain, which is at the type checker's limit.
+        .onChange(of: store.requestedSearch, initial: true) { openRequestedSearch(phone: true) }
+    }
+
+    /// Every place this launch has opened, kept alive and stacked; only the selected one shows.
+    private func phonePlaces() -> some View {
+        let ids = (menuPlaces.map(\.rawValue) + [PrimaryTab.more.rawValue]).filter { visited.contains($0) || $0 == selectedTab }
+        return placeStack(ids)
         .onChange(of: selectedTab, initial: true) { visited.insert(selectedTab) }
         // The bottom bar is the way around; screens drop their top-left menu button.
         .environment(\.paperShowMenu, { Task { @MainActor in setMenu(open: true) } })
@@ -687,6 +696,19 @@ struct RootView: View {
             tab = .schedule
             path = NavigationPath()
             path.append(job)
+        }
+    }
+
+    /// Opens search with the words a Siri or Shortcuts search asked for.
+    private func openRequestedSearch(phone: Bool) {
+        guard let query = store.requestedSearch else { return }
+        store.requestedSearch = nil
+        if phone {
+            barQuery = query
+            if !barSearching { openBarSearch() }
+        } else {
+            searchSeed = query
+            search = true
         }
     }
 
@@ -931,6 +953,8 @@ struct PaperGlobalSearch: View {
     /// back to push on the current place instead of inside this view.
     var externalQuery: Binding<String>? = nil
     var openResult: ((SearchDestination) -> Void)? = nil
+    /// Words to start with, from a Siri or Shortcuts search.
+    var initialQuery = ""
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
@@ -983,7 +1007,10 @@ struct PaperGlobalSearch: View {
                     .navigationBarTitleDisplayMode(.large)
                     .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Jobs, customers, invoices")
                     .searchFocused($fieldFocused)
-                    .task { if !embedded { fieldFocused = true } }
+                    .task {
+                        if query.isEmpty, !initialQuery.isEmpty { query = initialQuery }
+                        if !embedded { fieldFocused = true }
+                    }
                     .toolbar {
                         if !embedded {
                             ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }

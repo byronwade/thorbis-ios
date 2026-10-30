@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-siri-spotlight",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Find jobs with Siri and Spotlight",
+                      detail: "Ask Siri for your next job or schedule, and find your jobs and customers in Spotlight."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-lock-screen-controls",
             date: "2026-10-30",
             highlights: [
