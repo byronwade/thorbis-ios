@@ -135,6 +135,10 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
         assertFocusedNumberVisible(price, below: lineNavigation, in: app)
         XCTAssertEqual(price.value as? String, "245.00")
+        let priceBefore = XCTAttachment(screenshot: app.screenshot())
+        priceBefore.name = "Largest text price before replacement"
+        priceBefore.lifetime = .keepAlways
+        add(priceBefore)
         replaceVisibleNumber(price, original: "245.00", with: "275.00", in: app)
         XCTAssertEqual(price.value as? String, "275.00", "The unit price must be editable at the largest text size")
         let priceProof = XCTAttachment(screenshot: app.screenshot())
@@ -264,12 +268,15 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
     }
 
     private func replaceVisibleNumber(_ field: XCUIElement, original: String, with replacement: String, in app: XCUIApplication) {
-        // Use the native text selection menu; touching the right edge can place the
-        // caret before the final digit at accessibility sizes.
+        // Tap at the visible right-aligned value and use the native text edit menu.
+        // If the menu is not shown on tap, press the value as a person would.
         XCTAssertEqual(field.value as? String, original)
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.90, dy: 0.5)).press(forDuration: 1.2)
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
         let selectAll = app.menuItems["Select All"]
-        XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "The selected value must expose Select All")
+        if !selectAll.waitForExistence(timeout: 2) {
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.90, dy: 0.5)).press(forDuration: 1.2)
+        }
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "The value must expose the native Select All action")
         selectAll.tap()
         app.typeText(replacement)
     }
