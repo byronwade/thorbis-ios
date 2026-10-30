@@ -152,15 +152,20 @@ final class DescriptionCanvasUITests: XCTestCase {
         for _ in 0..<5 where !field.isHittable { app.swipeUp() }
         XCTAssertTrue(field.isHittable); field.tap(); field.typeText(" update")
         if app.toolbars.buttons["Done"].exists { app.toolbars.buttons["Done"].tap() }
-        let issue = app.buttons["Issue invoice"].firstMatch
-        XCTAssertTrue(issue.waitForExistence(timeout: 5)); issue.tap()
-        let confirm = app.buttons.matching(identifier: "Issue invoice").element(boundBy: app.buttons.matching(identifier: "Issue invoice").count - 1)
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+        func tapVisibleIssue() -> Bool {
+            let buttons = app.buttons.matching(identifier: "Issue invoice").allElementsBoundByIndex
+            guard let issue = buttons.last(where: { $0.isHittable }) else { return false }
+            issue.tap()
+            return true
+        }
+        XCTAssertTrue(tapVisibleIssue())
+        XCTAssertTrue(app.staticTexts["Issue invoice?"].waitForExistence(timeout: 5))
+        XCTAssertTrue(tapVisibleIssue())
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Preview issue temporarily unavailable")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.navigationBars["Edit invoice"].exists)
-        XCTAssertTrue(app.buttons["Issue invoice"].firstMatch.isEnabled)
-        app.buttons["Issue invoice"].firstMatch.tap()
-        app.buttons.matching(identifier: "Issue invoice").element(boundBy: app.buttons.matching(identifier: "Issue invoice").count - 1).tap()
+        XCTAssertTrue(tapVisibleIssue())
+        XCTAssertTrue(app.staticTexts["Issue invoice?"].waitForExistence(timeout: 5))
+        XCTAssertTrue(tapVisibleIssue())
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Edit invoice"])
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 10), .completed)
     }
