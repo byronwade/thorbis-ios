@@ -101,7 +101,7 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
         for _ in 0..<30 where !customerAction.isHittable { app.swipeUp() }
         XCTAssertTrue(customerAction.isHittable)
-        XCTAssertEqual(customerAction.label, "Show to customer")
+        XCTAssertEqual(customerAction.label, "Customer view")
         XCTAssertGreaterThan(customerAction.frame.height, 80)
         for _ in 0..<4 where !newJob.isHittable { app.swipeUp() }
         XCTAssertTrue(newJob.isHittable)
@@ -125,7 +125,7 @@ final class CustomerClarityUITests: XCTestCase {
             XCTAssertLessThanOrEqual(action.frame.maxY, screen.maxY)
             XCTAssertTrue(action.isHittable)
         }
-        XCTAssertEqual(customerAction.label, "Show to customer")
+        XCTAssertEqual(customerAction.label, "Customer view")
         capture("Customer bottom actions largest standard text")
     }
 

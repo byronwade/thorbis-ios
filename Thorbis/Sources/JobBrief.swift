@@ -14,8 +14,8 @@ enum JobMenuAction: Hashable {
     case deposit
     case wrapUp
     case followUps
-    case showToCustomer
-    case customerDetails
+    /// Customer view: the job's estimates, invoices and the customer's own details, in customer mode.
+    case customerView
     case email
     case copyID
 }
@@ -57,8 +57,7 @@ enum JobMenu {
         if inputs.canWrapUp, !inputs.barIsWrapUp { finish.append(.wrapUp) }
         finish.append(.followUps)
         var record: [JobMenuAction] = []
-        if inputs.canShowToCustomer { record.append(.showToCustomer) }
-        if inputs.canEditCustomer { record.append(.customerDetails) }
+        if inputs.canShowToCustomer || inputs.canEditCustomer { record.append(.customerView) }
         if inputs.canEmail { record.append(.email) }
         record.append(.copyID)
         return [visit, money, finish, record].filter { !$0.isEmpty }

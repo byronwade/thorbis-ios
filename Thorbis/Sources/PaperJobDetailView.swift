@@ -19,8 +19,6 @@ struct JobDetailView: View {
     @EnvironmentObject var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
-    @State private var showCustomerMode = false
-    @State private var showCommercialDocuments = false
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
     @State private var customerPaymentInvoiceID: String?
     @State private var documentInvoiceID: String?
@@ -81,6 +79,9 @@ struct JobDetailView: View {
     @State private var showAssign = false
     @State private var showFollowUps = false
     @State private var handoff: DeviceHandoff?
+    #if DEBUG
+    @State private var previewOpenedCustomerView = false
+    #endif
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -171,32 +172,6 @@ struct JobDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         .deviceHandoffs($handoff)
         .sensoryFeedback(.success, trigger: committed)
-        // The customer may have changed a phone, an email or a contact in their own hands.
-        .fullScreenCover(isPresented: $showCustomerMode, onDismiss: {
-            if let job { Task { await loadContacts(job) } }
-        }) {
-            if let customerID = job?.customerId {
-                CustomerSelfEditView(customerID: customerID) { showCustomerMode = false }
-            }
-        }
-        .fullScreenCover(isPresented: $showCommercialDocuments, onDismiss: {
-            Task { await finishCustomerDocuments() }
-        }) {
-            CustomerModeContainer(onUnlocked: { showCommercialDocuments = false }) { handBack in
-                if let job, let scope = scope(for: job) {
-                    JobCustomerDocumentsView(scope: scope, documents: documents, sourceGeneration: documentGeneration, jobTitle: job.title,
-                        customerName: store.customerName(job.customerId), handBack: handBack,
-                        onUnlocked: { showCommercialDocuments = false },
-                        requestPayment: { id in
-                            customerPaymentInvoiceID = id
-                            showCommercialDocuments = false
-                        }, invoiceUpdated: updateInvoice, authenticateOwner: customerOwnerAuthentication)
-                } else {
-                    Text("Hand the device back to your technician to reload this job.")
-                        .font(Theme.font(20)).padding(Theme.gutter)
-                }
-            }
-        }
         .sheet(isPresented: $showDeposit) {
             JobDepositSheet(jobID: jobId) { invoice in
                 selectedInvoiceID = invoice.id
@@ -262,6 +237,18 @@ struct JobDetailView: View {
             // The next step needs the job's paper, so it loads with the job, not only on its tab.
             await loadInvoices()
             if let job { await loadJobEstimates(job) }
+            #if DEBUG
+            // `--paper-preview-screen customer-view[-estimates|-invoice|-details]`: Customer view, opened as a tech would.
+            if PaperPreview.enabled, PaperPreview.screen.hasPrefix("customer-view"), !previewOpenedCustomerView {
+                previewOpenedCustomerView = true
+                switch PaperPreview.screen {
+                case "customer-view-estimates": openCustomerView(.estimates)
+                case "customer-view-invoice": if let invoice = invoices.first { openCustomerView(.invoice(invoice.id)) }
+                case "customer-view-details": openCustomerView(.details)
+                default: openCustomerView(.home)
+                }
+            }
+            #endif
         }
         .refreshable {
             await load()
@@ -419,10 +406,8 @@ struct JobDetailView: View {
             return ThorbisMenuItem("Wrap up", icon: "checkmark.seal", subtitle: "Closeout checklist") { showWrapUp = true }
         case .followUps:
             return ThorbisMenuItem("Follow-ups", icon: "list.bullet") { showFollowUps = true }
-        case .showToCustomer:
-            return ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCommercialDocuments = true }
-        case .customerDetails:
-            return ThorbisMenuItem("Customer details", icon: "person.crop.circle") { showCustomerMode = true }
+        case .customerView:
+            return ThorbisMenuItem("Customer view", icon: "person.crop.rectangle") { openCustomerView(.home) }
         case .copyID:
             return ThorbisMenuItem("Copy job ID", icon: "doc.on.doc") { UIPasteboard.general.string = job.id }
         }
@@ -570,6 +555,8 @@ struct JobDetailView: View {
 
     /// Directions always require choosing an account location; no job site is inferred.
     private var quickActions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+        if !barIsCustomerView { customerViewAction }
         Group {
             if (selectedTab == "Estimates" || selectedTab == "Invoice") && !typeSize.isAccessibilitySize {
                 HStack(spacing: 8) {
@@ -582,6 +569,7 @@ struct JobDetailView: View {
                     directionsAction
                 }
             }
+        }
         }
         .padding(.top, 8)
     }
@@ -723,7 +711,8 @@ struct JobDetailView: View {
                            busy: busy || creatingInvoice) { run(step) }
         } else if selectedTab == "Estimates" {
             if !jobEstimates.isEmpty {
-                PaperActionBar(title: "Present estimates", symbol: "person.crop.rectangle", action: presentEstimates)
+                PaperActionBar(title: "Customer view", symbol: "person.crop.rectangle") { openCustomerView(.estimates) }
+                    .accessibilityIdentifier("job-customer-view-bar")
             } else if canBuildEstimate {
                 PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
             }
@@ -1129,20 +1118,49 @@ struct JobDetailView: View {
                                     estimatesComplete: estimateRead?.isComplete == true)
     }
 
-    private func presentEstimates() {
-        guard let job, scope(for: job) != nil, session.can("estimate.view", feature: "estimates") else { return }
+    private var canOpenCustomerView: Bool {
+        session.can("estimate.view", feature: "estimates") || session.can("invoice.view", feature: "invoicing")
+            || session.can("customer.edit", feature: "core_crm")
+    }
+
+    /// Customer view: the job's one protected customer handoff (estimates, invoices, the customer's
+    /// own details) with one staff hand-back. Every customer-facing door on the job opens it.
+    private func openCustomerView(_ start: CustomerViewStart) {
+        guard let job, scope(for: job) != nil, canOpenCustomerView else { return }
         let model = JobEstimateHandoffModel(job: job, customerName: store.customerName(job.customerId), documents: documents, api: api, session: session)
+        let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
         let originalScope = model.scope, actorID = session.user?.id
         let generation = session.generation, apiGeneration = api.requestGeneration, origin = api.normalizedOrigin
-        estimateHandoffPresenter.present(model) { [weak api, weak session, weak documents] in
-            guard let api, let session, let documents else { return }
-            let current: @MainActor () -> Bool = {
-                session.user?.id == actorID && session.activeOrganization?.id == originalScope.organizationID &&
+        let current: @MainActor () -> Bool = { [weak api, weak session] in
+            guard let api, let session else { return false }
+            return session.user?.id == actorID && session.activeOrganization?.id == originalScope.organizationID &&
                 session.generation == generation && api.requestGeneration == apiGeneration && api.normalizedOrigin == origin &&
-                session.can("job.view", feature: "jobs") && session.can("estimate.view", feature: "estimates")
-            }
-            _ = await documents.loadEstimates(scope: originalScope, api: api, isCurrent: current)
+                session.can("job.view", feature: "jobs")
         }
+        estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
+                                         invoiceUpdated: updateInvoice) { exit in
+            guard current() else { return }
+            // The customer may have changed a phone, an email or a contact in their own hands.
+            await loadContacts(job)
+            if case .collect(let invoiceID) = exit { customerPaymentInvoiceID = invoiceID }
+            await finishCustomerDocuments()
+        }
+    }
+
+    @ViewBuilder private var customerViewAction: some View {
+        if canOpenCustomerView {
+            Button { openCustomerView(.home) } label: {
+                Label("Customer view", systemImage: "person.crop.rectangle").inkCommit(height: 44)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityHint("Hands the device to the customer for their estimates, invoices and details")
+            .accessibilityIdentifier("job-customer-view")
+        }
+    }
+
+    /// The bar already says Customer view; one door per screen.
+    private var barIsCustomerView: Bool {
+        (selectedTab == "Overview" && nextStep == .presentEstimates) || (selectedTab == "Estimates" && !jobEstimates.isEmpty)
     }
 
     private func buildEstimate() {
@@ -1154,7 +1172,7 @@ struct JobDetailView: View {
         switch step {
         case .transition(let target): runTransition(target)
         case .buildEstimate: buildEstimate()
-        case .presentEstimates: presentEstimates()
+        case .presentEstimates: openCustomerView(.estimates)
         case .showEstimate(let id): openEstimate = OpenedEstimate(id: id, present: true)
         case .createInvoice:
             Task {
@@ -1283,13 +1301,6 @@ struct JobDetailView: View {
               let job, scope(for: job)?.contains(actual) == true,
               invoicePaymentModel?.canRecordPayment == true else { return }
         showCollectPayment = true
-    }
-
-    private var customerOwnerAuthentication: @MainActor (String) async -> Bool {
-        #if DEBUG
-        if let preview = PaperPreview.ownerAuthentication { return preview }
-        #endif
-        return { await StaffUnlock.unlock(reason: $0) }
     }
 
     private func loadInvoicePayments(for invoice: InvoiceRecord) async {

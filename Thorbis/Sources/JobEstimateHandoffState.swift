@@ -168,10 +168,13 @@ final class JobEstimateHandoffModel: ObservableObject {
     private var request = UUID()
     private var reviewedGeneration: UUID?
     private var lastSignerName: String?
-    var isCurrent: Bool {
+    var isCurrent: Bool { isCurrentJob && session.can("estimate.view", feature: "estimates") }
+    /// Same person, workspace, session and job access: Customer view stays open on this job. Estimates
+    /// additionally need `isCurrent`; invoices and details carry their own permission gates.
+    var isCurrentJob: Bool {
         !retired && !actorID.isEmpty && session.user?.id == actorID && session.activeOrganization?.id == scope.organizationID &&
         session.generation == sessionGeneration && api.requestGeneration == apiGeneration && origin != nil && api.normalizedOrigin == origin &&
-        session.can("job.view", feature: "jobs") && session.can("estimate.view", feature: "estimates")
+        session.can("job.view", feature: "jobs")
     }
     var eligibleIDs: Set<String> {
         guard isCurrent else { return [] }
@@ -467,19 +470,72 @@ final class CustomerEstimateHandoffObservation: ObservableObject {
     }
 }
 
-/// Retains this one protected customer handoff above workspace and authentication branches.
+/// Where Customer view opens: its home, or straight on one of its sections or documents.
+enum CustomerViewStart: Equatable {
+    case home
+    /// The job's estimates, ready to select and approve.
+    case estimates
+    case estimate(String)
+    case invoice(String)
+    case details
+}
+
+/// How the technician left Customer view: back to staff, or straight to collecting an invoice.
+enum CustomerViewExit: Equatable {
+    case done
+    case collect(invoiceID: String)
+}
+
+/// Retains this one protected customer handoff ("Customer view") above workspace and authentication
+/// branches: the job's estimates, invoices and the customer's own details, with one staff hand-back.
 @MainActor
 final class JobEstimateHandoffPresenter: ObservableObject {
     @Published private(set) var active: JobEstimateHandoffModel?
-    private var onAuthenticatedExit: (@MainActor () async -> Void)?
+    private(set) var start: CustomerViewStart = .estimates
+    /// The customer's own details, when this person may edit customers.
+    private(set) var details: CustomerSelfEditModel?
+    /// The session generation the job's documents were read under.
+    private(set) var sourceGeneration: UUID?
+    private(set) var invoiceUpdated: (InvoiceRecord) -> Void = { _ in }
+    private var onAuthenticatedExit: (@MainActor (CustomerViewExit) async -> Void)?
+
     func present(_ model: JobEstimateHandoffModel, onAuthenticatedExit: @escaping @MainActor () async -> Void) {
-        guard active == nil, model.isCurrent else { return }
-        active = model; self.onAuthenticatedExit = onAuthenticatedExit
+        present(model, start: .estimates) { _ in await onAuthenticatedExit() }
     }
-    func authenticatedExit() {
+
+    func present(_ model: JobEstimateHandoffModel, start: CustomerViewStart, details: CustomerSelfEditModel? = nil,
+                 sourceGeneration: UUID? = nil, invoiceUpdated: @escaping (InvoiceRecord) -> Void = { _ in },
+                 onExit: @escaping @MainActor (CustomerViewExit) async -> Void) {
+        guard active == nil, model.isCurrentJob else { return }
+        self.start = start; self.details = details
+        self.sourceGeneration = sourceGeneration ?? model.session.generation
+        self.invoiceUpdated = invoiceUpdated
+        active = model; self.onAuthenticatedExit = onExit
+    }
+
+    func authenticatedExit(_ exit: CustomerViewExit = .done) {
         let refresh = onAuthenticatedExit
         active?.retire(clearDocuments: false); active = nil; onAuthenticatedExit = nil
-        Task { await refresh?() }
+        details = nil; invoiceUpdated = { _ in }; start = .estimates
+        Task { await refresh?(exit) }
+    }
+}
+
+extension JobEstimateHandoffPresenter {
+    /// Estimate and invoice detail's "Show to customer": Customer view on the document's own job,
+    /// read fresh and checked against this workspace and customer. False when there is no verified
+    /// job (the caller keeps its single-document presentation).
+    func openCustomerView(jobID: String, customerID: String, customerName: String, start: CustomerViewStart,
+                          api: APIClient, session: SessionController,
+                          onExit: @escaping @MainActor (CustomerViewExit) async -> Void) async -> Bool {
+        guard active == nil, session.can("job.view", feature: "jobs") else { return false }
+        let generation = session.generation
+        guard let job = try? await api.fieldJob(jobID), session.generation == generation, active == nil,
+              job.id == jobID, job.organizationId == session.activeOrganization?.id, job.customerId == customerID else { return false }
+        let model = JobEstimateHandoffModel(job: job, customerName: customerName, documents: JobDocumentCollections(), api: api, session: session)
+        let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
+        present(model, start: start, details: details, onExit: onExit)
+        return active === model
     }
 }
 

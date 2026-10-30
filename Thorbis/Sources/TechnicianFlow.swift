@@ -44,7 +44,7 @@ enum TechJobStep: Equatable {
             }
         case .buildEstimate: "Build estimate"
         case .showEstimate: "Show estimate to customer"
-        case .presentEstimates: "Present estimates"
+        case .presentEstimates: "Customer view"
         case .createInvoice: "Create invoice"
         case .reviewInvoice: "Review invoice"
         case .collect(_, let due, let currency): "Collect \(money(due, currency: currency))"

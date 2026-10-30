@@ -445,13 +445,13 @@ struct CustomerDetailView: View {
                     // Keep the customer handoff clear even when space is tight.
                     Group {
                         if typeSize.isAccessibilitySize {
-                            Text("Customer review")
+                            Text("Customer view")
                                 .multilineTextAlignment(.center)
                                 .fixedSize(horizontal: false, vertical: true)
                         } else {
                             ViewThatFits(in: .horizontal) {
-                                Label("Customer checks details", systemImage: "person.crop.rectangle").fixedSize()
-                                Text("Customer review")
+                                Label("Customer view", systemImage: "person.crop.rectangle").fixedSize()
+                                Text("Customer view")
                                     .multilineTextAlignment(.center)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -463,7 +463,7 @@ struct CustomerDetailView: View {
                     .foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 }
                 .buttonStyle(PressStyle())
-                .accessibilityLabel("Show to customer")
+                .accessibilityLabel("Customer view")
                 .accessibilityHint("Hands the device to the customer to check and fix their details")
                 .accessibilityIdentifier("customer-handoff-action")
             }
@@ -562,7 +562,7 @@ struct CustomerDetailView: View {
         }
         guard canEdit else { return items }
         return items + [
-            ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCustomerMode = true },
+            ThorbisMenuItem("Customer view", icon: "person.crop.rectangle") { showCustomerMode = true },
             ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add },
             ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add },
         ]

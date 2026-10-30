@@ -25,7 +25,7 @@ final class JobBriefTests: XCTestCase {
             [.transition("dispatched"), .transition("paused"), .schedule, .assign],
             [.billWithoutEstimate, .deposit],
             [.wrapUp, .followUps],
-            [.showToCustomer, .copyID],
+            [.customerView, .copyID],
         ])
     }
 
@@ -40,13 +40,12 @@ final class JobBriefTests: XCTestCase {
         XCTAssertFalse(groups.flatMap { $0 }.contains(.wrapUp))
     }
 
-    func testCustomerDetailsAndCommercialHandoffHaveIndependentPermissionEntries() {
+    func testCustomerViewIsOneEntryOpenToEitherDocumentsOrDetailsPermission() {
         let both = JobMenu.groups(.init(canShowToCustomer: true, canEditCustomer: true)).flatMap { $0 }
-        XCTAssertTrue(both.contains(.showToCustomer))
-        XCTAssertTrue(both.contains(.customerDetails))
-        let contactsOnly = JobMenu.groups(.init(canEditCustomer: true)).flatMap { $0 }
-        XCTAssertTrue(contactsOnly.contains(.customerDetails))
-        XCTAssertFalse(contactsOnly.contains(.showToCustomer))
+        XCTAssertEqual(both.filter { $0 == .customerView }.count, 1)
+        XCTAssertTrue(JobMenu.groups(.init(canEditCustomer: true)).flatMap { $0 }.contains(.customerView))
+        XCTAssertTrue(JobMenu.groups(.init(canShowToCustomer: true)).flatMap { $0 }.contains(.customerView))
+        XCTAssertFalse(JobMenu.groups(.init()).flatMap { $0 }.contains(.customerView))
     }
 
     // MARK: JS-06 contacts

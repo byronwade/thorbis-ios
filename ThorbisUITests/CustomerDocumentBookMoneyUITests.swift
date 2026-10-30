@@ -22,7 +22,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
-        app.buttons["Show to customer"].tap()
+        thorbisCustomerViewMenuItem(app).tap()
         let primary = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(primary.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["customer-invoice-00000000-0000-4000-8000-000000002241"].exists)
@@ -101,7 +101,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"] + extra
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["Job actions"].tap(); app.buttons["Show to customer"].tap()
+        app.buttons["Job actions"].tap(); thorbisCustomerViewMenuItem(app).tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(invoice.waitForExistence(timeout: 10)); invoice.tap()
         XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 10))

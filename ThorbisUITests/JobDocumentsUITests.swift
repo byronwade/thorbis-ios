@@ -17,7 +17,7 @@ final class JobDocumentsUITests: XCTestCase {
         let second = app.buttons["job-estimate-\(addonA)"]
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         XCTAssertTrue(second.exists)
-        let present = app.buttons["Present estimates"]
+        let present = app.buttons["Customer view"]
         XCTAssertTrue(present.waitForExistence(timeout: 5))
         XCTAssertTrue(present.isHittable)
         XCTAssertLessThanOrEqual(second.frame.maxY, present.frame.minY, "Both estimates should be visible above the presentation action")
@@ -77,7 +77,7 @@ final class JobDocumentsUITests: XCTestCase {
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
-        app.buttons["Show to customer"].tap()
+        thorbisCustomerViewMenuItem(app).tap()
         XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
         for identifier in ["customer-estimate-\(estimateA)", "customer-estimate-\(addonA)",
                            "customer-invoice-\(invoiceA)", "customer-invoice-\(depositA)"] {
@@ -98,7 +98,7 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Sign to approve"].exists)
         XCTAssertFalse(app.buttons["Send estimate"].exists)
         XCTAssertTrue(app.buttons["Technician: unlock to leave customer mode"].exists)
-        app.navigationBars.buttons["Documents"].tap()
+        app.navigationBars.buttons["Customer view"].tap()
         XCTAssertTrue(app.buttons["customer-estimate-\(estimateA)"].waitForExistence(timeout: 5))
         app.buttons["customer-estimate-\(estimateA)"].tap()
         XCTAssertTrue(app.navigationBars["EST-2218"].waitForExistence(timeout: 5))
@@ -183,7 +183,7 @@ final class JobDocumentsUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
         let list = app.scrollViews["customer-job-documents-list"]
-        let top = app.navigationBars["Documents"].frame.maxY
+        let top = app.navigationBars["Customer view"].frame.maxY
         let bottom = app.buttons["Hand back to the technician"].frame.minY
         // Large cards can report hittable while their center is still behind the fixed footer.
         for _ in 0..<10 {
@@ -199,7 +199,7 @@ final class JobDocumentsUITests: XCTestCase {
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
-        let show = app.buttons["Show to customer"]
+        let show = thorbisCustomerViewMenuItem(app)
         for _ in 0..<5 where !show.isHittable { app.collectionViews.firstMatch.swipeUp() }
         XCTAssertTrue(show.isHittable)
         show.tap()
@@ -281,7 +281,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         paper.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This invoice couldn't be verified")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["INV-2209"].exists)
-        XCTAssertFalse(app.buttons["Show to customer"].exists)
+        XCTAssertFalse(app.buttons["Customer view"].exists)
         XCTAssertFalse(app.buttons["Collect payment"].exists)
     }
 
@@ -313,7 +313,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
     }
     private func handToCustomer(_ app: XCUIApplication) {
         app.buttons["Job actions"].tap()
-        app.buttons["Show to customer"].tap()
+        thorbisCustomerViewMenuItem(app).tap()
         XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
     }
 }

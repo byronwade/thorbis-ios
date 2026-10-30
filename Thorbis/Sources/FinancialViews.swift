@@ -86,6 +86,7 @@ struct EstimateDetailView: View {
     @State private var showRevisionEditor = false
     @State private var action = ""
     @State private var showToCustomer = false
+    @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
     @State private var memberPricing: MemberPricing?
     private var scrollContent: some View {
         ScrollView {
@@ -235,13 +236,13 @@ struct EstimateDetailView: View {
     @ViewBuilder private var estimateBar: some View {
         if let record, record.status == "draft", jobID != nil, TechJobFlow.canShow(record, can: estimateAbilities) {
             // TF-05: on site, showing is sending. The draft is issued as it's handed over, no second step.
-            PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { Task { await handToCustomer() } }
+            PaperActionBar(title: "Customer view", symbol: "person.crop.rectangle", busy: busy) { Task { await handToCustomer() } }
         } else if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
             PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
         } else if let record, record.status == "sent", canShowSent(record) {
             // On site, the next step is the customer's yes: hand them the options to choose and sign.
             // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
-            PaperActionBar(title: "Show to customer", symbol: "person.crop.rectangle", busy: busy) { showToCustomer = true }
+            PaperActionBar(title: "Customer view", symbol: "person.crop.rectangle", busy: busy) { Task { await presentToCustomer() } }
         }
     }
 
@@ -271,6 +272,22 @@ struct EstimateDetailView: View {
             defer { busy = false }
             do { record = try await api.sendFieldEstimate(id, expectedRevisionNumber: current.currentRevisionNumber ?? 0) }
             catch is CancellationError { return } catch { self.error = error.localizedDescription; return }
+        }
+        await presentToCustomer()
+    }
+
+    /// On a job, the estimate opens in that job's Customer view, so the customer can also see the
+    /// job's other estimates, invoices and their own details. Without a job it stays a single document.
+    private func presentToCustomer() async {
+        guard let record else { return }
+        if let jobID {
+            busy = true
+            let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
+                customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session) { _ in
+                customerModeClosed()
+            }
+            busy = false
+            if opened { return }
         }
         showToCustomer = true
     }
@@ -384,6 +401,7 @@ struct InvoiceDetailView: View {
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var showSignature = false
     @State private var showToCustomer = false
+    @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
     /// Set when the customer pressed Pay and the technician unlocked: collect once customer mode closes.
     @State private var collectAfterCustomer = false
     var body: some View {
@@ -438,7 +456,8 @@ struct InvoiceDetailView: View {
                     }
                     PaperGroupHeader(title: "Actions").padding(.top, 4)
                     if record.status != "draft", record.status != "void" {
-                        Button { showToCustomer = true } label: { commercialAction("Show to customer", icon: "person.crop.rectangle") }
+                        Button { Task { await presentToCustomer() } } label: { commercialAction("Customer view", icon: "person.crop.rectangle") }
+                            .disabled(busy)
                             .buttonStyle(.plain)
                     }
                     NavigationLink { CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar).thorbisBackButton() } label: {
@@ -547,6 +566,25 @@ struct InvoiceDetailView: View {
         }
         .refreshable { await load() }
     }
+    /// On a job, the invoice opens in that job's Customer view, with its payments and balance beside
+    /// the job's other documents. Without a verified job it stays a single document.
+    private func presentToCustomer() async {
+        guard let record else { return }
+        if let jobID = record.jobId, expectedJobScope.map({ $0.contains(record) }) != false {
+            busy = true
+            let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
+                customerName: store.customerName(record.customerId), start: .invoice(record.id), api: api, session: session) { exit in
+                await load()
+                guard case .collect(let invoiceID) = exit, invoiceID == id, paymentModel?.canRecordPayment == true,
+                      session.can("invoice.payment.create", feature: "payments") else { return }
+                showCollectPayment = true
+            }
+            busy = false
+            if opened { return }
+        }
+        showToCustomer = true
+    }
+
     /// TF-08: issuing and collecting are one step for the tech; payment opens right after.
     private func issueThenCollect() async {
         guard await issue(), issueCollects, paymentModel?.canRecordPayment == true else { return }

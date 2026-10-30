@@ -277,23 +277,52 @@ struct JobEstimateHandoffView: View {
     }
 }
 
-/// This owner survives App's real session-generation and authentication branch replacement.
+/// Customer view's one protected owner. It survives App's real session-generation and
+/// authentication branch replacement, and gives the whole handoff one staff hand-back.
 struct JobEstimateProtectedOwner: View {
     @ObservedObject var model: JobEstimateHandoffModel
     @ObservedObject var presenter: JobEstimateHandoffPresenter
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var api: APIClient
+    /// Set after the technician unlocked while the customer's details have changes to review.
+    @State private var reviewingDetails: CustomerViewExit?
     var body: some View {
-        CustomerModeContainer(onUnlocked: { presenter.authenticatedExit() }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
-            JobEstimateHandoffView(model: model, handBack: handBack)
+        Group {
+            if let exit = reviewingDetails, let details = presenter.details {
+                // Staff side, after authentication: the existing review and audited save.
+                CustomerSelfEditReview(model: details) { presenter.authenticatedExit(exit) }
+            } else {
+                CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
+                    JobCustomerDocumentsView(scope: model.scope, documents: model.documents, sourceGeneration: presenter.sourceGeneration,
+                        jobTitle: model.jobTitle, customerName: model.customerName, handBack: handBack,
+                        onUnlocked: { leave(.done) },
+                        requestPayment: { leave(.collect(invoiceID: $0)) },
+                        invoiceUpdated: presenter.invoiceUpdated, authenticateOwner: documentAuthentication,
+                        handoff: model, details: presenter.details, start: presenter.start)
+                }
+            }
         }
-        .onChange(of: model.isCurrent) { _, valid in if !valid { model.retire() } }
+        .onChange(of: model.isCurrentJob) { _, valid in if !valid { model.retire() } }
         .onChange(of: model.approvalAuthority) { _, valid in if !valid { model.cancelApprovals() } }
+    }
+    /// Only the authenticated technician leaves; changed details are reviewed before staff screens return.
+    private func leave(_ exit: CustomerViewExit) {
+        if model.isCurrentJob, presenter.details?.hasChanges == true, session.can("customer.edit", feature: "core_crm") {
+            reviewingDetails = exit
+        } else {
+            presenter.authenticatedExit(exit)
+        }
     }
     private func authenticateOwner() async -> Bool {
         #if DEBUG
         if let authenticate = PaperPreview.ownerAuthentication { return await authenticate("Unlock to leave customer mode") }
         #endif
         return await StaffUnlock.unlock()
+    }
+    private var documentAuthentication: @MainActor (String) async -> Bool {
+        #if DEBUG
+        if let preview = PaperPreview.ownerAuthentication { return preview }
+        #endif
+        return { await StaffUnlock.unlock(reason: $0) }
     }
 }

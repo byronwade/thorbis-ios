@@ -157,7 +157,7 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
 
-        for title in ["Reschedule", "Add to Calendar", "Reassign technician", "Wrap up", "Follow-ups", "Show to customer", "Copy job ID"] {
+        for title in ["Reschedule", "Add to Calendar", "Reassign technician", "Wrap up", "Follow-ups", "Customer view", "Copy job ID"] {
             let action = button(startingWith: title, in: app)
             XCTAssertTrue(action.waitForExistence(timeout: 3), "Missing secondary action: \(title)")
             // A long menu opens at half height and scrolls; reach lower rows the way a person would.
