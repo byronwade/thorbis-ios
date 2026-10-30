@@ -291,16 +291,20 @@ private struct CustomerInvoiceBookPage: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(invoice.origin == "estimate_deposit" ? "Deposit invoice" : "Invoice")
                         .font(Theme.font(type.heading, weight: .medium)).accessibilityIdentifier("customer-invoice-summary")
-                    PaperStatusChip(status: invoice.status)
+                    if fresh { PaperStatusChip(status: invoice.status) }
+                    else { Text("Status needs refresh").font(Theme.font(type.body)).foregroundStyle(Theme.muted) }
                     if signed, let authorization = invoice.customerAuthorization {
                         Label("Signed by \(authorization.signerName)", systemImage: "signature")
                             .font(Theme.font(type.body))
                     }
                     if let amounts {
-                        Text(invoice.status == "void" ? "Voided invoice" : amounts.due == 0 ? "Paid in full" : "Amount due")
+                        let balance = CustomerInvoiceBalanceSummary(status: invoice.status, fresh: fresh, amounts: amounts,
+                            historyReconciled: model.historyComplete && model.paymentTotalCents == amounts.paid)
+                        Text(balance.title)
                             .font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-                        if invoice.status != "void" {
-                            Text(money(amounts.due, currency: invoice.currency)).font(Theme.monoFont(type.total, weight: .medium))
+                        if let headlineAmount = balance.amount {
+                            Text(money(headlineAmount, currency: invoice.currency))
+                                .font(Theme.monoFont(type.total, weight: .medium))
                         }
                         CustomerLinesCard(lines: invoice.lines, currency: invoice.currency, type: type,
                             rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"))

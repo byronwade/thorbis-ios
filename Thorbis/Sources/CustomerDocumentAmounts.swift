@@ -35,3 +35,28 @@ struct CustomerDocumentAmounts: Equatable {
         due = amountPaid >= final ? 0 : final - amountPaid
     }
 }
+
+/// Customer-facing invoice headline; never infers a payment from a zero balance.
+struct CustomerInvoiceBalanceSummary: Equatable {
+    let title: String
+    let amount: Int?
+
+    init(title: String, amount: Int?) { self.title = title; self.amount = amount }
+
+    init(status: String, fresh: Bool, amounts: CustomerDocumentAmounts, historyReconciled: Bool) {
+        if !fresh {
+            self.init(title: status == "void" ? "Last known status: Voided" : "Last known balance",
+                      amount: status == "void" ? nil : amounts.due)
+        } else if status == "void" {
+            self.init(title: "Voided invoice", amount: nil)
+        } else if status == "draft" {
+            self.init(title: "Draft total", amount: amounts.total)
+        } else if amounts.due > 0 {
+            self.init(title: "Amount due", amount: amounts.due)
+        } else if status == "paid", amounts.paid > 0, historyReconciled {
+            self.init(title: "Paid in full", amount: 0)
+        } else {
+            self.init(title: "No balance due", amount: 0)
+        }
+    }
+}

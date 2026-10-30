@@ -62,6 +62,12 @@ enum PaperPreview {
             primary.customerAuthorization = .init(id: "00000000-0000-4000-8000-000000009501", signerName: "Preview customer",
                 signedAt: "2026-10-27T12:00:00Z", imageMediaId: "00000000-0000-4000-8000-000000009502", linesRevision: primary.linesRevision)
         }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-zero") {
+            primary = changed(primary, ["lines": [], "amountPaid": 0])
+        }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-draft") {
+            primary = changed(primary, ["status": "draft"])
+        }
         let original = primary
         if isJobDocumentsMoneyPreview {
             let discount = FieldLine(id: "00000000-0000-4000-8000-000000009104", description: "Member discount", quantity: 1,
@@ -547,6 +553,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ !Self.scenario.reviewConnectionRestored }) {
             status = 503
             payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
+        } else if PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-deposit-history-failure"),
+                  url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/payments" {
+            status = 503
+            payload = ["status": 503, "title": "Sample payment history unavailable"]
         } else if PaperPreview.isJobEstimateRecoveryPreview,
                   url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
                   Self.scenario.lock.withLock({ Self.scenario.estimateUnavailable }) {
