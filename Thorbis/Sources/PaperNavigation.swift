@@ -19,6 +19,8 @@ struct RootView: View {
     @State private var showSettings = false
     @State private var path = NavigationPath()
     @State private var schedulePath = NavigationPath()
+    @State private var typedSchedulePath: [PaperTypedJobsRoute] = []
+    @StateObject private var typedScheduleOwner = PaperTypedJobsOwner()
     @State private var jobsPath = NavigationPath()
     @State private var typedJobsPath: [PaperTypedJobsRoute] = []
     @StateObject private var typedJobsOwner = PaperTypedJobsOwner()
@@ -307,7 +309,7 @@ struct RootView: View {
         .background(Theme.background)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
-        .onChange(of: store.requestedSchedule) { schedulePath = NavigationPath(); primaryTab = .schedule }
+        .onChange(of: store.requestedSchedule) { resetSchedulePath(); primaryTab = .schedule }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord(phone: true) }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
@@ -336,6 +338,10 @@ struct RootView: View {
             await store.refresh(api)
             #if DEBUG
             guard PaperPreview.enabled else { return }
+            if ProcessInfo.processInfo.arguments.contains("--typed-route-test-schedule-deep-link") {
+                store.requestedJobID = PaperPreview.jobID
+                return
+            }
             if PaperPreview.screen == "new-estimate" { previewNewEstimate = true; return }
             if PaperPreview.screen == "offline" || PaperPreview.screen == "offline-job" {
                 PaperPreviewProtocol.simulateNoSignal = true
@@ -418,7 +424,7 @@ struct RootView: View {
     /// Tabs stay stable for every role; a tab the role cannot use says so (HIG-005).
     private var atTabRoot: Bool {
         switch selectedTab {
-        case PrimaryTab.schedule.rawValue: schedulePath.isEmpty
+        case PrimaryTab.schedule.rawValue: typedJobsExperiment ? typedSchedulePath.isEmpty : schedulePath.isEmpty
         case PrimaryTab.jobs.rawValue: typedJobsExperiment ? typedJobsPath.isEmpty : jobsPath.isEmpty
         case PrimaryTab.customers.rawValue: customersPath.isEmpty
         case PrimaryTab.more.rawValue: morePath.isEmpty
@@ -452,8 +458,8 @@ struct RootView: View {
             let tabs = layout.visibleTabs(session)
             if tabs.contains(.schedule) {
                 primaryTab = .schedule
-                schedulePath = NavigationPath()
-                schedulePath.append(PaperRoute.job(item.id))
+                resetSchedulePath()
+                pushSchedulePaper(.job(item.id))
             } else if tabs.contains(.jobs) {
                 primaryTab = .jobs
                 resetJobsPath()
@@ -489,7 +495,22 @@ struct RootView: View {
 
     @ViewBuilder private func tabRoot(_ item: MenuItem) -> some View {
         switch item {
-        case .schedule: NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.paperDestinations() }
+        case .schedule:
+            if typedJobsExperiment {
+                NavigationStack(path: Binding(get: { typedSchedulePath }, set: { next in
+                    let old = typedSchedulePath
+                    typedSchedulePath = next
+                    typedScheduleOwner.changed(from: old, to: next)
+                })) {
+                    gated(.schedule) { ScheduleView() }
+                        .environment(\.paperTypedJobsOwner, typedScheduleOwner)
+                        .navigationDestination(for: PaperTypedJobsRoute.self) { route in
+                            typedJobsDestination(route).environment(\.paperTypedJobsOwner, typedScheduleOwner)
+                        }
+                }
+            } else {
+                NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.paperDestinations() }
+            }
         case .jobs:
             if typedJobsExperiment {
                 NavigationStack(path: Binding(get: { typedJobsPath }, set: { next in
@@ -513,6 +534,18 @@ struct RootView: View {
                 if let route = item.route { PaperRouteView(route: route).paperDestinations() }
             }
         }
+    }
+
+    private func resetSchedulePath() {
+        if typedJobsExperiment { typedScheduleOwner.discardPendingPop(); typedSchedulePath = [] } else { schedulePath = NavigationPath() }
+    }
+
+    private func pushScheduleJob(_ job: Job) {
+        if typedJobsExperiment { typedScheduleOwner.discardPendingPop(); typedSchedulePath.append(.job(job)) } else { schedulePath.append(job) }
+    }
+
+    private func pushSchedulePaper(_ route: PaperRoute) {
+        if typedJobsExperiment { typedScheduleOwner.discardPendingPop(); typedSchedulePath.append(.paper(route)) } else { schedulePath.append(route) }
     }
 
     private func resetJobsPath() {
@@ -570,8 +603,8 @@ struct RootView: View {
             let tabs = layout.visibleTabs(session)
             if tabs.contains(.schedule) {
                 primaryTab = .schedule
-                schedulePath = NavigationPath()
-                schedulePath.append(job)
+                resetSchedulePath()
+                pushScheduleJob(job)
             } else if tabs.contains(.jobs) {
                 primaryTab = .jobs
                 resetJobsPath()
