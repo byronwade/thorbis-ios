@@ -1,6 +1,22 @@
 import XCTest
 
 @MainActor
+/// The job's ••• door to Customer view. The header or bar door has the same name, so this picks the menu row.
+func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
+    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@",
+                                     "Customer view", "job-customer-view", "job-customer-view-bar")).firstMatch
+}
+
+/// Customer view's home: bring a document card fully above the fixed hand-back footer before tapping it.
+func thorbisRevealInCustomerView(_ element: XCUIElement, in app: XCUIApplication) {
+    XCTAssertTrue(element.waitForExistence(timeout: 10))
+    let list = app.scrollViews["customer-job-documents-list"]
+    let footer = app.buttons["Hand back to the technician"].firstMatch
+    for _ in 0..<8 where !(element.isHittable && (!footer.exists || element.frame.maxY <= footer.frame.minY)) {
+        list.swipeUp(velocity: .slow)
+    }
+}
+
 func thorbisStableButton(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
     let query = app.buttons.matching(identifier: identifier)
     var previous: CGRect?
@@ -89,7 +105,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testTwoSameTitleEstimatesApproveIndependentlyInOneProtectedHandoff() throws {
         let app = open(["--paper-preview-handoff-duplicate-titles", "--paper-preview-handoff-hide-controls"])
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
@@ -103,7 +119,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
         draw(app); thorbisStableButton(app, "handoff-submit-approval").tap()
         XCTAssertTrue(app.buttons["Next estimate"].waitForExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["Present estimates"].isHittable)
+        XCTAssertFalse(app.buttons["Customer view"].isHittable)
         app.buttons["Next estimate"].tap()
         XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.descendants(matching: .any)["customer-estimate-signature-pad"].value as? String, "Signature required", "The second estimate needs fresh ink")
@@ -117,13 +133,13 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(Set(approvals.compactMap { $0["estimateID"] as? String }).count, 2)
         XCTAssertEqual(Set(approvals.compactMap { $0["mediaID"] as? String }).count, 2)
         XCTAssertEqual(proof["ownerAuthenticationAttempts"] as? Int, 0)
-        XCTAssertFalse(app.buttons["Present estimates"].isHittable)
+        XCTAssertFalse(app.buttons["Customer view"].isHittable)
         capture(app, "Two independent approvals before one technician handback")
         ownerExit(app).tap()
-        waitHittable(app.buttons["Present estimates"])
+        waitHittable(app.buttons["Customer view"])
     }
     private func reachSecondSignature(_ app: XCUIApplication, optionID: String? = nil, firstPrice: String = "$190.00") {
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
         if let optionID { app.buttons[optionID].tap() }
@@ -176,7 +192,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testCommitSurfaceRespondsToTapAwayFromTheTitle() {
         let app = open(["--paper-preview-handoff-hide-controls"])
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         let select = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(select.waitForExistence(timeout: 10)); selectEstimate(app, select)
         let review = app.buttons["Review selected (1)"]
@@ -186,7 +202,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     private func interruptPreparation(_ label: String) throws {
         let app = open()
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         let select = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(select.waitForExistence(timeout: 10)); selectEstimate(app, select); thorbisStableButton(app, "handoff-review-selected").tap()
         XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10)); thorbisStableButton(app, "handoff-continue-signatures").tap()
@@ -216,11 +232,11 @@ final class JobEstimateHandoffUITests: XCTestCase {
         reachSecondSignature(app)
         ownerExit(app).tap()
         XCTAssertTrue(app.textFields["Your full name"].exists)
-        XCTAssertFalse(app.buttons["Present estimates"].isHittable)
+        XCTAssertFalse(app.buttons["Customer view"].isHittable)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1)
         toggleSampleControls(app); app.buttons["Allow sample unlock"].tap(); toggleSampleControls(app)
-        ownerExit(app).tap(); waitHittable(app.buttons["Present estimates"])
-        app.buttons["Present estimates"].tap()
+        ownerExit(app).tap(); waitHittable(app.buttons["Customer view"])
+        app.buttons["Customer view"].tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 2)
         XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
@@ -238,7 +254,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15)); app.buttons["See approvals"].tap()
         XCTAssertTrue(app.staticTexts["handoff-results-summary"].waitForExistence(timeout: 10))
         capture(app, "Production layout two completed estimates and one handback")
-        ownerExit(app).tap(); waitHittable(app.buttons["Present estimates"])
+        ownerExit(app).tap(); waitHittable(app.buttons["Customer view"])
     }
     func testPackageChoiceKeepsItsCanonicalConsentWhileAnotherEstimateApprovesIndependently() throws {
         let app = open(["--paper-preview-handoff-options", "--paper-preview-handoff-public-patch-no-acceptance", "--paper-preview-handoff-hide-controls"])
@@ -286,7 +302,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         ownerExit(app).tap()
         XCTAssertTrue(app.buttons["Check approval"].exists)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1, "A visible protected child exit must invoke the real owner boundary, not no-op")
-        XCTAssertFalse(app.buttons["Present estimates"].isHittable)
+        XCTAssertFalse(app.buttons["Customer view"].isHittable)
         app.buttons["Back to selected work"].tap()
         XCTAssertFalse(app.buttons["Continue to signatures"].exists, "There is no new signature checkpoint when every selected item is confirmed or unconfirmed")
         app.buttons["Back to estimates"].tap(); app.buttons["Check approval"].tap()
@@ -304,7 +320,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testLargestTextDarkModeKeepsBothEstimatesAndProtectedNavigationReachable() {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-thorbis.appearance", "dark"])
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         _ = ownerExit(app)
         capture(app, "Largest text dark estimate overview top")
@@ -323,11 +339,11 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertNotNil(back); back?.tap()
         XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
         ownerExit(app).tap()
-        waitHittable(app.buttons["Present estimates"])
+        waitHittable(app.buttons["Customer view"])
     }
     func testSelectedReviewShowsCanonicalDiscountBreakdown() {
         let app = open(["--paper-preview-handoff-discount", "--paper-preview-handoff-hide-controls"])
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         let select = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(select.waitForExistence(timeout: 10)); selectEstimate(app, select); thorbisStableButton(app, "handoff-review-selected").tap()
         XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
@@ -337,7 +353,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testApprovedSameTitleEstimateStaysVisibleBesideSentZeroWithoutReapproval() {
         let app = open(["--paper-preview-handoff-duplicate-titles", "--paper-preview-handoff-mixed", "--paper-preview-handoff-hide-controls"])
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         let select = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(select.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
@@ -353,7 +369,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testActualSignedOutBranchAndDeniedUnlockKeepProtectedOwner() {
         let app = open(["--paper-preview-handoff-denied-unlock"])
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         toggleSampleControls(app); app.buttons["End sample session shortly"].tap()
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "signedOut"), object: app.staticTexts["handoff-sample-session"])
@@ -369,7 +385,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testActualWorkspaceSelectionBranchKeepsProtectedOwner() {
         let app = open()
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         toggleSampleControls(app); app.buttons["Choose sample workspace shortly"].tap()
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "choosingWorkspace"), object: app.staticTexts["handoff-sample-session"])
@@ -383,7 +399,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testActualWorkspaceBranchRetirementKeepsProtectedOwner() {
         let app = open()
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 10)); app.buttons["Present estimates"].tap()
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 10)); app.buttons["Customer view"].tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         toggleSampleControls(app)
         app.buttons["Change sample workspace shortly"].tap()
@@ -404,7 +420,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(first.label.contains("Sample repair") && first.label.contains("$190.00") && first.label.contains("Sent"))
         XCTAssertTrue(second.label.contains("Sample additional work") && second.label.contains("$320.00") && second.label.contains("Sent"))
         XCTAssertTrue(app.buttons["Add estimate"].exists)
-        let present = app.buttons["Present estimates"]
+        let present = app.buttons["Customer view"]
         XCTAssertTrue(present.exists)
         // At accessibility sizes the section row is one pinned chooser (a40f825), not tabs.
         let tabs = app.buttons["job-section-chooser"]
@@ -432,8 +448,8 @@ final class JobEstimateHandoffUITests: XCTestCase {
 
     func testAllEstimatesUseOnePrimaryEntryAndKeepAddVisible() {
         let app = open(["--paper-preview-handoff-hide-controls"])
-        XCTAssertTrue(app.buttons["Present estimates"].waitForExistence(timeout: 30), "Existing estimates need one obvious customer presentation action")
-        let present = thorbisStableButton(app, "Present estimates")
+        XCTAssertTrue(app.buttons["Customer view"].waitForExistence(timeout: 30), "Existing estimates need one obvious customer presentation action")
+        let present = thorbisStableButton(app, "Customer view")
         capture(app, "Job estimates before entering customer handoff")
         XCTAssertTrue(app.buttons["Add estimate"].exists)
         present.tap()

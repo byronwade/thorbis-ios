@@ -347,7 +347,7 @@ struct CustomerModeOwnerUnlockButton: View {
             HStack(spacing: 8) { Image(systemName: "lock"); Text("Hand back") }
                 .font(Theme.font(17, weight: .medium)).frame(minHeight: CustomerModeStyle.target)
         }
-        .accessibilityLabel("Hand back to the technician")
+        .accessibilityLabel("Hand back")
         .accessibilityHint("Technician authentication is required to leave customer mode.")
         .accessibilityIdentifier("customer-mode-owner-exit")
         .disabled(busy || unlock == nil)
@@ -404,7 +404,7 @@ struct CustomerModeContainer<Content: View>: View {
                     else { Image(systemName: "lock").font(.system(size: 20)) }
                 }.frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
             }
-            .accessibilityLabel(ownerControlTitle == nil ? "Technician: unlock to leave customer mode" : "Hand back to the technician")
+            .accessibilityLabel(ownerControlTitle == nil ? "Technician: unlock to leave customer mode" : "Hand back")
             .accessibilityHint("Technician authentication is required to leave customer mode.")
             .accessibilityIdentifier(ownerControlTitle == nil ? "lock" : "customer-mode-owner-exit")
             .disabled(unlocking)
@@ -442,54 +442,106 @@ struct CustomerModeContainer<Content: View>: View {
 
 // MARK: - Screen
 
-/// "Show to customer": the customer's own details, presented in customer mode for them to check
-/// and correct on the technician's phone or iPad. Notes, balances, gate codes, other customers and
-/// the rest of the app stay hidden, and nothing is saved until the technician has unlocked the
-/// device and seen the changes. Each save is the normal audited customer write, under the
-/// technician's name.
-struct CustomerSelfEditView: View {
+/// The customer's own details in customer mode: the draft they edit, then the technician's audited
+/// save. One model so Customer view can hold the draft across its other sections and run the staff
+/// review only after the technician has unlocked.
+@MainActor
+final class CustomerSelfEditModel: ObservableObject {
     let customerID: String
-    let onFinished: () -> Void
+    @Published var draft: CustomerSelfEditDraft?
+    @Published private(set) var loadError: String?
+    @Published private(set) var saving = false
+    @Published private(set) var saveError: String?
+    @Published private(set) var savedAll = false
+    private let consentKey = UUID().uuidString
 
+    init(customerID: String) { self.customerID = customerID }
+
+    var hasChanges: Bool { draft?.hasChanges == true }
+
+    func load(api: APIClient) async {
+        guard draft == nil else { return }
+        do {
+            let record = try await api.fieldCustomer(customerID)
+            let contacts = try await api.fieldContacts(customerID)
+            let locations = try await api.fieldLocations(customerID)
+            let consent: CustomerSmsConsent?
+            do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
+            guard draft == nil else { return }
+            draft = CustomerSelfEditDraft(record: record, contacts: contacts, locations: locations, smsConsent: consent)
+        } catch is CancellationError {
+        } catch {
+            loadError = error.isConnectivityFailure ? "This needs a connection." : "Something went wrong."
+        }
+    }
+
+    /// Customer record first, then contacts, addresses and the text decision. Each step is its own
+    /// audited write; the draft is rebased after each one so a retry doesn't repeat finished work.
+    func save(api: APIClient) async {
+        guard var current = draft else { return }
+        saving = true
+        defer { saving = false }
+        saveError = nil
+        do {
+            let update = current.customerUpdate
+            if !update.isEmpty {
+                let record = try await api.updateFieldCustomer(customerID, request: update)
+                current = current.rebased(record: record)
+                draft = current
+            }
+            for change in current.contactUpdates {
+                let saved = try await api.updateFieldContact(customerID, change.id, request: change.request)
+                current = current.rebased(contact: saved)
+                draft = current
+            }
+            if let create = current.newContact {
+                _ = try await api.createFieldContact(customerID, request: create)
+                current.newContactName = ""; current.newContactPhone = ""; current.newContactEmail = ""
+                draft = current
+            }
+            if !current.locationChanges.isEmpty {
+                let records = try await api.fieldLocations(customerID)
+                for change in current.locationChanges {
+                    guard let existing = records.first(where: { $0.id == change.id }) else { continue }
+                    let saved = try await api.updateFieldLocation(customerID, change.id, request: FieldLocationUpdate(
+                        label: existing.label, kind: existing.kind, address: change.address, notes: existing.notes,
+                        // The map pin belonged to the old address.
+                        coordinates: nil, gateCode: existing.gateCode, alarmCode: existing.alarmCode,
+                        dogOnSite: existing.dogOnSite, parking: existing.parking))
+                    current = current.rebased(location: saved)
+                    draft = current
+                }
+            }
+            if let texts = current.textsChange {
+                let consent: CustomerSmsConsent?
+                do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
+                _ = try await api.recordCustomerSmsConsent(
+                    customerID, grant: texts, expectedVersion: consent?.version, idempotencyKey: consentKey,
+                    evidenceRef: "Customer chose this themselves in customer mode on staff's Thorbis iPhone app")
+            }
+            savedAll = true
+        } catch is CancellationError {
+        } catch {
+            saveError = error.isConnectivityFailure ? "Saving needs a connection. Try again when you have signal." : error.localizedDescription
+        }
+    }}
+
+/// The customer's side: check and fix their details. `done` leaves this form (hand back, or back to
+/// Customer view); nothing is saved here.
+struct CustomerSelfEditForm: View {
+    @ObservedObject var model: CustomerSelfEditModel
+    var doneTitle = "Done"
+    let done: () -> Void
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
-    @State private var draft: CustomerSelfEditDraft?
-    @State private var loadError: String?
-    @State private var staffReview = false
-    @State private var savedAll = false
     @State private var showErrors = false
-    @State private var saving = false
-    @State private var saveError: String?
-    @State private var consentKey = UUID().uuidString
     @FocusState private var focused: Bool
 
     private var businessName: String { session.activeOrganization?.name ?? "us" }
 
     var body: some View {
-        if staffReview {
-            NavigationStack {
-                Group { if savedAll { saved } else { review } }
-                    .background(Theme.background.ignoresSafeArea())
-                    .foregroundStyle(Theme.foreground)
-                    .navigationTitle("Customer view")
-                    .navigationBarTitleDisplayMode(.inline)
-            }
-            .interactiveDismissDisabled(saving)
-        } else {
-            CustomerModeContainer(onUnlocked: {
-                focused = false
-                if draft?.hasChanges == true { staffReview = true } else { onFinished() }
-            }) { handBack in
-                editing(handBack: handBack)
-            }
-            .task { await load() }
-        }
-    }
-
-    // MARK: Editing (customer)
-
-    @ViewBuilder private func editing(handBack: @escaping () -> Void) -> some View {
-        if let draft = Binding($draft) {
+        Group {
+        if let draft = Binding($model.draft) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -563,75 +615,23 @@ struct CustomerSelfEditView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom) {
-                CustomerCommitButton(title: "Done") {
+                CustomerCommitButton(title: doneTitle) {
                     focused = false
-                    if draft.wrappedValue.isValid { handBack() } else { showErrors = true }
+                    if draft.wrappedValue.isValid { done() } else { showErrors = true }
                 }
                 .frame(maxWidth: CustomerModeStyle.readableWidth)
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
                 .frame(maxWidth: .infinity)
                 .background(Theme.background)
             }
-        } else if let loadError {
+        } else if let loadError = model.loadError {
             ContentUnavailableView("Couldn't open your details", systemImage: "person.crop.circle.badge.exclamationmark",
                                    description: Text(loadError + " Hand the device back to your technician."))
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    // MARK: Review (technician)
-
-    private var review: some View {
-        let changes = draft?.changeSummary ?? []
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Review changes").font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                    .accessibilityAddTraits(.isHeader)
-                Text("These save to the customer's record and activity under your name.")
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(changes.enumerated()), id: \.offset) { index, line in
-                        Text(line).font(Theme.font(15)).padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        if index < changes.count - 1 { Divider().overlay(Theme.border) }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                if let saveError {
-                    Text(saveError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
-                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 10))
-                }
-            }
-            .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
-            .padding(.horizontal, Theme.gutter).padding(.top, 8)
-            .frame(maxWidth: .infinity)
         }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 8) {
-                PrimaryButton(title: "Save changes", busy: saving) { Task { await save() } }
-                Button("Discard changes", role: .destructive) { onFinished() }
-                    .font(Theme.font(15, weight: .medium)).frame(minHeight: 44).disabled(saving)
-            }
-            .frame(maxWidth: CustomerModeStyle.readableWidth)
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(Theme.background)
-        }
-    }
-
-    private var saved: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "checkmark.circle").font(.system(size: 44)).foregroundStyle(Theme.success).accessibilityHidden(true)
-            Text("Customer details saved").font(Theme.font(22, weight: .semibold))
-            Spacer()
-            PrimaryButton(title: "Done") { onFinished() }.frame(maxWidth: CustomerModeStyle.readableWidth)
-        }
-        .padding(.horizontal, Theme.gutter).padding(.bottom, 16)
-        .frame(maxWidth: .infinity)
+        .task { await model.load(api: api) }
     }
 
     // MARK: Pieces
@@ -679,75 +679,104 @@ struct CustomerSelfEditView: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
+}
 
-    // MARK: Actions
+/// The technician's side, after unlocking: review the customer's changes, then save under staff's name.
+struct CustomerSelfEditReview: View {
+    @ObservedObject var model: CustomerSelfEditModel
+    let onFinished: () -> Void
+    @EnvironmentObject private var api: APIClient
 
-    private func load() async {
-        guard draft == nil else { return }
-        do {
-            let record = try await api.fieldCustomer(customerID)
-            let contacts = try await api.fieldContacts(customerID)
-            let locations = try await api.fieldLocations(customerID)
-            let consent: CustomerSmsConsent?
-            do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
-            draft = CustomerSelfEditDraft(record: record, contacts: contacts, locations: locations, smsConsent: consent)
-        } catch is CancellationError {
-        } catch {
-            loadError = error.isConnectivityFailure ? "This needs a connection." : "Something went wrong."
+    var body: some View {
+        NavigationStack {
+            Group { if model.savedAll { saved } else { review } }
+                .background(Theme.background.ignoresSafeArea())
+                .foregroundStyle(Theme.foreground)
+                .navigationTitle("Customer view")
+                .navigationBarTitleDisplayMode(.inline)
+        }
+        .interactiveDismissDisabled(model.saving)
+    }
+
+    private var review: some View {
+        let changes = model.draft?.changeSummary ?? []
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Review changes").font(Theme.font(24, weight: .medium)).tracking(-0.36)
+                    .accessibilityAddTraits(.isHeader)
+                Text("These save to the customer's record and activity under your name.")
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(changes.enumerated()), id: \.offset) { index, line in
+                        Text(line).font(Theme.font(15)).padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        if index < changes.count - 1 { Divider().overlay(Theme.border) }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                if let saveError = model.saveError {
+                    Text(saveError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
+            .padding(.horizontal, Theme.gutter).padding(.top, 8)
+            .frame(maxWidth: .infinity)
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 8) {
+                PrimaryButton(title: "Save changes", busy: model.saving) { Task { await model.save(api: api) } }
+                Button("Discard changes", role: .destructive) { onFinished() }
+                    .font(Theme.font(15, weight: .medium)).frame(minHeight: 44).disabled(model.saving)
+            }
+            .frame(maxWidth: CustomerModeStyle.readableWidth)
+            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(Theme.background)
         }
     }
 
-    /// Customer record first, then contacts, addresses and the text decision. Each step is its own
-    /// audited write; the draft is rebased after each one so a retry doesn't repeat finished work.
-    private func save() async {
-        guard var current = draft else { return }
-        saving = true
-        defer { saving = false }
-        saveError = nil
-        do {
-            let update = current.customerUpdate
-            if !update.isEmpty {
-                let record = try await api.updateFieldCustomer(customerID, request: update)
-                current = current.rebased(record: record)
-                draft = current
+    private var saved: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "checkmark.circle").font(.system(size: 44)).foregroundStyle(Theme.success).accessibilityHidden(true)
+            Text("Customer details saved").font(Theme.font(22, weight: .semibold))
+            Spacer()
+            PrimaryButton(title: "Done") { onFinished() }.frame(maxWidth: CustomerModeStyle.readableWidth)
+        }
+        .padding(.horizontal, Theme.gutter).padding(.bottom, 16)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// Customer view without a job: just "Your details", in customer mode, then the staff review.
+struct CustomerSelfEditView: View {
+    let customerID: String
+    let onFinished: () -> Void
+    @StateObject private var model: CustomerSelfEditModel
+    @State private var staffReview = false
+
+    init(customerID: String, onFinished: @escaping () -> Void) {
+        self.customerID = customerID
+        self.onFinished = onFinished
+        _model = StateObject(wrappedValue: CustomerSelfEditModel(customerID: customerID))
+    }
+
+    var body: some View {
+        if staffReview {
+            CustomerSelfEditReview(model: model, onFinished: onFinished)
+        } else {
+            CustomerModeContainer(onUnlocked: {
+                if model.hasChanges { staffReview = true } else { onFinished() }
+            }) { handBack in
+                CustomerSelfEditForm(model: model, done: handBack)
             }
-            for change in current.contactUpdates {
-                let saved = try await api.updateFieldContact(customerID, change.id, request: change.request)
-                current = current.rebased(contact: saved)
-                draft = current
-            }
-            if let create = current.newContact {
-                _ = try await api.createFieldContact(customerID, request: create)
-                current.newContactName = ""; current.newContactPhone = ""; current.newContactEmail = ""
-                draft = current
-            }
-            if !current.locationChanges.isEmpty {
-                let records = try await api.fieldLocations(customerID)
-                for change in current.locationChanges {
-                    guard let existing = records.first(where: { $0.id == change.id }) else { continue }
-                    let saved = try await api.updateFieldLocation(customerID, change.id, request: FieldLocationUpdate(
-                        label: existing.label, kind: existing.kind, address: change.address, notes: existing.notes,
-                        // The map pin belonged to the old address.
-                        coordinates: nil, gateCode: existing.gateCode, alarmCode: existing.alarmCode,
-                        dogOnSite: existing.dogOnSite, parking: existing.parking))
-                    current = current.rebased(location: saved)
-                    draft = current
-                }
-            }
-            if let texts = current.textsChange {
-                let consent: CustomerSmsConsent?
-                do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
-                _ = try await api.recordCustomerSmsConsent(
-                    customerID, grant: texts, expectedVersion: consent?.version, idempotencyKey: consentKey,
-                    evidenceRef: "Customer chose this themselves in customer mode on staff's Thorbis iPhone app")
-            }
-            savedAll = true
-        } catch is CancellationError {
-        } catch {
-            saveError = error.isConnectivityFailure ? "Saving needs a connection. Try again when you have signal." : error.localizedDescription
         }
     }
 }
+
 
 extension CustomerSelfEditDraft {
     /// After a step saves, later steps compare against what the server now holds.

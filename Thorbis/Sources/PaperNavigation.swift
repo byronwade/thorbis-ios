@@ -616,7 +616,8 @@ struct RootView: View {
                 morePath.append(PaperRoute.billingSchedule("00000000-0000-4000-8000-000000009501"))
             case "new-customer": primaryTab = .customers; previewNewCustomer = true
             case "revenue": primaryTab = .more; morePath.append(PaperRoute.revenue)
-            case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups":
+            case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
+                 "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details":
                 if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs
                     jobsPath.append(job)

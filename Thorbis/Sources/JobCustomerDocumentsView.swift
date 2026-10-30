@@ -5,7 +5,9 @@ private enum CustomerJobPaper: Hashable {
     case invoice(InvoiceRecord, signing: Bool)
 }
 
-/// Lives inside one CustomerModeContainer: browsing never exposes technician controls.
+/// Customer view's home. Lives inside one CustomerModeContainer: the job's estimates (select and
+/// approve one or several), its invoices with their payments, and the customer's own details.
+/// Browsing never exposes technician controls.
 struct JobCustomerDocumentsView: View {
     let scope: JobDocumentScope
     @ObservedObject var documents: JobDocumentCollections
@@ -19,6 +21,11 @@ struct JobCustomerDocumentsView: View {
     let requestPayment: (String) -> Void
     let invoiceUpdated: (InvoiceRecord) -> Void
     var authenticateOwner: @MainActor (String) async -> Bool = { await StaffUnlock.unlock(reason: $0) }
+    /// The job's multi-estimate selection and approval, opened from Estimates.
+    var handoff: JobEstimateHandoffModel? = nil
+    /// The customer's own details, when this person may edit customers.
+    var details: CustomerSelfEditModel? = nil
+    var start: CustomerViewStart = .home
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
@@ -30,10 +37,14 @@ struct JobCustomerDocumentsView: View {
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var error: String?
     @State private var unlocking = false
+    @State private var approving = false
+    @State private var editingDetails = false
+    @State private var started = false
 
     private var currentWorkspace: Bool { sourceGeneration == session.generation && session.user != nil && session.activeOrganization?.id == scope.organizationID }
     private var canViewEstimates: Bool { session.can("estimate.view", feature: "estimates") }
     private var canViewInvoices: Bool { session.can("invoice.view", feature: "invoicing") }
+    private var canEditDetails: Bool { details != nil && session.can("customer.edit", feature: "core_crm") }
 
     var body: some View {
         Group {
@@ -53,6 +64,7 @@ struct JobCustomerDocumentsView: View {
                         }
                         if canViewEstimates { estimateRows }
                         if canViewInvoices { invoiceRows }
+                        if canEditDetails { detailsRow }
                     }
                     .padding(.horizontal, Theme.gutter).padding(.vertical, 16)
                     .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
@@ -64,7 +76,7 @@ struct JobCustomerDocumentsView: View {
                     .font(Theme.font(20)).padding(Theme.gutter)
             }
         }
-        .navigationTitle("Documents")
+        .navigationTitle("Customer view")
         .safeAreaInset(edge: .bottom) {
             CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: handBack)
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.background)
@@ -113,17 +125,62 @@ struct JobCustomerDocumentsView: View {
                     .font(Theme.font(20)).padding(Theme.gutter)
             }
         }
+        .thorbisDestination(isPresented: $approving) {
+            // The handoff guards itself: a changed session or access shows its own hand-back screen.
+            if let handoff {
+                JobEstimateHandoffView(model: handoff, handBack: beginHandBack)
+                    .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
+            } else {
+                Text("Hand the device back to your technician to reload this job.")
+                    .font(Theme.font(20)).padding(Theme.gutter)
+            }
+        }
+        .thorbisDestination(isPresented: $editingDetails) {
+            if currentWorkspace, canEditDetails, let details {
+                CustomerSelfEditForm(model: details) { editingDetails = false }
+                    .navigationTitle("Your details")
+                    .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
+            } else {
+                Text("Hand the device back to your technician to reload this job.")
+                    .font(Theme.font(20)).padding(Theme.gutter)
+            }
+        }
         .task(id: session.generation) {
             paper = nil
             book = nil
+            editingDetails = false
             paymentModel = nil
             await refresh()
+            if !started {
+                started = true
+                await open(start)
+            }
+        }
+    }
+
+    /// Opens Customer view on the section or document the technician started from.
+    private func open(_ start: CustomerViewStart) async {
+        guard currentWorkspace else { return }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        switch start {
+        case .home: break
+        case .estimates:
+            if canViewEstimates, handoff != nil { withTransaction(instant) { approving = true } }
+        case .estimate(let id):
+            // Opens on this estimate in the job's book; "Review and sign" is one tap away.
+            await openEstimate(id)
+        case .invoice(let id):
+            await openInvoice(id)
+        case .details:
+            if canEditDetails { withTransaction(instant) { editingDetails = true } }
         }
     }
 
     private var estimateRows: some View {
         VStack(alignment: .leading, spacing: 12) {
             PaperGroupHeader(title: "Estimates", count: (estimates?.records.count ?? 0) + (estimates?.unavailableIDs.count ?? 0))
+            approveEstimates
             if let estimates {
                 if estimates.records.isEmpty && estimates.isComplete { empty("No estimates for this job yet.") }
                 ForEach(estimates.records) { estimate in
@@ -140,6 +197,46 @@ struct JobCustomerDocumentsView: View {
                         .accessibilityIdentifier("customer-estimate-unavailable-\(id)")
                 }
             } else { SkeletonRows(count: 2, leading: false, inset: 0) }
+        }
+    }
+
+    /// Approving goes through the job's one multi-estimate review: select one or several, review,
+    /// then sign each. Already approved estimates stay listed without approving again.
+    @ViewBuilder private var approveEstimates: some View {
+        if handoff != nil, let estimates, estimates.records.contains(where: { $0.status == "sent" }) {
+            CustomerSecondaryButton(title: "Choose estimates to approve", type: CustomerType(nil)) { approving = true }
+                .accessibilityIdentifier("customer-view-approve-estimates")
+                .disabled(openingID != nil)
+        }
+    }
+
+    private var detailsRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PaperGroupHeader(title: "Your details", count: nil)
+            Button { editingDetails = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "person.crop.circle").font(.system(size: 22)).foregroundStyle(Theme.brandText)
+                        .frame(width: 30).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Check your details").font(Theme.font(18, weight: .medium))
+                        Text("Name, phone, email, addresses and how to reach you")
+                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Your details")
+            .accessibilityHint("Check and fix your name, phone, email and addresses")
+            .accessibilityIdentifier("customer-view-details")
+            .disabled(openingID != nil)
         }
     }
 
@@ -206,6 +303,8 @@ struct JobCustomerDocumentsView: View {
     private func beginHandBack() {
         paper = nil
         book = nil
+        approving = false
+        editingDetails = false
         handBack()
     }
 

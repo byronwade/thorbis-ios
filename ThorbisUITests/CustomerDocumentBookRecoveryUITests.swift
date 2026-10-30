@@ -55,7 +55,7 @@ final class CustomerDocumentBookRecoveryUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
-        app.buttons["Show to customer"].tap()
+        thorbisCustomerViewMenuItem(app).tap()
         return app
     }
 
