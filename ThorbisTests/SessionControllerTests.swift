@@ -99,6 +99,15 @@ final class SessionControllerTests: XCTestCase {
         let firstRequest = locations.begin(scope: original)
         XCTAssertTrue(locations.receive([location], scope: original, request: firstRequest, current: original))
         XCTAssertEqual(locations.visible(in: original), [location])
+        XCTAssertTrue(locations.containsCurrent(location, in: original))
+        var replacedLocations = locations
+        replacedLocations.remove(id: location.id, scope: original, current: original)
+        XCTAssertFalse(replacedLocations.containsCurrent(location, in: original), "A removed row must invalidate its open canvas")
+        let replacement = ServiceLocationRecord(id: location.id, organizationId: first, customerId: first,
+            label: "Changed address", kind: "service", address: "456 Main", notes: nil, coordinates: nil,
+            gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil, createdAt: "2026", updatedAt: "2027")
+        replacedLocations.save(replacement, scope: original, current: original)
+        XCTAssertFalse(replacedLocations.containsCurrent(location, in: original), "A replaced row must invalidate its old canvas")
         let delayed = locations.begin(scope: original)
         await session.revalidate()
         XCTAssertTrue(locations.visible(in: CustomerLocationScope.capture(session: session, api: api, customerID: first)).isEmpty)

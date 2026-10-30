@@ -222,6 +222,9 @@ struct CustomerScopedLocations {
         guard let current, current == scope else { return [] }
         return rows
     }
+    func containsCurrent(_ row: ServiceLocationRecord, in current: CustomerLocationScope?) -> Bool {
+        visible(in: current).contains(row)
+    }
     @discardableResult mutating func receive(_ records: [ServiceLocationRecord], scope: CustomerLocationScope,
                                                request: Int, current: CustomerLocationScope?) -> Bool {
         guard request == revision, self.scope == scope, current == scope,
@@ -263,6 +266,7 @@ private struct CustomerLocationCanvas: Identifiable {
 private struct CustomerLocationCanvasView: View {
     let item: CustomerLocationCanvas
     let onSaved: (ServiceLocationRecord) -> Void
+    let rowIsCurrent: () -> Bool
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
@@ -272,7 +276,7 @@ private struct CustomerLocationCanvasView: View {
         session.generation == item.generation && session.authorityRevision == item.authorityRevision &&
         api.requestGeneration == item.requestGeneration && session.user?.id == item.actorID &&
         session.activeOrganization?.id == item.organizationID &&
-        session.can("customer.view", feature: "core_crm")
+        session.can("customer.view", feature: "core_crm") && rowIsCurrent()
     }
 
     var body: some View {
@@ -459,17 +463,17 @@ struct CustomerDetailView: View {
     }
 
     private func locationCanvasContent(_ item: CustomerLocationCanvas) -> some View {
-        CustomerLocationCanvasView(item: item) { saved in
+        CustomerLocationCanvasView(item: item, onSaved: { saved in
             guard session.generation == item.generation,
                   session.authorityRevision == item.authorityRevision,
                   api.requestGeneration == item.requestGeneration,
                   session.user?.id == item.actorID,
                   session.activeOrganization?.id == item.organizationID,
                   saved.organizationId == item.organizationID, saved.customerId == customer.id,
-                  let scope = locationScope, locationState.scope == scope, canEdit else { return }
+                  let scope = locationScope, locationState.containsCurrent(item.location, in: scope), canEdit else { return }
             locationState.save(saved, scope: scope, current: locationScope)
             locationError = nil
-        }
+        }, rowIsCurrent: { locationState.containsCurrent(item.location, in: locationScope) })
     }
 
     private var customerContent: some View {
