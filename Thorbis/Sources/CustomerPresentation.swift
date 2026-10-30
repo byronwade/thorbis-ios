@@ -101,6 +101,7 @@ struct CustomerEstimatePresentation: View {
     let customerName: String
     let onApproved: (EstimateRecord?) -> Void
     let onDone: () -> Void
+    let returnToDocuments: (() -> Void)?
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -123,11 +124,13 @@ struct CustomerEstimatePresentation: View {
     private var actionBusy: Bool { busy || handoff?.running == true }
 
     init(estimate: EstimateRecord, jobID: String?, customerName: String, preselectedOptionID: String? = nil,
-         handoff: CustomerEstimateHandoffContext? = nil, onApproved: @escaping (EstimateRecord?) -> Void, onDone: @escaping () -> Void) {
+         handoff: CustomerEstimateHandoffContext? = nil, returnToDocuments: (() -> Void)? = nil,
+         onApproved: @escaping (EstimateRecord?) -> Void, onDone: @escaping () -> Void) {
         self.jobID = jobID
         self.customerName = customerName
         self.onApproved = onApproved
         self.onDone = onDone
+        self.returnToDocuments = returnToDocuments
         _handoffObservation = StateObject(wrappedValue: CustomerEstimateHandoffObservation(handoff))
         var flow = CustomerEstimateFlow(estimate: estimate)
         if let preselectedOptionID {
@@ -338,7 +341,7 @@ struct CustomerEstimatePresentation: View {
             if flow.total != nil {
                 Text(flow.totalText).font(Theme.monoFont(type.total, weight: .medium))
             }
-            Text(handoff == nil ? "Thank you. Please hand the device back to your technician." : "This estimate is approved. Continue when you're ready.")
+            Text(handoff == nil && returnToDocuments == nil ? "Thank you. Please hand the device back to your technician." : "This estimate is approved. Continue when you're ready.")
                 .font(Theme.font(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -387,12 +390,20 @@ struct CustomerEstimatePresentation: View {
                 CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
                 if let error { hint(error, danger: true) } else if !flow.canReview { hint("Choose an option above to continue.") }
                 CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
+                if let returnToDocuments {
+                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                        .disabled(actionBusy || openingReview)
+                }
             case .review:
                 CustomerPresentationCommit(title: flow.approveTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
                 if let error { hint(error, danger: true) }
                 HStack(spacing: 10) {
                     if flow.hasOptions { CustomerSecondaryButton(title: "Back", type: type) { flow.back() } }
                     CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
+                }
+                if let returnToDocuments {
+                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                        .disabled(actionBusy || openingReview)
                 }
             case .sign:
                 let reason = customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(strokes))
@@ -405,13 +416,24 @@ struct CustomerEstimatePresentation: View {
                     if let handoff { handoff.backToReview() } else { flow.back(); error = nil }
                 }
             case .done:
-                CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
+                if let returnToDocuments {
+                    CustomerPresentationCommit(title: "Back to job documents", enabled: true, busy: false, type: type, action: returnToDocuments)
+                        .disabled(actionBusy)
+                    CustomerSecondaryButton(title: "Hand back to the technician", type: type, action: onDone)
+                        .disabled(actionBusy)
+                } else {
+                    CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type, action: onDone)
+                }
             }
             } else {
                 if openingError != nil {
                     CustomerPresentationCommit(title: "Try again", enabled: true, busy: openingReview, type: type) { Task { await openReview() } }
                 }
                 CustomerSecondaryButton(title: "Not today", type: type) { onDone() }
+                if let returnToDocuments {
+                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                        .disabled(actionBusy || openingReview)
+                }
             }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
@@ -643,7 +665,15 @@ struct CustomerEstimatePresentation: View {
         guard let data = SignatureInk.png(strokes) else {
             throw Problem(title: "The signature could not be saved. Try again.", status: nil, detail: nil)
         }
-        let asset = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
+        let transfer: MediaTransfer
+        #if DEBUG
+        if PaperPreview.isJobEstimateHandoff {
+            transfer = MediaTransfer(api: api, storageSession: PaperPreview.handoffStorageTransport())
+        } else { transfer = MediaTransfer(api: api) }
+        #else
+        transfer = MediaTransfer(api: api)
+        #endif
+        let asset = try await transfer.upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
                                                              originalFilename: "signature.png", data: data, tags: ["signature"])
         uploadedSignature = (strokes, asset.id)
         return asset.id

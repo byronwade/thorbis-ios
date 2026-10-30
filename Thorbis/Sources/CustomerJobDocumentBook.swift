@@ -203,7 +203,8 @@ private struct CustomerEstimateBookPage: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(issued?.title ?? estimate.title).font(Theme.font(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
-                    PaperStatusChip(status: estimate.status)
+                    if fresh { PaperStatusChip(status: estimate.status) }
+                    else { Text("Status needs refresh").font(Theme.font(type.body)).foregroundStyle(Theme.muted) }
                     if !fresh {
                         Text("This copy needs a refresh before you can decide.").font(Theme.font(type.body))
                     } else if loading { ProgressView("Opening current estimate…").font(Theme.font(type.body)) }

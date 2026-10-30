@@ -212,6 +212,56 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(JobInvoiceMemory.ids(scope.jobID), [])
     }
 
+    func testMarkingEstimateReadStaleKeepsKnownRowsAndUnavailableReferences() async throws {
+        let client = api([.init(200, page([link(11), link(12)])), .init(200, estimate(11)), .init(503, problem(503))])
+        let documents = JobDocumentCollections()
+        let loaded = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
+        XCTAssertTrue(loaded)
+        documents.markEstimatesStale(scope: scope(job: 101))
+        XCTAssertEqual(documents.estimates?.freshIDs, [id(11)], "A different job cannot invalidate this collection")
+        documents.markEstimatesStale(scope: scope())
+        XCTAssertEqual(documents.estimates?.records.map(\.id), [id(11)])
+        XCTAssertEqual(documents.estimates?.unavailableIDs, [id(12)])
+        XCTAssertEqual(documents.estimates?.freshIDs, [])
+        XCTAssertEqual(documents.estimates?.isComplete, false)
+    }
+
+    func testApprovalResultOnlyReplacesTheMatchingLinkedEstimateAndIsNotFresh() async throws {
+        let client = api([.init(200, page([link(11), link(12)])), .init(200, estimate(11)), .init(200, estimate(12))])
+        let documents = JobDocumentCollections()
+        let loaded = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
+        XCTAssertTrue(loaded)
+        let updatedText = estimate(11).replacingOccurrences(of: "\"status\":\"sent\"", with: "\"status\":\"approved\"")
+        let updated = try JSONDecoder().decode(EstimateRecord.self, from: Data(updatedText.utf8))
+        documents.markEstimatesStale(scope: scope(), updated: updated, requestedID: id(12))
+        XCTAssertEqual(documents.estimates?.records.first?.status, "sent", "An unrelated result must not replace either linked estimate")
+        documents.markEstimatesStale(scope: scope(), updated: updated, requestedID: id(11))
+        XCTAssertEqual(documents.estimates?.records.first?.status, "approved")
+        XCTAssertEqual(documents.estimates?.freshIDs, [])
+        documents.markEstimatesStale(scope: scope(), updated: nil, requestedID: id(11))
+        XCTAssertEqual(documents.estimates?.freshIDs, [], "A nil public approval result cannot make old Sent status current")
+    }
+
+    func testMarkingStaleInvalidatesAnEarlierInFlightEstimateRead() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, page([link(11)])), .init(200, estimate(11)),
+                          .init(200, page([link(11)]), gate: gate)])
+        let documents = JobDocumentCollections()
+        let loaded = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
+        XCTAssertTrue(loaded)
+        let older = Task { await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true }) }
+        for _ in 0..<300 where URLProtocolFixture.recorded.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        documents.markEstimatesStale(scope: scope())
+        gate.release()
+        let published = await older.value
+        XCTAssertFalse(published)
+        XCTAssertEqual(documents.estimates?.records.map(\.id), [id(11)])
+        XCTAssertEqual(documents.estimates?.freshIDs, [])
+        XCTAssertFalse(documents.estimates?.isComplete ?? true)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+    }
+
     func testOlderEstimateReadCannotReplaceNewerEmptySnapshot() async throws {
         let gate = URLProtocolFixture.Gate()
         defer { gate.release() }

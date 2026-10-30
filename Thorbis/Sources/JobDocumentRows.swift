@@ -38,13 +38,13 @@ struct JobDocumentRow: View {
             }
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 8) {
-                    PaperStatusChip(status: status)
+                    statusIndicator
                     Text(reference).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 4)
                     if fresh { PaperDisclosure() }
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    PaperStatusChip(status: status)
+                    statusIndicator
                     HStack {
                         Text(reference).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                         Spacer(minLength: 4)
@@ -73,7 +73,7 @@ struct JobDocumentRow: View {
                 Text(reference).font(Theme.monoFont(customerFacing ? 14 : 12))
                     .foregroundStyle(Theme.muted)
                 Spacer(minLength: 4)
-                PaperStatusChip(status: status)
+                statusIndicator
             }
             Text(title).font(Theme.font(customerFacing ? 20 : 17, weight: .medium))
                 .fixedSize(horizontal: false, vertical: true)
@@ -92,6 +92,11 @@ struct JobDocumentRow: View {
                 if fresh { PaperDisclosure() }
             }
         }
+    }
+
+    @ViewBuilder private var statusIndicator: some View {
+        if fresh { PaperStatusChip(status: status) }
+        else { Text("Status needs refresh").font(Theme.font(customerFacing ? 17 : 13)).foregroundStyle(Theme.muted) }
     }
 }
 

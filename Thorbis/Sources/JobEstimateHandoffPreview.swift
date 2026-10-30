@@ -123,6 +123,10 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         if method == "GET", path == "/v1/jobs" { return .init(status:200,payload:["items":workspaceChanged ? [] : [job()]]) }
         if method == "GET", path == "/v1/customers" { return .init(status:200,payload:["items":[["id":PaperPreview.customerID,"organizationId":org,"name":"Sample customer","accountType":"residential","archived":false,"createdAt":now,"updatedAt":now]]]) }
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)" { return .init(status:200,payload:job()) }
+        if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates",
+           flags.contains("--paper-preview-handoff-membership-fails-after-approval"), !approved.isEmpty {
+            return .init(status: 200, payload: [:], error: URLError(.networkConnectionLost))
+        }
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates", interruptMembership {
             interruptMembership = false; return .init(status: 200, payload: [:], error: URLError(.networkConnectionLost))
         }
