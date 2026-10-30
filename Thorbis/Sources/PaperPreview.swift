@@ -470,6 +470,7 @@ struct SavedWorkPreviewControls: View {
 final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private final class Scenario: @unchecked Sendable {
         let lock = NSLock()
+        var setupPaymentReads = 0
         var invoiceReads = 0
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
@@ -486,7 +487,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -580,6 +581,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ Self.scenario.priceBookQueryFailed }) {
             status = 503
             payload = ["status": 503, "title": "The price book couldn't be loaded."]
+        } else if PaperPreview.onboardingScreen == "onboard-setup",
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-setup-retry"),
+                  url.path == "/v1/organization/merchant-readiness",
+                  Self.scenario.lock.withLock({ Self.scenario.setupPaymentReads += 1; return Self.scenario.setupPaymentReads == 1 }) {
+            status = 503
+            payload = ["status": 503, "title": "Sample setup status unavailable"]
         } else if Self.legacyInvoiceRead(url.path) {
             status = 404
             payload = ["status": 404, "title": "Preview legacy job invoice route"]
