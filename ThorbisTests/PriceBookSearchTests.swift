@@ -144,6 +144,27 @@ final class PriceBookSearchTests: XCTestCase {
         XCTAssertEqual(index.page("unknown", limit: 50).total, 0)
     }
 
+    func testRepeatedSearchChangesRespectFiltersUsageAndCatalogSnapshot() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = item(1, "Copper valve", cents: 100)
+        let second = item(2, "Copper elbow", cents: 200)
+        let service = item(3, "Copper service", kind: "service")
+        let index = PriceBookSearchIndex(items: [first, second, service])
+        let initial = index.page("copper", kind: .material, now: now, limit: 1)
+        XCTAssertEqual(initial.total, 2)
+        XCTAssertEqual(index.page("copper", kind: .material, now: now, limit: 1, offset: 1).results.first?.id,
+                       second.id == initial.results.first?.id ? first.id : second.id)
+        XCTAssertEqual(index.page("copper", kind: .service, now: now).results.map(\.id), [service.id])
+        XCTAssertEqual(index.page("copper", kind: .material, now: now, excludingIDs: [first.id]).results.map(\.id), [second.id])
+        let usage = [first.id: PriceBookUsage(count: 9, lastUsed: now)]
+        XCTAssertEqual(index.page("copper", kind: .material, usage: usage, now: now).results.first?.id, first.id)
+        XCTAssertEqual(index.page("unmatched", now: now).total, 0)
+
+        let updated = PriceBookSearchIndex(items: [item(1, "Copper valve", cents: 999)])
+        XCTAssertEqual(updated.page("copper", now: now).results.first?.item.sellPrice.amount, 999)
+        XCTAssertEqual(index.page("copper", kind: .material, now: now).results.first(where: { $0.id == first.id })?.item.sellPrice.amount, 100)
+    }
+
     func testLargeLoadedCatalogCanReachItsLastMatch() {
         let items = (1...10_000).map { item($0, String(format: "Valve %05d", $0)) }
         let index = PriceBookSearchIndex(items: items)
