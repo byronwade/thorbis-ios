@@ -56,8 +56,18 @@ final class RecentItems: ObservableObject {
     }
 }
 
+/// Places in the phone menu: tab-bar items first, then every other permitted destination.
+enum SideMenuContent {
+    static func places(tabs: [MenuItem], hidden: Set<MenuItem>, permitted: (MenuItem) -> Bool) -> [MenuItem] {
+        let rest = MenuItem.allCases.filter {
+            !tabs.contains($0) && !hidden.contains($0) && permitted($0) && $0.route != nil
+        }
+        return tabs + rest
+    }
+}
+
 /// The phone's side menu, laid out like the Claude app: the app title and one round button,
-/// a plain list, Pinned and Recents, then the account and New job along the bottom.
+/// a plain list under Pinned and Recents, then the account and New job floating at the bottom.
 /// Search is not in that bar. It sits above the list and shows when the menu is pulled down.
 /// The tab bar stays; this is a second way to get anywhere in one tap.
 struct SideMenu: View {
@@ -76,10 +86,13 @@ struct SideMenu: View {
     /// Search lives above `menu`. The menu starts at the top, so a pull downward uncovers search.
     @State private var scroll = ScrollPosition(id: "menu", anchor: .top)
 
-    private var pinned: [MenuItem] { layout.visibleTabs(session) }
-    private var everything: [MenuItem] {
-        // Like More, only places that can open on their own. The tab-bar items are Pinned.
-        MenuItem.allCases.filter { !pinned.contains($0) && !layout.hidden.contains($0) && $0.permitted(session) && $0.route != nil }
+    /// Tab-bar places first, then every other place that can open on its own.
+    private var places: [MenuItem] {
+        SideMenuContent.places(
+            tabs: layout.visibleTabs(session),
+            hidden: layout.hidden,
+            permitted: { $0.permitted(session) }
+        )
     }
     private var accountName: String {
         let name = session.user?.name ?? ""
@@ -95,30 +108,33 @@ struct SideMenu: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        searchField
-                            .id("search")
-                        menu
-                            .id("menu")
-                            // Taller than the viewport, so the search row rests above the fold
-                            // and a pull downward brings it in.
-                            .frame(minHeight: geometry.size.height, alignment: .top)
+        ZStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                GeometryReader { geometry in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            searchField
+                                .id("search")
+                            menu
+                                .id("menu")
+                                // Taller than the viewport, so the search row rests above the fold
+                                // and a pull downward brings it in.
+                                .frame(minHeight: geometry.size.height, alignment: .top)
+                        }
+                        // Identity scrolling only resolves ids inside a scroll-target layout.
+                        .scrollTargetLayout()
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 72)
                     }
-                    // Identity scrolling only resolves ids inside a scroll-target layout.
-                    .scrollTargetLayout()
-                    .padding(.horizontal, 8)
+                    .scrollPosition($scroll, anchor: .top)
+                    .scrollIndicators(.hidden)
                 }
-                .scrollPosition($scroll, anchor: .top)
-                .scrollIndicators(.hidden)
             }
             footer
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.surface.ignoresSafeArea())
+        .background(Theme.background.ignoresSafeArea())
         .task { reveal(showSearch ? "search" : "menu") }
         // MA-04: VoiceOver's escape gesture closes the menu; the app behind is hidden meanwhile.
         .accessibilityAddTraits(.isModal)
@@ -130,12 +146,12 @@ struct SideMenu: View {
             Button { switchWorkspace?() } label: {
                 HStack(spacing: 6) {
                     Text("Thorbis")
-                        .font(Theme.font(30, weight: .medium))
-                        .tracking(-0.6)
+                        .font(Theme.font(24, weight: .medium))
+                        .tracking(-0.3)
                         .lineLimit(1)
                     if switchWorkspace != nil {
                         Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Theme.muted)
                     }
                 }
@@ -148,12 +164,12 @@ struct SideMenu: View {
                 ? "Thorbis"
                 : "Thorbis, \(session.activeOrganization?.name ?? "company"). Switch company")
             Spacer(minLength: 0)
-            PaperCircleButton(symbol: "magnifyingglass", label: "Search", action: search)
+            PaperCircleButton(symbol: "magnifyingglass", label: "Search", fill: Theme.card, bordered: true, action: search)
         }
         .padding(.leading, 20)
-        .padding(.trailing, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
+        .padding(.trailing, 10)
+        .padding(.top, 2)
+        .padding(.bottom, 0)
     }
 
     /// The field that a downward pull uncovers. It opens company search; it is not a second list filter.
@@ -179,26 +195,25 @@ struct SideMenu: View {
     }
 
     private var menu: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if !pinned.isEmpty {
-                section("Pinned")
-                ForEach(pinned) { item in row(item) }
-                Color.clear.frame(height: 8)
+        VStack(alignment: .leading, spacing: 0) {
+            if !places.isEmpty {
+                section("Pinned", first: true)
+                ForEach(places) { item in row(item) }
             }
-            ForEach(everything) { item in row(item) }
             if !recents.items.isEmpty {
                 section("Recents")
                 ForEach(recents.items) { item in recent(item) }
             }
         }
-        .padding(.bottom, 12)
     }
 
+    /// Avatar and New job sit on the list, like Claude, so Recents can scroll behind them.
     private var footer: some View {
         HStack(alignment: .center, spacing: 12) {
             Button(action: settings) {
-                Avatar(name: accountName, size: 40)
+                Avatar(name: accountName, size: 36, fill: Theme.card)
                     .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.12), radius: 6, y: 1)
                     .frame(width: 44, height: 44)
                     .contentShape(Circle())
             }
@@ -208,23 +223,34 @@ struct SideMenu: View {
             if session.can("job.create", feature: "jobs") {
                 Button(action: newJob) {
                     HStack(spacing: 6) {
-                        Image(systemName: "plus").font(.system(size: 15, weight: .medium))
+                        Image(systemName: "plus").font(.system(size: 14, weight: .medium))
                         Text("New job")
                     }
                     .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.onInk)
-                    .padding(.horizontal, 18)
-                    .frame(height: 44)
+                    .padding(.horizontal, 16)
+                    .frame(height: 40)
                     .background(Theme.ink, in: Capsule())
+                    .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+                    .frame(minHeight: 44)
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("New job")
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-        .background(Theme.surface)
+        .padding(.top, 20)
+        .padding(.bottom, 10)
+        .background {
+            LinearGradient(
+                colors: [Theme.background.opacity(0), Theme.background.opacity(0.72), Theme.background],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.top, -8)
+            .allowsHitTesting(false)
+        }
     }
 
     private func reveal(_ id: String) {
@@ -233,26 +259,26 @@ struct SideMenu: View {
         withTransaction(transaction) { scroll.scrollTo(id: id, anchor: .top) }
     }
 
-    private func section(_ title: String) -> some View {
+    private func section(_ title: String, first: Bool = false) -> some View {
         Text(title)
             .font(Theme.font(13, weight: .medium))
             .foregroundStyle(Theme.muted)
             .padding(.horizontal, 12)
-            .padding(.top, 22)
-            .padding(.bottom, 6)
+            .padding(.top, first ? 8 : 22)
+            .padding(.bottom, 4)
             .accessibilityAddTraits(.isHeader)
     }
 
-    /// A plain row: one dark icon and a label, with room between rows. The current place is 500 and filled.
+    /// A plain row: one dark icon and a label. The current place is 500 and filled.
     private func row(_ item: MenuItem) -> some View {
         let here = current == item.rawValue
         return Button { open(item) } label: {
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 Image(systemName: item.symbol)
                     .symbolVariant(here ? .fill : .none)
-                    .font(.system(size: 20))
+                    .font(.system(size: 18))
                     .foregroundStyle(Theme.foreground)
-                    .frame(width: 28)
+                    .frame(width: 24)
                 Text(item.title)
                     .font(Theme.font(17, weight: here ? .medium : .regular))
                     .foregroundStyle(Theme.foreground)
@@ -260,7 +286,7 @@ struct SideMenu: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
-            .frame(minHeight: 52)
+            .frame(minHeight: 48)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
@@ -269,11 +295,11 @@ struct SideMenu: View {
 
     private func recent(_ item: RecentItems.Item) -> some View {
         Button { openRecent(item) } label: {
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 Image(systemName: item.kind == .job ? "briefcase" : "person")
-                    .font(.system(size: 20))
+                    .font(.system(size: 18))
                     .foregroundStyle(Theme.muted)
-                    .frame(width: 28)
+                    .frame(width: 24)
                 Text(item.title)
                     .font(Theme.font(17))
                     .foregroundStyle(Theme.foreground)
@@ -281,7 +307,7 @@ struct SideMenu: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
