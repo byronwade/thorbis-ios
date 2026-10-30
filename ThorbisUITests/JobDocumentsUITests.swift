@@ -361,6 +361,23 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Kitchen sink backup'" )).firstMatch.waitForExistence(timeout: 5))
     }
 
+    func testTypedCustomerJobRetainsSelectedInvoiceAfterReturn() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment"], screen: "customer")
+        let visit = app.buttons["customer-next-visit"]
+        XCTAssertTrue(visit.waitForExistence(timeout: 15)); visit.tap()
+        let invoiceTab = app.buttons["Invoice"]
+        XCTAssertTrue(invoiceTab.waitForExistence(timeout: 10)); invoiceTab.tap()
+        let first = app.buttons["job-invoice-\(invoice)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); first.tap()
+        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 5), "The invoice detail must actually open")
+        app.navigationBars["Invoice"].buttons["Back"].tap()
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 10)); collect.tap()
+        let collection = app.scrollViews.containing(.textField, identifier: "Amount to collect in dollars").firstMatch
+        XCTAssertTrue(collection.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
+    }
+
     func testTypedJobsRouteRetainsSelectedInvoiceAfterReturn() {
         let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]

@@ -37,3 +37,14 @@
 
 - [ ] Run all relevant iPhone and iPad route, payment-identity, permissions and refresh regressions on the exact candidate; obtain independent code review.
 - [ ] Remove diagnostic-only probes. Migrate remaining job entry roots and prove parity before enabling the typed experiment in production. Do not include this work in a TestFlight build until those checks pass.
+
+## Follow-up: Phone customer entry
+
+- [x] Reproduce the customer → job → invoice stall with `testTypedCustomerJobRetainsSelectedInvoiceAfterReturn`; the row was tapped but Invoice did not open in `/private/tmp/thorbis-typed-customer-red.xcresult`.
+- [ ] Give the customer tab its own typed path and owner, including preview, saved-customer and deep-link path handling; rerun the exact customer regression.
+- [ ] Verify customer back navigation, deep links, job switch and permission changes. More, custom tabs, Search and saved-work stacks remain separately unverified and must retain all functionality.
+
+The customer-owner candidate compiles, but its green run did not start XCTest
+after more than two minutes; `/private/tmp/thorbis-typed-customer-green.log`
+preserves the attempt. The run was stopped without a result. Do not integrate
+the candidate until the exact regression and the parity checks pass.
