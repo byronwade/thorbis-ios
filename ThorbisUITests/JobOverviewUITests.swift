@@ -80,7 +80,7 @@ final class JobOverviewUITests: XCTestCase {
     func testJobOverviewKeepsVisitActionsBeforeCustomerDetails() {
         let app = preview("job", working: true)
         let visit = app.staticTexts["On this visit"]
-        let locations = app.staticTexts["Customer locations"]
+        let locations = app.staticTexts["Service addresses"]
         XCTAssertTrue(visit.waitForExistence(timeout: 20))
         XCTAssertTrue(locations.waitForExistence(timeout: 20))
         XCTAssertLessThan(visit.frame.minY, locations.frame.minY)

@@ -196,6 +196,8 @@ struct JobContactsSection: View {
     let preference: String?
     let loaded: Bool
     let failed: Bool
+    /// When known, each real contact opens its own record; the account fallback never does.
+    var customerID: String? = nil
     let retry: () async -> Void
 
     var body: some View {
@@ -219,7 +221,10 @@ struct JobContactsSection: View {
                     .font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
             }
             ForEach(people) { person in
-                JobContactRow(person: person)
+                JobContactRow(person: person,
+                              route: customerID.flatMap { id in
+                                  person.id.hasPrefix("customer-") ? nil : PaperRoute.contact(customerID: id, contactID: person.id)
+                              })
             }
         }
     }
@@ -227,28 +232,51 @@ struct JobContactsSection: View {
 
 private struct JobContactRow: View {
     let person: JobContacts.Person
+    var route: PaperRoute? = nil
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         let reach = person.reach
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(person.name).font(Theme.font(15, weight: .medium))
-                if let detail = person.detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted) }
-                if let phone = person.phone, !phone.isEmpty {
-                    Text(phone).font(Theme.monoFont(13)).foregroundStyle(Theme.muted).textSelection(.enabled)
-                } else if let email = person.email, !email.isEmpty {
-                    Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted).textSelection(.enabled)
+            // Only the words open the contact; Call, Text and Email stay their own buttons.
+            if let route {
+                NavigationLink(value: route) {
+                    HStack(spacing: 6) {
+                        info
+                        Spacer(minLength: 4)
+                        PaperDisclosure()
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(RowPressStyle())
+                .accessibilityHint("Opens the contact")
+            } else {
+                info
+                Spacer(minLength: 8)
             }
-            .accessibilityElement(children: .combine)
-            Spacer(minLength: 8)
             if let call = reach.call { glyph("phone", label: "Call \(person.name)") { openURL(call) } }
             if let text = reach.text { glyph("message", label: "Text \(person.name)") { openURL(text) } }
             if let email = reach.email { glyph("envelope", label: "Email \(person.name)") { openURL(email) } }
         }
         .padding(.vertical, 6)
         .frame(minHeight: 56)
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(person.name).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            if let detail = person.detail {
+                Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            if let phone = person.phone, !phone.isEmpty {
+                Text(phone).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+            } else if let email = person.email, !email.isEmpty {
+                Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func glyph(_ symbol: String, label: String, perform: @escaping () -> Void) -> some View {
@@ -266,29 +294,35 @@ private struct JobContactRow: View {
 struct JobSiteSection: View {
     let place: ServiceLocationRecord
     let showsLabel: Bool
+    /// False where the address already sits just above, so only the access facts follow.
+    var showsAddress = true
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PaperGroupHeader(title: "Getting in")
-            Button {
-                if let url = Directions.url(address: place.address, coordinates: place.coordinates) { openURL(url) }
-            } label: {
-                PaperDetailRow(label: showsLabel ? place.label : "Address") {
-                    HStack(spacing: 4) {
-                        Text(place.address).foregroundStyle(Theme.brandText)
-                        Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.brandText)
-                    }
-                }
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityHint("Opens driving directions in Maps")
+            if showsAddress { addressRow }
             if let gate = place.gateCode { code("Gate code", gate) }
             if let alarm = place.alarmCode { code("Alarm code", alarm) }
             if let dog = place.dogOnSite { PaperDetailRow("Dog", value: dog) }
             if let parking = place.parking { PaperDetailRow("Parking", value: parking) }
             if let notes = place.notes, !notes.isEmpty { PaperDetailRow("Site notes", value: notes) }
         }
+    }
+
+    private var addressRow: some View {
+        Button {
+            if let url = Directions.url(address: place.address, coordinates: place.coordinates) { openURL(url) }
+        } label: {
+            PaperDetailRow(label: showsLabel ? place.label : "Address") {
+                HStack(spacing: 4) {
+                    Text(place.address).foregroundStyle(Theme.brandText)
+                    Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.brandText)
+                }
+            }
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityHint("Opens driving directions in Maps")
     }
 
     private func code(_ label: String, _ value: String) -> some View {
