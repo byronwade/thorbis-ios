@@ -7,6 +7,16 @@ func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
                                      "Customer view", "job-customer-view", "job-customer-view-bar")).firstMatch
 }
 
+/// Customer view's home: bring a document card fully above the fixed hand-back footer before tapping it.
+func thorbisRevealInCustomerView(_ element: XCUIElement, in app: XCUIApplication) {
+    XCTAssertTrue(element.waitForExistence(timeout: 10))
+    let list = app.scrollViews["customer-job-documents-list"]
+    let footer = app.buttons["Hand back to the technician"].firstMatch
+    for _ in 0..<8 where !(element.isHittable && (!footer.exists || element.frame.maxY <= footer.frame.minY)) {
+        list.swipeUp(velocity: .slow)
+    }
+}
+
 func thorbisStableButton(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
     let query = app.buttons.matching(identifier: identifier)
     var previous: CGRect?

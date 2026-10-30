@@ -5,6 +5,7 @@ import XCTest
 @MainActor
 final class CustomerViewUITests: XCTestCase {
     private let invoiceA = "00000000-0000-4000-8000-000000002209"
+    private let estimateA = "00000000-0000-4000-8000-000000002218"
 
     func testCustomerViewOpensFromTheJobAndReachesEstimatesAnInvoiceAndYourDetails() {
         continueAfterFailure = false
@@ -51,6 +52,78 @@ final class CustomerViewUITests: XCTestCase {
         exit.tap()
         XCTAssertTrue(door.waitForExistence(timeout: 15))
         XCTAssertFalse(app.staticTexts["Your job documents"].exists)
+    }
+
+    func testEstimateDetailOpensCustomerViewOnThatEstimateAndHandsBackToTheEstimate() {
+        let app = launch(screen: "job-estimates")
+        let row = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20)); row.tap()
+        XCTAssertTrue(app.navigationBars["Estimate"].waitForExistence(timeout: 10))
+        let door = detailDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        // Opened on this estimate inside the protected container, ready to decide.
+        XCTAssertTrue(app.navigationBars["EST-2218"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons.matching(identifier: "customer-mode-owner-exit").firstMatch.exists
+                      || app.buttons["Technician: unlock to leave customer mode"].exists)
+        capture(app, "Customer view estimate deep link")
+        ownerExit(app)
+        XCTAssertTrue(app.buttons["Customer view"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["Your job documents"].exists)
+    }
+
+    func testInvoiceDetailOpensCustomerViewOnThatInvoice() {
+        let app = launch(screen: "job-invoice")
+        let paper = app.buttons["job-invoice-\(invoiceA)"]
+        XCTAssertTrue(paper.waitForExistence(timeout: 20)); paper.tap()
+        let door = detailDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 10))
+        // The Actions row sits under the fixed Collect payment footer until scrolled up.
+        for _ in 0..<6 where !(door.isHittable && door.frame.maxY < app.frame.height * 0.85) { app.swipeUp(velocity: .slow) }
+        door.tap()
+        XCTAssertTrue(app.navigationBars["INV-2209"].waitForExistence(timeout: 15))
+        capture(app, "Customer view invoice deep link")
+        ownerExit(app)
+        XCTAssertTrue(app.buttons["Customer view"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["Your job documents"].exists)
+    }
+
+    func testChangedDetailsStillGoThroughStaffReviewAfterHandBack() {
+        let app = launch()
+        let door = app.buttons["job-customer-view"]
+        XCTAssertTrue(door.waitForExistence(timeout: 20)); door.tap()
+        let details = app.buttons["customer-view-details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        reveal(details, in: app)
+        details.tap()
+        let name = app.textFields["Name"].firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        name.tap(); name.typeText(" Jr")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        ownerExit(app)
+        XCTAssertTrue(app.staticTexts["Review changes"].waitForExistence(timeout: 10), "Customer edits need the technician's review")
+        capture(app, "Customer view details review")
+        app.buttons["Discard changes"].tap()
+        XCTAssertTrue(door.waitForExistence(timeout: 15))
+    }
+
+    private func launch(screen: String = "job") -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", screen, "--paper-preview-working-job",
+                               "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved"]
+        app.launch()
+        return app
+    }
+
+    /// The detail screen's own door, not the job header's one still in the stack beneath it.
+    private func detailDoor(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Customer view", "job-customer-view")).firstMatch
+    }
+
+    private func ownerExit(_ app: XCUIApplication) {
+        let exit = app.buttons.matching(identifier: "customer-mode-owner-exit").firstMatch
+        if exit.waitForExistence(timeout: 5) { exit.tap() } else { app.buttons["Technician: unlock to leave customer mode"].tap() }
     }
 
     /// Large cards can report hittable while their centre is still behind the fixed hand-back footer.

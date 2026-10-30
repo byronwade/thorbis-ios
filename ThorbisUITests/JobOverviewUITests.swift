@@ -158,7 +158,8 @@ final class JobOverviewUITests: XCTestCase {
         more.tap()
 
         for title in ["Reschedule", "Add to Calendar", "Reassign technician", "Wrap up", "Follow-ups", "Customer view", "Copy job ID"] {
-            let action = button(startingWith: title, in: app)
+            // The header door shares the name; check the menu's own row.
+            let action = title == "Customer view" ? thorbisCustomerViewMenuItem(app) : button(startingWith: title, in: app)
             XCTAssertTrue(action.waitForExistence(timeout: 3), "Missing secondary action: \(title)")
             // A long menu opens at half height and scrolls; reach lower rows the way a person would.
             if !action.isHittable { app.buttons["Reschedule"].swipeUp() }

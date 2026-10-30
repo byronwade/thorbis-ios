@@ -291,7 +291,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         ready(app)
         handToCustomer(app)
         let paper = app.buttons["customer-invoice-\(invoice)"]
-        XCTAssertTrue(paper.waitForExistence(timeout: 10))
+        thorbisRevealInCustomerView(paper, in: app)
         paper.tap()
         let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
         XCTAssertTrue(pay.waitForExistence(timeout: 5))

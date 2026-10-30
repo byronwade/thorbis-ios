@@ -26,6 +26,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let primary = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(primary.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["customer-invoice-00000000-0000-4000-8000-000000002241"].exists)
+        thorbisRevealInCustomerView(primary, in: app)
         primary.tap()
         XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 10))
         assertText("Member discount", in: app)
@@ -103,7 +104,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap(); thorbisCustomerViewMenuItem(app).tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
-        XCTAssertTrue(invoice.waitForExistence(timeout: 10)); invoice.tap()
+        thorbisRevealInCustomerView(invoice, in: app); invoice.tap()
         XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 10))
         return app
     }

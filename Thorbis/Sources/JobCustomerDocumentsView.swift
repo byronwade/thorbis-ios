@@ -126,7 +126,8 @@ struct JobCustomerDocumentsView: View {
             }
         }
         .thorbisDestination(isPresented: $approving) {
-            if currentWorkspace, canViewEstimates, let handoff {
+            // The handoff guards itself: a changed session or access shows its own hand-back screen.
+            if let handoff {
                 JobEstimateHandoffView(model: handoff, handBack: beginHandBack)
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             } else {
@@ -147,7 +148,6 @@ struct JobCustomerDocumentsView: View {
         .task(id: session.generation) {
             paper = nil
             book = nil
-            approving = false
             editingDetails = false
             paymentModel = nil
             await refresh()
@@ -168,12 +168,8 @@ struct JobCustomerDocumentsView: View {
         case .estimates:
             if canViewEstimates, handoff != nil { withTransaction(instant) { approving = true } }
         case .estimate(let id):
+            // Opens on this estimate in the job's book; "Review and sign" is one tap away.
             await openEstimate(id)
-            guard book == .estimate(id) else { return }
-            // The book is on screen first, so Back from the decision returns to this estimate.
-            try? await Task.sleep(for: .milliseconds(450))
-            guard book == .estimate(id) else { return }
-            await openEstimate(id, decision: true)
         case .invoice(let id):
             await openInvoice(id)
         case .details:

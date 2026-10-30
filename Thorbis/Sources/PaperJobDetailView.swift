@@ -1158,10 +1158,9 @@ struct JobDetailView: View {
         }
     }
 
-    /// The bar already says Customer view; one door per screen.
-    private var barIsCustomerView: Bool {
-        (selectedTab == "Overview" && nextStep == .presentEstimates) || (selectedTab == "Estimates" && !jobEstimates.isEmpty)
-    }
+    /// On Estimates the bar already says Customer view; one door per screen. Elsewhere the header
+    /// door stays put, so the layout never shifts as the job's paper loads.
+    private var barIsCustomerView: Bool { selectedTab == "Estimates" && !jobEstimates.isEmpty }
 
     private func buildEstimate() {
         guard canBuildEstimate, let job, scope(for: job) != nil else { return }

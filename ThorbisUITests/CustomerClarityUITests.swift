@@ -102,7 +102,8 @@ final class CustomerClarityUITests: XCTestCase {
         for _ in 0..<30 where !customerAction.isHittable { app.swipeUp() }
         XCTAssertTrue(customerAction.isHittable)
         XCTAssertEqual(customerAction.label, "Customer view")
-        XCTAssertGreaterThan(customerAction.frame.height, 80)
+        // "Customer view" fits on one line now; the target still clears the large commit height.
+        XCTAssertGreaterThanOrEqual(customerAction.frame.height, 56)
         for _ in 0..<4 where !newJob.isHittable { app.swipeUp() }
         XCTAssertTrue(newJob.isHittable)
         capture("Customer actions large text")

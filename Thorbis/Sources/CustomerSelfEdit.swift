@@ -347,7 +347,7 @@ struct CustomerModeOwnerUnlockButton: View {
             HStack(spacing: 8) { Image(systemName: "lock"); Text("Hand back") }
                 .font(Theme.font(17, weight: .medium)).frame(minHeight: CustomerModeStyle.target)
         }
-        .accessibilityLabel("Hand back to the technician")
+        .accessibilityLabel("Hand back")
         .accessibilityHint("Technician authentication is required to leave customer mode.")
         .accessibilityIdentifier("customer-mode-owner-exit")
         .disabled(busy || unlock == nil)
@@ -404,7 +404,7 @@ struct CustomerModeContainer<Content: View>: View {
                     else { Image(systemName: "lock").font(.system(size: 20)) }
                 }.frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
             }
-            .accessibilityLabel(ownerControlTitle == nil ? "Technician: unlock to leave customer mode" : "Hand back to the technician")
+            .accessibilityLabel(ownerControlTitle == nil ? "Technician: unlock to leave customer mode" : "Hand back")
             .accessibilityHint("Technician authentication is required to leave customer mode.")
             .accessibilityIdentifier(ownerControlTitle == nil ? "lock" : "customer-mode-owner-exit")
             .disabled(unlocking)
