@@ -19,7 +19,21 @@ final class JobCommercialDocumentsTests: XCTestCase {
         let row = JobDocumentRow(estimate: record, fresh: true)
         XCTAssertNil(row.amount, "Absent options do not prove the base amount was accepted")
         XCTAssertEqual(row.detail, "View estimate details")
-        XCTAssertNil(JobEstimateSummary(records: [record], complete: true), "The approved total cannot be inferred")
+        let summary = try XCTUnwrap(JobEstimateSummary(records: [record], complete: true))
+        XCTAssertTrue(summary.approvedUnavailable)
+        XCTAssertTrue(summary.amounts.isEmpty, "The approved total cannot be inferred")
+    }
+
+    func testUnknownApprovedAmountPreservesSentTotalsWithoutPartialApprovedSum() throws {
+        var unknown = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
+        unknown["status"] = "approved"
+        unknown.removeValue(forKey: "options")
+        let uncertain = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: unknown))
+        let knownApproved = try pricedEstimate(status: "approved", cents: 1000)
+        let sent = try pricedEstimate(status: "sent", cents: 2500)
+        let summary = try XCTUnwrap(JobEstimateSummary(records: [uncertain, knownApproved, sent], complete: true))
+        XCTAssertTrue(summary.approvedUnavailable)
+        XCTAssertEqual(summary.amounts, [.init(status: "sent", currency: "USD", cents: 2500)])
     }
 
     func testApprovedOptionEstimateDoesNotShowBaseLinesAsAcceptedAmount() throws {

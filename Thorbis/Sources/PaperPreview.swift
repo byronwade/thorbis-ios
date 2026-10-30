@@ -69,6 +69,9 @@ enum PaperPreview {
             let line = FieldLine(id: "00000000-0000-4000-8000-000000009298", description: "First paragraph: inspect the entire installation before beginning work. Confirm all existing connections and document their condition.\n\nSecond paragraph: carefully complete the repair, test the system, and explain the results to the customer. Final detail: return the work area to its original condition.", quantity: 1, unitPrice: FieldMoney(amount: 12000, currency: "USD"), source: nil)
             draft = changed(draft, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([line]))])
         }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-approved-unknown-total") {
+            draft = changed(draft, ["status": "approved", "options": NSNull()])
+        }
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-invalid-money") {
             let invalid = FieldLine(id: "00000000-0000-4000-8000-000000009299", description: "Unverifiable sample amount", quantity: 2,
                                     unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)
