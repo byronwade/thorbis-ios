@@ -127,7 +127,8 @@ struct ThorbisApp: App {
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .tint(Theme.brandText)
             #if DEBUG
-            .overlay(alignment: .top) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
+            // Takes its own room at the top so it never covers a screen's back button or title.
+            .safeAreaInset(edge: .top, spacing: 0) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
             #endif
             .task {
                 connectivity.onReconnect = { Task { await resync() } }

@@ -79,7 +79,8 @@ struct JobDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
-            if let error { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
+            // Offline already says so above; a second "no connection" banner would only repeat it.
+            if let error, !session.isOffline { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
             if let job {
                 if selectedTab == "Photos" {
                     header(job, compact: true)
@@ -334,14 +335,13 @@ struct JobDetailView: View {
             // One wrapping row of chips instead of two fixed rows (chips are pills).
             FlowRow(spacing: 6, lineSpacing: 6) {
                     statusControl(job)
+                    // Only status is a pill; time and technician read as plain facts beside it.
                     if let date = JobFiltering.date(job.scheduledFor) {
                         Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
                             Label(date.visitLabel(), systemImage: "clock")
-                                .font(Theme.font(12, weight: .medium))
+                                .font(Theme.font(13, weight: .medium))
                                 .foregroundStyle(Theme.muted)
-                                .padding(.horizontal, 10)
                                 .frame(height: Theme.chipHeight)
-                                .background(Theme.fill, in: Capsule())
                                 .padding(.vertical, 8).contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
@@ -350,20 +350,11 @@ struct JobDetailView: View {
                         .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
                     }
                     if let assignedName = assignedDisplayName(for: job) {
-                        HStack(spacing: 6) {
-                            Text(nameInitials(assignedName))
-                                .font(Theme.font(12, weight: .medium))
-                                .foregroundStyle(Theme.brandText)
-                                .frame(width: 22, height: 22)
-                                .dynamicTypeSize(...DynamicTypeSize.large)
-                                .background(Theme.brandSurface, in: Circle())
-                            Text(shortName(assignedName))
-                                .font(Theme.font(12, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                        }
-                        .padding(.leading, 3).padding(.trailing, 10)
-                        .frame(height: Theme.chipHeight)
-                        .background(Theme.fill, in: Capsule())
+                        Label(shortName(assignedName), systemImage: "person")
+                            .font(Theme.font(13, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                            .frame(height: Theme.chipHeight)
+                            .padding(.vertical, 8)
                     }
                     MemberChip(customerID: job.customerId)
             }
@@ -383,10 +374,7 @@ struct JobDetailView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityHint("Opens the invoice")
             }
-            if !compact {
-                JobProgressTrack(status: outbox.pendingStatus(for: job.id) ?? job.status).padding(.top, 10)
-                quickActions
-            }
+            if !compact { quickActions }
         }
         .padding(.horizontal, Theme.gutter)
         .padding(.top, 4)
@@ -449,10 +437,6 @@ struct JobDetailView: View {
         guard let first = parts.first else { return name }
         guard let last = parts.dropFirst().last else { return String(first) }
         return "\(first) \(last.prefix(1))."
-    }
-
-    private func nameInitials(_ name: String) -> String {
-        String(name.split(whereSeparator: \.isWhitespace).prefix(2).compactMap(\.first))
     }
 
     private var invoiceBalanceCents: Int? {
@@ -1192,43 +1176,6 @@ struct JobDetailView: View {
 struct OpenedEstimate: Identifiable, Hashable {
     let id: String
     let present: Bool
-}
-
-struct JobProgressTrack: View {
-    let status: String
-    private static let steps = ["Booked", "On the way", "On site", "Working", "Done"]
-
-    private var current: Int? {
-        switch status {
-        case "scheduled", "dispatched": 0
-        case "en_route": 1
-        case "arrived": 2
-        case "in_progress", "paused": 3
-        case "completed": 4
-        default: nil
-        }
-    }
-
-    var body: some View {
-        if let current {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 4) {
-                    ForEach(Self.steps.indices, id: \.self) { index in
-                        Capsule()
-                            .fill(index <= current ? tint : Theme.fill)
-                            .frame(height: 5)
-                    }
-                }
-                // The status chip above names the step and the bottom bar names the next one,
-                // so the track stays a quiet bar without a second line of words.
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Step \(current + 1) of 5, \(Self.steps[current])")
-        }
-    }
-
-    /// One accent for progress; status is the word, not a rainbow (design.thorbis.com Color).
-    private var tint: Color { status == "completed" ? Theme.success : Theme.brandText }
 }
 
 /// Invoice ids this phone has seen per job, so a technician (whose invoice list is empty by

@@ -13,6 +13,15 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-modern-pass-1",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "textformat", title: "Cleaner screens, easier numbers",
+                      detail: "Amounts and times use the same clean type as the rest of the app, and the job header is lighter."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
             id: "2026-10-30-bottom-search",
             date: "2026-10-30",
             highlights: [
