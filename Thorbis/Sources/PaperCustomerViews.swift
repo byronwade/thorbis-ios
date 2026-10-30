@@ -289,6 +289,7 @@ struct CustomerDetailView: View {
     @State private var smsConsentChoice: Bool?
     @State private var smsConsentError: String?
     @State private var showCustomerMode = false
+    @State private var handoff: DeviceHandoff?
     private var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
     private var contacts: [CustomerContactRecord] { contactState.contacts }
@@ -358,19 +359,17 @@ struct CustomerDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            if canEdit {
+            let items = customerMenuItems
+            if !items.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    ThorbisMenu(items: [
-                        ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCustomerMode = true },
-                        ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add },
-                        ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add },
-                    ], accessibilityLabel: "Customer actions") { Image(systemName: "ellipsis") }
+                    ThorbisMenu(items: items, accessibilityLabel: "Customer actions") { Image(systemName: "ellipsis") }
                 }
             }
         }
         .safeAreaInset(edge: .bottom) {
             if !typeSize.isAccessibilitySize { customerPrimaryActions }
         }
+        .deviceHandoffs($handoff)
         .task { await load() }
         .task { await loadSmsConsent() }
         .task(id: recordsScope) {
@@ -550,8 +549,35 @@ struct CustomerDetailView: View {
         }
     }
 
+    /// Email and Save to Contacts need no edit rights; the record changes do.
+    private var customerMenuItems: [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        if let record {
+            if let mail = MailDraft(recipient: contacts.first(where: \.primary)?.email ?? record.email) {
+                items.append(ThorbisMenuItem("Email", icon: "envelope") { handoff = .mail(mail) })
+            }
+            items.append(ThorbisMenuItem("Save to Contacts", icon: "person.crop.circle.badge.plus") {
+                handoff = .contact(ContactCardDraft.make(customer: record))
+            })
+        }
+        guard canEdit else { return items }
+        return items + [
+            ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCustomerMode = true },
+            ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add },
+            ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add },
+        ]
+    }
+
     private func contactMenuItems(_ contact: CustomerContactRecord) -> [ThorbisMenuItem] {
-        var items = [ThorbisMenuItem("Edit contact", icon: "pencil") { contactSheet = .edit(contact) }]
+        var items: [ThorbisMenuItem] = []
+        if let mail = MailDraft(recipient: contact.email) {
+            items.append(ThorbisMenuItem("Email", icon: "envelope") { handoff = .mail(mail) })
+        }
+        items.append(ThorbisMenuItem("Save to Contacts", icon: "person.crop.circle.badge.plus") {
+            handoff = .contact(ContactCardDraft.make(contact: contact, customerName: record?.name ?? customer.name, address: record?.address))
+        })
+        guard canEdit else { return items }
+        items.append(ThorbisMenuItem("Edit contact", icon: "pencil") { contactSheet = .edit(contact) })
         if !contact.primary {
             items.append(ThorbisMenuItem("Make primary", icon: "star", isDisabled: isMutatingContact) {
                 Task { await makeContactPrimary(contact) }
@@ -653,13 +679,11 @@ struct CustomerDetailView: View {
                     Spacer(minLength: 2)
                     if let phone = contact.phone { CustomerContactIcon(value: phone, isPhone: true) }
                     if let email = contact.email { CustomerContactIcon(value: email, isPhone: false) }
-                    if canEdit {
-                        ThorbisMenu(items: contactMenuItems(contact),
-                                    accessibilityLabel: "Contact actions for \(contact.name)") {
-                            Image(systemName: "ellipsis").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
-                        }
-                        .disabled(isMutatingContact)
+                    ThorbisMenu(items: contactMenuItems(contact),
+                                accessibilityLabel: "Contact actions for \(contact.name)") {
+                        Image(systemName: "ellipsis").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
                     }
+                    .disabled(isMutatingContact)
                 }.frame(minHeight: 48)
             }
             if contacts.isEmpty { emptyText("No contacts") }

@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-calendar-contacts-mail",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "calendar.badge.plus", title: "Add visits to Calendar and Contacts",
+                      detail: "Put a scheduled visit on your calendar, save customers to Contacts and email them from Mail.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-tablet-invoice",
             date: "2026-10-30",
             highlights: [
