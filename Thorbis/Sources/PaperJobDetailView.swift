@@ -25,6 +25,7 @@ struct JobDetailView: View {
     @State private var customerPaymentInvoiceID: String?
     @State private var documentInvoiceID: String?
     @State private var notes: [JobNoteRecord] = []
+    @State private var jobLoadGeneration = 0
     @State private var note = ""
     @State private var reason = ""
     @State private var nextAction = ""
@@ -1253,13 +1254,21 @@ struct JobDetailView: View {
         await invoicePaymentModel?.load()
     }
     private func load() async {
+        guard let readScope = ActivitySnapshotScope.capture(session: session, recordID: jobId, capability: "job.view", feature: "jobs") else { return }
+        jobLoadGeneration += 1
+        let request = jobLoadGeneration
         let generation = session.generation
         let authorityRevision = session.authorityRevision
         let policyVersion = session.policyVersion
+        let apiGeneration = api.requestGeneration
+        let origin = api.normalizedOrigin
+        func current() -> Bool {
+            !Task.isCancelled && jobLoadGeneration == request && readScope.isCurrent(session: session) &&
+            session.policyVersion == policyVersion && api.requestGeneration == apiGeneration && api.normalizedOrigin == origin
+        }
         do {
             let loadedJob = try await api.fieldJob(jobId)
-            guard session.generation == generation, session.authorityRevision == authorityRevision,
-                  session.policyVersion == policyVersion else { return }
+            guard current() else { return }
             guard loadedJob.id == jobId, loadedJob.organizationId == session.activeOrganization?.id else {
                 throw Problem(title: "Job could not be verified", status: nil, detail: nil)
             }
@@ -1281,16 +1290,17 @@ struct JobDetailView: View {
                 locationsContext = locationContext
             }
             if let locationContext, contactsContext != locationContext || !contactsLoaded { await loadContacts(loadedJob) }
+            guard current(), job?.id == loadedJob.id, job?.organizationId == readScope.organizationID else { return }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
-            let loadedNotes = try await api.fieldNotes(jobId)
-            guard session.generation == generation else { return }
+            guard let loadedNotes = try await JobNotesReader.read(scope: readScope,
+                fetch: { try await api.fieldNotes(jobId) }, isCurrent: current), current() else { return }
             notes = loadedNotes
             JobDetailCache.save(notes: loadedNotes, jobID: jobId)
             error = nil
             await loadBrief()
         } catch is CancellationError {} catch {
-            guard session.generation == generation else { return }
+            guard current() else { return }
             if error.isConnectivityFailure {
                 // No signal: the last copy of this job, or what the schedule already knows.
                 if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }

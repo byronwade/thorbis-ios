@@ -82,6 +82,62 @@ final class SessionControllerTests: XCTestCase {
         withExtendedLifetime(subscription) {}
     }
 
+    func testDelayedJobNotesCannotPublishAfterSameSessionRevokeAndRegrant() async throws {
+        let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["customer.view"]"#)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, activeSession), .init(200, revoked), .init(200, features),
+            .init(200, activeSession), .init(200, catalog), .init(200, features)
+        ])
+        await session.restore()
+        let scope = try XCTUnwrap(ActivitySnapshotScope.capture(session: session, recordID: "job-a", capability: "job.view", feature: "jobs"))
+        let (stream, release) = AsyncStream<Void>.makeStream()
+        var started = false
+        let read = Task { @MainActor in
+            try await JobNotesReader.read(scope: scope, fetch: {
+                started = true
+                for await _ in stream { break }
+                return [JobNoteRecord(id: "n", organizationId: self.first, jobId: "job-a", authorUserId: self.actor, body: "old note", createdAt: "2026-10-30T10:00:00Z")]
+            }, isCurrent: { scope.isCurrent(session: session) })
+        }
+        while !started { await Task.yield() }
+        await session.revalidate()
+        await session.revalidate()
+        release.yield(())
+        release.finish()
+        let result = try await read.value
+        XCTAssertNil(result, "An old-authority note must not be published after regrant")
+    }
+
+    func testDelayedJobNotesCannotPublishAfterWorkspaceSwitch() async throws {
+        let memberships = #"[{"id":"019f0000-0000-7000-8000-000000000001","name":"First"},{"id":"019f0000-0000-7000-8000-000000000002","name":"Second"}]"#
+        let selectedSession = activeSession.replacingOccurrences(of: first, with: second)
+        let selectedCatalog = catalog.replacingOccurrences(of: first, with: second)
+        let selectedFeatures = features.replacingOccurrences(of: first, with: second)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, memberships), .init(200, catalog), .init(200, features),
+            .init(200, "{}"), .init(200, selectedSession), .init(200, selectedCatalog), .init(200, selectedFeatures)
+        ])
+        await session.restore()
+        let scope = try XCTUnwrap(ActivitySnapshotScope.capture(session: session, recordID: "job-a", capability: "job.view", feature: "jobs"))
+        let (stream, release) = AsyncStream<Void>.makeStream()
+        var started = false
+        let read = Task { @MainActor in
+            try await JobNotesReader.read(scope: scope, fetch: {
+                started = true
+                for await _ in stream { break }
+                return [JobNoteRecord(id: "n", organizationId: self.first, jobId: "job-a", authorUserId: self.actor, body: "old note", createdAt: "2026-10-30T10:00:00Z")]
+            }, isCurrent: { scope.isCurrent(session: session) })
+        }
+        while !started { await Task.yield() }
+        await session.selectOrganization(id: second)
+        XCTAssertEqual(session.activeOrganization?.id, second)
+        release.yield(())
+        release.finish()
+        let result = try await read.value
+        XCTAssertNil(result, "Old-workspace notes must not be published into the new workspace")
+    }
+
     func testActivitySnapshotCannotReappearAfterCustomerPermissionRevokeAndRegrant() async {
         let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
         let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)

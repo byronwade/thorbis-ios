@@ -89,3 +89,18 @@ enum ActivityDestinationMapping {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
+
+/// Reject a late or cross-job note read before a caller publishes or caches it.
+@MainActor
+enum JobNotesReader {
+    static func read(scope: ActivitySnapshotScope, fetch: () async throws -> [JobNoteRecord],
+                     isCurrent: () -> Bool) async throws -> [JobNoteRecord]? {
+        guard !Task.isCancelled, isCurrent() else { return nil }
+        let notes = try await fetch()
+        guard !Task.isCancelled, isCurrent() else { return nil }
+        guard notes.allSatisfy({ $0.jobId == scope.recordID && $0.organizationId == scope.organizationID }) else {
+            throw Problem(title: "Job notes could not be verified", status: nil, detail: nil)
+        }
+        return notes
+    }
+}
