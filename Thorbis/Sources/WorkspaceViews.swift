@@ -44,7 +44,7 @@ struct WorkspaceNoticesView: View {
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 4) {
                                 if !notice.read {
-                                    Text("Unread").font(Theme.font(12, weight: .semibold))
+                                    Text("Unread").font(Theme.font(14, weight: .semibold))
                                         .foregroundStyle(Theme.brandText)
                                 }
                                 Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .medium))
