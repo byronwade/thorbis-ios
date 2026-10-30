@@ -169,6 +169,53 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
     }
 
+    func testReadOnlyEstimateCanHandBackAfterStatusChanges() {
+        let app = readonlyStatusChangeFixture()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        let review = app.buttons["customer-book-review-sign"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        changeSampleStatuses(app)
+        thorbisStableButton(app, "customer-book-review-sign").tap()
+        XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
+        let handBack = app.buttons["Hand back to the technician"]
+        XCTAssertTrue(handBack.waitForExistence(timeout: 10)); handBack.tap()
+        XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
+    }
+
+    func testReadOnlyInvoiceCanHandBackAfterStatusChanges() {
+        let app = readonlyStatusChangeFixture()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        XCTAssertTrue(app.buttons["Choose a job document"].waitForExistence(timeout: 10))
+        app.buttons["Choose a job document"].tap(); app.buttons["INV-2209"].tap()
+        let sign = app.buttons["Sign for the work"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 10))
+        changeSampleStatuses(app)
+        sign.tap()
+        XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
+        let handBack = app.buttons["Hand back to the technician"]
+        XCTAssertTrue(handBack.waitForExistence(timeout: 10)); handBack.tap()
+        XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
+    }
+
+    private func readonlyStatusChangeFixture() -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-documents-status-change"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
+        app.buttons["Job actions"].tap(); app.buttons["Show to customer"].tap()
+        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        return app
+    }
+
+    private func changeSampleStatuses(_ app: XCUIApplication) {
+        app.buttons["Sample connection"].tap()
+        let change = app.buttons["Change sample document statuses"]
+        XCTAssertTrue(change.waitForExistence(timeout: 5)); change.tap()
+    }
+
     func testSwipesAndButtonsBrowseEveryDocumentForOnlyThisJob() {
         continueAfterFailure = false
         let app = XCUIApplication()

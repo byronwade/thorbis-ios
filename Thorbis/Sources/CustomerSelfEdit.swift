@@ -386,6 +386,7 @@ struct CustomerModeContainer<Content: View>: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if PaperPreview.isJobEstimateHandoff && !ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-hide-controls") { JobEstimateHandoffPreviewControls() }
             else if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
+            else if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-documents-status-change") { PaperPreviewConnectionMenu() }
         }
         #endif
         .interactiveDismissDisabled()

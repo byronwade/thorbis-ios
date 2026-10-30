@@ -1,0 +1,7 @@
+# Read-only estimate and invoice hand-back
+
+A document can become read-only after a customer has opened its job document book but before a fresh decision read returns. Two DEBUG-only local transport tests simulate a sent estimate becoming approved and an issued invoice becoming void at that boundary. Before the fix both tests reached the read-only document and failed to reach the technician unlock screen after hand-back (`/private/tmp/readonly-handback-red.log`, `.xcresult`). The read-only destinations now use the same nested-destination reset as the existing interactive document hand-back; the owner authentication boundary is unchanged.
+
+On the fixed source, `/private/tmp/readonly-handback-fixed-tests.log` and `.xcresult` show 25 job-document unit tests, 9 release-note unit tests and 10 customer document-book UI tests passing on iPhone SE, iOS 18.2. Both previously failing read-only hand-back tests passed, as did the interactive estimate/invoice hand-back and document paging tests. No financial mutation was performed. Test-only status-change controls are compiled only in DEBUG and must be included in release fixture-exclusion auditing.
+
+Live status-change races, physical-device authentication, iPad and VoiceOver remain untested. The passing run did not retain a screenshot for either new test; the result bundle retains assertions and execution results, and a pre-fix hierarchy is at `/private/tmp/readonly-handback-red-attachments/`.
