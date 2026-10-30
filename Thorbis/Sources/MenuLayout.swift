@@ -144,6 +144,8 @@ final class MenuLayout: ObservableObject {
 
     @Published var tabs: [MenuItem] { didSet { changed() } }
     @Published var hidden: Set<MenuItem> { didSet { changed() } }
+    /// The order of places in the phone menu below the bar's; places not listed follow in their usual order.
+    @Published var menuOrder: [MenuItem] { didSet { changed() } }
     /// Where the layout comes from: this phone, or the owner's company-wide layout.
     @Published private(set) var source: Source = .phone
     enum Source { case phone, company }
@@ -157,6 +159,8 @@ final class MenuLayout: ObservableObject {
     private struct Stored: Codable {
         var tabs: [String]
         var hidden: [String]
+        /// Absent in layouts saved before the menu could be reordered.
+        var menu: [String]?
     }
 
     private let defaults: UserDefaults
@@ -169,9 +173,25 @@ final class MenuLayout: ObservableObject {
         let tabs = stored?.tabs.compactMap(MenuItem.init(rawValue:)) ?? Self.defaultTabs
         self.tabs = Array(NSOrderedSet(array: tabs).array.compactMap { $0 as? MenuItem }.prefix(Self.maxTabs))
         self.hidden = Set(stored?.hidden.compactMap(MenuItem.init(rawValue:)) ?? [])
+        self.menuOrder = stored?.menu?.compactMap(MenuItem.init(rawValue:)) ?? []
     }
 
-    var isDefault: Bool { tabs == Self.defaultTabs && hidden.isEmpty }
+    var isDefault: Bool { tabs == Self.defaultTabs && hidden.isEmpty && menuOrder.isEmpty }
+
+    /// Whether `item` can sit in the bar: a company layout carries only `companyTabs`.
+    func canBeTab(_ item: MenuItem) -> Bool { source != .company || MenuItem.companyTabs.contains(item) }
+
+    /// Live arranging from the phone menu: `bar` becomes the tabs (up to `maxTabs`, extras spill to
+    /// the top of the menu) and `menu` the menu order. Places this role cannot see keep their tab.
+    func arrange(bar: [MenuItem], menu: [MenuItem], permitted: (MenuItem) -> Bool) {
+        let allowed = bar.filter(canBeTab)
+        let keep = tabs.filter { !permitted($0) && !bar.contains($0) && !menu.contains($0) }
+        let newTabs = Array((allowed + keep).prefix(Self.maxTabs))
+        let spilled = bar.filter { !newTabs.contains($0) }
+        let newMenu = spilled + menu.filter { !newTabs.contains($0) }
+        if newTabs != tabs { tabs = newTabs }
+        if newMenu != menuOrder { menuOrder = newMenu }
+    }
 
     func visibleTabs(_ session: SessionController) -> [MenuItem] { tabs.filter { $0.permitted(session) } }
 
@@ -191,6 +211,7 @@ final class MenuLayout: ObservableObject {
     func reset() {
         tabs = Self.defaultTabs
         hidden = []
+        menuOrder = []
     }
 
     /// Reads the company layout. A 404 (none saved yet, or an older server) keeps this phone's own.
@@ -209,7 +230,8 @@ final class MenuLayout: ObservableObject {
         guard source == .company, let api else { return }
         let body = CompanyMobileLayout(tabs: tabs.filter(MenuItem.companyTabs.contains).map(\.serverID) + ["more"],
                                        hiddenTabs: [],
-                                       moreMenu: MenuItem.allCases.filter { $0.route != nil }.map {
+                                       moreMenu: (menuOrder + MenuItem.allCases).reduce(into: [MenuItem]()) { if !$0.contains($1) { $0.append($1) } }
+                                           .filter { $0.route != nil }.map {
                                            .init(id: $0.serverID, hidden: hidden.contains($0))
                                        },
                                        jobTabs: companyJobTabs, version: nil, updatedAt: nil, updatedBy: nil)
@@ -237,6 +259,7 @@ final class MenuLayout: ObservableObject {
         tabs = Array(layout.tabs.filter { !hiddenTabs.contains($0) }.compactMap(MenuItem.init(serverTab:))
             .filter(MenuItem.companyTabs.contains).prefix(Self.maxTabs))
         hidden = Set((layout.moreMenu ?? []).filter(\.hidden).compactMap { MenuItem(serverTab: $0.id) })
+        menuOrder = (layout.moreMenu ?? []).compactMap { MenuItem(serverTab: $0.id) }
         companyJobTabs = layout.jobTabs ?? []
         source = .company
     }
@@ -247,6 +270,7 @@ final class MenuLayout: ObservableObject {
         defer { applying = false }
         tabs = Array((stored?.tabs.compactMap(MenuItem.init(rawValue:)) ?? Self.defaultTabs).prefix(Self.maxTabs))
         hidden = Set(stored?.hidden.compactMap(MenuItem.init(rawValue:)) ?? [])
+        menuOrder = stored?.menu?.compactMap(MenuItem.init(rawValue:)) ?? []
         source = .phone
     }
 
@@ -257,7 +281,8 @@ final class MenuLayout: ObservableObject {
     private func save() {
         // The company layout lives on the server; it never overwrites this phone's own layout.
         guard !applying, source == .phone else { return }
-        let stored = Stored(tabs: tabs.map(\.rawValue), hidden: hidden.map(\.rawValue).sorted())
+        let stored = Stored(tabs: tabs.map(\.rawValue), hidden: hidden.map(\.rawValue).sorted(),
+                            menu: menuOrder.map(\.rawValue))
         if let data = try? JSONEncoder().encode(stored) { defaults.set(data, forKey: key) }
     }
 }
@@ -284,7 +309,7 @@ struct CustomizeMenuView: View {
     private var company: Bool { layout.source == .company }
     /// Members follow the owner's company layout; only owners change it.
     private var editable: Bool { !company || isOwner }
-    private func canBeTab(_ item: MenuItem) -> Bool { !company || MenuItem.companyTabs.contains(item) }
+    private func canBeTab(_ item: MenuItem) -> Bool { layout.canBeTab(item) }
 
     var body: some View {
         List {
@@ -298,14 +323,14 @@ struct CustomizeMenuView: View {
                 .moveDisabled(!editable)
                 .deleteDisabled(!editable)
             } header: {
-                Text("Tab bar")
+                Text("Bottom bar")
             } footer: {
                 Text(footer)
             }
 
             let addable = MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.permitted(session) && canBeTab($0) }
             if editable, layout.tabs.count < MenuLayout.maxTabs, !addable.isEmpty {
-                Section("Add to tab bar") {
+                Section("Add to bottom bar") {
                     ForEach(addable) { item in
                         Button { withAnimation { layout.addTab(item) } } label: {
                             Label(item.title, systemImage: item.symbol)
@@ -324,9 +349,9 @@ struct CustomizeMenuView: View {
                     .disabled(!editable)
                 }
             } header: {
-                Text("Show in More")
+                Text("Show in menu")
             } footer: {
-                Text("Hidden items stay available here; nothing is removed.")
+                Text("Hidden places stay here to turn back on; nothing is removed.")
             }
 
             if isOwner && !company {
@@ -351,8 +376,8 @@ struct CustomizeMenuView: View {
 
     private var footer: String {
         let name = session.activeOrganization?.name ?? "your company"
-        if company && isOwner { return "Up to \(MenuLayout.maxTabs) tabs, plus More and Search. Changes apply to everyone in \(name)." }
+        if company && isOwner { return "Up to \(MenuLayout.maxTabs) places in the bar. Changes apply to everyone in \(name)." }
         if company { return "Set by \(name). Ask an owner to change it." }
-        return "Up to \(MenuLayout.maxTabs) tabs, plus More and Search. Drag to reorder, swipe to remove."
+        return "Up to \(MenuLayout.maxTabs) places in the bar. Drag to reorder, swipe to remove."
     }
 }

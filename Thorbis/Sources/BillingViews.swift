@@ -151,7 +151,10 @@ struct BillingScheduleDetailView: View {
     @State private var createdInvoiceID: String?
 
     var body: some View {
-        ScrollView {
+        // Captured so dismissing the confirm (which clears `confirm`) can't blank the command
+        // before the action runs it.
+        let pendingConfirm = confirm
+        return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let progress {
                     VStack(alignment: .leading, spacing: 6) {
@@ -225,12 +228,11 @@ struct BillingScheduleDetailView: View {
                 }
             }
         }
-        .confirmationDialog(confirm == "release-retainage" ? "Release the withheld retainage as a draft invoice?" : "Bill every remaining line as a final draft invoice?",
-                            isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), titleVisibility: .visible) {
-            Button(confirm == "release-retainage" ? "Release retainage" : "Bill the remainder") {
-                if let command = confirm { Task { await run(command) } }
-            }
-        }
+        .thorbisConfirm(pendingConfirm == "release-retainage" ? "Release the withheld retainage as a draft invoice?" : "Bill every remaining line as a final draft invoice?",
+                        isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }),
+                        actions: [ThorbisConfirmAction(pendingConfirm == "release-retainage" ? "Release retainage" : "Bill the remainder") {
+            if let command = pendingConfirm { Task { await run(command) } }
+        }])
         .refreshable { await load() }
         .task { await load() }
     }

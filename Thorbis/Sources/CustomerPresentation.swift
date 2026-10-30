@@ -178,13 +178,13 @@ struct CustomerEstimatePresentation: View {
         .sheet(item: $detailsFor) { option in includedSheet(option) }
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadOffer() }
-        .confirmationDialog("Not ready to decide?", isPresented: $confirmNotToday, titleVisibility: .visible) {
-            Button("I'll think about it") { onDone() }
-            Button("No thanks, decline", role: .destructive) { Task { await decline() } }
-            Button("Keep looking", role: .cancel) {}
-        } message: {
-            Text("You can think about it and decide later, or decline this estimate now.")
-        }
+        .thorbisConfirm("Not ready to decide?",
+                        message: "You can think about it and decide later, or decline this estimate now.",
+                        isPresented: $confirmNotToday,
+                        actions: [
+                            ThorbisConfirmAction("I'll think about it") { onDone() },
+                            ThorbisConfirmAction("No thanks, decline", role: .destructive) { Task { await decline() } },
+                        ])
     }
 
     // MARK: Screens

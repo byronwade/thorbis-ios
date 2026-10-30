@@ -31,29 +31,42 @@ struct PaperHeader: View {
     var search: (() -> Void)? = nil
     @EnvironmentObject private var session: SessionController
     @Environment(\.paperShowMenu) private var openAccount
+    @Environment(\.paperMenuButton) private var showsMenuButton
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // ChatGPT-style top row: the menu button sits top-left on every main screen.
-            HStack(alignment: .center, spacing: 8) {
-                PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
-                Spacer(minLength: 0)
-                if let search {
-                    // Filters this list; the tab bar's search finds anything. Different glyphs, different jobs.
-                    PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: search)
+            // The menu button sits top-left on iPad. On iPhone the bottom bar opens the menu, so the
+            // filter joins the title's line and no near-empty row sits above it.
+            if showsMenuButton {
+                HStack(alignment: .center, spacing: 8) {
+                    PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
+                    Spacer(minLength: 0)
+                    filterButton
                 }
-                // One way in: the menu button. The account lives at the bottom of the menu.
+                .frame(minHeight: 44)
             }
-            Text(title)
-                .font(Theme.font(30, weight: .medium)).tracking(-0.6)
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .center, spacing: 12) {
+                Text(title)
+                    .font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                if !showsMenuButton { filterButton }
+            }
             Text(subtitle)
                 .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .lineLimit(2)
                 .frame(minHeight: 20, alignment: .leading)
         }
         .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, Theme.gutter).padding(.top, 2).padding(.bottom, 12)
+        .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 12)
+    }
+
+    /// Filters this list; the bar's Search finds anything. Different glyphs, different jobs.
+    @ViewBuilder private var filterButton: some View {
+        if let search {
+            PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: search)
+        }
     }
 }
 
@@ -62,6 +75,9 @@ struct PaperCircleButton: View {
     let symbol: String
     let label: String
     var size: CGFloat = 36
+    /// Canvas fill; use `Theme.card` with `bordered` on a cream ground so the circle reads as a button.
+    var fill: Color = Theme.fill
+    var bordered = false
     let action: () -> Void
 
     var body: some View {
@@ -69,7 +85,9 @@ struct PaperCircleButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.foreground)
-                .frame(width: size, height: size).background(Theme.fill, in: Circle())
+                .frame(width: size, height: size)
+                .background(fill, in: Circle())
+                .overlay { if bordered { Circle().strokeBorder(Theme.border, lineWidth: 1) } }
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -391,6 +409,17 @@ enum PaperChrome {
     }
 }
 
+private struct PaperMenuButtonKey: EnvironmentKey {
+    static let defaultValue = true
+}
+extension EnvironmentValues {
+    /// Whether tab-root headers show the top-left menu button. iPhone turns it off for the bottom bar.
+    var paperMenuButton: Bool {
+        get { self[PaperMenuButtonKey.self] }
+        set { self[PaperMenuButtonKey.self] = newValue }
+    }
+}
+
 private struct PaperShowMenuKey: EnvironmentKey {
     static let defaultValue: @Sendable () -> Void = {}
 }
@@ -614,28 +643,18 @@ struct LineItemActions: View {
     let remove: () -> Void
 
     var body: some View {
-        Menu { LineItemMenuItems(canMoveUp: canMoveUp, canMoveDown: canMoveDown, moveUp: moveUp, moveDown: moveDown, remove: remove) } label: {
+        var items: [ThorbisMenuItem] = []
+        if canMoveUp { items.append(ThorbisMenuItem("Move up", icon: "arrow.up") { moveUp() }) }
+        if canMoveDown { items.append(ThorbisMenuItem("Move down", icon: "arrow.down") { moveDown() }) }
+        items.append(ThorbisMenuItem("Remove line", icon: "trash", role: .destructive) { remove() })
+        return ThorbisMenu(items: items,
+                           accessibilityLabel: "Actions for \(name.isEmpty ? "line item" : name)") {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.muted)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .accessibilityLabel("Actions for \(name.isEmpty ? "line item" : name)")
-    }
-}
-
-struct LineItemMenuItems: View {
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-    let moveUp: () -> Void
-    let moveDown: () -> Void
-    let remove: () -> Void
-
-    var body: some View {
-        if canMoveUp { Button(action: moveUp) { Label("Move up", systemImage: "arrow.up") } }
-        if canMoveDown { Button(action: moveDown) { Label("Move down", systemImage: "arrow.down") } }
-        Button(role: .destructive, action: remove) { Label("Remove line", systemImage: "trash") }
     }
 }
 
@@ -680,10 +699,8 @@ extension View {
     /// Cancel and swipe never throw away edits silently (MA-16, MA-17).
     func discardChangesGuard(hasChanges: Bool, busy: Bool, isPresented: Binding<Bool>, discard: @escaping () -> Void) -> some View {
         interactiveDismissDisabled(busy || hasChanges)
-            .confirmationDialog("Discard your changes?", isPresented: isPresented, titleVisibility: .visible) {
-                Button("Discard changes", role: .destructive, action: discard)
-                Button("Keep editing", role: .cancel) {}
-            }
+            .thorbisConfirm("Discard your changes?", isPresented: isPresented,
+                            actions: [ThorbisConfirmAction("Discard changes", role: .destructive, action: discard)])
     }
 }
 
@@ -693,8 +710,14 @@ struct FloatingCreateButton: View {
     let title: String
     var disabled = false
     let action: () -> Void
+    /// On iPhone the bottom bar's + creates for the screen showing, so this pill steps aside.
+    @Environment(\.paperMenuButton) private var visible
 
     var body: some View {
+        if visible { pill }
+    }
+
+    private var pill: some View {
         HStack {
             Spacer()
             Button(action: action) {
