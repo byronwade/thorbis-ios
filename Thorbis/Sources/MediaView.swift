@@ -77,11 +77,9 @@ struct JobMediaView: View {
                 }
                 if !allPhotos.isEmpty {
                     if dynamicTypeSize.isAccessibilitySize {
-                        Menu {
-                            ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
-                                Button("\(option) · \(photoFilterCount(option))") { filter = option }
-                            }
-                        } label: {
+                        ThorbisMenu(items: ["All", "Before", "After", "Untagged"].map { option in
+                            ThorbisMenuItem("\(option) · \(photoFilterCount(option))", isSelected: filter == option) { filter = option }
+                        }, title: "Filter photos") {
                             Label("Filter photos · \(filter)", systemImage: "line.3.horizontal.decrease.circle")
                                 .font(.body.weight(.medium))
                                 .frame(minHeight: 44, alignment: .leading)
