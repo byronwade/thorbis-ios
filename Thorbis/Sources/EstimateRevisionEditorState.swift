@@ -68,6 +68,9 @@ struct EstimateRevisionLineDraft: Identifiable, Equatable {
     var groupSettled: Bool
     /// EB-13: false when this material is folded into one "Materials" line for the customer.
     var showToCustomer: Bool
+    /// True once the person drags or moves this line to a group, so a move on a line saved
+    /// before groups were stored still counts as a change to save.
+    var movedByPerson = false
 
     init(id: UUID = UUID(), originalLineID: String? = nil, description: String,
          quantity: String, unitPrice: String, source: FieldEstimateLineSourceInput? = nil,
@@ -357,8 +360,8 @@ struct EstimateRevisionEditorState: Equatable {
                   Int(draft.quantity) == original.quantity,
                   parsePrice(draft.unitPrice) == original.unitPrice.amount,
                   sourceMatches(draft.source, original: original),
-                  // A line saved before groups were stored has no group to compare.
-                  !storesGroups || ((original.group == nil || presentation.group == original.group)
+                  // A line saved before groups were stored has no group to compare, only a move.
+                  !storesGroups || ((original.group == nil ? !draft.movedByPerson : presentation.group == original.group)
                       && (presentation.showToCustomer ?? true) == (original.showToCustomer ?? true))
             else { return false }
         }
