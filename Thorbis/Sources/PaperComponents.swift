@@ -137,7 +137,7 @@ struct PaperTabs: View {
     /// async render thread, and the main-actor tab content then traps (crash in `row(padding:)`).
     private var fittingCandidate: (padding: CGFloat, inset: CGFloat)? {
         // Until measured, start from the loosest row; the measurement settles it before the next frame.
-        guard available > 0, labelWidths.count == Set(options).count else { return candidates.first }
+        guard available > 0, options.allSatisfy({ labelWidths[$0] != nil }) else { return candidates.first }
         return candidates.first { candidate in
             let tabs = options.reduce(CGFloat(0)) { $0 + max(44, (labelWidths[$1] ?? 0) + candidate.padding * 2) }
             return tabs + CGFloat(max(0, options.count - 1)) * 2 + candidate.inset * 2 <= available + 0.5
