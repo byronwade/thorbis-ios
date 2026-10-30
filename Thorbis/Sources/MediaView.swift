@@ -9,6 +9,9 @@ struct JobMediaView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var pendingMedia: PendingMediaStore
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var records: [MediaAssetRecord] = []
     @State private var selection: PhotosPickerItem?
     @State private var selectedData: Data?
@@ -73,22 +76,47 @@ struct JobMediaView: View {
                     .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 }
                 if !allPhotos.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
-                            let count = option == "All" ? allPhotos.count : option == "Untagged"
-                                ? allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }.count
-                                : allPhotos.filter { $0.tags.contains(option) }.count
-                            Button { filter = option } label: {
-                                Text("\(option) · \(count)").font(Theme.font(13, weight: .medium))
-                                    .foregroundStyle(filter == option ? Theme.background : Theme.muted)
-                                    .padding(.horizontal, 11).frame(height: 28)
-                                    .background(filter == option ? Theme.foreground : Theme.fill, in: Capsule())
-                                    .frame(minHeight: 44).contentShape(Rectangle())
+                    if dynamicTypeSize.isAccessibilitySize {
+                        ThorbisMenu(items: ["All", "Before", "After", "Untagged"].map { option in
+                            ThorbisMenuItem("\(option) · \(photoFilterCount(option))", isSelected: filter == option) { filter = option }
+                        }, title: "Filter photos") {
+                            Label("Filter photos · \(filter)", systemImage: "line.3.horizontal.decrease.circle")
+                                .font(.body.weight(.medium))
+                                .frame(minHeight: 44, alignment: .leading)
+                        }
+                        .accessibilityIdentifier("photo-filter-menu")
+                    } else {
+                        HStack(spacing: 6) {
+                            ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
+                                let count = photoFilterCount(option)
+                                Button { filter = option } label: {
+                                    Text("\(option) · \(count)").font(Theme.font(13, weight: .medium))
+                                        .foregroundStyle(filter == option ? Theme.background : Theme.muted)
+                                        .padding(.horizontal, 11).frame(height: 28)
+                                        .background(filter == option ? Theme.foreground : Theme.fill, in: Capsule())
+                                        .frame(minHeight: 44).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(filter == option ? .isSelected : [])
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(filter == option ? .isSelected : [])
                         }
                     }
+                }
+                if !loading && !allPhotos.isEmpty && photos.isEmpty {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) {
+                            Text("No matching photos").foregroundStyle(Theme.muted)
+                            Spacer(minLength: 0)
+                            Button("Show all photos") { filter = "All" }.frame(minHeight: 44)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("No matching photos").foregroundStyle(Theme.muted)
+                            Button("Show all photos") { filter = "All" }.frame(minHeight: 44)
+                        }
+                    }
+                    .font(.subheadline)
+                    .tint(Theme.brandText)
+                    .frame(minHeight: 44)
                 }
                 if let warning = pendingMedia.storageWarning { ErrorBanner(message: warning) }
                 if pendingMedia.legacyCount > 0 {
@@ -96,6 +124,9 @@ struct JobMediaView: View {
                     Button("Recover older photos") { showLegacyRecovery = true }
                         .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
                         .frame(minHeight: 44).disabled(!canAdd || busy)
+                }
+                if canAdd && dynamicTypeSize.isAccessibilitySize {
+                    photoCaptureControls.padding(.top, 10)
                 }
                 if !waiting.isEmpty {
                     PaperGroupHeader(title: "Waiting to upload", count: waiting.count) {
@@ -121,57 +152,68 @@ struct JobMediaView: View {
                     }
                 }
                 // One empty state for the whole tab instead of two empty sections.
-                if photos.isEmpty && documents.isEmpty && waiting.isEmpty && pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil && !loading {
+                if allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil && !loading {
                     PaperEmptyState(symbol: "camera", title: "No photos yet",
                                     message: canAdd ? "Take a before photo when you arrive. Photos and PDFs up to 8 MB." : "Photos and documents added to this job show here.")
                 }
                 if !photos.isEmpty { PaperGroupHeader(title: "Photos", count: photos.count) }
                 if !photos.isEmpty {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                        ForEach(photos) { record in
-                            ZStack(alignment: .bottomTrailing) {
-                                Button { open(record) } label: {
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        MediaThumbnail(record: record, attempt: thumbnailAttempt)
-                                            .frame(maxWidth: .infinity).frame(height: 120)
-                                            .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
-                                            .overlay(alignment: .topLeading) {
-                                                if let tag = ["Before", "After"].first(where: record.tags.contains) {
-                                                    Text(tag).font(Theme.font(11, weight: .semibold))
-                                                        .foregroundStyle(Theme.foreground)
-                                                        .padding(.horizontal, 8).frame(height: 24)
-                                                        .background(Theme.background.opacity(0.9), in: Capsule())
-                                                        .padding(8)
+                    ForEach(JobPhotoDateGroups.group(photos, calendar: calendar), id: \.day) { group in
+                        Text(group.day.map(photoDayLabel) ?? "Date unavailable")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.muted)
+                            .accessibilityAddTraits(.isHeader)
+                        LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize
+                                  ? [GridItem(.flexible())]
+                                  : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                            ForEach(group.photos) { record in
+                                ZStack(alignment: .bottomTrailing) {
+                                    Button { open(record) } label: {
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            MediaThumbnail(record: record, attempt: thumbnailAttempt)
+                                                .frame(maxWidth: .infinity).frame(height: 120)
+                                                .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
+                                                .overlay(alignment: .topLeading) {
+                                                    if let tag = ["Before", "After"].first(where: record.tags.contains) {
+                                                        Text(tag).font(Theme.font(11, weight: .semibold))
+                                                            .foregroundStyle(Theme.foreground)
+                                                            .padding(.horizontal, 8).frame(height: 24)
+                                                            .background(Theme.background.opacity(0.9), in: Capsule())
+                                                            .padding(8)
+                                                    }
                                                 }
+                                            Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium))
+                                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                                                .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
+                                                .padding(.horizontal, 10).padding(.vertical, 8)
+                                                .padding(.trailing, dynamicTypeSize.isAccessibilitySize && canAdd && record.uploadState == "stored" ? 46 : 0)
+                                            if record.uploadState != "stored" {
+                                                Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
+                                                    .padding(.horizontal, 10).padding(.bottom, 8)
                                             }
-                                        Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium)).lineLimit(1)
-                                            .padding(.horizontal, 10).padding(.vertical, 8)
-                                        if record.uploadState != "stored" {
-                                            Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
-                                                .padding(.horizontal, 10).padding(.bottom, 8)
                                         }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(busy || preview.loading || record.uploadState != "stored")
-                                .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
-                                if canAdd, record.uploadState == "stored" {
-                                    ThorbisMenu(items: [
-                                        ThorbisMenuItem("Before") { Task { await retag(record, .before) } },
-                                        ThorbisMenuItem("After") { Task { await retag(record, .after) } },
-                                        ThorbisMenuItem("Other") { Task { await retag(record, .other) } },
-                                    ], title: "Tag photo", accessibilityLabel: stageName(record)) {
-                                        Image(systemName: "tag")
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(Theme.foreground)
-                                            .frame(width: 44, height: 44)
-                                            .background(Theme.background.opacity(0.92), in: Circle())
+                                    .buttonStyle(.plain)
+                                    .disabled(busy || preview.loading || record.uploadState != "stored")
+                                    .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
+                                    if canAdd, record.uploadState == "stored" {
+                                        ThorbisMenu(items: [
+                                            ThorbisMenuItem("Before") { Task { await retag(record, .before) } },
+                                            ThorbisMenuItem("After") { Task { await retag(record, .after) } },
+                                            ThorbisMenuItem("Other") { Task { await retag(record, .other) } },
+                                        ], title: "Tag photo", accessibilityLabel: stageName(record)) {
+                                            Image(systemName: "tag")
+                                                .font(.system(size: 15, weight: .semibold))
+                                                .foregroundStyle(Theme.foreground)
+                                                .frame(width: 44, height: 44)
+                                                .background(Theme.background.opacity(0.92), in: Circle())
+                                        }
+                                        .disabled(busy)
+                                        .padding(4)
                                     }
-                                    .disabled(busy)
-                                    .padding(4)
                                 }
                             }
                         }
@@ -205,43 +247,10 @@ struct JobMediaView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .safeAreaInset(edge: .bottom) {
-            if canAdd {
-                VStack(spacing: 8) {
-                    ThorbisSegmented(options: [("Before", "Before"), ("After", "After"), ("Other", "Other")],
-                                     selection: $stage)
-                        .disabled(busy)
-                    HStack(spacing: 8) {
-                        Button { showCamera = true } label: {
-                            HStack(spacing: 7) {
-                                if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "camera") }
-                                Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")
-                            }
-                            .inkCommit()
-                        }
-                        .buttonStyle(PressStyle())
-                        .disabled(busy || !UIImagePickerController.isSourceTypeAvailable(.camera))
-                        PhotosPicker(selection: $selection, matching: .images) {
-                            Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                                .frame(width: 46, height: 46)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                        }
-                        .disabled(busy)
-                        .accessibilityLabel("Choose from library")
-                        ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
-                            ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
-                            : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }],
-                                    title: "Add a document", accessibilityLabel: "Add a document") {
-                            Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                                .frame(width: 46, height: 46)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                        }
-                        .disabled(busy)
-                    }
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-                .background(Theme.background)
+            if canAdd && !dynamicTypeSize.isAccessibilitySize {
+                photoCaptureControls
+                    .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+                    .background(Theme.background)
             }
         }
         .sheet(isPresented: $showLegacyRecovery) {
@@ -323,6 +332,61 @@ struct JobMediaView: View {
         selectedCapturedAt = Date()
         error = nil
     }
+    private func photoFilterCount(_ option: String) -> Int {
+        switch option {
+        case "Before", "After": allPhotos.filter { $0.tags.contains(option) }.count
+        case "Untagged": allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }.count
+        default: allPhotos.count
+        }
+    }
+
+    private var photoCaptureControls: some View {
+        VStack(spacing: 8) {
+            ThorbisSegmented(options: [("Before", "Before"), ("After", "After"), ("Other", "Other")],
+                             selection: $stage)
+                .disabled(busy)
+            HStack(spacing: 8) {
+                Button { showCamera = true } label: {
+                    HStack(spacing: 7) {
+                        if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "camera") }
+                        Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")
+                    }
+                    .inkCommit()
+                }
+                .buttonStyle(PressStyle())
+                .disabled(busy || !UIImagePickerController.isSourceTypeAvailable(.camera))
+                PhotosPicker(selection: $selection, matching: .images) {
+                    Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)
+                        .frame(width: 46, height: 46)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                }
+                .disabled(busy)
+                .accessibilityLabel("Choose from library")
+                ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
+                    ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
+                    : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }],
+                            title: "Add a document", accessibilityLabel: "Add a document") {
+                    Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
+                        .frame(width: 46, height: 46)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                }
+                .disabled(busy)
+            }
+        }
+    }
+
+    private func photoDayLabel(_ day: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = locale
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: day)
+    }
+
     private func stageName(_ record: MediaAssetRecord) -> String {
         if record.tags.contains("Before") { return "Change photo stage, currently Before" }
         if record.tags.contains("After") { return "Change photo stage, currently After" }
@@ -500,5 +564,32 @@ struct DocumentScanner: UIViewControllerRepresentable {
         func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) { onFinish(nil) }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) { onFinish(nil) }
+    }
+}
+
+/// Presentation-only grouping; unavailable capture dates never fall back to upload time.
+enum JobPhotoDateGroups {
+    struct Group {
+        let day: Date?
+        let photos: [MediaAssetRecord]
+    }
+
+    static func group(_ photos: [MediaAssetRecord], calendar: Calendar) -> [Group] {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standard = ISO8601DateFormatter()
+        var byDay: [Date: [MediaAssetRecord]] = [:]
+        var unavailable: [MediaAssetRecord] = []
+        for photo in photos {
+            guard let raw = photo.capturedAt,
+                  let date = fractional.date(from: raw) ?? standard.date(from: raw) else {
+                unavailable.append(photo)
+                continue
+            }
+            byDay[calendar.startOfDay(for: date), default: []].append(photo)
+        }
+        var groups = byDay.keys.sorted(by: >).map { Group(day: $0, photos: byDay[$0]!) }
+        if !unavailable.isEmpty { groups.append(Group(day: nil, photos: unavailable)) }
+        return groups
     }
 }

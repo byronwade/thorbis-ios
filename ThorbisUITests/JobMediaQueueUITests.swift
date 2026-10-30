@@ -2,6 +2,161 @@ import XCTest
 
 @MainActor
 final class JobMediaQueueUITests: XCTestCase {
+    func testUndatedPhotosStayVisibleAndFilterableInTheirOwnGroup() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Date unavailable"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
+        app.buttons["Before · 1"].tap()
+        XCTAssertTrue(app.staticTexts["Date unavailable"].exists)
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
+        XCTAssertTrue(app.buttons["Change photo stage, currently Before"].exists)
+    }
+
+    func testDatedPhotosAreGroupedAndFilterKeepsCorrectPhotoActions() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "-thorbis.appearance", "dark"]
+        app.launch()
+        let newest = app.staticTexts["Oct 27, 2026"]
+        let older = app.staticTexts["Oct 26, 2026"]
+        let unknown = app.staticTexts["Date unavailable"]
+        XCTAssertTrue(newest.waitForExistence(timeout: 20))
+        XCTAssertTrue(older.exists)
+        XCTAssertTrue(unknown.exists)
+        XCTAssertLessThan(newest.frame.minY, older.frame.minY)
+        XCTAssertLessThan(older.frame.minY, unknown.frame.minY)
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
+        XCTAssertTrue(app.buttons["Photo, Finished unit"].exists)
+        let top = XCTAttachment(screenshot: app.screenshot())
+        top.name = "Job photo dates at top"
+        top.lifetime = .keepAlways
+        add(top)
+        app.swipeUp()
+        XCTAssertTrue(app.buttons["Photo, Uncertain date"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Job photos grouped by capture date"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.swipeDown()
+        app.buttons["After · 1"].tap()
+        XCTAssertTrue(older.exists)
+        XCTAssertTrue(app.buttons["Photo, Finished unit"].exists)
+        XCTAssertFalse(newest.exists)
+        XCTAssertFalse(unknown.exists)
+        XCTAssertTrue(app.buttons["Change photo stage, currently After"].exists)
+    }
+
+    func testPhotoDateHeadingAtLargestText() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let heading = app.staticTexts["Oct 27, 2026"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 20))
+        for _ in 0..<6 where !heading.isHittable { app.swipeUp() }
+        XCTAssertTrue(heading.isHittable)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Job photo date at largest text"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testLargestTextPhotoFilterAndCaptureControlsRemainUsable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let filter = app.buttons["photo-filter-menu"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 20))
+        for _ in 0..<6 where !filter.isHittable { app.swipeUp() }
+        XCTAssertTrue(filter.isHittable)
+        filter.tap()
+        XCTAssertTrue(app.buttons["After · 1"].waitForExistence(timeout: 5))
+        app.buttons["After · 1"].tap()
+        let photo = app.buttons["Photo, Finished unit"]
+        let library = app.buttons["Choose from library"]
+        XCTAssertTrue(library.exists)
+        let date = app.staticTexts["Oct 26, 2026"]
+        XCTAssertTrue(date.exists)
+        XCTAssertLessThan(library.frame.minY, date.frame.minY, "Capture is available before a long photo collection")
+        let stageAfter = app.buttons["After"]
+        for _ in 0..<8 where !stageAfter.isHittable {
+            if stageAfter.frame.midY < app.frame.midY { app.swipeDown() } else { app.swipeUp() }
+        }
+        XCTAssertTrue(stageAfter.isHittable)
+        app.buttons["After"].tap()
+        XCTAssertTrue(app.buttons["Take after photo"].exists)
+        for _ in 0..<8 where !photo.isHittable { app.swipeUp() }
+        XCTAssertTrue(photo.isHittable)
+        XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.75)
+        XCTAssertGreaterThan(photo.frame.height, 100)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Largest text photo remains usable"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let libraryButton = app.buttons["Choose from library"]
+        for _ in 0..<12 where !libraryButton.isHittable {
+            let down = libraryButton.frame.midY < app.frame.midY
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.40 : 0.60))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.60 : 0.40))
+            start.press(forDuration: 0.2, thenDragTo: end)
+        }
+        XCTAssertTrue(libraryButton.isHittable)
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "Library and document controls at largest text on narrow iPhone"
+        capture.lifetime = .keepAlways
+        add(capture)
+        libraryButton.tap()
+        let cancel = app.buttons["Cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+        let documentButton = app.buttons["Add a document"]
+        XCTAssertTrue(documentButton.isHittable)
+        documentButton.tap()
+        XCTAssertTrue(app.buttons["Choose a PDF"].waitForExistence(timeout: 5))
+    }
+
+    func testCaptureControlsPrecedeManyPendingUploadsAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let base = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-reset-media"]
+        app.launchArguments = base + ["--paper-preview-many-pending", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        defer { app.terminate(); app.launchArguments = base; app.launch(); app.terminate() }
+        let firstPending = app.descendants(matching: .any).matching(identifier: "pending-media-00000000-0000-4000-8000-000000009800").firstMatch
+        XCTAssertTrue(firstPending.waitForExistence(timeout: 20))
+        let library = app.buttons["Choose from library"]
+        XCTAssertTrue(library.exists)
+        XCTAssertLessThan(library.frame.minY, firstPending.frame.minY, "Capture should precede the pending queue")
+        XCTAssertTrue(app.staticTexts["Waiting to upload"].exists)
+        XCTAssertTrue(app.buttons["Retry"].exists)
+    }
+
+    func testEmptyPhotoFilterOffersReturnToAllPhotos() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media"]
+        app.launch()
+        XCTAssertTrue(app.buttons["After · 0"].waitForExistence(timeout: 20))
+        app.buttons["After · 0"].tap()
+        XCTAssertTrue(app.staticTexts["No matching photos"].exists)
+        XCTAssertFalse(app.staticTexts["No photos yet"].exists)
+        let showAll = app.buttons["Show all photos"]
+        XCTAssertTrue(showAll.isHittable)
+        XCTAssertLessThan(showAll.frame.maxY, app.buttons["Before"].frame.minY)
+        let recovery = XCTAttachment(screenshot: app.screenshot())
+        recovery.name = "Empty photo filter recovery above capture"
+        recovery.lifetime = .keepAlways
+        add(recovery)
+        showAll.tap()
+        let all = app.buttons["All · 1"]
+        XCTAssertTrue(all.isSelected)
+        let photo = app.buttons["Photo, Outdoor unit"]
+        for _ in 0..<8 where !photo.isHittable { app.swipeUp() }
+        XCTAssertTrue(photo.isHittable)
+    }
+
     func testSavedScanRemainsJobBoundAfterNavigationAndRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
