@@ -282,6 +282,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         app.navigationBars.buttons["Back"].tap()
         XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
         app.buttons["Test invoice balance change"].tap()
+        XCTAssertTrue(app.staticTexts["typed-invoice-refresh-guidance"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Collect payment"].isHittable)
     }
 
