@@ -1,8 +1,20 @@
 import XCTest
+import StripeTerminal
 @testable import Thorbis
 
 @MainActor
 final class TapToPayReadinessTests: XCTestCase {
+    func testTechnicianReaderConfigurationCannotPresentMerchantTerms() throws {
+        let configuration = try TerminalSetup.connectionConfiguration(locationID: "tml_test_location")
+        XCTAssertFalse(configuration.isTOSAcceptancePermitted)
+    }
+
+    func testUnacceptedMerchantTermsDirectTechnicianToAdministrator() {
+        let error = NSError(domain: ErrorDomain, code: ErrorCode.Code.tapToPayReaderTOSNotYetAccepted.rawValue)
+        XCTAssertEqual(TapToPayController.message(for: error),
+                       "Tap to Pay needs setup. Ask your business administrator to complete the merchant terms, or use another payment method.")
+    }
+
     func testUnqualifiedBuildOverridesAnOtherwiseEligibleWorkspaceAndPhone() {
         XCTAssertFalse(TapToPayReadiness.allows(
             buildEnabled: false, deviceSupported: true, featureEnabled: true, canCollect: true

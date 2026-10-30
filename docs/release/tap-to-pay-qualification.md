@@ -32,3 +32,27 @@ Keep the release policy false while these gates remain open. Do not submit a
 duplicate entitlement request, enable a capability, accept terms, or send review
 materials based solely on this document. The original approval email is the
 case thread; no mail or portal state was changed during the audit.
+
+## Technician connection safeguard — October 30, 2026
+
+Stripe Terminal 5.8.1's `SCPTapToPayConnectionConfiguration` header documents
+that terms acceptance defaults to permitted; setting it to false prevents the
+terms prompt and fails the connection when merchant terms are not yet accepted.
+Invoice collection now explicitly sets this value to false, and the two
+terms-related SDK errors direct the technician to the business administrator
+or another payment method. The administrator setup flow is not implemented by
+this change. A valid prior merchant acceptance, the Apple distribution grant,
+provider readiness and physical-device qualification remain separate gates.
+
+The earlier table's aggregate-receipt observation is historical: current
+invoice collection checks the canonical payment for the specific attempt.
+This does not establish connected-merchant or distribution qualification.
+The `ThorbisTapToPayEnabled` release policy remains false.
+
+Verification in the isolated worktree: the builder setter and configuration
+getter typechecked against the pinned simulator framework; all 12 existing
+Tap build-audit Python tests passed. Two new Swift tests cover the configuration
+and unaccepted-terms message, but were not executed: the initial simulator
+test build stalled during asset compilation and was stopped. Repeat those tests
+and test the fail-closed connection on an authorized physical development
+device before treating the behavior as qualified.
