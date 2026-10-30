@@ -75,7 +75,19 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(app.buttons["After · 1"].waitForExistence(timeout: 5))
         app.buttons["After · 1"].tap()
         let photo = app.buttons["Photo, Finished unit"]
-        for _ in 0..<6 where !photo.isHittable { app.swipeUp() }
+        let library = app.buttons["Choose from library"]
+        XCTAssertTrue(library.exists)
+        let date = app.staticTexts["Oct 26, 2026"]
+        XCTAssertTrue(date.exists)
+        XCTAssertLessThan(library.frame.minY, date.frame.minY, "Capture is available before a long photo collection")
+        let stageAfter = app.buttons["After"]
+        for _ in 0..<8 where !stageAfter.isHittable {
+            if stageAfter.frame.midY < app.frame.midY { app.swipeDown() } else { app.swipeUp() }
+        }
+        XCTAssertTrue(stageAfter.isHittable)
+        app.buttons["After"].tap()
+        XCTAssertTrue(app.buttons["Take after photo"].exists)
+        for _ in 0..<8 where !photo.isHittable { app.swipeUp() }
         XCTAssertTrue(photo.isHittable)
         XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.75)
         XCTAssertGreaterThan(photo.frame.height, 100)
@@ -83,7 +95,7 @@ final class JobMediaQueueUITests: XCTestCase {
         screenshot.name = "Largest text photo remains usable"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        for _ in 0..<6 where !app.buttons["Choose from library"].isHittable { app.swipeUp() }
+        for _ in 0..<8 where !app.buttons["Choose from library"].isHittable { app.swipeDown() }
         XCTAssertTrue(app.buttons["Choose from library"].isHittable)
         XCTAssertTrue(app.buttons["Add a document"].isHittable)
     }

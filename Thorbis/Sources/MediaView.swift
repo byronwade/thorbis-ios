@@ -134,6 +134,9 @@ struct JobMediaView: View {
                         .accessibilityValue(Text("Captured \(photo.capturedAt.formatted(date: .abbreviated, time: .shortened))"))
                     }
                 }
+                if canAdd && dynamicTypeSize.isAccessibilitySize {
+                    photoCaptureControls.padding(.top, 10)
+                }
                 // One empty state for the whole tab instead of two empty sections.
                 if photos.isEmpty && documents.isEmpty && waiting.isEmpty && pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil && !loading {
                     PaperEmptyState(symbol: "camera", title: "No photos yet",
@@ -223,9 +226,6 @@ struct JobMediaView: View {
                 }
                 if canAdd && !(photos.isEmpty && documents.isEmpty) {
                     Text("Photos and PDFs up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
-                }
-                if canAdd && dynamicTypeSize.isAccessibilitySize {
-                    photoCaptureControls.padding(.top, 10)
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
