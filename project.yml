@@ -52,6 +52,8 @@ targets:
         CODE_SIGN_STYLE: Automatic
         SKIP_INSTALL: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        # Shared intents compile here only to draw buttons; they perform in the app process.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) THORBIS_WIDGET_EXTENSION
   ThorbisTests:
     type: bundle.unit-test
     platform: iOS

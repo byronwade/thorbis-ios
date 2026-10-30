@@ -44,6 +44,36 @@ enum JobLiveActivity {
         })
     }
 
+    /// The card's fixed fields and current state for a job, read before a background launch's
+    /// session restore retires the card, so a Lock Screen step can put the same card back.
+    @MainActor
+    static func card(for jobID: String) -> (attributes: JobActivityAttributes, state: JobActivityAttributes.ContentState)? {
+        Activity<JobActivityAttributes>.activities.first { $0.attributes.jobID == jobID }
+            .map { ($0.attributes, $0.content.state) }
+    }
+
+    /// Shows a confirmed or queued step on the job's card: updates it in place, or puts it back
+    /// when a session restore ended it. Other jobs' cards are left alone.
+    @MainActor
+    static func show(attributes: JobActivityAttributes, state: JobActivityAttributes.ContentState,
+                     isAuthorized: @escaping @MainActor () -> Bool) async {
+        await lifecycle.perform(endCount: 0, isAuthorized: isAuthorized, end: { _ in }, finish: {
+            if let current = Activity<JobActivityAttributes>.activities.first(where: { $0.attributes.jobID == attributes.jobID }) {
+                if current.content.state != state {
+                    await update(id: current.id, status: state.status, since: state.since, waitingToSync: state.waitingToSync)
+                }
+                return
+            }
+            guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+            _ = try? Activity.request(attributes: attributes, content: ActivityContent(state: state, staleDate: nil))
+        })
+    }
+
+    /// When the job entered `status`, from the server's record.
+    static func since(_ job: JobRecord, _ status: String) -> Date? {
+        JobFiltering.date(stamp(job, status))
+    }
+
     static func addressNeedsReplacement(existing: String?, desired: String?) -> Bool {
         existing != desired
     }

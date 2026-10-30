@@ -47,23 +47,32 @@ struct JobLiveActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(place(context.attributes))
+                        Text(context.state.waitingToSync ? "Waiting to sync" : place(context.attributes))
                             .font(.caption)
-                            .foregroundStyle(Ink.muted)
+                            .foregroundStyle(context.state.waitingToSync ? Ink.warning : Ink.muted)
                             .lineLimit(1)
                         StepTrack(step: context.state.step, tint: Ink.tint(context.state))
+                        NextStepButton(jobID: context.attributes.jobID, state: context.state)
                     }
                 }
             } compactLeading: {
-                Image(systemName: context.state.symbol)
+                // The status is always a word; the color only reinforces it.
+                Text(context.state.shortLabel)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Ink.tint(context.state))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             } compactTrailing: {
                 ElapsedText(since: context.state.since)
                     .font(.caption.monospacedDigit().weight(.medium))
                     .frame(maxWidth: 52)
             } minimal: {
-                Image(systemName: context.state.symbol)
+                Text(context.state.shortLabel)
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Ink.tint(context.state))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .accessibilityLabel(context.state.label)
             }
             .widgetURL(JobActivityLink.url(jobID: context.attributes.jobID))
             .keylineTint(Ink.brand)
@@ -115,8 +124,31 @@ struct JobLockScreenView: View {
                     .lineLimit(1)
             }
             StepTrack(step: state.step, tint: Ink.tint(state))
+            NextStepButton(jobID: attributes.jobID, state: state)
         }
         .padding(16)
+    }
+}
+
+/// The one forward step (On my way, Mark arrived, Start work). It runs in the app process and the
+/// card only changes once the server or the phone's outbox has the step; nothing shows success early.
+struct NextStepButton: View {
+    let jobID: String
+    let state: JobActivityAttributes.ContentState
+
+    var body: some View {
+        if let next = state.nextStep {
+            Button(intent: AdvanceJobStepIntent(jobID: jobID, target: next.target)) {
+                Label(next.title, systemImage: next.symbol)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Capsule().fill(Ink.brand))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Updates this job's status.")
+        }
     }
 }
 

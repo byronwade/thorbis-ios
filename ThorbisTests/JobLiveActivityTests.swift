@@ -129,3 +129,40 @@ final class JobActivityLifecycleTests: XCTestCase {
     }
 
 }
+
+final class JobNextStepTests: XCTestCase {
+    func testCardOffersOnlyTheNextForwardFieldStep() {
+        func next(_ status: String) -> JobNextStep? {
+            JobActivityAttributes.ContentState(status: status, since: .now, waitingToSync: false).nextStep
+        }
+        XCTAssertEqual(next("dispatched")?.target, "en_route")
+        XCTAssertEqual(next("dispatched")?.title, "On my way")
+        XCTAssertEqual(next("en_route")?.target, "arrived")
+        XCTAssertEqual(next("en_route")?.title, "Mark arrived")
+        XCTAssertEqual(next("arrived")?.target, "in_progress")
+        XCTAssertEqual(next("arrived")?.title, "Start work")
+        // Pausing, resuming and finishing need the app.
+        XCTAssertNil(next("in_progress"))
+        XCTAssertNil(next("paused"))
+        XCTAssertNil(next("completed"))
+    }
+
+    @MainActor
+    func testEveryOfferedStepMapsToARequestTheOutboxCanQueue() throws {
+        for status in ["scheduled", "en_route", "arrived"] {
+            let step = try XCTUnwrap(JobNextStep.after(status))
+            let request = try XCTUnwrap(JobStepIntentRunner.request(for: step.target))
+            let payload = try XCTUnwrap(OutboxEntry.ProgressPayload(jobID: "job-1", request: request))
+            XCTAssertEqual(payload.to, step.target)
+        }
+        XCTAssertNil(JobStepIntentRunner.request(for: "paused"))
+    }
+
+    func testCompactStatusIsAlwaysAWord() {
+        for status in JobLiveActivity.liveStatuses {
+            let state = JobActivityAttributes.ContentState(status: status, since: .now, waitingToSync: false)
+            XCTAssertFalse(state.shortLabel.isEmpty)
+            XCTAssertTrue(state.shortLabel.first?.isLetter ?? false)
+        }
+    }
+}
