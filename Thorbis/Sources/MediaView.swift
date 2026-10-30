@@ -11,6 +11,7 @@ struct JobMediaView: View {
     @EnvironmentObject var pendingMedia: PendingMediaStore
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var records: [MediaAssetRecord] = []
     @State private var selection: PhotosPickerItem?
     @State private var selectedData: Data?
@@ -75,20 +76,31 @@ struct JobMediaView: View {
                     .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 }
                 if !allPhotos.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
-                            let count = option == "All" ? allPhotos.count : option == "Untagged"
-                                ? allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }.count
-                                : allPhotos.filter { $0.tags.contains(option) }.count
-                            Button { filter = option } label: {
-                                Text("\(option) · \(count)").font(Theme.font(13, weight: .medium))
-                                    .foregroundStyle(filter == option ? Theme.background : Theme.muted)
-                                    .padding(.horizontal, 11).frame(height: 28)
-                                    .background(filter == option ? Theme.foreground : Theme.fill, in: Capsule())
-                                    .frame(minHeight: 44).contentShape(Rectangle())
+                    if dynamicTypeSize.isAccessibilitySize {
+                        Menu {
+                            ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
+                                Button("\(option) · \(photoFilterCount(option))") { filter = option }
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(filter == option ? .isSelected : [])
+                        } label: {
+                            Label("Filter photos · \(filter)", systemImage: "line.3.horizontal.decrease.circle")
+                                .font(.body.weight(.medium))
+                                .frame(minHeight: 44, alignment: .leading)
+                        }
+                        .accessibilityIdentifier("photo-filter-menu")
+                    } else {
+                        HStack(spacing: 6) {
+                            ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
+                                let count = photoFilterCount(option)
+                                Button { filter = option } label: {
+                                    Text("\(option) · \(count)").font(Theme.font(13, weight: .medium))
+                                        .foregroundStyle(filter == option ? Theme.background : Theme.muted)
+                                        .padding(.horizontal, 11).frame(height: 28)
+                                        .background(filter == option ? Theme.foreground : Theme.fill, in: Capsule())
+                                        .frame(minHeight: 44).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(filter == option ? .isSelected : [])
+                            }
                         }
                     }
                 }
@@ -134,7 +146,9 @@ struct JobMediaView: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.muted)
                             .accessibilityAddTraits(.isHeader)
-                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                        LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize
+                                  ? [GridItem(.flexible())]
+                                  : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                             ForEach(group.photos) { record in
                                 ZStack(alignment: .bottomTrailing) {
                                     Button { open(record) } label: {
@@ -151,8 +165,11 @@ struct JobMediaView: View {
                                                             .padding(8)
                                                     }
                                                 }
-                                            Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium)).lineLimit(1)
+                                            Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium))
+                                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                                                .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
                                                 .padding(.horizontal, 10).padding(.vertical, 8)
+                                                .padding(.trailing, dynamicTypeSize.isAccessibilitySize && canAdd && record.uploadState == "stored" ? 46 : 0)
                                             if record.uploadState != "stored" {
                                                 Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
                                                     .padding(.horizontal, 10).padding(.bottom, 8)
@@ -207,49 +224,19 @@ struct JobMediaView: View {
                 if canAdd && !(photos.isEmpty && documents.isEmpty) {
                     Text("Photos and PDFs up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
+                if canAdd && dynamicTypeSize.isAccessibilitySize {
+                    photoCaptureControls.padding(.top, 10)
+                }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .safeAreaInset(edge: .bottom) {
-            if canAdd {
-                VStack(spacing: 8) {
-                    ThorbisSegmented(options: [("Before", "Before"), ("After", "After"), ("Other", "Other")],
-                                     selection: $stage)
-                        .disabled(busy)
-                    HStack(spacing: 8) {
-                        Button { showCamera = true } label: {
-                            HStack(spacing: 7) {
-                                if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "camera") }
-                                Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")
-                            }
-                            .inkCommit()
-                        }
-                        .buttonStyle(PressStyle())
-                        .disabled(busy || !UIImagePickerController.isSourceTypeAvailable(.camera))
-                        PhotosPicker(selection: $selection, matching: .images) {
-                            Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                                .frame(width: 46, height: 46)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                        }
-                        .disabled(busy)
-                        .accessibilityLabel("Choose from library")
-                        ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
-                            ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
-                            : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }],
-                                    title: "Add a document", accessibilityLabel: "Add a document") {
-                            Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                                .frame(width: 46, height: 46)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                        }
-                        .disabled(busy)
-                    }
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-                .background(Theme.background)
+            if canAdd && !dynamicTypeSize.isAccessibilitySize {
+                photoCaptureControls
+                    .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+                    .background(Theme.background)
             }
         }
         .sheet(isPresented: $showLegacyRecovery) {
@@ -331,6 +318,51 @@ struct JobMediaView: View {
         selectedCapturedAt = Date()
         error = nil
     }
+    private func photoFilterCount(_ option: String) -> Int {
+        switch option {
+        case "Before", "After": allPhotos.filter { $0.tags.contains(option) }.count
+        case "Untagged": allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }.count
+        default: allPhotos.count
+        }
+    }
+
+    private var photoCaptureControls: some View {
+        VStack(spacing: 8) {
+            ThorbisSegmented(options: [("Before", "Before"), ("After", "After"), ("Other", "Other")],
+                             selection: $stage)
+                .disabled(busy)
+            HStack(spacing: 8) {
+                Button { showCamera = true } label: {
+                    HStack(spacing: 7) {
+                        if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "camera") }
+                        Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")
+                    }
+                    .inkCommit()
+                }
+                .buttonStyle(PressStyle())
+                .disabled(busy || !UIImagePickerController.isSourceTypeAvailable(.camera))
+                PhotosPicker(selection: $selection, matching: .images) {
+                    Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)
+                        .frame(width: 46, height: 46)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                }
+                .disabled(busy)
+                .accessibilityLabel("Choose from library")
+                ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
+                    ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
+                    : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }],
+                            title: "Add a document", accessibilityLabel: "Add a document") {
+                    Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
+                        .frame(width: 46, height: 46)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                }
+                .disabled(busy)
+            }
+        }
+    }
+
     private func photoDayLabel(_ day: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar

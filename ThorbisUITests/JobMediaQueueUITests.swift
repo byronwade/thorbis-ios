@@ -62,6 +62,32 @@ final class JobMediaQueueUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testLargestTextPhotoFilterAndCaptureControlsRemainUsable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let filter = app.buttons["photo-filter-menu"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 20))
+        for _ in 0..<6 where !filter.isHittable { app.swipeUp() }
+        XCTAssertTrue(filter.isHittable)
+        filter.tap()
+        XCTAssertTrue(app.buttons["After · 1"].waitForExistence(timeout: 5))
+        app.buttons["After · 1"].tap()
+        let photo = app.buttons["Photo, Finished unit"]
+        for _ in 0..<6 where !photo.isHittable { app.swipeUp() }
+        XCTAssertTrue(photo.isHittable)
+        XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.75)
+        XCTAssertGreaterThan(photo.frame.height, 100)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Largest text photo remains usable"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        for _ in 0..<6 where !app.buttons["Choose from library"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.buttons["Choose from library"].isHittable)
+        XCTAssertTrue(app.buttons["Add a document"].isHittable)
+    }
+
     func testSavedScanRemainsJobBoundAfterNavigationAndRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
