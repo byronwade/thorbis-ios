@@ -759,6 +759,11 @@ struct CustomerDetailView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(job.title).font(Theme.font(15, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                             Text(job.status.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                            if let scheduled = JobFiltering.date(job.scheduledFor) {
+                                Label("Scheduled for \(scheduled.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))", systemImage: "calendar")
+                                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                         Spacer(minLength: 8)
                         PaperDisclosure()

@@ -2,6 +2,37 @@ import XCTest
 
 @MainActor
 final class CustomerClarityUITests: XCTestCase {
+    func testJobHistoryShowsActualDatesAndKeepsUndatedJobs() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-history-dates", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Jobs"].waitForExistence(timeout: 30))
+        app.buttons["Jobs"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "2025")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "2026")).firstMatch.exists)
+        for title in ["Invalid time preview job", "Missing time preview job"] {
+            let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+            XCTAssertTrue(row.exists)
+            XCTAssertFalse(row.label.contains("Scheduled for"))
+        }
+        let image = XCTAttachment(screenshot: app.screenshot())
+        image.name = "Customer job history dates"
+        image.lifetime = .keepAlways
+        add(image)
+        let job = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "AC not cooling")).firstMatch
+        XCTAssertTrue(job.exists)
+        let expectedTime = DateFormatter()
+        expectedTime.locale = Locale(identifier: "en_US")
+        expectedTime.timeZone = TimeZone.current
+        expectedTime.timeStyle = .short
+        let utcTime = ISO8601DateFormatter().date(from: "2025-03-12T15:00:00Z")!
+        let display = job.label.replacingOccurrences(of: "\u{202F}", with: " ").replacingOccurrences(of: "\u{00A0}", with: " ")
+        let time = expectedTime.string(from: utcTime).replacingOccurrences(of: "\u{202F}", with: " ").replacingOccurrences(of: "\u{00A0}", with: " ")
+        XCTAssertTrue(display.contains(time), "The row must show the real local clock time: \(job.label)")
+        job.tap()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
+    }
+
     func testNextVisitStaysReadableAndOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()

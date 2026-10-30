@@ -1206,10 +1206,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2224", "0416", "AC recheck — Nakamura", "scheduled", 16, 0),
             ("2201", "0412", "Drain cleaning", "completed", 8, 30)
         ]
-        return rows.filter { !arguments.contains("--paper-preview-customer-no-jobs") || $0.1 != "0412" }.map { ref, customer, title, status, hour, minute in
-            ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
+        var selectedRows = rows
+        if arguments.contains("--paper-preview-customer-history-dates") {
+            selectedRows.append(("2230", "0412", "Invalid time preview job", "scheduled", 8, 0))
+            selectedRows.append(("2231", "0412", "Missing time preview job", "scheduled", 8, 0))
+        }
+        return selectedRows.filter { !arguments.contains("--paper-preview-customer-no-jobs") || $0.1 != "0412" }.map { ref, customer, title, status, hour, minute in
+            let testSchedule: Any = ref == "2231" ? NSNull() : ref == "2214" ? "2025-03-12T15:00:00Z" : ref == "2201" ? "2026-03-12T15:00:00Z" : "invalid"
+            return ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
              "customerId": "00000000-0000-4000-8000-00000000\(customer)", "title": title, "status": status,
-             "assignedToUserId": PaperPreview.actorID, "scheduledFor": today(hour: hour, minute: minute),
+             "assignedToUserId": PaperPreview.actorID, "scheduledFor": arguments.contains("--paper-preview-customer-history-dates") ? testSchedule : today(hour: hour, minute: minute),
              "createdAt": "2026-07-20T12:00:00Z", "updatedAt": today(hour: 9, minute: 0),
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
              "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
