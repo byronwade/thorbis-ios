@@ -17,6 +17,10 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Thorbis uses Bluetooth to connect to supported card readers for in-person payments.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Thorbis uses your location to show your position on the schedule map and verify where in-person card payments occur.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Thorbis uses the camera to add job photos, such as before and after shots, to the job you are working on.</string>
 	<key>NSFaceIDUsageDescription</key>
