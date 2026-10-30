@@ -82,6 +82,43 @@ final class SessionControllerTests: XCTestCase {
         withExtendedLifetime(subscription) {}
     }
 
+    func testCustomerLocationsNeverReuseAuthorityAfterRevocationAndRegrant() async {
+        let enabled = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
+        let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)
+        let (session, api) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, enabled),
+            .init(200, activeSession), .init(200, revoked), .init(200, enabled),
+            .init(200, activeSession), .init(200, catalog), .init(200, enabled)
+        ])
+        await session.restore()
+        let original = CustomerLocationScope.capture(session: session, api: api, customerID: first)!
+        let location = ServiceLocationRecord(id: "location", organizationId: first, customerId: first,
+            label: "Private address", kind: "service", address: "123 Main", notes: nil, coordinates: nil,
+            gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil, createdAt: "2026", updatedAt: "2026")
+        var locations = CustomerScopedLocations()
+        let firstRequest = locations.begin(scope: original)
+        XCTAssertTrue(locations.receive([location], scope: original, request: firstRequest, current: original))
+        XCTAssertEqual(locations.visible(in: original), [location])
+        let delayed = locations.begin(scope: original)
+        await session.revalidate()
+        XCTAssertTrue(locations.visible(in: CustomerLocationScope.capture(session: session, api: api, customerID: first)).isEmpty)
+        await session.revalidate()
+        let regranted = CustomerLocationScope.capture(session: session, api: api, customerID: first)!
+        XCTAssertNotEqual(original, regranted)
+        XCTAssertTrue(locations.visible(in: regranted).isEmpty, "Old rows must not be reauthorized")
+        locations.save(location, scope: original, current: regranted)
+        XCTAssertTrue(locations.visible(in: regranted).isEmpty, "An old edit must not publish after regrant")
+        XCTAssertFalse(locations.receive([location], scope: original, request: delayed, current: regranted))
+        let fresh = locations.begin(scope: regranted)
+        XCTAssertTrue(locations.receive([location], scope: regranted, request: fresh, current: regranted))
+        XCTAssertEqual(locations.visible(in: regranted), [location])
+        locations.remove(id: location.id, scope: original, current: regranted)
+        XCTAssertEqual(locations.visible(in: regranted), [location], "An old removal must not mutate the new view")
+        api.invalidateRequests()
+        let invalidated = CustomerLocationScope.capture(session: session, api: api, customerID: first)
+        XCTAssertTrue(locations.visible(in: invalidated).isEmpty)
+    }
+
     func testCustomerRecordsScopeRejectsStaleCompletionAfterSameVersionRevokeAndRegrant() async {
         let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
         let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)

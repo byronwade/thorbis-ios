@@ -187,21 +187,66 @@ struct CustomersView: View {
     }
 }
 
-private enum CustomerLocationSheet: Identifiable {
-    case add
-    case edit(ServiceLocationRecord)
+/// Authority under which a customer's location records were fetched.
+struct CustomerLocationScope: Equatable {
+    let actorID: String
+    let organizationID: String
+    let customerID: String
+    let generation: UUID
+    let authorityRevision: UUID
+    let requestGeneration: UUID
+    let policyVersion: Int?
 
-    var id: String {
-        switch self {
-        case .add: "new-location"
-        case .edit(let location): location.id
-        }
+    @MainActor static func capture(session: SessionController, api: APIClient, customerID: String) -> Self? {
+        guard session.can("customer.view", feature: "core_crm"),
+              let actorID = session.user?.id, let organizationID = session.activeOrganization?.id else { return nil }
+        return Self(actorID: actorID, organizationID: organizationID, customerID: customerID,
+                    generation: session.generation, authorityRevision: session.authorityRevision,
+                    requestGeneration: api.requestGeneration, policyVersion: session.policyVersion)
     }
+}
 
-    var location: ServiceLocationRecord? {
-        if case .edit(let location) = self { return location }
-        return nil
+/// Keeps the authority that produced the list; a later grant cannot adopt old rows.
+struct CustomerScopedLocations {
+    private(set) var scope: CustomerLocationScope?
+    private var rows: [ServiceLocationRecord] = []
+    private var revision = 0
+
+    mutating func begin(scope: CustomerLocationScope) -> Int {
+        revision += 1
+        if self.scope != scope { rows = []; self.scope = scope }
+        return revision
     }
+    mutating func clear() { revision += 1; rows = []; scope = nil }
+    func visible(in current: CustomerLocationScope?) -> [ServiceLocationRecord] {
+        guard let current, current == scope else { return [] }
+        return rows
+    }
+    @discardableResult mutating func receive(_ records: [ServiceLocationRecord], scope: CustomerLocationScope,
+                                               request: Int, current: CustomerLocationScope?) -> Bool {
+        guard request == revision, self.scope == scope, current == scope,
+              records.allSatisfy({ $0.organizationId == scope.organizationID && $0.customerId == scope.customerID }) else { return false }
+        rows = records
+        return true
+    }
+    mutating func save(_ record: ServiceLocationRecord, scope: CustomerLocationScope, current: CustomerLocationScope?) {
+        guard self.scope == scope, current == scope, record.organizationId == scope.organizationID,
+              record.customerId == scope.customerID else { return }
+        revision += 1
+        if let index = rows.firstIndex(where: { $0.id == record.id }) { rows[index] = record }
+        else { rows.append(record) }
+    }
+    mutating func remove(id: String, scope: CustomerLocationScope, current: CustomerLocationScope?) {
+        guard self.scope == scope, current == scope else { return }
+        revision += 1
+        rows.removeAll { $0.id == id }
+    }
+}
+
+private struct CustomerLocationSheet: Identifiable {
+    let location: ServiceLocationRecord?
+    let scope: CustomerLocationScope
+    var id: String { location?.id ?? "new-location" }
 }
 
 /// The location shown in a drawer is bound to the authority that opened it.
@@ -335,6 +380,7 @@ struct CustomerDetailView: View {
     @EnvironmentObject var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @State private var record: CustomerRecord?
+    @State private var recordScope: CustomerLocationScope?
     @State private var contactState = CustomerContactCollectionState()
     @State private var loadGeneration = 0
     @State private var activity: [CustomerHistoryEntry] = []
@@ -342,7 +388,7 @@ struct CustomerDetailView: View {
     @State private var activityLoading = false
     @State private var activityError: String?
     @State private var activityLoadGeneration = 0
-    @State private var locationState = ServiceLocationCollectionState()
+    @State private var locationState = CustomerScopedLocations()
     @State private var error: String?
     @State private var showNewJob = false
     @State private var contactSheet: CustomerContactSheetItem?
@@ -352,6 +398,7 @@ struct CustomerDetailView: View {
     @State private var locationSheet: CustomerLocationSheet?
     @State private var locationCanvas: CustomerLocationCanvas?
     @State private var locationToRemove: ServiceLocationRecord?
+    @State private var locationRemovalScope: CustomerLocationScope?
     @State private var isRemovingLocation = false
     @State private var locationError: String?
     @State private var tab = "Overview"
@@ -372,9 +419,60 @@ struct CustomerDetailView: View {
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
     private var contacts: [CustomerContactRecord] { contactState.contacts }
     private var contactsLoaded: Bool { contactState.isLoaded }
-    private var locations: [ServiceLocationRecord] { locationState.locations }
+    private var locationScope: CustomerLocationScope? { CustomerLocationScope.capture(session: session, api: api, customerID: customer.id) }
+    private var locations: [ServiceLocationRecord] { locationState.visible(in: locationScope) }
 
     var body: some View {
+        customerContent
+            .task(id: locationScope) { await updateLocationAuthority() }
+            .sheet(item: $locationSheet) { item in locationEditor(item) }
+            .sheet(item: $locationCanvas) { item in locationCanvasContent(item) }
+    }
+
+    private func updateLocationAuthority() async {
+        locationSheet = nil
+        locationCanvas = nil
+        locationToRemove = nil
+        locationRemovalScope = nil
+        locationError = nil
+        guard let scope = locationScope else { locationState.clear(); recordScope = nil; return }
+        await loadLocations(scope)
+        guard scope == locationScope, !Task.isCancelled else { return }
+        await load()
+    }
+
+    private func openNewLocation() {
+        guard let scope = locationScope, locationState.scope == scope, canEdit else { return }
+        locationSheet = CustomerLocationSheet(location: nil, scope: scope)
+    }
+
+    @ViewBuilder private func locationEditor(_ item: CustomerLocationSheet) -> some View {
+        if item.scope == locationScope, canEdit {
+            ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
+                guard item.scope == locationScope, canEdit else { return }
+                locationState.save(saved, scope: item.scope, current: locationScope)
+                locationError = nil
+            }
+        } else {
+            Text("Location details are no longer available.").padding()
+        }
+    }
+
+    private func locationCanvasContent(_ item: CustomerLocationCanvas) -> some View {
+        CustomerLocationCanvasView(item: item) { saved in
+            guard session.generation == item.generation,
+                  session.authorityRevision == item.authorityRevision,
+                  api.requestGeneration == item.requestGeneration,
+                  session.user?.id == item.actorID,
+                  session.activeOrganization?.id == item.organizationID,
+                  saved.organizationId == item.organizationID, saved.customerId == customer.id,
+                  let scope = locationScope, locationState.scope == scope, canEdit else { return }
+            locationState.save(saved, scope: scope, current: locationScope)
+            locationError = nil
+        }
+    }
+
+    private var customerContent: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 customerIdentity
@@ -385,7 +483,7 @@ struct CustomerDetailView: View {
                 }.padding(.horizontal, Theme.gutter).padding(.bottom, 10)
                 PaperQuickActions(phone: contacts.first(where: \.primary)?.phone ?? record?.phone,
                                   email: contacts.first(where: \.primary)?.email ?? record?.email,
-                                  directions: (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
+                                  directions: (locations.first?.address ?? (recordScope == locationScope && locationScope != nil ? record?.address : nil)).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
                     .padding(.horizontal, Theme.gutter).padding(.bottom, 14)
                 // Next visit sits above everything else: it's why most people open a customer.
                 if tab == "Overview" && session.can("job.view", feature: "jobs") {
@@ -442,7 +540,7 @@ struct CustomerDetailView: View {
                     ThorbisMenu(items: [
                         ThorbisMenuItem("Show to customer", icon: "person.crop.rectangle") { showCustomerMode = true },
                         ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add },
-                        ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add },
+                        ThorbisMenuItem("Add location", icon: "mappin.and.ellipse", isDisabled: locationState.scope != locationScope || locationScope == nil) { openNewLocation() },
                     ], accessibilityLabel: "Customer actions") { Image(systemName: "ellipsis") }
                 }
             }
@@ -450,7 +548,6 @@ struct CustomerDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if !typeSize.isAccessibilitySize { customerPrimaryActions }
         }
-        .task { await load() }
         .task { await loadSmsConsent() }
         .task(id: recordsScope) {
             if recordsPublishedScope != recordsScope {
@@ -473,11 +570,16 @@ struct CustomerDetailView: View {
         }
         .refreshable {
             await load()
+            if let scope = locationScope { await loadLocations(scope) }
             if tab == "Activity" { await loadActivity(reset: true) }
             if tab == "Records" { await loadRecords() }
         }
         .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
-        .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task { await load(); await loadSmsConsent() } }) {
+        .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task {
+            await load()
+            if let scope = locationScope { await loadLocations(scope) }
+            await loadSmsConsent()
+        } }) {
             CustomerSelfEditView(customerID: customer.id) { showCustomerMode = false }
         }
         .sheet(item: $contactSheet, onDismiss: { Task { await load() } }) { item in
@@ -487,26 +589,10 @@ struct CustomerDetailView: View {
                 error = nil
             }
         }
-        .sheet(item: $locationSheet) { item in
-            ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
-                locationState.save(saved)
-                locationError = nil
-            }
-        }
-        .sheet(item: $locationCanvas) { item in
-            CustomerLocationCanvasView(item: item) { saved in
-                guard session.generation == item.generation,
-                      session.authorityRevision == item.authorityRevision,
-                      api.requestGeneration == item.requestGeneration,
-                      session.user?.id == item.actorID,
-                      session.activeOrganization?.id == item.organizationID,
-                      saved.organizationId == item.organizationID,
-                      saved.customerId == customer.id else { return }
-                locationState.save(saved)
-                locationError = nil
-            }
-        }
-        .thorbisConfirm(item: $locationToRemove,
+        .thorbisConfirm(item: Binding(
+            get: { locationScope != nil && locationRemovalScope == locationScope ? locationToRemove : nil },
+            set: { locationToRemove = $0 }
+        ),
                         title: { _ in "Remove service location?" },
                         message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
                         actions: { location in
@@ -602,7 +688,7 @@ struct CustomerDetailView: View {
                 if let email = record.email {
                     HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(15)).frame(minHeight: 44)
                 }
-                if let address = record.address {
+                if recordScope == locationScope, locationScope != nil, let address = record.address {
                     HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(15)).frame(minHeight: 44)
                 }
                 if let industry = record.industry { detailRow("Industry", value: industry) }
@@ -656,8 +742,14 @@ struct CustomerDetailView: View {
     }
 
     private func locationMenuItems(_ location: ServiceLocationRecord) -> [ThorbisMenuItem] {
-        [ThorbisMenuItem("Edit location", icon: "pencil") { locationSheet = .edit(location) },
-         ThorbisMenuItem("Remove location", icon: "trash", role: .destructive) { locationToRemove = location }]
+        [ThorbisMenuItem("Edit location", icon: "pencil") {
+            guard let scope = locationScope, locationState.scope == scope, canEdit else { return }
+            locationSheet = CustomerLocationSheet(location: location, scope: scope)
+         }, ThorbisMenuItem("Remove location", icon: "trash", role: .destructive) {
+            guard let scope = locationScope, locationState.scope == scope, canEdit else { return }
+            locationRemovalScope = scope
+            locationToRemove = location
+         }]
     }
 
     /// Job texts: what the customer told staff about text messages for their jobs.
@@ -759,8 +851,8 @@ struct CustomerDetailView: View {
     }
     private var locationsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { locationSheet = .add } label: { Image(systemName: "plus").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle()) }.accessibilityLabel("Add location") } }
-            if let locationError {
+            HStack { sectionTitle("Locations", count: locations.count); Spacer(); if canEdit { Button { openNewLocation() } label: { Image(systemName: "plus").frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle()) }.accessibilityLabel("Add location") } }
+            if locationScope != nil, locationState.scope == locationScope, let locationError {
                 Text(locationError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
@@ -796,12 +888,12 @@ struct CustomerDetailView: View {
                         Text(notes).font(Theme.font(14)).foregroundStyle(Theme.muted).lineLimit(2)
                     }
                     Button {
-                        guard let actorID = session.user?.id, let organizationID = session.activeOrganization?.id,
-                              session.can("customer.view", feature: "core_crm"),
-                              organizationID == location.organizationId, location.customerId == customer.id else { return }
-                        locationCanvas = CustomerLocationCanvas(location: location, actorID: actorID,
-                            organizationID: organizationID, generation: session.generation,
-                            authorityRevision: session.authorityRevision, requestGeneration: api.requestGeneration)
+                        guard let scope = locationScope, locationState.scope == scope,
+                              locations.contains(where: { $0.id == location.id }),
+                              scope.organizationID == location.organizationId, location.customerId == customer.id else { return }
+                        locationCanvas = CustomerLocationCanvas(location: location, actorID: scope.actorID,
+                            organizationID: scope.organizationID, generation: scope.generation,
+                            authorityRevision: scope.authorityRevision, requestGeneration: scope.requestGeneration)
                     } label: {
                         Label("Show location details", systemImage: "text.alignleft")
                             .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
@@ -818,18 +910,23 @@ struct CustomerDetailView: View {
     }
 
     private func removeLocation(_ location: ServiceLocationRecord) async {
-        guard canEdit, !isRemovingLocation else { return }
+        guard canEdit, !isRemovingLocation, let scope = locationRemovalScope,
+              scope == locationScope, locationState.scope == scope,
+              locations.contains(where: { $0.id == location.id }) else { return }
         isRemovingLocation = true
         defer {
             isRemovingLocation = false
             locationToRemove = nil
+            locationRemovalScope = nil
         }
         do {
             try await api.removeFieldLocation(customer.id, location.id)
-            locationState.remove(id: location.id)
+            guard scope == locationScope, canEdit else { return }
+            locationState.remove(id: location.id, scope: scope, current: locationScope)
             locationError = nil
         } catch is CancellationError {
         } catch {
+            guard scope == locationScope, canEdit else { return }
             locationError = error.localizedDescription
         }
     }
@@ -1040,23 +1137,35 @@ struct CustomerDetailView: View {
     }
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
+    private func loadLocations(_ scope: CustomerLocationScope) async {
+        guard scope == locationScope else { return }
+        let request = locationState.begin(scope: scope)
+        do {
+            let records = try await api.fieldLocations(customer.id)
+            guard !Task.isCancelled else { return }
+            if locationState.receive(records, scope: scope, request: request, current: locationScope) {
+                locationError = nil
+            }
+        } catch is CancellationError {
+        } catch {
+            guard scope == locationScope else { return }
+            locationError = error.localizedDescription
+        }
+    }
+
     private func load() async {
         loadGeneration += 1
         let requestGeneration = loadGeneration
-        let locationRequestGeneration = locationState.beginLoad()
+        let sourceScope = locationScope
         let contactRequestGeneration = contactState.beginLoading()
         do {
             let loadedRecord = try await api.fieldCustomer(customer.id)
-            guard loadGeneration == requestGeneration else { return }
+            guard loadGeneration == requestGeneration, let sourceScope, sourceScope == locationScope else { return }
             record = loadedRecord
+            recordScope = sourceScope
             let loadedContacts = try await api.fieldContacts(customer.id)
-            guard loadGeneration == requestGeneration else { return }
+            guard loadGeneration == requestGeneration, sourceScope == locationScope else { return }
             contactState.receive(loadedContacts, generation: contactRequestGeneration)
-            let loadedLocations = try await api.fieldLocations(customer.id)
-            guard loadGeneration == requestGeneration else { return }
-            if locationState.receive(loadedLocations, generation: locationRequestGeneration) {
-                locationError = nil
-            }
             error = nil
         } catch is CancellationError {} catch {
             guard loadGeneration == requestGeneration else { return }
