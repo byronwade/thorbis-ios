@@ -27,6 +27,21 @@ extension Array where Element == EstimateRevisionLineDraft {
         filter { $0.group == group }
     }
 
+    /// EB-13: whether the customer sees each material line. One hidden material hides them all,
+    /// so a material added while the switch is off is folded in too.
+    var showsMaterials: Bool { !contains { $0.group == .material && !$0.showToCustomer } }
+
+    mutating func setShowsMaterials(_ shown: Bool) {
+        for index in indices where self[index].group == .material { self[index].showToCustomer = shown }
+    }
+
+    /// The saved `group` and `showToCustomer` of one line, or nil for both while the workspace
+    /// doesn't store groups yet (`estimate_line_groups`).
+    func storedPresentation(of line: EstimateRevisionLineDraft, storesGroups: Bool) -> (group: String?, showToCustomer: Bool?) {
+        guard storesGroups else { return (nil, nil) }
+        return (line.group.rawValue, line.group == .material && !showsMaterials ? false : nil)
+    }
+
     /// Sum of qty × each in cents, or nil while any line's price or quantity is unreadable.
     func subtotal(_ group: EstimateLineGroup? = nil) -> Int? {
         var sum = 0
@@ -411,6 +426,8 @@ struct EstimateLineGroupsEditor: View {
     @Binding var lines: [EstimateRevisionLineDraft]
     let disabled: Bool
     let focus: FocusState<EstimateBuilderFocus?>.Binding
+    /// EB-13: "Show on estimate" on Materials, once the workspace stores it.
+    var materialsSwitch = false
     let addTo: (EstimateLineGroup) -> Void
     let removed: (EstimateRevisionLineDraft, Int) -> Void
 
@@ -437,6 +454,8 @@ struct EstimateLineGroupsEditor: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             .dropDestination(for: String.self) { ids, _ in drop(ids, before: groupLines.first?.id, group: group) }
+
+            if group == .material && materialsSwitch && !groupLines.isEmpty { materialsVisibility }
 
             VStack(spacing: 0) {
                 ForEach(groupLines) { line in
@@ -472,6 +491,23 @@ struct EstimateLineGroupsEditor: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
         }
         .disabled(disabled)
+    }
+
+    /// EB-13: on by default; off, the customer sees one "Materials" line with the same sum.
+    private var materialsVisibility: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(isOn: Binding(get: { lines.showsMaterials },
+                                 set: { shown in withAnimation(Self.spring) { lines.setShowsMaterials(shown) } })) {
+                Text("Show on estimate").font(Theme.font(15)).foregroundStyle(Theme.foreground)
+            }
+            .tint(Theme.brand)
+            .frame(minHeight: 44)
+            if !lines.showsMaterials {
+                Text("The customer sees one Materials line\(lines.subtotal(.material).map { " · " + money($0, currency: "USD") } ?? "").")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .transition(.opacity)
+            }
+        }
     }
 
     static let spring = Animation.spring(response: 0.3, dampingFraction: 1)

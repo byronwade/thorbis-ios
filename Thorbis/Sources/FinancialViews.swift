@@ -699,6 +699,17 @@ private extension View {
 }
 
 /// Sum of line amounts in cents, or nil on overflow or a negative line.
+/// The estimate lines a customer sees (EB-13): materials marked hidden fold into one "Materials"
+/// line after the others with their sum, so no price is hidden and the lines still add up to the
+/// total. The server's PDF and approval link fold the same way.
+func customerEstimateLines(_ lines: [FieldLine]) -> [FieldLine] {
+    let hidden = lines.filter { $0.showToCustomer == false }
+    guard let first = hidden.first, let sum = paperLinesTotal(hidden) else { return lines }
+    return lines.filter { $0.showToCustomer != false }
+        + [FieldLine(id: first.id, description: "Materials", quantity: 1,
+                     unitPrice: FieldMoney(amount: sum, currency: first.unitPrice.currency), source: nil)]
+}
+
 func paperLinesTotal(_ lines: [FieldLine]) -> Int? {
     var total = 0
     for line in lines {

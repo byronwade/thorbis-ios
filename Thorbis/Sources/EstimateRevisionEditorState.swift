@@ -66,11 +66,13 @@ struct EstimateRevisionLineDraft: Identifiable, Equatable {
     /// False only for a line loaded from the server until the catalog sorts it once; a group the
     /// person picks is never overwritten by a later catalog refresh.
     var groupSettled: Bool
+    /// EB-13: false when this material is folded into one "Materials" line for the customer.
+    var showToCustomer: Bool
 
     init(id: UUID = UUID(), originalLineID: String? = nil, description: String,
          quantity: String, unitPrice: String, source: FieldEstimateLineSourceInput? = nil,
          group: EstimateLineGroup = .work, priceBookOriginal: PriceBookLineOriginal? = nil,
-         groupSettled: Bool = true) {
+         groupSettled: Bool = true, showToCustomer: Bool = true) {
         self.id = id
         self.originalLineID = originalLineID
         self.description = description
@@ -80,6 +82,7 @@ struct EstimateRevisionLineDraft: Identifiable, Equatable {
         self.group = group
         self.priceBookOriginal = priceBookOriginal
         self.groupSettled = groupSettled
+        self.showToCustomer = showToCustomer
     }
 }
 
@@ -95,6 +98,8 @@ struct EstimateRevisionEditorState: Equatable {
     var title: String
     var lines: [EstimateRevisionLineDraft]
     var options: [EstimateRevisionOptionDraft]
+    /// The workspace stores each line's group and the materials switch (`estimate_line_groups`).
+    var storesLineGroups = false
 
     init(estimate: EstimateRecord) {
         self.estimate = estimate
@@ -127,12 +132,13 @@ struct EstimateRevisionEditorState: Equatable {
 
     var hasChanges: Bool {
         guard Self.cleaned(title) == estimate.title,
-              Self.linesMatch(lines, originals: estimate.lines),
+              Self.linesMatch(lines, originals: estimate.lines, storesGroups: storesLineGroups),
               options.count == (estimate.options?.count ?? 0) else { return true }
         for (draft, original) in zip(options, estimate.options ?? []) {
             guard draft.id == original.id, Self.cleaned(draft.title) == Self.cleaned(original.title),
                   Self.cleaned(draft.description) == Self.cleaned(original.description),
-                  Self.linesMatch(draft.lines, originals: original.lines) else { return true }
+                  Self.linesMatch(draft.lines, originals: original.lines, storesGroups: storesLineGroups)
+            else { return true }
         }
         return false
     }
@@ -243,7 +249,7 @@ struct EstimateRevisionEditorState: Equatable {
         let cleanedTitle = Self.cleaned(title)
         guard !cleanedTitle.isEmpty else { throw EstimateRevisionEditorError.titleRequired }
         guard cleanedTitle.utf16.count <= 200 else { throw EstimateRevisionEditorError.titleTooLong }
-        let requestLines = try Self.makeLines(lines)
+        let requestLines = try Self.makeLines(lines, storesGroups: storesLineGroups)
         guard options.count <= 8 else { throw EstimateRevisionEditorError.tooManyOptions }
         var identities = Set<String>()
         let requestOptions = try options.map { option -> FieldEstimateOptionRequest in
@@ -258,7 +264,7 @@ struct EstimateRevisionEditorState: Equatable {
                 id: identity,
                 title: optionTitle,
                 description: Self.cleaned(option.description),
-                lines: try Self.makeLines(option.lines)
+                lines: try Self.makeLines(option.lines, storesGroups: storesLineGroups)
             )
         }
         if !canDiscount,
@@ -294,14 +300,18 @@ struct EstimateRevisionEditorState: Equatable {
            let price = line.source?.originalUnitPrice, price.currency == "USD" {
             original = PriceBookLineOriginal(description: description, unitPrice: priceText(price.amount))
         }
+        let storedGroup = line.group.flatMap(EstimateLineGroup.init(rawValue:))
         return EstimateRevisionLineDraft(
             originalLineID: line.id,
             description: line.description,
             quantity: String(line.quantity),
             unitPrice: priceText(line.unitPrice.amount),
             source: source,
+            group: storedGroup ?? .work,
             priceBookOriginal: original,
-            groupSettled: false
+            // A stored group is the person's choice; only lines saved before groups get sorted.
+            groupSettled: storedGroup != nil,
+            showToCustomer: line.showToCustomer ?? true
         )
     }
 
@@ -309,7 +319,7 @@ struct EstimateRevisionEditorState: Equatable {
         EstimateRevisionLineDraft(description: "", quantity: "1", unitPrice: "", source: .manual)
     }
 
-    private static func makeLines(_ drafts: [EstimateRevisionLineDraft]) throws -> [FieldEstimateLineInput] {
+    private static func makeLines(_ drafts: [EstimateRevisionLineDraft], storesGroups: Bool) throws -> [FieldEstimateLineInput] {
         guard !drafts.isEmpty else { throw EstimateRevisionEditorError.noLines }
         guard drafts.count <= 500 else { throw EstimateRevisionEditorError.tooManyLines }
         return try drafts.map { draft in
@@ -325,23 +335,32 @@ struct EstimateRevisionEditorState: Equatable {
             if let source = draft.source, case .unsupported = source {
                 throw EstimateRevisionEditorError.unsupportedLineSource
             }
+            let presentation = drafts.storedPresentation(of: draft, storesGroups: storesGroups)
             return FieldEstimateLineInput(
                 description: description,
                 quantity: quantity,
                 unitPrice: FieldMoney(amount: amount, currency: "USD"),
-                source: draft.source ?? .manual
+                source: draft.source ?? .manual,
+                group: presentation.group,
+                showToCustomer: presentation.showToCustomer
             )
         }
     }
 
-    private static func linesMatch(_ drafts: [EstimateRevisionLineDraft], originals: [FieldLine]) -> Bool {
+    private static func linesMatch(_ drafts: [EstimateRevisionLineDraft], originals: [FieldLine],
+                                   storesGroups: Bool) -> Bool {
         guard drafts.count == originals.count else { return false }
         for (draft, original) in zip(drafts, originals) {
+            let presentation = drafts.storedPresentation(of: draft, storesGroups: storesGroups)
             guard draft.originalLineID == original.id,
                   cleaned(draft.description) == original.description,
                   Int(draft.quantity) == original.quantity,
                   parsePrice(draft.unitPrice) == original.unitPrice.amount,
-                  sourceMatches(draft.source, original: original) else { return false }
+                  sourceMatches(draft.source, original: original),
+                  // A line saved before groups were stored has no group to compare.
+                  !storesGroups || ((original.group == nil || presentation.group == original.group)
+                      && (presentation.showToCustomer ?? true) == (original.showToCustomer ?? true))
+            else { return false }
         }
         return true
     }

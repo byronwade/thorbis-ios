@@ -250,7 +250,7 @@ struct CustomerEstimatePresentation: View {
             if flow.hasOptions, let description = flow.selectedOption?.description, !description.isEmpty {
                 Text(description).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
             }
-            CustomerLinesCard(lines: flow.lines, currency: flow.currency, type: type,
+            CustomerLinesCard(lines: customerEstimateLines(flow.lines), currency: flow.currency, type: type,
                               rows: flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? [])
         }
     }
@@ -378,7 +378,7 @@ struct CustomerEstimatePresentation: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(option.title).font(Theme.font(type.heading + 4, weight: .medium))
-                    CustomerLinesCard(lines: option.lines, currency: option.currency, type: type,
+                    CustomerLinesCard(lines: customerEstimateLines(option.lines), currency: option.currency, type: type,
                                       rows: [CustomerAmountRow(label: "Total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
                 }
                 .padding(Theme.gutter)
