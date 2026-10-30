@@ -8,6 +8,8 @@ struct PaperTabletSchedule: View {
     @State private var range = "Today"
     @State private var selectedID: String?
     @State private var showNewJob = false
+    @State private var typedPath: [PaperTabletScheduleRoute] = []
+    @StateObject private var typedOwner = PaperTypedJobsOwner(stackKind: .tabletSchedule)
 
     private var jobs: [Job] {
         guard session.can("job.view", feature: "jobs") else { return [] }
@@ -24,8 +26,44 @@ struct PaperTabletSchedule: View {
             scheduleColumn
                 .frame(width: 350)
                 .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
-            NavigationStack {
-                Group {
+            Group {
+                if PaperTypedRouteExperiment.enabled {
+                    NavigationStack(path: Binding(get: { typedPath }, set: { next in
+                        let old = typedPath
+                        typedPath = next
+                        typedOwner.changed(from: old.map(\.route), to: next.map(\.route))
+                    })) {
+                        detailContent
+                            .environment(\.paperTypedJobsOwner, typedOwner)
+                            .navigationDestination(for: PaperTabletScheduleRoute.self) { route in
+                                PaperTypedDestination(route: route.route).environment(\.paperTypedJobsOwner, typedOwner)
+                            }
+                    }
+                } else {
+                    NavigationStack {
+                        detailContent
+                            .environment(\.paperTypedJobsOwner, nil)
+                            .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
+                            .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
+                            .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .onChange(of: jobs.map(\.id), initial: true) { _, ids in
+            if selectedID.map({ ids.contains($0) }) != true { selectedID = ids.first }
+        }
+        .onChange(of: selectedID) { _, _ in
+            if PaperTypedRouteExperiment.enabled { typedOwner.discardPendingPop(); typedPath = [] }
+        }
+        .sheet(isPresented: $showNewJob) { NewJobSheet() }
+    }
+
+    private var detailContent: some View {
+        Group {
                     if range == "Map" {
                         // iPad gets the same route map as the phone, beside today's list.
                         ScrollView {
@@ -45,18 +83,6 @@ struct PaperTabletSchedule: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.background)
-                .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
-                .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
-                .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
-        .onChange(of: jobs.map(\.id), initial: true) { _, ids in
-            if selectedID.map({ ids.contains($0) }) != true { selectedID = ids.first }
-        }
-        .sheet(isPresented: $showNewJob) { NewJobSheet() }
     }
 
     private var scheduleColumn: some View {

@@ -30,6 +30,8 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
     @State private var path = NavigationPath()
+    @State private var typedTabletPath: [PaperTypedJobsRoute] = []
+    @StateObject private var typedTabletOwner = PaperTypedJobsOwner()
     @State private var schedulePath = NavigationPath()
     @State private var typedSchedulePath: [PaperTypedJobsRoute] = []
     @StateObject private var typedScheduleOwner = PaperTypedJobsOwner()
@@ -102,26 +104,21 @@ struct RootView: View {
     }
 
     private func tabletNavigation() -> some View {
-        NavigationStack(path: $path) {
-            Group {
-                switch tab {
-                case .schedule:
-                    PaperTabletSchedule()
-                case .jobs: JobsView()
-                case .customers: CustomersView()
-                case .more: MoreView()
+        Group {
+            if typedJobsExperiment {
+                NavigationStack(path: Binding(get: { typedTabletPath }, set: { next in
+                    let old = typedTabletPath
+                    typedTabletPath = next
+                    typedTabletOwner.changed(from: old, to: next)
+                })) {
+                    tabletRootContent
+                        .environment(\.paperTypedJobsOwner, typedTabletOwner)
+                        .navigationDestination(for: PaperTypedJobsRoute.self) { route in
+                            PaperTypedDestination(route: route).environment(\.paperTypedJobsOwner, typedTabletOwner)
+                        }
                 }
-            }
-            .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
-            .background(Theme.background)
-            .paperDestinations()
-            .navigationDestination(isPresented: $priceBook) {
-                WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
-            }
-            .navigationDestination(isPresented: $drafts) {
-                if let actor = session.user?.id, let org = session.activeOrganization?.id {
-                    InboxLocalDraftView(actorID: actor, organizationID: org)
-                }
+            } else {
+                NavigationStack(path: $path) { tabletRootContent.paperDestinations() }
             }
         }
         .sheet(isPresented: $search) { PaperGlobalSearch() }
@@ -168,8 +165,8 @@ struct RootView: View {
                 case "my-day": tab = .schedule
                 case "customers": tab = .customers
                 case "menu", "more": settings = true
-                case "job", "job-invoice": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
-                case "customer", "customer-activity", "customer-records": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
+                case "job", "job-invoice": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { pushTabletJob(job) }
+                case "customer", "customer-activity", "customer-records": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { pushTabletCustomer(customer) }
                 default: break
                 }
             }
@@ -177,17 +174,37 @@ struct RootView: View {
         }
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: false) }
         .onChange(of: store.jobs) { openRequestedJob(phone: false) }
-        .onChange(of: store.requestedSchedule) { path = NavigationPath(); tab = .schedule }
+        .onChange(of: store.requestedSchedule) { resetTabletPath(); tab = .schedule }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord(phone: false) }
         .onAppear {
-            if session.can("job.view", feature: "jobs") { path = NavigationPath(); tab = .schedule }
-            else if session.can("customer.view", feature: "core_crm") { path = NavigationPath(); tab = .customers }
+            if session.can("job.view", feature: "jobs") { resetTabletPath(); tab = .schedule }
+            else if session.can("customer.view", feature: "core_crm") { resetTabletPath(); tab = .customers }
         }
     }
 
-    /// Linear-style phone navigation: no side menu and no system tab bar. A floating bar holds the
-    /// pinned places and a switcher slot; the switcher opens a menu of every place, with the business
-    /// switcher on top. The bar shows on a place's first screen and steps aside for pushed screens.
+    private var tabletRootContent: some View {
+            Group {
+                switch tab {
+                case .schedule:
+                    PaperTabletSchedule()
+                case .jobs: JobsView()
+                case .customers: CustomersView()
+                case .more: MoreView()
+                }
+            }
+            .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
+            .background(Theme.background)
+            .navigationDestination(isPresented: $priceBook) {
+                WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
+            }
+            .navigationDestination(isPresented: $drafts) {
+                if let actor = session.user?.id, let org = session.activeOrganization?.id {
+                    InboxLocalDraftView(actorID: actor, organizationID: org)
+                }
+            }
+    }
+
+    /// Floating phone navigation keeps each place in its own stack.
     @ViewBuilder private func phoneNavigation() -> some View {
         #if DEBUG
         if PaperPreview.enabled, PaperPreview.screen == "ipad-sidebar" {
@@ -650,7 +667,7 @@ struct RootView: View {
                     gated(.schedule) { ScheduleView() }
                         .environment(\.paperTypedJobsOwner, typedScheduleOwner)
                         .navigationDestination(for: PaperTypedJobsRoute.self) { route in
-                            typedJobsDestination(route).environment(\.paperTypedJobsOwner, typedScheduleOwner)
+                            PaperTypedDestination(route: route).environment(\.paperTypedJobsOwner, typedScheduleOwner)
                         }
                 }
             } else {
@@ -666,7 +683,7 @@ struct RootView: View {
                     gated(.jobs) { JobsView() }
                         .environment(\.paperTypedJobsOwner, typedJobsOwner)
                         .navigationDestination(for: PaperTypedJobsRoute.self) { route in
-                            typedJobsDestination(route).environment(\.paperTypedJobsOwner, typedJobsOwner)
+                            PaperTypedDestination(route: route).environment(\.paperTypedJobsOwner, typedJobsOwner)
                         }
                 }
             } else {
@@ -679,6 +696,18 @@ struct RootView: View {
                 if let route = item.route { PaperRouteView(route: route).paperDestinations() }
             }
         }
+    }
+
+    private func resetTabletPath() {
+        if typedJobsExperiment { typedTabletOwner.discardPendingPop(); typedTabletPath = [] } else { path = NavigationPath() }
+    }
+
+    private func pushTabletJob(_ job: Job) {
+        if typedJobsExperiment { typedTabletOwner.discardPendingPop(); typedTabletPath.append(.job(job)) } else { path.append(job) }
+    }
+
+    private func pushTabletCustomer(_ customer: Customer) {
+        if typedJobsExperiment { typedTabletOwner.discardPendingPop(); typedTabletPath.append(.customer(customer)) } else { path.append(customer) }
     }
 
     private func resetSchedulePath() {
@@ -705,38 +734,7 @@ struct RootView: View {
         if typedJobsExperiment { typedJobsOwner.discardPendingPop(); typedJobsPath.append(.paper(route)) } else { jobsPath.append(route) }
     }
 
-    private var typedJobsExperiment: Bool {
-        #if DEBUG
-        return PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--invoice-route-owner-experiment")
-        #else
-        return false
-        #endif
-    }
-
-    @ViewBuilder private func typedJobsDestination(_ route: PaperTypedJobsRoute) -> some View {
-        switch route {
-        case .job(let job):
-            if session.can("job.view", feature: "jobs") { JobDetailView(jobId: job.id) }
-            else { ContentUnavailableView("Job unavailable", systemImage: "lock") }
-        case .customer(let customer):
-            if session.can("customer.view", feature: "core_crm") { CustomerDetailView(customer: customer) }
-            else { ContentUnavailableView("Customer unavailable", systemImage: "lock") }
-        case .paper(.job(let id)):
-            if session.can("job.view", feature: "jobs") { JobDetailView(jobId: id) }
-            else { ContentUnavailableView("Job unavailable", systemImage: "lock") }
-        case .paper(let value): PaperRouteView(route: value)
-        case .invoice(let value):
-            if session.phase == .ready, session.user?.id == value.actorID,
-               session.activeOrganization?.id == value.organizationID, session.generation == value.sessionGeneration,
-               session.authorityRevision == value.authorityRevision, api.requestGeneration == value.apiGeneration,
-               api.normalizedOrigin == value.apiOrigin, session.can("job.view", feature: "jobs"),
-               session.can("invoice.view", feature: "invoicing") {
-                InvoiceDetailView(id: value.invoiceID, expectedJobScope: .init(jobID: value.jobID, organizationID: value.organizationID, customerID: value.customerID))
-            } else {
-                ContentUnavailableView("Invoice unavailable", systemImage: "lock", description: Text("Return to the job to refresh this invoice."))
-            }
-        }
-    }
+    private var typedJobsExperiment: Bool { PaperTypedRouteExperiment.enabled }
 
     /// Opens the job a Live Activity tap asked for, once the job list has it.
     private func openRequestedJob(phone: Bool) {
@@ -761,8 +759,8 @@ struct RootView: View {
             }
         } else {
             tab = .schedule
-            path = NavigationPath()
-            path.append(job)
+            resetTabletPath()
+            pushTabletJob(job)
         }
     }
 
@@ -789,7 +787,14 @@ struct RootView: View {
             }
         } else {
             if case .customer = record { tab = .customers } else { tab = .schedule }
-            path = target
+            if typedJobsExperiment {
+                resetTabletPath()
+                switch record {
+                case .customer(let id): pushTabletCustomer(store.customers.first { $0.id == id } ?? Customer(id: id, name: "Customer", archived: nil, createdAt: nil))
+                case .estimate(let id): typedTabletPath.append(.paper(.estimate(id)))
+                case .invoice(let id): typedTabletPath.append(.paper(.invoice(id)))
+                }
+            } else { path = target }
         }
     }
 
@@ -839,7 +844,7 @@ struct RootView: View {
     }
 
     private func sidebarRow(_ title: String, icon: String, target: TabletSection, count: Int? = nil) -> some View {
-        Button { path = NavigationPath(); tab = target } label: {
+        Button { resetTabletPath(); tab = target } label: {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.system(size: 17)).frame(width: 18).foregroundStyle(Theme.muted)
                 Text(title).font(Theme.font(15, weight: tab == target ? .medium : .regular))

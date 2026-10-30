@@ -67,4 +67,18 @@ final class JobInvoiceRouteTransitionTests: XCTestCase {
             sessionGeneration: session, authorityRevision: authority, presentationID: presentation, apiGeneration: apiGeneration, apiOrigin: "https://other.example.test"))
     }
 
+    func testMultiplePopKeepsRemovedInvoiceRoutesInOrder() {
+        let first = invoice("invoice-2209"), second = invoice("invoice-2240")
+        let root: [Route] = [.job("job-a")]
+        let old = root + [.invoice(first), .invoice(second)]
+        let removed = JobInvoiceRouteTransition.completedPops(from: old, to: root) { route in
+            if case let .invoice(value) = route { return value }; return nil
+        }
+        XCTAssertEqual(removed, [first, second])
+        let replaced = JobInvoiceRouteTransition.completedPops(from: old, to: [.job("other")]) { route in
+            if case let .invoice(value) = route { return value }; return nil
+        }
+        XCTAssertTrue(replaced.isEmpty)
+    }
+
 }
