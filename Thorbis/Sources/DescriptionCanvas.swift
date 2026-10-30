@@ -103,6 +103,21 @@ struct DescriptionCanvas: View {
             .navigationTitle(accessValid ? title : "Description")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                #if DEBUG
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-authority") {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        Button("Test revoke") { session.previewSetEstimateEditing(false) }
+                        Button("Test restore") { session.previewSetEstimateEditing(true) }
+                    }
+                }
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-removal") {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Test remove") {
+                            NotificationCenter.default.post(name: Notification.Name("ThorbisPreviewRemoveCanvasLine"), object: nil)
+                        }
+                    }
+                }
+                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         if working != original { confirmDiscard = true } else { dismiss() }

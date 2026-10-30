@@ -205,6 +205,13 @@ struct InvoiceLineEditorView: View {
         }
         .task(id: catalogContext) { await refreshCatalog() }
         .onChange(of: catalogContext) { _, _ in finishSearch() }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisPreviewRemoveCanvasLine"))) { _ in
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--canvas-test-removal"), let target = descriptionTarget {
+                try? editor.removeLine(id: target.id)
+            }
+            #endif
+        }
         .onChange(of: editingAddedLine) { _, expanded in
             if expanded { focus = nil }
         }

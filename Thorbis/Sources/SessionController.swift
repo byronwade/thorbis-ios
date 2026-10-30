@@ -118,6 +118,15 @@ final class SessionController: ObservableObject {
         api.onUnauthorized = { [weak self] in self?.invalidateUnauthorizedSession() }
     }
 
+    #if DEBUG
+    /// Preview-only authority transitions for exercising in-flight editor behavior.
+    func previewSetEstimateEditing(_ enabled: Bool) {
+        guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--canvas-test-authority") else { return }
+        authorityRevision = UUID()
+        if enabled { capabilities.insert("estimate.create") } else { capabilities.remove("estimate.create") }
+    }
+    #endif
+
     func can(_ capability: String, feature: String? = nil) -> Bool {
         guard phase == .ready,
               let sessionDeadline, Date() < sessionDeadline,
