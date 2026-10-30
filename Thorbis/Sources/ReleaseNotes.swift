@@ -18,6 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "list.bullet", title: "Move through lists faster",
                       detail: "Customer lists and repeated price book searches do less work as you browse."),
+                .init(symbol: "photo.on.rectangle", title: "Browse job photos sooner",
+                      detail: "Open photos sooner and load more as you browse."),
             ]
         ),
         ReleaseNote(
