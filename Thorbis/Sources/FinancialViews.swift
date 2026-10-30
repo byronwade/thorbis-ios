@@ -96,37 +96,30 @@ struct EstimateDetailView: View {
                     commercialHeading(ref: "EST-\(record.id.suffix(4).uppercased())", context: store.customerName(record.customerId), title: record.title,
                                       status: record.status, date: record.createdAt)
                     DocumentCustomerLink(customerID: record.customerId)
-                    // MF-04: an estimate leads with its total.
+                    // MF-04: an estimate leads with its total, once. A member's price is its supporting
+                    // line, so the lines below end without repeating either amount (F16).
                     if let total = paperLinesTotal(record.lines), !record.lines.isEmpty {
-                        MoneyFigure(label: "Total", cents: total, currency: record.lines.first?.unitPrice.currency ?? "USD")
+                        let currency = record.lines.first?.unitPrice.currency ?? "USD"
+                        VStack(alignment: .leading, spacing: 6) {
+                            MoneyFigure(label: "Total", cents: total, currency: currency)
+                            if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
+                                let memberTotal = record.lines.reduce(0) { $0 + $1.quantity * memberPricing.memberPrice($1.unitPrice.amount) }
+                                HStack(spacing: 6) {
+                                    Image(systemName: "star.fill").font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Theme.brandText).accessibilityHidden(true)
+                                    // MF-05: money stays ink; only the mark carries the member color.
+                                    Text("Member price \(money(memberTotal, currency: currency)) · \(memberPricing.discountPercent)% off")
+                                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .accessibilityElement(children: .combine)
+                            }
+                        }
                     }
                     PaperGroupHeader(title: "Line items", count: record.lines.count).padding(.top, 4)
                     VStack(spacing: 0) {
                         ForEach(record.lines) { line in CommercialLineView(line: line, divider: line.id != record.lines.first?.id) }
                         if record.lines.isEmpty { Text("No line items yet.").foregroundStyle(Theme.muted).padding(16) }
-                        if !record.lines.isEmpty, let total = paperLinesTotal(record.lines) {
-                            Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15)
-                            HStack {
-                                Text("Total").font(Theme.font(15, weight: .medium))
-                                Spacer()
-                                Text(money(total, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                    .moneyStyle(.total)
-                            }
-                            .padding(15)
-                            if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
-                                let memberTotal = record.lines.reduce(0) { $0 + $1.quantity * memberPricing.memberPrice($1.unitPrice.amount) }
-                                HStack {
-                                    Label("Member price · \(memberPricing.discountPercent)% off", systemImage: "star")
-                                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
-                                    Spacer()
-                                    // MF-05: money stays ink; only the label carries the member mark.
-                                    Text(money(memberTotal, currency: record.lines.first?.unitPrice.currency ?? "USD"))
-                                        .moneyStyle(.total).foregroundStyle(Theme.foreground)
-                                }
-                                .padding(.horizontal, 15).padding(.bottom, 15)
-                                .accessibilityElement(children: .combine)
-                            }
-                        }
                     }
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))

@@ -3,8 +3,8 @@ import XCTest
 @MainActor
 /// The job's ••• door to Customer view. The header or bar door has the same name, so this picks the menu row.
 func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@",
-                                     "Customer view", "job-customer-view", "job-customer-view-bar")).firstMatch
+    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
+                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view")).firstMatch
 }
 
 /// Customer view's home: bring a document card fully above the fixed hand-back footer before tapping it.
@@ -422,7 +422,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Add estimate"].exists)
         let present = app.buttons["Customer view"]
         XCTAssertTrue(present.exists)
-        let tabs = app.buttons["Estimates"]
+        let tabs = app.buttons["Money"]
         XCTAssertTrue(tabs.exists)
         for _ in 0..<8 {
             let frame = first.frame
