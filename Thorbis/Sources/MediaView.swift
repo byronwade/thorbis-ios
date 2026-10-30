@@ -411,7 +411,7 @@ struct JobMediaView: View {
             } catch { self.error = error.localizedDescription }
         }
         .sheet(isPresented: Binding(get: { previewIsCurrent && preview.url != nil }, set: { if !$0 { preview.clear(); previewScope = nil; previewRecord = nil } })) {
-            if previewIsCurrent, let file = preview.url { NativeDocumentPreview(url: file) }
+            if previewIsCurrent, let file = preview.url { NativeDocumentPreview(url: file).accessibilityIdentifier("job-media-preview") }
         }
         .onChange(of: readScope) { _, _ in preview.clear(); previewScope = nil; previewRecord = nil; busy = false }
         .onChange(of: records) { _, _ in if !previewIsCurrent { preview.clear(); previewScope = nil; previewRecord = nil } }
@@ -542,6 +542,12 @@ struct JobMediaView: View {
         defer { if pageRequest == request { loadingMore = false } }
         do {
             let page = try await api.fieldMediaPage(jobID, cursor: cursor)
+            #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-revoke-late-page") {
+                PaperPreviewProtocol.revokeJobMediaView()
+                await session.revalidate()
+            }
+            #endif
             guard !Task.isCancelled, pageRequest == request, readScope == scope, sourceScope == scope, nextCursor == cursor else { return }
             try JobMediaPageIntegrity.validate(page, jobID: scope.job, organizationID: scope.organization, seen: seenCursors, existing: records)
             var ids = Set(records.map(\.id))
@@ -620,7 +626,23 @@ struct JobMediaView: View {
         previewRecord = record
         preview.open {
             guard readScope == scope, sourceScope == scope, records.contains(record) else { throw CancellationError() }
-            let file = try await MediaTransfer(api: api).download(mediaID: record.id, filename: record.originalFilename)
+            let file: URL
+            #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-revoke-preview") {
+                file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+                let data = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 100, height: 100)).pdfData { $0.beginPage() }
+                try data.write(to: file)
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(7))
+                    PaperPreviewProtocol.revokeJobMediaView()
+                    await session.revalidate()
+                }
+            } else {
+                file = try await MediaTransfer(api: api).download(mediaID: record.id, filename: record.originalFilename)
+            }
+            #else
+            file = try await MediaTransfer(api: api).download(mediaID: record.id, filename: record.originalFilename)
+            #endif
             guard !Task.isCancelled, readScope == scope, sourceScope == scope, records.contains(record) else {
                 try? FileManager.default.removeItem(at: file)
                 throw CancellationError()

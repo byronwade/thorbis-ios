@@ -509,6 +509,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var savedWorkEditingRevoked = false
         var priceBookViewRevoked = false
         var documentEstimateViewRevoked = false
+        var jobMediaViewRevoked = false
         var priceBookReads = 0
         var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
@@ -516,7 +517,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -527,6 +528,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
+    static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
     static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
     static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
     static func switchSavedWorkWorkspace() {
@@ -894,6 +896,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
