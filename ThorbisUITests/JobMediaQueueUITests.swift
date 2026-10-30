@@ -93,22 +93,36 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(unknown.exists)
         XCTAssertLessThan(newest.frame.minY, older.frame.minY)
         XCTAssertLessThan(older.frame.minY, unknown.frame.minY)
-        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
-        XCTAssertTrue(app.buttons["Photo, Finished unit"].exists)
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].isHittable)
         let top = XCTAttachment(screenshot: app.screenshot())
         top.name = "Job photo dates at top"
         top.lifetime = .keepAlways
         add(top)
-        app.swipeUp()
-        XCTAssertTrue(app.buttons["Photo, Uncertain date"].waitForExistence(timeout: 5))
+        let finished = app.buttons["Photo, Finished unit"]
+        for _ in 0..<5 where !finished.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.37)))
+        }
+        XCTAssertTrue(finished.isHittable)
+        let undated = app.buttons["Photo, Uncertain date"]
+        for _ in 0..<5 where !undated.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.37)))
+        }
+        XCTAssertTrue(undated.isHittable)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Job photos grouped by capture date"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        app.swipeDown()
-        app.buttons["After · 1"].tap()
+        let afterFilter = app.buttons["After · 1"]
+        for _ in 0..<5 where !afterFilter.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78)))
+        }
+        XCTAssertTrue(afterFilter.isHittable)
+        afterFilter.tap()
         XCTAssertTrue(older.exists)
-        XCTAssertTrue(app.buttons["Photo, Finished unit"].exists)
+        XCTAssertTrue(finished.exists)
         XCTAssertFalse(newest.exists)
         XCTAssertFalse(unknown.exists)
         XCTAssertTrue(app.buttons["Change photo stage, currently After"].exists)
