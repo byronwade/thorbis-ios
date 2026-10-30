@@ -1,5 +1,0 @@
-# New customer keyboard dismissal
-
-On source `af79abfde39c57eb8f318fed1d2eeb873aea4aea`, the iPhone SE simulator focused UI test `AdaptiveControlsUITests/testLongSegmentedChoicesRemainReadableAndSelectableAtLargestText` passed with 1 test and 0 failures on 2026-10-30. It confirms that the keyboard Done action dismisses the keyboard and both Residential and Commercial can be selected at the largest Dynamic Type size. Result: `/private/tmp/customer-keyboard-verify-1030.xcresult`; log: `/private/tmp/customer-keyboard-verify-1030.log`.
-
-The earlier test run on `306210b` failed on a drag-based keyboard dismissal assertion. The later attempt at `af79abf` did not execute because CoreSimulator stopped (Mach -308); it was not a product test result. This successful run used the existing keyboard toolbar modifier and the exact source above. The fixed Save customer action occupies substantial space at the largest text size. VoiceOver, iPad, real customer creation, cancel flow and each keyboard type remain unverified.
