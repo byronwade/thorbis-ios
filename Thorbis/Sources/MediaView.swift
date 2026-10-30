@@ -9,6 +9,8 @@ struct JobMediaView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var pendingMedia: PendingMediaStore
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
     @State private var records: [MediaAssetRecord] = []
     @State private var selection: PhotosPickerItem?
     @State private var selectedData: Data?
@@ -127,51 +129,57 @@ struct JobMediaView: View {
                 }
                 if !photos.isEmpty { PaperGroupHeader(title: "Photos", count: photos.count) }
                 if !photos.isEmpty {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                        ForEach(photos) { record in
-                            ZStack(alignment: .bottomTrailing) {
-                                Button { open(record) } label: {
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        MediaThumbnail(record: record, attempt: thumbnailAttempt)
-                                            .frame(maxWidth: .infinity).frame(height: 120)
-                                            .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
-                                            .overlay(alignment: .topLeading) {
-                                                if let tag = ["Before", "After"].first(where: record.tags.contains) {
-                                                    Text(tag).font(Theme.font(11, weight: .semibold))
-                                                        .foregroundStyle(Theme.foreground)
-                                                        .padding(.horizontal, 8).frame(height: 24)
-                                                        .background(Theme.background.opacity(0.9), in: Capsule())
-                                                        .padding(8)
+                    ForEach(JobPhotoDateGroups.group(photos, calendar: calendar), id: \.day) { group in
+                        Text(group.day.map(photoDayLabel) ?? "Date unavailable")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.muted)
+                            .accessibilityAddTraits(.isHeader)
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                            ForEach(group.photos) { record in
+                                ZStack(alignment: .bottomTrailing) {
+                                    Button { open(record) } label: {
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            MediaThumbnail(record: record, attempt: thumbnailAttempt)
+                                                .frame(maxWidth: .infinity).frame(height: 120)
+                                                .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
+                                                .overlay(alignment: .topLeading) {
+                                                    if let tag = ["Before", "After"].first(where: record.tags.contains) {
+                                                        Text(tag).font(Theme.font(11, weight: .semibold))
+                                                            .foregroundStyle(Theme.foreground)
+                                                            .padding(.horizontal, 8).frame(height: 24)
+                                                            .background(Theme.background.opacity(0.9), in: Capsule())
+                                                            .padding(8)
+                                                    }
                                                 }
+                                            Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium)).lineLimit(1)
+                                                .padding(.horizontal, 10).padding(.vertical, 8)
+                                            if record.uploadState != "stored" {
+                                                Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
+                                                    .padding(.horizontal, 10).padding(.bottom, 8)
                                             }
-                                        Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium)).lineLimit(1)
-                                            .padding(.horizontal, 10).padding(.vertical, 8)
-                                        if record.uploadState != "stored" {
-                                            Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
-                                                .padding(.horizontal, 10).padding(.bottom, 8)
                                         }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(busy || preview.loading || record.uploadState != "stored")
-                                .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
-                                if canAdd, record.uploadState == "stored" {
-                                    ThorbisMenu(items: [
-                                        ThorbisMenuItem("Before") { Task { await retag(record, .before) } },
-                                        ThorbisMenuItem("After") { Task { await retag(record, .after) } },
-                                        ThorbisMenuItem("Other") { Task { await retag(record, .other) } },
-                                    ], title: "Tag photo", accessibilityLabel: stageName(record)) {
-                                        Image(systemName: "tag")
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(Theme.foreground)
-                                            .frame(width: 44, height: 44)
-                                            .background(Theme.background.opacity(0.92), in: Circle())
+                                    .buttonStyle(.plain)
+                                    .disabled(busy || preview.loading || record.uploadState != "stored")
+                                    .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
+                                    if canAdd, record.uploadState == "stored" {
+                                        ThorbisMenu(items: [
+                                            ThorbisMenuItem("Before") { Task { await retag(record, .before) } },
+                                            ThorbisMenuItem("After") { Task { await retag(record, .after) } },
+                                            ThorbisMenuItem("Other") { Task { await retag(record, .other) } },
+                                        ], title: "Tag photo", accessibilityLabel: stageName(record)) {
+                                            Image(systemName: "tag")
+                                                .font(.system(size: 15, weight: .semibold))
+                                                .foregroundStyle(Theme.foreground)
+                                                .frame(width: 44, height: 44)
+                                                .background(Theme.background.opacity(0.92), in: Circle())
+                                        }
+                                        .disabled(busy)
+                                        .padding(4)
                                     }
-                                    .disabled(busy)
-                                    .padding(4)
                                 }
                             }
                         }
@@ -323,6 +331,16 @@ struct JobMediaView: View {
         selectedCapturedAt = Date()
         error = nil
     }
+    private func photoDayLabel(_ day: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = locale
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: day)
+    }
+
     private func stageName(_ record: MediaAssetRecord) -> String {
         if record.tags.contains("Before") { return "Change photo stage, currently Before" }
         if record.tags.contains("After") { return "Change photo stage, currently After" }
@@ -500,5 +518,32 @@ struct DocumentScanner: UIViewControllerRepresentable {
         func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) { onFinish(nil) }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) { onFinish(nil) }
+    }
+}
+
+/// Presentation-only grouping; unavailable capture dates never fall back to upload time.
+enum JobPhotoDateGroups {
+    struct Group {
+        let day: Date?
+        let photos: [MediaAssetRecord]
+    }
+
+    static func group(_ photos: [MediaAssetRecord], calendar: Calendar) -> [Group] {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standard = ISO8601DateFormatter()
+        var byDay: [Date: [MediaAssetRecord]] = [:]
+        var unavailable: [MediaAssetRecord] = []
+        for photo in photos {
+            guard let raw = photo.capturedAt,
+                  let date = fractional.date(from: raw) ?? standard.date(from: raw) else {
+                unavailable.append(photo)
+                continue
+            }
+            byDay[calendar.startOfDay(for: date), default: []].append(photo)
+        }
+        var groups = byDay.keys.sorted(by: >).map { Group(day: $0, photos: byDay[$0]!) }
+        if !unavailable.isEmpty { groups.append(Group(day: nil, photos: unavailable)) }
+        return groups
     }
 }

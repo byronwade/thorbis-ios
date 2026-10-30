@@ -2,6 +2,66 @@ import XCTest
 
 @MainActor
 final class JobMediaQueueUITests: XCTestCase {
+    func testUndatedPhotosStayVisibleAndFilterableInTheirOwnGroup() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Date unavailable"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
+        app.buttons["Before · 1"].tap()
+        XCTAssertTrue(app.staticTexts["Date unavailable"].exists)
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
+        XCTAssertTrue(app.buttons["Change photo stage, currently Before"].exists)
+    }
+
+    func testDatedPhotosAreGroupedAndFilterKeepsCorrectPhotoActions() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "-thorbis.appearance", "dark"]
+        app.launch()
+        let newest = app.staticTexts["Oct 27, 2026"]
+        let older = app.staticTexts["Oct 26, 2026"]
+        let unknown = app.staticTexts["Date unavailable"]
+        XCTAssertTrue(newest.waitForExistence(timeout: 20))
+        XCTAssertTrue(older.exists)
+        XCTAssertTrue(unknown.exists)
+        XCTAssertLessThan(newest.frame.minY, older.frame.minY)
+        XCTAssertLessThan(older.frame.minY, unknown.frame.minY)
+        XCTAssertTrue(app.buttons["Photo, Outdoor unit"].exists)
+        XCTAssertTrue(app.buttons["Photo, Finished unit"].exists)
+        let top = XCTAttachment(screenshot: app.screenshot())
+        top.name = "Job photo dates at top"
+        top.lifetime = .keepAlways
+        add(top)
+        app.swipeUp()
+        XCTAssertTrue(app.buttons["Photo, Uncertain date"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Job photos grouped by capture date"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.swipeDown()
+        app.buttons["After · 1"].tap()
+        XCTAssertTrue(older.exists)
+        XCTAssertTrue(app.buttons["Photo, Finished unit"].exists)
+        XCTAssertFalse(newest.exists)
+        XCTAssertFalse(unknown.exists)
+        XCTAssertTrue(app.buttons["Change photo stage, currently After"].exists)
+    }
+
+    func testPhotoDateHeadingAtLargestText() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let heading = app.staticTexts["Oct 27, 2026"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 20))
+        for _ in 0..<6 where !heading.isHittable { app.swipeUp() }
+        XCTAssertTrue(heading.isHittable)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Job photo date at largest text"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testSavedScanRemainsJobBoundAfterNavigationAndRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()

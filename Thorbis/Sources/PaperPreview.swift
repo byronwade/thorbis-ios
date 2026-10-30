@@ -1007,13 +1007,27 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                    "contentType": "image/png", "byteSize": 73, "storageKey": key, "createdAt": now]]]
             }
             if path == "/v1/jobs/\(id)/media", PaperPreview.screen == "job-media" {
-                return ["items": [[
+                let first: [String: Any] = [
                     "id": "00000000-0000-4000-8000-000000009301", "organizationId": org, "jobId": id,
                     "uploaderUserId": actor, "kind": "photo", "mime": "image/jpeg", "sizeBytes": 120_000,
                     "originalFilename": "outdoor-unit.jpg", "contentHash": "preview", "storageKey": "preview/outdoor-unit.jpg",
                     "uploadState": "stored", "tags": ["Before"], "caption": "Outdoor unit", "archived": false,
                     "createdAt": now, "updatedAt": now
-                ]]]
+                ]
+                guard ProcessInfo.processInfo.arguments.contains("--paper-preview-media-dates") else { return ["items": [first]] }
+                var newest = first
+                newest["capturedAt"] = "2026-10-27T12:00:00Z"
+                var earlier = first
+                earlier["id"] = "00000000-0000-4000-8000-000000009302"
+                earlier["caption"] = "Finished unit"
+                earlier["capturedAt"] = "2026-10-26T12:00:00.123Z"
+                earlier["tags"] = ["After"]
+                var invalid = first
+                invalid["id"] = "00000000-0000-4000-8000-000000009303"
+                invalid["caption"] = "Uncertain date"
+                invalid["capturedAt"] = "not-a-date"
+                invalid["tags"] = []
+                return ["items": [earlier, invalid, newest]]
             }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
             if path == "/v1/jobs/\(id)/estimates" { return ["items": []] }
