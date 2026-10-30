@@ -155,9 +155,11 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
             let visibleTop = searchBar.frame.maxY + 8
             // The keyboard AX frame starts below its predictive/accessory surfaces.
             // Keep the gesture in the upper half of the header-to-keyboard interval.
+            // The keyboard's Done bar sits above that frame and covers content too.
             let keyboard = app.keyboards.firstMatch
+            let doneBar = app.toolbars.firstMatch
             let visibleBottom = keyboard.exists
-                ? (searchBar.frame.maxY + keyboard.frame.minY) / 2
+                ? (searchBar.frame.maxY + min(keyboard.frame.minY, doneBar.exists ? doneBar.frame.minY : .infinity)) / 2
                 : app.frame.maxY - 16
             if control.frame.minY >= visibleTop && control.frame.maxY <= visibleBottom { break }
             let distance = min(control.frame.maxY - visibleBottom + 8, visibleBottom - visibleTop - 16)
@@ -173,14 +175,10 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private func replaceQuantityWithTen(_ quantity: XCUIElement, in app: XCUIApplication) {
         // Select the existing single digit using the native touch interaction.
         // Type through the application so XCTest does not reposition the field caret.
-        quantity.doubleTap()
+        // The value is right-aligned in a wide well; double-tap the digit itself, since a
+        // double-tap in the empty left of the well only places the caret.
+        quantity.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).doubleTap()
         app.typeText("10")
-        guard quantity.value as? String != "10" else { return }
-        // A double-tap sometimes only places the caret. The value is right-aligned, so a tap at the
-        // trailing edge puts the caret after it; clear it there and type the quantity again.
-        quantity.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-        let typed = (quantity.value as? String) ?? ""
-        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count) + "10")
     }
 
     func testRepeatedInlineAddsKeepCatalogReachableWithKeyboard() {

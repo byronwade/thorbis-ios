@@ -744,18 +744,35 @@ struct LineNumberField: View {
     }
 }
 
+/// The keyboard's Done bar floats over the screen above the keyboard, outside the keyboard safe
+/// area, so a focused field or row could sit under it and swallow taps. While the keyboard is up,
+/// the content's safe area also clears the bar.
+private struct KeyboardDoneButton: ViewModifier {
+    @State private var keyboardShown = false
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: keyboardShown ? 52 : 0).allowsHitTesting(false)
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardShown = true }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardShown = false }
+    }
+}
+
 extension View {
     /// Number pads have no return key: one Done above the keyboard (MA-16).
     func keyboardDoneButton() -> some View {
-        toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                }
-                .frame(minWidth: 44, minHeight: 44)
-            }
-        }
+        modifier(KeyboardDoneButton())
     }
 
     /// Cancel and swipe never throw away edits silently (MA-16, MA-17).
