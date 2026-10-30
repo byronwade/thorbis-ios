@@ -28,6 +28,14 @@ enum ReleaseNotes {
             fixes: 0
         ),
         ReleaseNote(
+            id: "2026-10-30-sizes-any-order",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "ruler", title: "Sizes found however you type them",
+                      detail: "Pipe 10 mm finds an item written Pipe 10mm, and the words can go in any order."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-tablet-invoice",
             date: "2026-10-30",
             highlights: [
