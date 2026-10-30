@@ -914,7 +914,8 @@ struct JobDetailView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(timeline(job)) { entry in
-                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
+                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject),
+                                 fallback: ActivityFallback(title: entry.title, body: entry.body, when: entry.date.formatted(date: .abbreviated, time: .shortened), capability: "job.view", feature: "jobs")) {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(spacing: 0) {
                             Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))

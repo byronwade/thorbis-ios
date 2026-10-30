@@ -8,17 +8,66 @@ enum ActivityRecordLabel {
     }
 }
 
-/// Wraps an activity row in a link only when the row already names a real record.
+/// Feed information shown when no verified record can be opened.
+struct ActivityFallback {
+    let title: String
+    var body: String? = nil
+    var when: String? = nil
+    let capability: String
+    let feature: String
+}
+
+struct ActivitySnapshotScope: Equatable {
+    let actorID: String
+    let organizationID: String
+    let generation: UUID
+    let authorityRevision: UUID
+    let capability: String
+    let feature: String
+
+    @MainActor static func capture(session: SessionController, capability: String, feature: String) -> Self? {
+        guard session.can(capability, feature: feature), let actorID = session.user?.id,
+              let organizationID = session.activeOrganization?.id else { return nil }
+        return Self(actorID: actorID, organizationID: organizationID, generation: session.generation,
+                    authorityRevision: session.authorityRevision, capability: capability, feature: feature)
+    }
+
+    @MainActor func isCurrent(session: SessionController) -> Bool {
+        Self.capture(session: session, capability: capability, feature: feature) == self
+    }
+}
+
+private struct ActivitySnapshot: Identifiable {
+    let id = UUID()
+    let fallback: ActivityFallback
+    let scope: ActivitySnapshotScope
+}
+
+/// Opens a named record when available; otherwise shows only the feed's own details.
 struct ActivityLink<Content: View>: View {
     let destination: ActivityDestination?
+    let fallback: ActivityFallback
     @ViewBuilder var content: () -> Content
+    @EnvironmentObject private var session: SessionController
+    @State private var snapshot: ActivitySnapshot?
 
     var body: some View {
-        if let destination {
-            NavigationLink(value: destination.route) { label }
+        Group {
+            if let destination {
+                NavigationLink(value: destination.route) { label }
+                    .buttonStyle(RowPressStyle())
+            } else {
+                Button {
+                    guard let scope = ActivitySnapshotScope.capture(session: session, capability: fallback.capability, feature: fallback.feature) else { return }
+                    snapshot = ActivitySnapshot(fallback: fallback, scope: scope)
+                } label: { label }
                 .buttonStyle(RowPressStyle())
-        } else {
-            label
+                .sheet(item: $snapshot) { detail in
+                    NavigationStack {
+                        ActivitySnapshotView(snapshot: detail)
+                    }
+                }
+            }
         }
     }
 
@@ -26,14 +75,46 @@ struct ActivityLink<Content: View>: View {
         HStack(spacing: 8) {
             content()
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            if destination != nil {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
-            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.muted)
+                .accessibilityHidden(true)
         }
         .contentShape(Rectangle())
+    }
+}
+
+private struct ActivitySnapshotView: View {
+    let snapshot: ActivitySnapshot
+    @EnvironmentObject private var session: SessionController
+    @Environment(\.dismiss) private var dismiss
+
+    private var authorized: Bool { snapshot.scope.isCurrent(session: session) }
+
+    var body: some View {
+        ScrollView {
+            if authorized {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(snapshot.fallback.title).font(Theme.font(20, weight: .medium))
+                    if let body = snapshot.fallback.body, !body.isEmpty {
+                        Text(body).font(Theme.font(17)).textSelection(.enabled)
+                    }
+                    if let when = snapshot.fallback.when, !when.isEmpty {
+                        Text(when).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Theme.gutter)
+            } else {
+                Text("This activity is no longer available.")
+                    .font(Theme.font(17)).padding(Theme.gutter)
+            }
+        }
+        .background(Theme.background)
+        .foregroundStyle(Theme.foreground)
+        .navigationTitle("Activity")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
 }
 

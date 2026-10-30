@@ -835,7 +835,8 @@ struct CustomerDetailView: View {
                 if activityLoading && activity.isEmpty { SkeletonRows(count: 4, inset: 0) }
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(activity) { event in
-                        ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id)) {
+                        ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id),
+                                     fallback: ActivityFallback(title: event.summary, when: ActivityRecordLabel.noteWhen(event.occurredAt), capability: "customer.view", feature: "core_crm")) {
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: activitySymbol(for: event.kind))
                                     .font(.system(size: 13, weight: .medium))
