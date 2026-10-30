@@ -2,6 +2,60 @@ import XCTest
 
 @MainActor
 final class PriceBookStandaloneUITests: XCTestCase {
+    func testLongItemAndHighPriceRemainVisibleInNarrowList() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-extreme", "-thorbis.appearance", "dark"]
+        app.launch()
+        let title = app.staticTexts["Commercial plumbing system inspection and complete replacement."]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let price = app.staticTexts["$1,234,567.89"]
+        XCTAssertTrue(price.exists)
+        XCTAssertGreaterThan(title.frame.width, 0)
+        XCTAssertGreaterThan(price.frame.width, 0)
+        capture("Price book narrow long title and high price")
+    }
+
+    func testStaleLongDescriptionRemainsReadableAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-extreme", "--paper-preview-pricebook-authority", "--paper-preview-pricebook-renew", "--paper-preview-pricebook-stable", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Change sample access shortly"].waitForExistence(timeout: 30))
+        app.buttons["Change sample access shortly"].tap()
+        XCTAssertTrue(app.staticTexts["Showing previously loaded items. Refresh to update."].waitForExistence(timeout: 20))
+        let description = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final paragraph of the complete description.")).firstMatch
+        XCTAssertTrue(description.exists)
+        XCTAssertGreaterThan(description.frame.height, 200)
+        for _ in 0..<10 where !app.staticTexts["$1,234,567.89"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["$1,234,567.89"].isHittable)
+        capture("Price book stale long description and high price, largest text")
+    }
+
+    func testLargeTextKeepsItemAndPriceReadableAndOpensFullDescription() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "-thorbis.appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let title = app.staticTexts["PEX copper crimp ring pack: 1-in."]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !title.isHittable { app.swipeUp() }
+        XCTAssertTrue(title.isHittable)
+        XCTAssertGreaterThan(title.frame.height, 110, "The complete item name must wrap at the largest text size.")
+        let price = app.staticTexts["$15.13"]
+        XCTAssertTrue(price.exists)
+        XCTAssertGreaterThanOrEqual(price.frame.minY, title.frame.maxY, "At the largest text size, the amount should have room below the item name.")
+        capture("Price book largest text title")
+        for _ in 0..<8 where !price.isHittable { app.swipeUp() }
+        XCTAssertTrue(price.isHittable)
+        capture("Price book largest text amount")
+        for _ in 0..<8 where !title.isHittable { app.swipeDown() }
+        XCTAssertTrue(title.isHittable)
+        title.tap()
+        let details = app.staticTexts["PEX copper crimp ring pack: 1-in. Ten rings for matching-size PEX; tool calibration remains required."]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+    }
+
     private func launch(admin: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long"]
