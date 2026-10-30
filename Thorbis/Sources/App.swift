@@ -156,7 +156,8 @@ struct ThorbisApp: App {
                     PaperPreview.reviewConnectionControl
                 }
             }
-            .overlay(alignment: .top) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
+            // Takes its own room at the top so it never covers a screen's back button or title.
+            .safeAreaInset(edge: .top, spacing: 0) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
             #endif
             .task {
                 connectivity.onReconnect = { Task { await resync() } }

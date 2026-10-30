@@ -323,14 +323,14 @@ struct CustomizeMenuView: View {
                 .moveDisabled(!editable)
                 .deleteDisabled(!editable)
             } header: {
-                Text("Tab bar")
+                Text("Bottom bar")
             } footer: {
                 Text(footer)
             }
 
             let addable = MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.permitted(session) && canBeTab($0) }
             if editable, layout.tabs.count < MenuLayout.maxTabs, !addable.isEmpty {
-                Section("Add to tab bar") {
+                Section("Add to bottom bar") {
                     ForEach(addable) { item in
                         Button { withAnimation { layout.addTab(item) } } label: {
                             Label(item.title, systemImage: item.symbol)
@@ -349,9 +349,9 @@ struct CustomizeMenuView: View {
                     .disabled(!editable)
                 }
             } header: {
-                Text("Show in More")
+                Text("Show in menu")
             } footer: {
-                Text("Hidden items stay available here; nothing is removed.")
+                Text("Hidden places stay here to turn back on; nothing is removed.")
             }
 
             if isOwner && !company {
@@ -376,8 +376,8 @@ struct CustomizeMenuView: View {
 
     private var footer: String {
         let name = session.activeOrganization?.name ?? "your company"
-        if company && isOwner { return "Up to \(MenuLayout.maxTabs) tabs, plus More and Search. Changes apply to everyone in \(name)." }
+        if company && isOwner { return "Up to \(MenuLayout.maxTabs) places in the bar. Changes apply to everyone in \(name)." }
         if company { return "Set by \(name). Ask an owner to change it." }
-        return "Up to \(MenuLayout.maxTabs) tabs, plus More and Search. Drag to reorder, swipe to remove."
+        return "Up to \(MenuLayout.maxTabs) places in the bar. Drag to reorder, swipe to remove."
     }
 }

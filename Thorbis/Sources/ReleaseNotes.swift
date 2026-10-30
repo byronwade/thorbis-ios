@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-tablet-invoice",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.plaintext", title: "Invoices open from iPad Schedule",
+                      detail: "On iPad, a job's invoice opens from Schedule and stays the one you picked when you come back."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-faster-lists",
             date: "2026-10-30",
             highlights: [
@@ -122,6 +130,15 @@ enum ReleaseNotes {
                       detail: "Estimates, invoices and billing schedules have clearer visual markers."),
             ],
             fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-10-30-modern-pass-1",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "textformat", title: "Cleaner screens, easier numbers",
+                      detail: "Amounts and times use the same clean type as the rest of the app, and the job header is lighter."),
+            ],
+            fixes: 2
         ),
         ReleaseNote(
             id: "2026-10-30-bottom-search",
