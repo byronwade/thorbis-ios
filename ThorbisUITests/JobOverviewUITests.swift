@@ -113,7 +113,7 @@ final class JobOverviewUITests: XCTestCase {
         let app = preview("job", accessibleText: true)
         let call = app.buttons["Call"]
         let text = app.buttons["Text"]
-        let directions = app.buttons["Directions in Maps"]
+        let directions = app.buttons["Directions"]
         let primary = app.buttons["On my way"]
         XCTAssertTrue(call.waitForExistence(timeout: 15))
         XCTAssertTrue(primary.waitForExistence(timeout: 5))
@@ -122,7 +122,7 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(directions.frame.minY, text.frame.maxY)
         XCTAssertGreaterThan(primary.frame.height, 50)
         XCTAssertTrue(primary.isHittable)
-        let content = app.scrollViews.containing(.button, identifier: "Directions in Maps").firstMatch
+        let content = app.scrollViews.containing(.button, identifier: "Directions").firstMatch
         for _ in 0..<3 where !directions.isHittable { content.swipeUp() }
         XCTAssertTrue(directions.isHittable, "Directions must remain reachable below the enlarged header")
         capture(app, name: "Accessible contact actions after scrolling")
