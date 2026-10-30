@@ -191,7 +191,7 @@ extension APIClient {
         try await send("GET", "/v1/reports/revenue")
     }
 
-    func priceBookItems(limit: Int = 50, cursor: String? = nil) async throws -> PriceBookPage {
+    func priceBookItems(limit: Int = 50, cursor: String? = nil, requireFresh: Bool = false) async throws -> PriceBookPage {
         guard (1...200).contains(limit), cursor.map({ UUID(uuidString: $0) != nil }) ?? true else {
             throw Problem(title: "Invalid Price Book page", status: nil, detail: "Use a UUID cursor and 1–200 items.")
         }
@@ -199,7 +199,7 @@ extension APIClient {
             URLQueryItem(name: "resourceId", value: "price_book_items"),
             URLQueryItem(name: "purpose", value: "collection"),
             URLQueryItem(name: "limit", value: String(limit)),
-        ], cursor: cursor)
+        ], cursor: cursor, requireFresh: requireFresh)
         guard response.schemaVersion == 1, response.resourceId == "price_book_items",
               response.purpose == "collection", response.localMode == "complete",
               response.items.allSatisfy({ $0.resourceId == "price_book_items" && $0.id == $0.fields.id }) else {

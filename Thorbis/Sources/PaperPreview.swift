@@ -453,12 +453,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var savedWorkOffline = false
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
+        var priceBookViewRevoked = false
+        var priceBookReads = 0
+        var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
     }
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -468,6 +471,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
+    static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
+    static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
     static func switchSavedWorkWorkspace() {
         scenario.lock.withLock { scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = true }
     }
@@ -538,6 +543,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ Self.scenario.estimateUnavailable }) {
             status = 503
             payload = ["status": 503, "title": "Sample estimate connection unavailable"]
+        } else if PaperPreview.screen == "price-book", url.path == "/v1/query",
+                  Self.scenario.lock.withLock({ Self.scenario.priceBookQueryFailed }) {
+            status = 503
+            payload = ["status": 503, "title": "The price book couldn't be loaded."]
         } else if Self.legacyInvoiceRead(url.path) {
             status = 404
             payload = ["status": 404, "title": "Preview legacy job invoice route"]
@@ -546,7 +555,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   url.path == "/v1/estimates/00000000-0000-4000-8000-000000002238" {
             status = 503
             payload = ["status": 503, "title": "Preview estimate unavailable"]
-        } else if url.scheme == "https", url.host == "app.thorbis.com", let fixture = Self.fixture(path: url.path, queryItems: URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []) {
+        } else if url.scheme == "https", url.host == "app.thorbis.com", let fixture = Self.fixture(path: url.path, queryItems: URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [], isFresh: request.cachePolicy == .reloadIgnoringLocalCacheData && request.value(forHTTPHeaderField: "Cache-Control") == "no-cache") {
             status = 200
             payload = fixture
         } else {
@@ -563,9 +572,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
     override func stopLoading() {}
 
-    private static func fixture(path: String, queryItems: [URLQueryItem] = []) -> Any? {
+    private static func fixture(path: String, queryItems: [URLQueryItem] = [], isFresh: Bool = false) -> Any? {
         let actor = PaperPreview.actorID
-        let changedWorkspace = PaperPreview.isSavedWorkPreview && scenario.lock.withLock { scenario.savedWorkWorkspaceChanged }
+        let changedWorkspace = (PaperPreview.isSavedWorkPreview || PaperPreview.screen == "price-book") && scenario.lock.withLock { scenario.savedWorkWorkspaceChanged }
         let org = changedWorkspace ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID
         let expiry = ISO8601DateFormatter().string(from: PaperPreview.isSavedWorkPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-expiry") ? PaperPreview.savedWorkDeadline : Date().addingTimeInterval(86_400))
         let now = ISO8601DateFormatter().string(from: Date())
@@ -766,6 +775,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
         }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/payments" { return ["items": []] }
+        if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-long"),
+           path == "/v1/price-book/items/00000000-0000-4000-8000-000000009201" {
+            let id = "00000000-0000-4000-8000-000000009201"
+            let description = "PEX copper crimp ring pack: 1-in. Ten rings for matching-size PEX; tool calibration remains required. [thorbis-plumbing-demo-v1:material-049]"
+            return ["item": ["id": id, "organizationId": org, "status": "active", "currentRevision": 4, "createdAt": now, "updatedAt": now],
+                    "revision": ["itemId": id, "organizationId": org, "revision": 4, "description": description, "unit": "10-pack", "kind": "material", "taxClassification": "taxable", "sellPrice": ["amount": 1513, "currency": "USD"], "createdAt": now]] as [String: Any]
+        }
         if path == "/v1/organization/profile" {
             let catalog: [(String, String, Int, Bool)] = [
                 ("legal_name", "Legal business name", 1, true), ("dba_names", "DBA / trade names", 1, false),
@@ -787,11 +803,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
+            if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
             if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
+            if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
             if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
                     "capabilities": capabilities,
@@ -820,6 +838,40 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": matchingCustomer([waiting], queryItems: queryItems)]
         case "/v1/query":
+            if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-long"),
+               queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
+                let id = "00000000-0000-4000-8000-000000009201"
+                let readNumber = scenario.lock.withLock { scenario.priceBookReads += 1; return scenario.priceBookReads }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-delayed"), readNumber == 1 {
+                    Thread.sleep(forTimeInterval: 8)
+                }
+                let renewed = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") && !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-stable") && readNumber > 1 && (!ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-cache-test") || isFresh)
+                let description = renewed ? "Updated PEX rings. Latest catalog details. [thorbis-plumbing-demo-v1:material-049]" : "PEX copper crimp ring pack: 1-in. Ten rings for matching-size PEX; tool calibration remains required. [thorbis-plumbing-demo-v1:material-049]"
+                let later = queryItems.contains { $0.name == "cursor" }
+                let pages = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-pages")
+                let firstRow = pages && later ? "Second loaded item. Additional details. [thorbis-plumbing-demo-v1:material-050]" : description
+                let rows: [(String, String, String, Int)] = [(firstRow, "10-pack", "material", 1513)] +
+                    (pages && !later ? (1...49).map { ("Sample material \($0). Details for item \($0).", "each", "material", 1000 + $0) } : []) +
+                    (ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-many") ? [
+                        ("Copper reducer: 1-1/4 × 1-in. Reduces a copper pressure-line diameter. [thorbis-plumbing-demo-v1:material-024]", "each", "material", 1056),
+                        ("Thread tape roll. Use with compatible approved materials. [thorbis-plumbing-demo-v1:material-245]", "roll", "material", 2655),
+                        ("Copper 90-degree elbow: 1-1/2-in sweat. Turns a copper pressure line. [thorbis-plumbing-demo-v1:material-010]", "each", "material", 1046),
+                        ("Inspect a leaking faucet. Diagnose the source of the leak and recommend a repair. [thorbis-plumbing-demo-v1:service-001]", "flat", "service", 8900),
+                        ("Clear kitchen drain. Includes an assessment and standard drain clearing. [thorbis-plumbing-demo-v1:service-002]", "flat", "service", 24900)
+                    ] : [])
+                let items = rows.enumerated().map { offset, entry -> [String: Any] in
+                    let entryID = pages && later ? "00000000-0000-4000-8000-000000009251" : (offset == 0 ? id : String(format: "00000000-0000-4000-8000-%012d", 9201 + offset))
+                    return ["id": entryID, "resourceId": "price_book_items", "label": entry.0, "subtitle": "\(entry.2.capitalized) · \(entry.1)",
+                            "fields": ["price_book_items.id": entryID, "price_book_items.current_revision": 4,
+                                       "price_book_items.description": entry.0, "price_book_items.unit": entry.1,
+                                       "price_book_items.sell_price_amount": entry.3, "price_book_items.currency": "USD",
+                                       "price_book_items.tax_classification": "taxable", "price_book_items.kind": entry.2]]
+                }
+                return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
+                        "items": items,
+                        "nextCursor": (ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-partial") || (pages && !later)) ? "00000000-0000-4000-8000-000000009988" as Any : NSNull(),
+                        "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
+            }
             if PaperPreview.enabled, ["invoice-editor", "new-estimate"].contains(PaperPreview.screen),
                ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-many"),
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
