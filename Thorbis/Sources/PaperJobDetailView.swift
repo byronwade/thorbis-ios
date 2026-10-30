@@ -122,7 +122,7 @@ struct JobDetailView: View {
                             }
                         }
                         .padding(.horizontal, Theme.gutter)
-                        .padding(.top, selectedTab == "Invoice" ? 4 : selectedTab == "Estimates" ? 12 : 22)
+                        .padding(.top, selectedTab == "Invoice" ? 4 : selectedTab == "Estimates" ? 8 : 22)
                         .padding(.bottom, 28)
                     } header: {
                         tabBar.background(Theme.background)
@@ -674,7 +674,7 @@ struct JobDetailView: View {
                 .accessibilityHint("Choose a job section")
                 .accessibilityIdentifier("job-section-chooser")
             } else {
-                PaperTabs(options: tabs, selection: $selectedTab, wrapOverflow: true)
+                PaperTabs(options: tabs, selection: $selectedTab, explicitScrollControl: true)
             }
         }
         .padding(.bottom, 4)

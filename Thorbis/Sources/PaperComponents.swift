@@ -88,6 +88,8 @@ struct PaperTabs: View {
     @Binding var selection: String
     /// Keep every destination visible when a compact screen cannot fit one row.
     var wrapOverflow = false
+    /// Offer a button as well as a swipe when a row has hidden sections.
+    var explicitScrollControl = false
     /// True while tabs remain past the trailing edge; the fade shows only then, so the
     /// last tab is never left dimmed once you've scrolled to it.
     @State private var moreTrailing = true
@@ -109,20 +111,36 @@ struct PaperTabs: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ScrollViewReader { proxy in
-                    ScrollView(.horizontal) {
-                        row(padding: 12).padding(.horizontal, Theme.gutter - 4)
-                    }
-                    .scrollIndicators(.hidden)
-                    .onScrollGeometryChange(for: Bool.self) { geometry in
-                        geometry.contentOffset.x + geometry.containerSize.width < geometry.contentSize.width - 1
-                    } action: { _, value in
-                        moreTrailing = value
-                    }
-                    .mask(LinearGradient(stops: [.init(color: .black, location: 0.88),
-                                                 .init(color: moreTrailing ? .clear : .black, location: 1)],
-                                         startPoint: .leading, endPoint: .trailing))
-                    .onChange(of: selection) { _, value in
-                        withMotion(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+                    HStack(spacing: 0) {
+                        ScrollView(.horizontal) {
+                            row(padding: explicitScrollControl ? 6 : 12).padding(.horizontal, Theme.gutter - 4)
+                        }
+                        .scrollIndicators(.hidden)
+                        .onScrollGeometryChange(for: Bool.self) { geometry in
+                            geometry.contentOffset.x + geometry.containerSize.width < geometry.contentSize.width - 1
+                        } action: { _, value in
+                            moreTrailing = value
+                        }
+                        .mask(LinearGradient(stops: [.init(color: .black, location: 0.88),
+                                                     .init(color: moreTrailing ? .clear : .black, location: 1)],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .onChange(of: selection) { _, value in
+                            withMotion(.easeOut(duration: 0.2)) { proxy.scrollTo(value, anchor: .center) }
+                        }
+                        if explicitScrollControl, let first = options.first, let last = options.last {
+                            Button {
+                                withMotion(.easeOut(duration: 0.2)) {
+                                    proxy.scrollTo(moreTrailing ? last : first, anchor: moreTrailing ? .trailing : .leading)
+                                }
+                            } label: {
+                                Image(systemName: moreTrailing ? "chevron.right" : "chevron.left")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(moreTrailing ? "Show more job sections" : "Show first job sections")
+                        }
                     }
                 }
             }
