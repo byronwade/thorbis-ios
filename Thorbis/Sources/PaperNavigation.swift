@@ -816,7 +816,8 @@ struct PaperRouteView: View {
     var body: some View {
         switch route {
         case .inbox:
-            WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices")).id(session.generation)
+            WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices"),
+                                 calls: CallLogRules.available(session)).id(session.generation)
         case .estimates: EstimatesView()
         case .invoices: InvoicesView()
         case .priceBook:
