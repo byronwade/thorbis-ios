@@ -82,6 +82,10 @@ struct ScorecardCache {
         defaults.set(data, forKey: key(user, org, period))
     }
 
+    func remove(user: String, org: String, period: ScorecardPeriod) {
+        defaults.removeObject(forKey: key(user, org, period))
+    }
+
     func load(user: String, org: String, period: ScorecardPeriod) -> (card: Scorecard, savedAt: Date)? {
         guard let data = defaults.data(forKey: key(user, org, period)),
               let entry = try? JSONDecoder().decode(Entry.self, from: data) else { return nil }

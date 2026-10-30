@@ -57,5 +57,7 @@ final class ScorecardTests: XCTestCase {
         XCTAssertEqual(cache.load(user: "u1", org: "o1", period: .week)?.savedAt, saved)
         XCTAssertNil(cache.load(user: "u1", org: "o1", period: .month))
         XCTAssertNil(cache.load(user: "u2", org: "o1", period: .week))
+        cache.remove(user: "u1", org: "o1", period: .week)
+        XCTAssertNil(cache.load(user: "u1", org: "o1", period: .week))
     }
 }

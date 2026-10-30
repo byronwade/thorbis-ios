@@ -137,8 +137,15 @@ struct ScorecardView: View {
             cache.save(loaded, user: user, org: org, period: period)
         } catch is CancellationError {} catch {
             guard session.generation == generation, period == selected else { return }
+            // An answer from the server (denied, gone) is final: drop the saved card rather
+            // than show numbers this person may no longer see.
+            if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status) {
+                cache.remove(user: user, org: org, period: period)
+                card = nil
+                loadedPeriod = nil
+                asOf = nil
             // TG-14: offline shows the last numbers this phone loaded, with their time.
-            if let cached = cache.load(user: user, org: org, period: period) {
+            } else if let cached = cache.load(user: user, org: org, period: period) {
                 card = cached.card
                 loadedPeriod = period
                 asOf = cached.savedAt
