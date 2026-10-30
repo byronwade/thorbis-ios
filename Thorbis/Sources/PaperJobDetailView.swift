@@ -455,7 +455,7 @@ struct JobDetailView: View {
                     }
                     MemberChip(customerID: job.customerId)
             }
-            if let balance = invoiceBalanceCents {
+            if let balance = invoiceBalanceCents, selectedTab != "Estimates" {
                 // MF-01/MF-03: what's owed on the job is a labelled figure, not a chip. It jumps to
                 // the Invoice tab, where it can be collected.
                 Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
@@ -529,29 +529,43 @@ struct JobDetailView: View {
 
     /// Directions always require choosing an account location; no job site is inferred.
     private var quickActions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            PaperQuickActions(phone: job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil })
-            if !customerLocations.isEmpty {
-                Menu {
-                    ForEach(customerLocations) { place in
-                        Button {
-                            if let url = JobLocationPolicy.directions(for: place.id, in: customerLocations) { openURL(url) }
-                        } label: {
-                            Text(place.label)
-                            Text("\(place.kind == "billing" ? "Billing" : "Service") · \(place.address)")
-                        }
-                    }
-                } label: {
-                    Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond")
-                        .font(Theme.font(15, weight: .medium))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+        Group {
+            if (selectedTab == "Estimates" || selectedTab == "Invoice") && !typeSize.isAccessibilitySize {
+                HStack(spacing: 8) {
+                    PaperQuickActions(phone: job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil })
+                    directionsAction
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityHint("Choose a customer location")
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    PaperQuickActions(phone: job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil })
+                    directionsAction
+                }
             }
         }
         .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private var directionsAction: some View {
+        if !customerLocations.isEmpty {
+            Menu {
+                ForEach(customerLocations) { place in
+                    Button {
+                        if let url = JobLocationPolicy.directions(for: place.id, in: customerLocations) { openURL(url) }
+                    } label: {
+                        Text(place.label)
+                        Text("\(place.kind == "billing" ? "Billing" : "Service") · \(place.address)")
+                    }
+                }
+            } label: {
+                Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond")
+                    .font(Theme.font(15, weight: .medium))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityHint("Choose a customer location")
+        }
     }
 
     @ViewBuilder

@@ -8,6 +8,25 @@ final class JobDocumentsUITests: XCTestCase {
     private let estimateA = "00000000-0000-4000-8000-000000002218"
     private let addonA = "00000000-0000-4000-8000-000000002238"
 
+    func testTechnicianEstimateCardsKeepBothDocumentsOpenable() {
+        continueAfterFailure = false
+        let app = preview()
+        let estimates = thorbisStableButton(app, "Estimates")
+        estimates.tap()
+        let first = app.buttons["job-estimate-\(estimateA)"]
+        let second = app.buttons["job-estimate-\(addonA)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        XCTAssertTrue(second.exists)
+        let present = app.buttons["Present estimates"]
+        XCTAssertTrue(present.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(second.frame.maxY, present.frame.minY, "Both estimates should be visible above the presentation action")
+        for _ in 0..<5 where !first.isHittable { app.swipeUp() }
+        XCTAssertTrue(first.isHittable)
+        capture(app, "Job estimate cards")
+        first.tap()
+        XCTAssertTrue(app.staticTexts["EST-2218"].waitForExistence(timeout: 10))
+    }
+
     func testAllJobInvoicesAreVisibleAndOpenTheirOwnDetail() {
         continueAfterFailure = false
         let app = preview()
@@ -223,7 +242,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
         disclosure.tap()
         XCTAssertTrue(app.staticTexts["Awaiting approval · USD"].exists)
-        XCTAssertTrue(app.staticTexts["$340.00"].exists)
+        XCTAssertTrue(app.staticTexts["$970.00"].exists)
     }
 
     func testStaffDetailRejectsSameInvoiceIDReturnedForAnotherJob() {
