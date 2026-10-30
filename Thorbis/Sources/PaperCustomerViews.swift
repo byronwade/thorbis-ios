@@ -353,21 +353,36 @@ struct CustomerDetailView: View {
                 if canEdit {
                     Button { showCustomerMode = true } label: {
                         // Keep the customer handoff clear even when space is tight.
-                        ViewThatFits(in: .horizontal) {
-                            Label("Customer checks details", systemImage: "person.crop.rectangle").fixedSize()
-                            Label("Customer review", systemImage: "person.crop.rectangle").fixedSize()
+                        Group {
+                            if typeSize.isAccessibilitySize {
+                                Text("Customer review")
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                ViewThatFits(in: .horizontal) {
+                                    Label("Customer checks details", systemImage: "person.crop.rectangle").fixedSize()
+                                    Text("Customer review")
+                                        .multilineTextAlignment(.center)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
                         }
-                        .font(Theme.font(17, weight: .medium)).frame(maxWidth: .infinity).frame(height: Theme.commitHeight).foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        .font(Theme.font(17, weight: .medium))
+                        .padding(.horizontal, 12).padding(.vertical, typeSize.isAccessibilitySize ? 10 : 8)
+                        .frame(maxWidth: .infinity, minHeight: Theme.commitHeight)
+                        .foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Show to customer")
                     .accessibilityHint("Hands the device to the customer to check and fix their details")
+                    .accessibilityIdentifier("customer-handoff-action")
                 }
                 if session.can("job.create", feature: "jobs") {
                     Button { showNewJob = true } label: {
                         Label("New job", systemImage: "plus").inkCommit()
                     }
                     .buttonStyle(PressStyle())
+                    .accessibilityIdentifier("customer-new-job-action")
                 }
             }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
         }

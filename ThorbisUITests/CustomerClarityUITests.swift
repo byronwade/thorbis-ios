@@ -49,6 +49,49 @@ final class CustomerClarityUITests: XCTestCase {
         capture("Customer overview large text")
     }
 
+    func testBottomActionsFitAndExplainCustomerReviewAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let customerAction = app.buttons["customer-handoff-action"]
+        let newJob = app.buttons["customer-new-job-action"]
+        XCTAssertTrue(customerAction.waitForExistence(timeout: 30))
+        XCTAssertTrue(newJob.waitForExistence(timeout: 10))
+        let screen = app.windows.firstMatch.frame
+        for action in [customerAction, newJob] {
+            XCTAssertGreaterThanOrEqual(action.frame.minX, screen.minX)
+            XCTAssertLessThanOrEqual(action.frame.maxX, screen.maxX)
+            XCTAssertGreaterThanOrEqual(action.frame.minY, screen.minY)
+            XCTAssertLessThanOrEqual(action.frame.maxY, screen.maxY)
+            XCTAssertTrue(action.isHittable)
+        }
+        XCTAssertEqual(customerAction.label, "Show to customer")
+        XCTAssertGreaterThan(customerAction.frame.height, 80)
+        capture("Customer bottom actions large text")
+    }
+
+    func testBottomActionsFitAtLargestStandardText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launch()
+        let customerAction = app.buttons["customer-handoff-action"]
+        let newJob = app.buttons["customer-new-job-action"]
+        XCTAssertTrue(customerAction.waitForExistence(timeout: 30))
+        XCTAssertTrue(newJob.waitForExistence(timeout: 10))
+        let screen = app.windows.firstMatch.frame
+        for action in [customerAction, newJob] {
+            XCTAssertGreaterThanOrEqual(action.frame.minX, screen.minX)
+            XCTAssertLessThanOrEqual(action.frame.maxX, screen.maxX)
+            XCTAssertGreaterThanOrEqual(action.frame.minY, screen.minY)
+            XCTAssertLessThanOrEqual(action.frame.maxY, screen.maxY)
+            XCTAssertTrue(action.isHittable)
+        }
+        XCTAssertEqual(customerAction.label, "Show to customer")
+        capture("Customer bottom actions largest standard text")
+    }
+
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
