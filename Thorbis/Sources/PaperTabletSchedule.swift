@@ -8,8 +8,10 @@ struct PaperTabletSchedule: View {
     @State private var range = "Today"
     @State private var selectedID: String?
     @State private var showNewJob = false
-    @State private var typedPath: [PaperTabletScheduleRoute] = []
-    @StateObject private var typedOwner = PaperTypedJobsOwner(stackKind: .tabletSchedule)
+    @Binding var typedPath: [PaperTypedJobsRoute]
+    let typedOwner: PaperTypedJobsOwner
+    @Binding var priceBook: Bool
+    @Binding var drafts: Bool
 
     private var jobs: [Job] {
         guard session.can("job.view", feature: "jobs") else { return [] }
@@ -31,12 +33,20 @@ struct PaperTabletSchedule: View {
                     NavigationStack(path: Binding(get: { typedPath }, set: { next in
                         let old = typedPath
                         typedPath = next
-                        typedOwner.changed(from: old.map(\.route), to: next.map(\.route))
+                        typedOwner.changed(from: old, to: next)
                     })) {
                         detailContent
                             .environment(\.paperTypedJobsOwner, typedOwner)
-                            .navigationDestination(for: PaperTabletScheduleRoute.self) { route in
-                                PaperTypedDestination(route: route.route).environment(\.paperTypedJobsOwner, typedOwner)
+                            .navigationDestination(for: PaperTypedJobsRoute.self) { route in
+                                PaperTypedDestination(route: route).environment(\.paperTypedJobsOwner, typedOwner)
+                            }
+                            .navigationDestination(isPresented: $priceBook) {
+                                WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
+                            }
+                            .navigationDestination(isPresented: $drafts) {
+                                if let actor = session.user?.id, let org = session.activeOrganization?.id {
+                                    InboxLocalDraftView(actorID: actor, organizationID: org)
+                                }
                             }
                     }
                 } else {

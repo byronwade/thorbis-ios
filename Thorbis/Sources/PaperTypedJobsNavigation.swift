@@ -17,18 +17,9 @@ enum PaperTypedJobsRoute: Hashable {
     }
 }
 
-/// A distinct value type ensures the nested tablet Schedule stack owns its links.
-struct PaperTabletScheduleRoute: Hashable {
-    let route: PaperTypedJobsRoute
-}
-
 @MainActor
 final class PaperTypedJobsOwner: ObservableObject {
-    enum StackKind { case standard, tabletSchedule }
-    let stackKind: StackKind
     let diagnosticID = UUID()
-
-    init(stackKind: StackKind = .standard) { self.stackKind = stackKind }
     struct Pop: Equatable {
         let id = UUID()
         let routes: [JobInvoiceRoute]
@@ -78,12 +69,8 @@ struct PaperCompatibleLink<Value: Hashable, Label: View>: View {
     }
 
     var body: some View {
-        if let owner, let route = PaperTypedJobsRoute.wrapping(value) {
-            if owner.stackKind == .tabletSchedule {
-                NavigationLink(value: PaperTabletScheduleRoute(route: route)) { label }
-            } else {
-                NavigationLink(value: route) { label }
-            }
+        if owner != nil, let route = PaperTypedJobsRoute.wrapping(value) {
+            NavigationLink(value: route) { label }
         } else {
             NavigationLink(value: value) { label }
         }
