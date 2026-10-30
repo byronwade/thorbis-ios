@@ -81,11 +81,20 @@ struct SettingsView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
             .thorbisConfirm("Sign out of Thorbis?",
-                            message: pendingMedia.signOutWarning(outboxWarning: outbox.signOutWarning),
+                            message: signOutWarning,
                             isPresented: $confirmSignOut,
                             actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }])
             .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
         }
+    }
+
+    private var signOutWarning: String {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-long-confirmation") {
+            return "24 changes on this phone haven't synced yet. Signing out deletes them. 12 saved photos or documents have not uploaded yet. Signing out deletes all of them, including media in other workspaces and older saved photos."
+        }
+        #endif
+        return pendingMedia.signOutWarning(outboxWarning: outbox.signOutWarning)
     }
 
     private var notificationLabel: String? {

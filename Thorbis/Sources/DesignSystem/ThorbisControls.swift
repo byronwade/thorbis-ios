@@ -66,28 +66,47 @@ struct ThorbisSelect<Value: Hashable>: View {
 struct ThorbisSegmented<Value: Hashable>: View {
     let options: [(value: Value, label: String)]
     @Binding var selection: Value
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                let isOn = option.value == selection
-                Button { selection = option.value } label: {
-                    Text(option.label)
-                        .font(Theme.font(15, weight: .medium)).lineLimit(1)
-                        .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
-                        .frame(maxWidth: .infinity).frame(height: Theme.chipHeight + 10)
-                        .background(isOn ? Theme.card : .clear, in: Capsule())
-                        .overlay(Capsule().stroke(isOn ? Theme.border : .clear))
-                        .shadow(color: .black.opacity(isOn ? 0.06 : 0), radius: 3, y: 1)
-                        .contentShape(Capsule())
+        Group {
+            if typeSize.isAccessibilitySize {
+                verticalChoices
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 3) { choices(horizontal: true) }
+                    verticalChoices
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
         }
         .padding(3)
-        .background(Theme.fill, in: Capsule())
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    private var verticalChoices: some View {
+        VStack(spacing: 3) { choices(horizontal: false) }
+    }
+
+    @ViewBuilder private func choices(horizontal: Bool) -> some View {
+        ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+            let isOn = option.value == selection
+            Button { selection = option.value } label: {
+                Text(option.label)
+                    .font(Theme.font(15, weight: .medium))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: horizontal, vertical: !horizontal)
+                    .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(isOn ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(isOn ? Theme.border : .clear))
+                    .shadow(color: .black.opacity(isOn ? 0.06 : 0), radius: 3, y: 1)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+        }
     }
 }
 
@@ -117,15 +136,19 @@ struct ThorbisConfirmCard: View {
     let onChoose: (ThorbisConfirmAction) -> Void
     let onCancel: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
+        ScrollView {
         VStack(spacing: 14) {
             VStack(spacing: 6) {
                 Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let message {
                     Text(message).font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -152,6 +175,8 @@ struct ThorbisConfirmCard: View {
             }
         }
         .padding(16)
+        }
+        .scrollBounceBehavior(.basedOnSize)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
         .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
@@ -161,7 +186,8 @@ struct ThorbisConfirmCard: View {
         .padding(.bottom, 10)
         // Fitted height, biased up for Dynamic Type; `.large` is the escape hatch so a long
         // title/message at an AX size can't clip the buttons.
-        .presentationDetents([.height(estimatedHeight), .large])
+        .presentationDetents(typeSize.isAccessibilitySize || verticalSizeClass == .compact
+                             ? [.large] : [.height(estimatedHeight), .large])
         .presentationBackground(.clear)
         .presentationDragIndicator(.hidden)
     }
