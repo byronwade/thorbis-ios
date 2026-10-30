@@ -342,17 +342,22 @@ private struct ScheduleHero<Commit: View>: View {
     var pendingStatus: String? = nil
     @ViewBuilder var commit: () -> Commit
     @ScaledMetric(relativeTo: .caption) private var laneWidth: CGFloat = 60
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Group {
-                if let date = JobFiltering.date(job.scheduledFor) {
-                    Text(date.formatted(.dateTime.hour().minute()))
-                } else { Text("No time") }
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+        layout {
+            VStack(alignment: .leading, spacing: 8) {
+                ScheduleVisitMarker(status: pendingStatus ?? job.status, pending: pendingStatus != nil)
+                Group {
+                    if let date = JobFiltering.date(job.scheduledFor) {
+                        Text(date.formatted(.dateTime.hour().minute()))
+                    } else { Text("No time") }
+                }
+                .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.foreground)
-            .lineLimit(1).minimumScaleFactor(0.8)
-            .frame(width: laneWidth, alignment: .leading).padding(.top, 3)
+            .frame(width: typeSize.isAccessibilitySize ? nil : laneWidth, alignment: .leading)
             VStack(alignment: .leading, spacing: 10) {
                 NavigationLink(value: job) {
                     HStack(alignment: .top) {
@@ -381,6 +386,32 @@ private struct ScheduleHero<Commit: View>: View {
         .background(Theme.surface)
         .overlay(alignment: .top) { Theme.border.frame(height: 1) }
         .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
+    }
+}
+
+/// Reinforces the actual job status with a consistent symbol and color; the status remains in words.
+private struct ScheduleVisitMarker: View {
+    let status: String
+    var pending = false
+
+    private var background: Color {
+        if pending { return Theme.warningSurface }
+        switch status {
+        case "completed": return Theme.successSurface
+        case "in_progress", "arrived", "paused": return Theme.warningSurface
+        case "en_route", "dispatched": return Theme.brandSurface
+        default: return Theme.fill
+        }
+    }
+
+    var body: some View {
+        let (symbol, color) = statusIcon(status)
+        Image(systemName: pending ? "clock.arrow.circlepath" : symbol)
+            .font(.system(size: 17, weight: .medium))
+            .foregroundStyle(pending ? Theme.warning : color)
+            .frame(width: 36, height: 36)
+            .background(background, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 
@@ -441,12 +472,12 @@ struct ScheduleCompactRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     if typeSize.isAccessibilitySize { time }
                     Text(job.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     Text("\(job.status.statusLabel) · \(customer)")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                 }
                 Spacer(minLength: 0)
-                StatusRing(status: job.status)
+                ScheduleVisitMarker(status: job.status)
             }
             .padding(.horizontal, Theme.gutter).padding(.vertical, 5)
             .frame(minHeight: 52)
