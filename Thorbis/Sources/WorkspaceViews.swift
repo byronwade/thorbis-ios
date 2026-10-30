@@ -34,27 +34,38 @@ struct WorkspaceNoticesView: View {
                     ForEach(visible) { notice in
                         // Each notice opens the job it is about.
                         NavigationLink(value: PaperRoute.job(notice.jobId)) {
-                        // MA-11: what and when, with the unread state as a shape (dot) and weight, not a tinted tile.
                         HStack(alignment: .top, spacing: 12) {
-                            Circle().fill(notice.read ? Color.clear : Theme.brand).frame(width: 8, height: 8).padding(.top, 7)
+                            Image(systemName: notice.read ? "bell" : "bell.badge.fill")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(notice.read ? Theme.muted : Theme.brandText)
+                                .frame(width: 40, height: 40)
+                                .background(notice.read ? Theme.fill : Theme.brandSurface,
+                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                if !notice.read {
+                                    Text("Unread").font(Theme.font(12, weight: .semibold))
+                                        .foregroundStyle(Theme.brandText)
+                                }
                                 Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .medium))
                                     .foregroundStyle(notice.read ? Theme.muted : Theme.foreground)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text([notice.meta, timeLabel(notice.at)].filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: 0)
                             Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Theme.muted).padding(.top, 4).accessibilityHidden(true)
                         }
                         .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                        .frame(minHeight: 52)
+                        .frame(minHeight: 60)
                         .contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityElement(children: .combine)
-                        .accessibilityValue(notice.read ? "" : "Unread")
+                        .accessibilityLabel([notice.title, notice.meta, timeLabel(notice.at), notice.read ? "Read" : "Unread"]
+                            .filter { !$0.isEmpty }.joined(separator: ", "))
                         .accessibilityHint("Opens the job")
                     }
                     if nextCursor != nil {
