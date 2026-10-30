@@ -203,6 +203,18 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
     }
 
+    func testTypedJobsRouteOpensBothScopedInvoiceDetails() {
+        let app = launch(["--invoice-route-owner-experiment"], screen: "job-invoice")
+        for (id, reference) in [(invoice, "INV-2209"), (second, "INV-2240")] {
+            let card = app.buttons["job-invoice-\(id)"]
+            XCTAssertTrue(card.waitForExistence(timeout: 15))
+            card.tap()
+            XCTAssertTrue(app.staticTexts[reference].waitForExistence(timeout: 5))
+            app.navigationBars.buttons.firstMatch.tap()
+        }
+        XCTAssertFalse(app.buttons["job-invoice-00000000-0000-4000-8000-000000002241"].exists)
+    }
+
     func testTypedJobsRouteRetainsSelectedInvoiceAfterReturn() {
         let app = launch(["--paper-preview-job-invoices-equal-balances", "--invoice-route-owner-experiment"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]
