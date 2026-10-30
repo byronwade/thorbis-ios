@@ -175,10 +175,12 @@ extension ThorbisApp {
     @MainActor private func resync() async {
         await session.revalidate()
         guard session.phase == .ready, !session.isOffline else { return }
+        // Photos first: a queued Complete job may depend on them meeting the photo requirement.
+        await PendingPhotoStore.uploadAll(api: api)
+        outbox.countPhotos()
         if !outbox.pending.isEmpty {
             await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
         }
-        await PendingPhotoStore.uploadAll(api: api)
         await store.refresh(api)
     }
 }
