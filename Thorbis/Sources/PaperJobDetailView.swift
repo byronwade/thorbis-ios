@@ -841,6 +841,8 @@ struct JobDetailView: View {
                 ForEach(estimateRead?.unavailableIDs ?? [], id: \.self) { id in
                     JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
                                    status: "unavailable", amount: nil, fresh: false)
+                        // A container keeps the id on the card itself; without one it lands on each text.
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("job-estimate-unavailable-\(id)")
                 }
                 if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true) {

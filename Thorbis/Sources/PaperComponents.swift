@@ -119,18 +119,38 @@ struct PaperTabs: View {
     /// True while tabs remain past the trailing edge; the fade shows only then, so the
     /// last tab is never left dimmed once you've scrolled to it.
     @State private var moreTrailing = true
+    /// The width offered to the tabs, and each label's natural width, measured on the main actor.
+    @State private var available: CGFloat = 0
+    @State private var labelWidths: [String: CGFloat] = [:]
+
+    /// One-row spacings, loosest first, each with its outer inset. The job's five tabs need the
+    /// tighter ones on a 402pt phone; a cut-off "Acti" reads as a bug. The tightest is only for
+    /// callers that would otherwise wrap; each tab keeps its 44-point minimum and full label.
+    private var candidates: [(padding: CGFloat, inset: CGFloat)] {
+        var all: [(padding: CGFloat, inset: CGFloat)] = [(12, Theme.gutter - 4), (8, Theme.gutter - 8), (6, Theme.gutter - 6)]
+        if wrapOverflow { all.append((3, Theme.gutter - 6)) }
+        return all
+    }
+
+    /// The loosest one-row spacing that fits, or nil when none does. Chosen here rather than with
+    /// `ViewThatFits`: that builds candidate rows lazily during layout, which SwiftUI can run on its
+    /// async render thread, and the main-actor tab content then traps (crash in `row(padding:)`).
+    private var fittingCandidate: (padding: CGFloat, inset: CGFloat)? {
+        // Until measured, start from the loosest row; the measurement settles it before the next frame.
+        guard available > 0, labelWidths.count == Set(options).count else { return candidates.first }
+        return candidates.first { candidate in
+            let tabs = options.reduce(CGFloat(0)) { $0 + max(44, (labelWidths[$1] ?? 0) + candidate.padding * 2) }
+            return tabs + CGFloat(max(0, options.count - 1)) * 2 + candidate.inset * 2 <= available + 0.5
+        }
+    }
+
     var body: some View {
         // Fit one row where possible. Compact layouts can wrap; other callers keep
         // the scrolling fallback and its trailing fade.
-        ViewThatFits(in: .horizontal) {
-            row(padding: 12).padding(.horizontal, Theme.gutter - 4)
-            row(padding: 8).padding(.horizontal, Theme.gutter - 8)
-            // The job's five tabs need this on a 402pt phone; a cut-off "Acti" reads as a bug.
-            row(padding: 6).padding(.horizontal, Theme.gutter - 6)
-            if wrapOverflow {
-                // Keep all destinations in one row when modestly tighter spacing suffices.
-                // Each tab retains its 44-point minimum height and full label.
-                row(padding: 3).padding(.horizontal, Theme.gutter - 6)
+        Group {
+            if let fit = fittingCandidate {
+                row(padding: fit.padding).padding(.horizontal, fit.inset)
+            } else if wrapOverflow {
                 FlowRow(spacing: 2, lineSpacing: 0) {
                     ForEach(options, id: \.self) { option in
                         tab(option, padding: 8)
@@ -174,8 +194,25 @@ struct PaperTabs: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+        .background(alignment: .topLeading) { labelMeasurement }
         .padding(.bottom, 4)
         .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    /// Each label at its natural width, unseen. Weight does not change with selection, so
+    /// selecting a tab never re-measures.
+    private var labelMeasurement: some View {
+        HStack(spacing: 0) {
+            ForEach(options, id: \.self) { option in
+                Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { labelWidths[option] = $0 }
+            }
+        }
+        .fixedSize()
+        .hidden()
+        .accessibilityHidden(true)
     }
 
     private func row(padding: CGFloat) -> some View {

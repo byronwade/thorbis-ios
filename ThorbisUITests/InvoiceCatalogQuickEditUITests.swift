@@ -19,7 +19,33 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         search.typeText("Camera sewer inspection")
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009999"]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
-        item.tap()
+        // At this size the row is taller than the gap between the search bar and the keyboard, and
+        // its centre sits under the keyboard's Done bar (which the keyboard AX frame leaves out).
+        // Tap the part a person can see, as they would.
+        let searchBar = app.otherElements["invoice-catalog-search"]
+        func keyboardTop() -> CGFloat {
+            // The keyboard AX frame leaves out the Done bar above it; take whichever starts higher.
+            min(app.toolbars.firstMatch.exists ? app.toolbars.firstMatch.frame.minY : app.frame.maxY,
+                app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY : app.frame.maxY)
+        }
+        func visibleSpan() -> (top: CGFloat, bottom: CGFloat) {
+            (max(item.frame.minY, searchBar.frame.maxY), min(item.frame.maxY, keyboardTop()))
+        }
+        // The results replace Recent as the search settles, and the custom-line row above can push
+        // the item under the keyboard's Done bar. Scroll it up in short drags, as a person would,
+        // keeping the gesture between the search bar and the keyboard so the keyboard stays up.
+        for _ in 0..<8 {
+            let span = visibleSpan()
+            if item.isHittable && span.bottom - span.top >= 88 { break }
+            let startY = keyboardTop() - 12
+            let distance = min(88 - (span.bottom - span.top) + 16, startY - searchBar.frame.maxY - 16)
+            let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.midX, dy: startY))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -max(24, distance))))
+        }
+        let span = visibleSpan()
+        XCTAssertGreaterThanOrEqual(span.bottom - span.top, 88, "Enough of the catalog row must be visible to tap")
+        item.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: item.frame.width / 2, dy: (span.top + span.bottom) / 2 - item.frame.minY)).tap()
         let added = app.otherElements["invoice-added-line-editor"]
         XCTAssertTrue(added.waitForExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.exists)
@@ -30,7 +56,6 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(description.waitForExistence(timeout: 5))
         let identity = String(description.identifier.dropFirst("invoice-line-description-".count))
         let quantity = added.otherElements["invoice-line-quantity-" + identity].textFields.firstMatch
-        let searchBar = app.otherElements["invoice-catalog-search"]
         revealControl(quantity, below: searchBar, in: app)
         XCTAssertGreaterThan(quantity.frame.width, 200, "Accessibility quantity editing must have room for the full value")
         let price = added.textFields["Unit price in dollars"]
@@ -150,6 +175,12 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         // Type through the application so XCTest does not reposition the field caret.
         quantity.doubleTap()
         app.typeText("10")
+        guard quantity.value as? String != "10" else { return }
+        // A double-tap sometimes only places the caret. The value is right-aligned, so a tap at the
+        // trailing edge puts the caret after it; clear it there and type the quantity again.
+        quantity.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        let typed = (quantity.value as? String) ?? ""
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count) + "10")
     }
 
     func testRepeatedInlineAddsKeepCatalogReachableWithKeyboard() {

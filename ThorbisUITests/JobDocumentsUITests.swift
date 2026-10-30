@@ -109,9 +109,9 @@ final class JobDocumentsUITests: XCTestCase {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-job-documents-partial"])
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Couldn't load all estimates")).firstMatch.waitForExistence(timeout: 15))
-        app.buttons["Estimates"].tap()
+        thorbisStableButton(app, "Estimates").tap()
         XCTAssertTrue(app.buttons["job-estimate-\(estimateA)"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.otherElements["job-estimate-unavailable-\(addonA)"].exists)
+        XCTAssertTrue(app.otherElements["job-estimate-unavailable-\(addonA)"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.staticTexts["No estimates yet"].exists)
         capture(app, "Partial job estimates")
     }
@@ -200,7 +200,10 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
         let show = app.buttons["Show to customer"]
-        for _ in 0..<5 where !show.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        // The job menu is a ThorbisMenu sheet (a scroll view); at large text its later rows start below the fold.
+        let menu = app.scrollViews.containing(NSPredicate(format: "elementType == %d AND label == %@",
+                                                           XCUIElement.ElementType.button.rawValue, "Show to customer")).firstMatch
+        for _ in 0..<5 where !show.isHittable { menu.swipeUp() }
         XCTAssertTrue(show.isHittable)
         show.tap()
         XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
