@@ -118,6 +118,9 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertGreaterThan(price.frame.width, 200, "The full unit price must fit without a clipped money well")
         quantity.tap()
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
+        // Keyboard presentation can move the field; reveal it again before editing.
+        revealControl(quantity, below: searchBar, in: app)
+        XCTAssertEqual(quantity.value as? String, "1")
         replaceQuantityWithTen(quantity, in: app)
         XCTAssertEqual(quantity.value as? String, "10")
         let editingProof = XCTAttachment(screenshot: app.screenshot())
@@ -128,7 +131,11 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertEqual(price.value as? String, "245.00")
         price.tap()
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
+        revealControl(price, below: searchBar, in: app)
         XCTAssertEqual(price.value as? String, "245.00")
+        price.doubleTap()
+        app.typeText("275.00")
+        XCTAssertEqual(price.value as? String, "275.00", "The unit price must be editable at the largest text size")
         let priceProof = XCTAttachment(screenshot: app.screenshot())
         priceProof.name = "Largest text full unit price above the decimal keyboard"
         priceProof.lifetime = .keepAlways
