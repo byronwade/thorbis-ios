@@ -609,7 +609,11 @@ struct CustomerInvoicePresentation: View {
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
-    private var dueExample: FinancingExample? { due > 0 ? offer.example(for: due) : nil }
+    /// Nothing new to apply for while an application is still out with the lender.
+    private var dueExample: FinancingExample? {
+        guard due > 0, !applications.contains(where: \.isOpen) else { return nil }
+        return offer.example(for: due)
+    }
     private var latestApplication: FinancingApplication? { applications.first }
     private var financingStatus: String? { latestApplication.flatMap { FinancingWords.status($0, forCustomer: true) } }
 
@@ -868,6 +872,8 @@ struct CustomerInvoicePresentation: View {
            let updated = try? await api.fieldInvoice(invoice.id) {
             reloadedInvoice = updated
             onSigned(updated)
+            // The offer answered for the old balance; ask again for what the loan left.
+            offer = due > 0 ? await api.financingOffer(amounts: [due]) : .off
         }
     }
 

@@ -546,8 +546,18 @@ struct InvoiceDetailView: View {
                         } : nil,
                         financing: session.can("invoice.payment.create", feature: FinancingWords.feature),
                         onSigned: { updated in
+                            let paidChanged = updated.amountPaid != self.record?.amountPaid
                             self.record = updated
                             paymentModel?.acceptInvoiceMutationResponse(updated)
+                            // A funded loan is a payment the model has not seen: reload its history
+                            // so the remaining balance can still be taken.
+                            if paidChanged, let paymentModel {
+                                Task {
+                                    await paymentModel.load()
+                                    // The model is not observed here; re-reading the record redraws onPay.
+                                    if let loaded = paymentModel.invoice { self.record = loaded }
+                                }
+                            }
                         },
                         onDone: handBack)
                 }
