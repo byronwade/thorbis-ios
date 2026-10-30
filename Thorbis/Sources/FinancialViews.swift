@@ -477,7 +477,9 @@ struct InvoiceDetailView: View {
                     do {
                         self.record = try await api.authorizeFieldInvoice(id, expectedLinesRevision: record.linesRevision, signature: signature)
                         return nil
-                    } catch { return error.localizedDescription }
+                    } catch {
+                        return error.isConnectivityFailure ? SignatureCaptureSheet.noSignal : error.localizedDescription
+                    }
                 }
             }
         }

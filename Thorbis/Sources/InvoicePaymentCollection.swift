@@ -146,6 +146,8 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             payments = try await api.fieldPayments(invoiceID)
             historyComplete = true
             JobDetailCache.save(payments: payments, invoiceID: invoiceID)
+            // Saved with the payments in it, so the saved copy now holds them (OF-08).
+            outbox?.forgetRecorded(seen: Set(payments.map(\.idempotencyKey)))
             loadError = nil
             if acceptedPaymentID == nil, let request = pendingRequest,
                let recovered = payments.first(where: { $0.idempotencyKey == request.idempotencyKey }) {

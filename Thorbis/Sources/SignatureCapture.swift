@@ -12,6 +12,9 @@ struct SignatureCaptureSheet: View {
     var queueOffline: (@MainActor (_ png: Data, _ clientAssetID: String, _ signerName: String, _ signedAt: String) -> Bool)? = nil
     /// Runs the approval or authorization with the uploaded signature; returns an error message on failure.
     let submit: (FieldSignatureInput) async -> String?
+    /// What `submit` returns when the request failed for lack of signal, so the sheet can still
+    /// save the ink for later instead of losing it.
+    static let noSignal = "signature.no-signal"
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
@@ -112,7 +115,8 @@ struct SignatureCaptureSheet: View {
         busy = true
         defer { busy = false }
         error = nil
-        if session.isOffline, uploaded == nil, saveForLater(key: clientAssetID) {
+        // An image already uploaded for this ink is reused by its client asset id once online.
+        if session.isOffline, saveForLater(key: clientAssetID) {
             dismiss()
             return
         }
@@ -133,10 +137,15 @@ struct SignatureCaptureSheet: View {
             }
             let input = FieldSignatureInput(signerName: trimmedName,
                                             signedAt: ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
-            if let message = await submit(input) { error = message } else { dismiss() }
+            switch await submit(input) {
+            case nil: dismiss()
+            case Self.noSignal?:
+                if saveForLater(key: key) { dismiss() } else { error = "Signing needs a connection. Try again when you have signal." }
+            case let message?: error = message
+            }
         } catch is CancellationError {
         } catch {
-            if error.isConnectivityFailure, uploaded == nil, saveForLater(key: clientAssetID) {
+            if error.isConnectivityFailure, saveForLater(key: clientAssetID) {
                 dismiss()
                 return
             }

@@ -44,7 +44,7 @@ struct JobCloseoutView: View {
     private func waitingSatisfies(_ requirement: FieldCloseoutRequirement) -> Bool {
         guard requirement.outcome == "blocked", let closeout else { return false }
         switch requirement.kind {
-        case "notes": return !outbox.pendingNotes(for: jobID).isEmpty
+        case "notes": return outbox.pendingNotes(for: jobID).contains { $0.state == .pending }
         case "photos":
             return closeout.facts.photoCount + PendingPhotoStore.list(jobID: jobID).count >= closeout.policy.requiredPhotoCount
         case "check": return outbox.waitingChecks(jobID: jobID).contains(String(requirement.requirement.dropFirst("check:".count)))
@@ -64,7 +64,7 @@ struct JobCloseoutView: View {
             return due > 0 ? (invoice.id, due) : nil
         }
         return !owing.isEmpty && owing.allSatisfy { id, due in
-            outbox.waitingPayments(invoiceID: id).reduce(0) { $0 + $1.amountCents } >= due
+            outbox.waitingPayments(invoiceID: id, replayableOnly: true).reduce(0) { $0 + $1.amountCents } >= due
         }
     }
     private var canComplete: Bool {

@@ -235,10 +235,16 @@ final class FieldOutbox: ObservableObject {
 
     private func persistRecorded() {
         guard let recordedFile else { return }
-        // The newest few are enough: older ones are long in every saved payment history.
-        if recordedPayments.count > 50 { recordedPayments.removeFirst(recordedPayments.count - 50) }
         try? JSONEncoder().encode(recordedPayments)
             .write(to: recordedFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    /// An invoice's history from the server now holds these payments, and that history is
+    /// saved on the phone, so they no longer need holding.
+    func forgetRecorded(seen keys: Set<String>) {
+        let before = recordedPayments.count
+        recordedPayments.removeAll { keys.contains($0.idempotencyKey) }
+        if recordedPayments.count != before { persistRecorded() }
     }
 
     /// Changes queued in other workspaces on this phone; `clearAll()` deletes those too, so the
@@ -272,6 +278,8 @@ final class FieldOutbox: ObservableObject {
     /// Re-reads the waiting photo count after a photo is saved or sent.
     func countPhotos() {
         let count = PendingPhotoStore.list().count
+        // Photos left the phone: open screens reload, so a closeout sees the server's photo count.
+        if count < waitingPhotos { syncGeneration += 1 }
         if waitingPhotos != count { waitingPhotos = count }
     }
 
@@ -338,17 +346,19 @@ final class FieldOutbox: ObservableObject {
     }
 
     /// Cash and check waiting to record on an invoice (OF-08). Never counted as paid.
-    func waitingPayments(invoiceID: String) -> [OutboxEntry.PaymentPayload] {
-        entries.compactMap { if case .payment(let payment) = $0.action, payment.invoiceId == invoiceID { payment } else { nil } }
+    /// Refused ones still hold their money against the invoice (the cash is in hand), but only
+    /// replayable ones count toward a closeout (`replayableOnly`).
+    func waitingPayments(invoiceID: String, replayableOnly: Bool = false) -> [OutboxEntry.PaymentPayload] {
+        (replayableOnly ? pending : entries).compactMap { if case .payment(let payment) = $0.action, payment.invoiceId == invoiceID { payment } else { nil } }
     }
 
     func waitingSignature(invoiceID: String) -> OutboxEntry.SignaturePayload? {
-        entries.lazy.compactMap { if case .invoiceSignature(let payload) = $0.action, payload.invoiceId == invoiceID { payload } else { nil } }.last
+        pending.lazy.compactMap { if case .invoiceSignature(let payload) = $0.action, payload.invoiceId == invoiceID { payload } else { nil } }.last
     }
 
     /// Checklist items confirmed on this phone and not yet on the server.
     func waitingChecks(jobID: String) -> Set<String> {
-        Set(entries.compactMap { if case .acknowledgeCheck(let check) = $0.action, check.jobId == jobID { check.checkKey } else { nil } })
+        Set(pending.compactMap { if case .acknowledgeCheck(let check) = $0.action, check.jobId == jobID { check.checkKey } else { nil } })
     }
 
     func learn(_ job: JobRecord) {
