@@ -56,9 +56,20 @@ final class RecentItems: ObservableObject {
     }
 }
 
-/// A side menu like the web app's sidebar: workspace and search at the top, the pinned tabs,
-/// every other place, recent jobs and customers, then New job and one account row. The tab bar
-/// stays; this is a second way to get anywhere in one tap.
+/// Places in the phone menu: tab-bar items first, then every other permitted destination.
+enum SideMenuContent {
+    static func places(tabs: [MenuItem], hidden: Set<MenuItem>, permitted: (MenuItem) -> Bool) -> [MenuItem] {
+        let rest = MenuItem.allCases.filter {
+            !tabs.contains($0) && !hidden.contains($0) && permitted($0) && $0.route != nil
+        }
+        return tabs + rest
+    }
+}
+
+/// The phone's side menu, laid out like the Claude app: the app title and one round button,
+/// a plain list under Pinned and Recents, then the account and New job floating at the bottom.
+/// Search is not in that bar. It sits above the list and shows when the menu is pulled down.
+/// The tab bar stays; this is a second way to get anywhere in one tap.
 struct SideMenu: View {
     let open: (MenuItem) -> Void
     let openRecent: (RecentItems.Item) -> Void
@@ -72,123 +83,235 @@ struct SideMenu: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
     @ObservedObject private var recents = RecentItems.shared
+    /// Search lives above `menu`. The menu starts at the top, so a pull downward uncovers search.
+    @State private var scroll = ScrollPosition(id: "menu", anchor: .top)
 
-    private var pinned: [MenuItem] { layout.visibleTabs(session) }
-    private var everything: [MenuItem] {
-        // Like More, only places that can open on their own; Schedule, Jobs and Customers are tabs.
-        MenuItem.allCases.filter { !pinned.contains($0) && !layout.hidden.contains($0) && $0.permitted(session) && $0.route != nil }
+    /// Tab-bar places first, then every other place that can open on its own.
+    private var places: [MenuItem] {
+        SideMenuContent.places(
+            tabs: layout.visibleTabs(session),
+            hidden: layout.hidden,
+            permitted: { $0.permitted(session) }
+        )
+    }
+    private var accountName: String {
+        let name = session.user?.name ?? ""
+        return name.isEmpty ? "Account" : name
+    }
+    /// Screenshot fixture: start with the pull-down search already in view.
+    private var showSearch: Bool {
+        #if DEBUG
+        PaperPreview.enabled && PaperPreview.screen == "side-menu-search"
+        #else
+        false
+        #endif
     }
 
-    /// Workspace and search at the top. The footer is only New job and one account row.
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // The company is a control when there is another to switch to.
-            Button { switchWorkspace?() } label: {
-                HStack(spacing: 10) {
-                    Text(String((session.activeOrganization?.name ?? "T").prefix(1)).uppercased())
-                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.onInk)
-                        .frame(width: 28, height: 28)
-                        .background(Theme.ink, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .dynamicTypeSize(...DynamicTypeSize.large)
-                    Text(session.activeOrganization?.name ?? "Thorbis").font(Theme.font(17, weight: .medium))
-                        .lineLimit(1)
-                    if switchWorkspace != nil {
-                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.muted)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 12)
-                .frame(minHeight: 48).contentShape(Rectangle())
-            }
-            .buttonStyle(RowPressStyle())
-            .allowsHitTesting(switchWorkspace != nil)
-            .accessibilityLabel(switchWorkspace == nil ? "Company: \(session.activeOrganization?.name ?? "Thorbis")"
-                                                       : "Company: \(session.activeOrganization?.name ?? "Thorbis"). Switch company")
-            .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 4)
-
-            SidebarSearchButton(action: search)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(pinned) { item in row(item) }
-                    if !everything.isEmpty {
-                        section("More places")
-                        ForEach(everything) { item in row(item) }
-                    }
-                    if !recents.items.isEmpty {
-                        section("Recent")
-                        ForEach(recents.items) { item in
-                            Button { openRecent(item) } label: {
-                                HStack(spacing: 14) {
-                                    Image(systemName: item.kind == .job ? "briefcase" : "person")
-                                        .font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 22)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(item.title).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(1)
-                                        Text(item.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.horizontal, 12)
-                                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(RowPressStyle())
+        ZStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                GeometryReader { geometry in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            searchField
+                                .id("search")
+                            menu
+                                .id("menu")
+                                // Taller than the viewport, so the search row rests above the fold
+                                // and a pull downward brings it in.
+                                .frame(minHeight: geometry.size.height, alignment: .top)
                         }
+                        // Identity scrolling only resolves ids inside a scroll-target layout.
+                        .scrollTargetLayout()
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 72)
                     }
+                    .scrollPosition($scroll, anchor: .top)
+                    .scrollIndicators(.hidden)
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 12)
             }
-            .scrollIndicators(.hidden)
-
-            VStack(spacing: 12) {
-                if session.can("job.create", feature: "jobs") {
-                    Button(action: newJob) {
-                        Label("New job", systemImage: "plus")
-                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.onInk)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Theme.ink, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                    }
-                    .buttonStyle(PressStyle())
-                }
-                SidebarAccountButton(name: session.user?.name ?? "", action: settings)
-            }
-            .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 22)
-            .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+            footer
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.surface.ignoresSafeArea())
+        .background(Theme.background.ignoresSafeArea())
+        .task { reveal(showSearch ? "search" : "menu") }
         // MA-04: VoiceOver's escape gesture closes the menu; the app behind is hidden meanwhile.
         .accessibilityAddTraits(.isModal)
         .accessibilityAction(.escape) { close() }
     }
 
-    private func section(_ title: String) -> some View {
-        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-            .padding(.horizontal, 12).padding(.top, 18).padding(.bottom, 4)
+    private var header: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Button { switchWorkspace?() } label: {
+                HStack(spacing: 6) {
+                    Text("Thorbis")
+                        .font(Theme.font(24, weight: .medium))
+                        .tracking(-0.3)
+                        .lineLimit(1)
+                    if switchWorkspace != nil {
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                    }
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .allowsHitTesting(switchWorkspace != nil)
+            .accessibilityLabel(switchWorkspace == nil
+                ? "Thorbis"
+                : "Thorbis, \(session.activeOrganization?.name ?? "company"). Switch company")
+            Spacer(minLength: 0)
+            PaperCircleButton(symbol: "magnifyingglass", label: "Search", fill: Theme.card, bordered: true, action: search)
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 10)
+        .padding(.top, 2)
+        .padding(.bottom, 0)
+    }
+
+    /// The field that a downward pull uncovers. It opens company search; it is not a second list filter.
+    private var searchField: some View {
+        Button(action: search) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                Text("Search")
+                Spacer(minLength: 0)
+            }
+            .font(Theme.font(16))
+            .foregroundStyle(Theme.muted)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Search")
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
+
+    private var menu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !places.isEmpty {
+                section("Pinned", first: true)
+                ForEach(places) { item in row(item) }
+            }
+            if !recents.items.isEmpty {
+                section("Recents")
+                ForEach(recents.items) { item in recent(item) }
+            }
+        }
+    }
+
+    /// Avatar and New job sit on the list, like Claude, so Recents can scroll behind them.
+    private var footer: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Button(action: settings) {
+                Avatar(name: accountName, size: 36, fill: Theme.card)
+                    .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.12), radius: 6, y: 1)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Settings, \(accountName)")
+            Spacer(minLength: 0)
+            if session.can("job.create", feature: "jobs") {
+                Button(action: newJob) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus").font(.system(size: 14, weight: .medium))
+                        Text("New job")
+                    }
+                    .font(Theme.font(15, weight: .medium))
+                    .foregroundStyle(Theme.onInk)
+                    .padding(.horizontal, 16)
+                    .frame(height: 40)
+                    .background(Theme.ink, in: Capsule())
+                    .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+                    .frame(minHeight: 44)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("New job")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 20)
+        .padding(.bottom, 10)
+        .background {
+            LinearGradient(
+                colors: [Theme.background.opacity(0), Theme.background.opacity(0.72), Theme.background],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.top, -8)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func reveal(_ id: String) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { scroll.scrollTo(id: id, anchor: .top) }
+    }
+
+    private func section(_ title: String, first: Bool = false) -> some View {
+        Text(title)
+            .font(Theme.font(13, weight: .medium))
+            .foregroundStyle(Theme.muted)
+            .padding(.horizontal, 12)
+            .padding(.top, first ? 8 : 22)
+            .padding(.bottom, 4)
             .accessibilityAddTraits(.isHeader)
     }
 
-    /// MA-02: the current place sits in the well fill with its word at 500 and its mark filled;
-    /// the others are 400 with a quiet place hue on the mark only.
+    /// A plain row: one dark icon and a label. The current place is 500 and filled.
     private func row(_ item: MenuItem) -> some View {
         let here = current == item.rawValue
         return Button { open(item) } label: {
             HStack(spacing: 14) {
-                Image(systemName: item.symbol).symbolVariant(here ? .fill : .none)
-                    .font(.system(size: 17)).foregroundStyle(here ? Theme.foreground : item.tint).frame(width: 22)
-                Text(item.title).font(Theme.font(15, weight: here ? .medium : .regular))
+                Image(systemName: item.symbol)
+                    .symbolVariant(here ? .fill : .none)
+                    .font(.system(size: 18))
                     .foregroundStyle(Theme.foreground)
+                    .frame(width: 24)
+                Text(item.title)
+                    .font(Theme.font(17, weight: here ? .medium : .regular))
+                    .foregroundStyle(Theme.foreground)
+                    .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
-            .frame(minHeight: 46)
-            .background(here ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .frame(minHeight: 48)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         .accessibilityAddTraits(here ? .isSelected : [])
+    }
+
+    private func recent(_ item: RecentItems.Item) -> some View {
+        Button { openRecent(item) } label: {
+            HStack(spacing: 14) {
+                Image(systemName: item.kind == .job ? "briefcase" : "person")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: 24)
+                Text(item.title)
+                    .font(Theme.font(17))
+                    .foregroundStyle(Theme.foreground)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityLabel("\(item.kind == .job ? "Job" : "Customer"), \(item.title)")
+        .accessibilityHint(item.subtitle)
     }
 }
