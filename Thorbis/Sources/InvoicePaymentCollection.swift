@@ -124,8 +124,10 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     var waitingForProjection: Bool { acceptedPaymentID != nil }
 
     var canRecordPayment: Bool {
+        // Offline, a saved history may be missing or older than the invoice. Only cash and check can
+        // be taken then, and the server checks the balance when they record (OF-08).
         canOfferCollection && !isLoading && !isRecording && !waitingForProjection &&
-            historyComplete && paymentTotalCents == invoice?.amountPaid
+            (offlineCopy || (historyComplete && paymentTotalCents == invoice?.amountPaid))
     }
 
     func load() async {

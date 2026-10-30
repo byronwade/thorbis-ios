@@ -56,15 +56,28 @@ struct JobCloseoutView: View {
     /// Cash and check waiting on this phone cover every unpaid balance on the job's invoices as
     /// last seen. A partial payment leaves the requirement (and the unpaid disposition) showing.
     private var waitingPaymentsCoverBalance: Bool {
-        // The single invoice copy is newer when a payment was recorded on the invoice screen.
-        let invoices = (JobDetailCache.invoices(jobID) ?? []).map { JobDetailCache.invoice($0.id) ?? $0 }
+        // The job's invoice list, plus any invoice this phone took cash on for the job; the single
+        // invoice copy is newer when a payment was recorded on the invoice screen.
+        let listed = JobDetailCache.invoices(jobID) ?? []
+        let paidHere = (outbox.pending.compactMap { entry -> String? in
+            if case .payment(let payment) = entry.action, payment.jobId == jobID { payment.invoiceId } else { nil }
+        } + outbox.recordedPayments.filter { $0.jobId == jobID }.map(\.invoiceId))
+            .filter { id in !listed.contains { $0.id == id } }
+        let invoices = listed.map { JobDetailCache.invoice($0.id) ?? $0 }
+            + Set(paidHere).compactMap { JobDetailCache.invoice($0) }
         let owing = invoices.filter { $0.status == "issued" }.compactMap { invoice -> (String, Int)? in
             let total = invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
             let due = total - invoice.amountPaid
             return due > 0 ? (invoice.id, due) : nil
         }
         return !owing.isEmpty && owing.allSatisfy { id, due in
-            outbox.waitingPayments(invoiceID: id, replayableOnly: true).reduce(0) { $0 + $1.amountCents } >= due
+            let queued = outbox.waitingPayments(invoiceID: id, replayableOnly: true).reduce(0) { $0 + $1.amountCents }
+            // Recorded from the queue but newer than this phone's saved copy of the invoice.
+            let saved = Set((JobDetailCache.payments(id) ?? []).map(\.idempotencyKey))
+            let recorded = outbox.recordedPayments
+                .filter { $0.invoiceId == id && !saved.contains($0.idempotencyKey) }
+                .reduce(0) { $0 + $1.amountCents }
+            return queued + recorded >= due
         }
     }
     private var canComplete: Bool {
@@ -267,7 +280,14 @@ struct JobCloseoutView: View {
             || !PendingPhotoStore.list(jobID: jobID).isEmpty {
             queueOffline(queued)
             completed += 1
-            if !session.isOffline { Task { await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync")) } }
+            if !session.isOffline {
+                Task {
+                    // Photos first, as on reconnect: the completion is held until this job's are sent.
+                    await PendingPhotoStore.uploadAll(api: api)
+                    outbox.countPhotos()
+                    await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
+                }
+            }
             return
         }
         busy = true
