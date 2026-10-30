@@ -769,15 +769,18 @@ struct PaperDocumentRow: View {
                 .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                 .accessibilityHidden(true)
             if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 6) {
-                    documentIdentity
-                    amountAndStatus(alignment: .leading)
+                stackedContent
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 8) {
+                        documentIdentity.frame(minWidth: 170, alignment: .leading)
+                        Spacer(minLength: 0)
+                        amountAndStatus(alignment: .trailing)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    stackedContent
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                documentIdentity
-                Spacer(minLength: 8)
-                amountAndStatus(alignment: .trailing)
             }
         }
         .frame(minHeight: 64)
@@ -789,7 +792,6 @@ struct PaperDocumentRow: View {
     private var documentIdentity: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
             if typeSize.isAccessibilitySize {
                 stackedMetadata
@@ -806,6 +808,14 @@ struct PaperDocumentRow: View {
             }
         }
         .foregroundStyle(Theme.muted)
+    }
+
+    private var stackedContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            documentIdentity
+            amountAndStatus(alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var stackedMetadata: some View {
