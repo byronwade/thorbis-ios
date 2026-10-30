@@ -28,6 +28,19 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["EST-2218"].waitForExistence(timeout: 10))
     }
 
+    func testNarrowJobSectionsCanReachActivity() {
+        let app = preview()
+        thorbisStableButton(app, "Estimates").tap()
+        let activity = app.buttons["Activity"]
+        let more = app.buttons["Show more job sections"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
+        XCTAssertTrue(activity.isHittable)
+        activity.tap()
+        XCTAssertTrue(app.buttons["Notes"].waitForExistence(timeout: 10))
+        capture(app, "Activity reached from narrow job sections")
+    }
+
     func testAllJobInvoicesAreVisibleAndOpenTheirOwnDetail() {
         continueAfterFailure = false
         let app = preview()

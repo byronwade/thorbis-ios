@@ -17,7 +17,8 @@ struct JobDocumentRow: View {
         }
         .foregroundStyle(Theme.foreground)
         .multilineTextAlignment(.leading)
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, customerFacing ? 16 : 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
@@ -25,14 +26,14 @@ struct JobDocumentRow: View {
     }
 
     private var technicianRow: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: symbol)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Theme.brandText)
-                .frame(width: 36, height: 36)
+                .frame(width: 26, height: 26)
                 .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         titleText
