@@ -344,7 +344,7 @@ struct RootView: View {
                 outbox.enqueue(.note(.init(jobId: PaperPreview.jobID, body: "Gate code 4417 — dog in the back yard.")), policyVersion: session.policyVersion ?? 1)
                 if PaperPreview.screen == "offline-job", let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs
-                    jobsPath.append(job)
+                    pushJobsJob(job)
                 }
                 return
             }
@@ -392,10 +392,10 @@ struct RootView: View {
             case "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups":
                 if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs
-                    if typedJobsExperiment { typedJobsPath.append(.job(job)) } else { jobsPath.append(job) }
-                    if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
-                    if PaperPreview.screen == "job-assign" { jobsPath.append(PaperRoute.assign(jobID: job.id)) }
-                    if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
+                    pushJobsJob(job)
+                    if PaperPreview.screen == "job-closeout" { pushJobsPaper(.closeout(jobID: job.id)) }
+                    if PaperPreview.screen == "job-assign" { pushJobsPaper(.assign(jobID: job.id)) }
+                    if PaperPreview.screen == "job-followups" { pushJobsPaper(.followUps(jobID: job.id)) }
                 }
             case "customer", "customer-activity", "customer-records":
                 if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
@@ -456,8 +456,8 @@ struct RootView: View {
                 schedulePath.append(PaperRoute.job(item.id))
             } else if tabs.contains(.jobs) {
                 primaryTab = .jobs
-                jobsPath = NavigationPath()
-                jobsPath.append(PaperRoute.job(item.id))
+                resetJobsPath()
+                pushJobsPaper(.job(item.id))
             } else {
                 primaryTab = .more
                 morePath = NavigationPath()
@@ -515,6 +515,18 @@ struct RootView: View {
         }
     }
 
+    private func resetJobsPath() {
+        if typedJobsExperiment { typedJobsOwner.discardPendingPop(); typedJobsPath = [] } else { jobsPath = NavigationPath() }
+    }
+
+    private func pushJobsJob(_ job: Job) {
+        if typedJobsExperiment { typedJobsOwner.discardPendingPop(); typedJobsPath.append(.job(job)) } else { jobsPath.append(job) }
+    }
+
+    private func pushJobsPaper(_ route: PaperRoute) {
+        if typedJobsExperiment { typedJobsOwner.discardPendingPop(); typedJobsPath.append(.paper(route)) } else { jobsPath.append(route) }
+    }
+
     private var typedJobsExperiment: Bool {
         #if DEBUG
         return PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--invoice-route-owner-experiment")
@@ -525,13 +537,22 @@ struct RootView: View {
 
     @ViewBuilder private func typedJobsDestination(_ route: PaperTypedJobsRoute) -> some View {
         switch route {
-        case .job(let job): JobDetailView(jobId: job.id)
-        case .customer(let customer): CustomerDetailView(customer: customer)
+        case .job(let job):
+            if session.can("job.view", feature: "jobs") { JobDetailView(jobId: job.id) }
+            else { ContentUnavailableView("Job unavailable", systemImage: "lock") }
+        case .customer(let customer):
+            if session.can("customer.view", feature: "core_crm") { CustomerDetailView(customer: customer) }
+            else { ContentUnavailableView("Customer unavailable", systemImage: "lock") }
+        case .paper(.job(let id)):
+            if session.can("job.view", feature: "jobs") { JobDetailView(jobId: id) }
+            else { ContentUnavailableView("Job unavailable", systemImage: "lock") }
         case .paper(let value): PaperRouteView(route: value)
         case .invoice(let value):
             if session.phase == .ready, session.user?.id == value.actorID,
                session.activeOrganization?.id == value.organizationID, session.generation == value.sessionGeneration,
-               session.authorityRevision == value.authorityRevision, session.can("invoice.view", feature: "invoicing") {
+               session.authorityRevision == value.authorityRevision, api.requestGeneration == value.apiGeneration,
+               api.normalizedOrigin == value.apiOrigin, session.can("job.view", feature: "jobs"),
+               session.can("invoice.view", feature: "invoicing") {
                 InvoiceDetailView(id: value.invoiceID, expectedJobScope: .init(jobID: value.jobID, organizationID: value.organizationID, customerID: value.customerID))
             } else {
                 ContentUnavailableView("Invoice unavailable", systemImage: "lock", description: Text("Return to the job to refresh this invoice."))
@@ -553,8 +574,8 @@ struct RootView: View {
                 schedulePath.append(job)
             } else if tabs.contains(.jobs) {
                 primaryTab = .jobs
-                jobsPath = NavigationPath()
-                jobsPath.append(job)
+                resetJobsPath()
+                pushJobsJob(job)
             } else {
                 primaryTab = .more
                 morePath = NavigationPath()
@@ -964,6 +985,7 @@ struct PaperGlobalSearch: View {
             }
             .paperDestinations()
         }
+        .environment(\.paperTypedJobsOwner, nil)
     }
 
     private func label(_ type: String) -> String {

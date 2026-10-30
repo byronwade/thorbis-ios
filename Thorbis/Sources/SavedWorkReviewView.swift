@@ -49,6 +49,7 @@ struct SavedWorkReviewView: View {
                             }
                         }
                 }
+                .environment(\.paperTypedJobsOwner, nil)
                 .environment(\.savedWorkReviewReturnToRoot, {
                     guard current else { close(); return }
                     path = NavigationPath()

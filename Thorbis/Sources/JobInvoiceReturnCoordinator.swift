@@ -8,10 +8,14 @@ struct JobInvoiceReturnContext: Equatable {
     let actorID: String
     let sessionGeneration: UUID
     let authorityRevision: UUID
+    let presentationID: UUID
+    let apiGeneration: UUID
+    let apiOrigin: String
 
     func contains(_ route: JobInvoiceRoute) -> Bool {
         route.matches(jobID: jobID, organizationID: organizationID, customerID: customerID,
-                      actorID: actorID, sessionGeneration: sessionGeneration, authorityRevision: authorityRevision)
+                      actorID: actorID, sessionGeneration: sessionGeneration, authorityRevision: authorityRevision,
+                      presentationID: presentationID, apiGeneration: apiGeneration, apiOrigin: apiOrigin)
     }
 }
 
@@ -61,5 +65,13 @@ struct JobInvoiceReturnCoordinator {
         state.invalidate()
         activeRoute = nil
         activeRequest = nil
+    }
+}
+
+/// Do not let a preferred-invoice fallback replace the invoice the technician returned from.
+enum JobInvoiceReturnIdentity {
+    static func permits(returnedID: String?, selectedID: String, modelID: String?, verifiedID: String?, recordsMatch: Bool) -> Bool {
+        guard let returnedID else { return true }
+        return selectedID == returnedID && modelID == returnedID && verifiedID == returnedID && recordsMatch
     }
 }

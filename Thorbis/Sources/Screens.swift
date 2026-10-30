@@ -172,6 +172,8 @@ struct NewJobSheet: View {
                 .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
                 .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
         }
+        // This sheet owns an independent, legacy navigation stack until migrated.
+        .environment(\.paperTypedJobsOwner, nil)
         // A swipe never throws away a typed title (MA-16).
         .interactiveDismissDisabled(busy || (savedJobID == nil && !draft.title.isEmpty))
     }

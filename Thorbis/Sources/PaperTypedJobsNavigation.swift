@@ -29,11 +29,17 @@ final class PaperTypedJobsOwner: ObservableObject {
         if pop?.id == id { pop = nil }
     }
 
+    func discardPendingPop() { pop = nil }
+
     func changed(from old: [PaperTypedJobsRoute], to new: [PaperTypedJobsRoute]) {
+        guard old != new else { return }
         guard let route = JobInvoiceRouteTransition.completedPop(from: old, to: new, invoice: { value in
             if case let .invoice(route) = value { return route }
             return nil
-        }) else { return }
+        }) else {
+            discardPendingPop()
+            return
+        }
         pop = Pop(route: route)
     }
 }
