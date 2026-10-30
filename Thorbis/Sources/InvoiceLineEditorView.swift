@@ -189,13 +189,13 @@ struct InvoiceLineEditorView: View {
             .frame(maxWidth: .infinity)
             }
         }
-        .scrollDismissesKeyboard(.interactively)
+        .scrollDismissesKeyboard(editingAddedLine && dynamicTypeSize.isAccessibilitySize ? .never : .interactively)
         .onChange(of: focusedNumber) { _, _ in
-            if let field = activeFocusedNumber { scrollProxy.scrollTo(field, anchor: .center) }
+            if let field = activeFocusedNumber { scrollProxy.scrollTo(field, anchor: .top) }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
             if let field = activeFocusedNumber {
-                withAnimation { scrollProxy.scrollTo(field, anchor: .center) }
+                withAnimation { scrollProxy.scrollTo(field, anchor: .top) }
             }
         }
         .background(Theme.background)

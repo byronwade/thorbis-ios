@@ -118,8 +118,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertGreaterThan(price.frame.width, 200, "The full unit price must fit without a clipped money well")
         quantity.tap()
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
-        // Keyboard presentation can move the field; reveal it again before editing.
-        revealControl(quantity, below: searchBar, in: app)
+        assertFocusedNumberVisible(quantity, below: searchBar, in: app)
         XCTAssertEqual(quantity.value as? String, "1")
         replaceQuantityWithTen(quantity, in: app)
         XCTAssertEqual(quantity.value as? String, "10")
@@ -131,7 +130,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertEqual(price.value as? String, "245.00")
         price.tap()
         XCTAssertTrue(app.keyboards.keys["0"].waitForExistence(timeout: 5))
-        revealControl(price, below: searchBar, in: app)
+        assertFocusedNumberVisible(price, below: searchBar, in: app)
         XCTAssertEqual(price.value as? String, "245.00")
         replaceVisibleNumber(price, original: "245.00", with: "275.00", in: app)
         XCTAssertEqual(price.value as? String, "275.00", "The unit price must be editable at the largest text size")
@@ -246,6 +245,17 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(control.isHittable, app.debugDescription)
     }
 
+    private func assertFocusedNumberVisible(_ field: XCUIElement, below searchBar: XCUIElement, in app: XCUIApplication) {
+        let visible = NSPredicate { _, _ in
+            let keyboard = app.keyboards.firstMatch
+            guard keyboard.exists, keyboard.keys["0"].isHittable, field.isHittable else { return false }
+            return field.frame.minY >= searchBar.frame.maxY && field.frame.maxY <= keyboard.frame.minY - 44
+        }
+        let visibility = expectation(for: visible, evaluatedWith: nil)
+        wait(for: [visibility], timeout: 10)
+        XCTAssertTrue(field.isHittable, "The focused numeric field must remain reachable above the keyboard")
+    }
+
     private func replaceQuantityWithTen(_ quantity: XCUIElement, in app: XCUIApplication) {
         replaceVisibleNumber(quantity, original: "1", with: "10", in: app)
     }
@@ -254,7 +264,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         // Use the native text selection menu; touching the right edge can place the
         // caret before the final digit at accessibility sizes.
         XCTAssertEqual(field.value as? String, original)
-        field.press(forDuration: 1.2)
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.5)).press(forDuration: 1.2)
         let selectAll = app.menuItems["Select All"]
         XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "The selected value must expose Select All")
         selectAll.tap()
