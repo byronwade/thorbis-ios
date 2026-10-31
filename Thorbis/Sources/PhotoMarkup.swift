@@ -106,28 +106,26 @@ struct PhotoMarkupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            // Thorbis bar: Cancel and Save as words, Undo as a quiet circle, all 44pt or larger.
+            HStack(spacing: 10) {
                 Button("Cancel") {
                     if model.hasStrokes { confirmDiscard = true } else { onCancel() }
                 }
-                .frame(minHeight: 44)
+                .buttonStyle(ThorbisBarButtonStyle())
                 .accessibilityIdentifier("markup-cancel")
-                Spacer()
-                Button { model.undo() } label: {
-                    Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44)
-                }
-                .disabled(!model.canUndo)
-                .accessibilityLabel("Undo")
+                Spacer(minLength: 0)
+                Text("Mark up").font(Theme.font(17, weight: .medium)).accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                PaperCircleButton(symbol: "arrow.uturn.backward", label: "Undo", size: 44, fill: Theme.card, bordered: true) { model.undo() }
+                    .disabled(!model.canUndo)
+                    .opacity(model.canUndo ? 1 : 0.4)
                 Button(saving ? "Saving…" : "Save") { save() }
-                    .font(Theme.font(17, weight: .semibold))
-                    .frame(minHeight: 44)
+                    .buttonStyle(ThorbisBarButtonStyle(prominent: true))
                     .disabled(!model.hasStrokes || saving)
                     .accessibilityIdentifier("markup-save")
             }
-            .font(Theme.font(17))
             .foregroundStyle(Theme.foreground)
-            .tint(Theme.brandText)
-            .padding(.horizontal, Theme.gutter)
+            .padding(.horizontal, Theme.gutter).padding(.vertical, 6)
             if let error {
                 ErrorBanner(message: error)
             }

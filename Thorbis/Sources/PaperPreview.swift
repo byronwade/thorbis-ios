@@ -344,6 +344,21 @@ enum PaperPreview {
                 catch { assertionFailure("Synthetic media fixture could not be saved: \(error)") }
             }
         }
+        if args.contains("--paper-preview-media-waiting") {
+            // Media redesign screenshots: photos saved on this phone, not yet sent (labelled SAMPLE).
+            store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
+            do {
+                guard let context = store.captureContext else { return store }
+                for (number, sample) in [("New valve, close up", ["After"]), ("Burst shot 1", [String]()), ("Burst shot 2", [String]())].enumerated() {
+                    let id = String(format: "00000000-0000-4000-8000-%012d", 9881 + number)
+                    if store.items.contains(where: { $0.id == id }) { continue }
+                    let data = MediaSample.image(caption: sample.0, tags: sample.1).jpegData(compressionQuality: 0.8)!
+                    try store.save(.init(id: id, jobID: jobID, filename: "sample-pending-\(number + 1).jpg", tags: sample.1,
+                                         capturedAt: Date().addingTimeInterval(Double(number - 3) * 60), kind: "photo", mime: "image/jpeg",
+                                         caption: sample.0), data: data, context: context)
+                }
+            } catch { assertionFailure("Synthetic waiting media failed: \(error)") }
+        }
         if args.contains("--paper-preview-many-pending") {
             store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
             let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 100, height: 100)).pdfData { $0.beginPage() }
@@ -1136,6 +1151,36 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "uploadState": "stored", "tags": ["Before"], "caption": "Outdoor unit", "archived": false,
                     "createdAt": now, "updatedAt": now
                 ]
+                // Media redesign screenshots: a visit's worth of sample photos (thumbnails are drawn
+                // as labelled SAMPLE tiles in DEBUG), three stages and two documents.
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-grid") {
+                    let shots: [(String, String, [String])] = [
+                        ("Water heater, as found", "08:58", ["Before"]), ("Rusted supply line", "09:01", ["Before"]),
+                        ("Leak at the base", "09:02", ["Before"]), ("Anode rod", "09:04", ["Before"]),
+                        ("Data plate", "09:05", []), ("Shutoff valve", "09:20", []),
+                        ("New supply lines", "11:40", ["After"]), ("Expansion tank fitted", "11:44", ["After"]),
+                        ("Water heater, finished", "11:52", ["After"]), ("Dry floor", "11:55", ["After"]),
+                        ("Old tank on the truck", "12:05", []),
+                    ]
+                    var items: [[String: Any]] = shots.enumerated().map { offset, shot in
+                        let parts = shot.1.split(separator: ":").compactMap { Int($0) }
+                        return ["id": String(format: "00000000-0000-4000-8000-%012d", 9401 + offset), "organizationId": org, "jobId": id,
+                                "uploaderUserId": offset == 10 ? "00000000-0000-4000-8000-000000008801" : actor,
+                                "kind": "photo", "mime": "image/jpeg", "sizeBytes": 240_000,
+                                "originalFilename": "sample-\(offset + 1).jpg", "contentHash": "preview", "storageKey": "preview/\(offset).jpg",
+                                "uploadState": "stored", "tags": shot.2, "caption": shot.0, "archived": false,
+                                "capturedAt": today(hour: parts[0], minute: parts[1]),
+                                "createdAt": today(hour: parts[0], minute: parts[1]), "updatedAt": now] as [String: Any]
+                    }
+                    for (offset, doc) in [("Sample permit.pdf", "application/pdf", "document"), ("Sample leak clip.mp4", "video/mp4", "video")].enumerated() {
+                        items.append(["id": String(format: "00000000-0000-4000-8000-%012d", 9451 + offset), "organizationId": org, "jobId": id,
+                                      "uploaderUserId": actor, "kind": doc.2, "mime": doc.1, "sizeBytes": 1_400_000 + offset * 2_600_000,
+                                      "originalFilename": doc.0, "contentHash": "preview", "storageKey": "preview/doc-\(offset)",
+                                      "uploadState": "stored", "tags": [String](), "caption": NSNull(), "archived": false,
+                                      "capturedAt": today(hour: 9, minute: 30 + offset), "createdAt": now, "updatedAt": now])
+                    }
+                    return ["items": Array(items.reversed())]
+                }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-pages") {
                     if queryItems.contains(where: { $0.name == "cursor" && $0.value == "next-media" }) {
                         var later = first

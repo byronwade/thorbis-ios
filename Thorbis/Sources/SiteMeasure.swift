@@ -31,6 +31,44 @@ enum MeasureDistanceFormatter {
     static func caption(meters: Double, locale: Locale) -> String {
         "Measured \(format(meters: meters, locale: locale))"
     }
+
+    /// The units a trade reads a tape in. Feet and inches for most US trades, plain inches for
+    /// fitters who think in inches, metric elsewhere. Defaults from the locale; the choice is kept.
+    enum Unit: String, CaseIterable {
+        case feetInches, inches, metric
+        var label: String {
+            switch self {
+            case .feetInches: "ft in"
+            case .inches: "in"
+            case .metric: "m / cm"
+            }
+        }
+        static func standard(for locale: Locale) -> Unit { locale.measurementSystem == .us ? .feetInches : .metric }
+    }
+
+    static func format(meters: Double, unit: Unit, locale: Locale) -> String {
+        let meters = max(0, meters)
+        switch unit {
+        case .feetInches:
+            return format(meters: meters, locale: Locale(identifier: "en_US"))
+        case .inches:
+            let number = NumberFormatter()
+            number.locale = locale
+            number.numberStyle = .decimal
+            number.maximumFractionDigits = 1
+            number.minimumFractionDigits = 0
+            let inches = (meters / 0.0254 * 2).rounded() / 2
+            return "\(number.string(from: NSNumber(value: inches)) ?? "0") in"
+        case .metric:
+            var metric = Locale.Components(locale: locale)
+            metric.measurementSystem = .metric
+            return format(meters: meters, locale: Locale(components: metric))
+        }
+    }
+
+    static func caption(meters: Double, unit: Unit, locale: Locale) -> String {
+        "Measured \(format(meters: meters, unit: unit, locale: locale))"
+    }
 }
 
 enum SiteMeasure {
@@ -159,14 +197,33 @@ private struct ARSceneRepresentable: UIViewRepresentable {
 }
 
 /// Tap two points to measure a distance on site; Save files the annotated snapshot to the job.
+/// Thorbis bar (Close, Clear as words), the result large in the trade's units, and one ink
+/// "Save to job" commit.
 struct SiteMeasureView: View {
     /// Saves the stamped snapshot with its caption. Throwing keeps the view open with the error.
     let onSave: (UIImage, String) throws -> Void
     let onClose: () -> Void
     @StateObject private var session = SiteMeasureSession()
     @Environment(\.locale) private var locale
+    @AppStorage("siteMeasureUnit") private var storedUnit = ""
     @State private var error: String?
     @State private var cameraDenied = false
+
+    private var unit: MeasureDistanceFormatter.Unit {
+        MeasureDistanceFormatter.Unit(rawValue: storedUnit) ?? .standard(for: locale)
+    }
+    private var unitBinding: Binding<MeasureDistanceFormatter.Unit> {
+        Binding(get: { unit }, set: { storedUnit = $0.rawValue })
+    }
+    /// DEBUG screenshots only: a fixed sample reading over a plain ground, since the simulator has no AR.
+    private var sampleMeters: Double? {
+        #if DEBUG
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("measure"),
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-media-state") { return 1.2446 }
+        #endif
+        return nil
+    }
+    private var distance: Double? { sampleMeters ?? session.distance }
 
     var body: some View {
         ZStack {
@@ -176,6 +233,9 @@ struct SiteMeasureView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.background)
+            } else if sampleMeters != nil {
+                Color(white: 0.35).ignoresSafeArea()
+                    .overlay { Text("SAMPLE camera view").font(Theme.font(15, weight: .medium)).foregroundStyle(.white.opacity(0.7)) }
             } else {
                 ARSceneRepresentable(session: session) { point in
                     if session.place(at: point) {
@@ -187,56 +247,61 @@ struct SiteMeasureView: View {
                     .shadow(radius: 2).allowsHitTesting(false).accessibilityHidden(true)
             }
             VStack(spacing: 10) {
-                HStack {
+                HStack(spacing: 10) {
                     Button("Close") { session.pause(); onClose() }
-                        .font(Theme.font(17, weight: .medium)).foregroundStyle(.white)
-                        .frame(minHeight: 44).padding(.horizontal, 14)
-                        .background(.black.opacity(0.55), in: Capsule())
+                        .buttonStyle(ThorbisBarButtonStyle())
                         .accessibilityIdentifier("measure-close")
                     Spacer()
                     if !session.points.isEmpty {
                         Button("Clear") { session.reset() }
-                            .font(Theme.font(17, weight: .medium)).foregroundStyle(.white)
-                            .frame(minHeight: 44).padding(.horizontal, 14)
-                            .background(.black.opacity(0.55), in: Capsule())
+                            .buttonStyle(ThorbisBarButtonStyle())
+                            .accessibilityIdentifier("measure-clear")
                     }
                 }
                 if let error { ErrorBanner(message: error) }
                 Spacer()
-                VStack(spacing: 8) {
-                    if let distance = session.distance {
-                        Text(MeasureDistanceFormatter.format(meters: distance, locale: locale))
-                            .font(Theme.font(34, weight: .bold)).monospacedDigit()
-                            .accessibilityLabel("Distance \(MeasureDistanceFormatter.format(meters: distance, locale: locale))")
+                VStack(spacing: 12) {
+                    if let distance {
+                        Text(MeasureDistanceFormatter.format(meters: distance, unit: unit, locale: locale))
+                            .font(Theme.moneyFont(.hero)).monospacedDigit()
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .accessibilityLabel("Distance \(MeasureDistanceFormatter.format(meters: distance, unit: unit, locale: locale))")
+                            .accessibilityIdentifier("measure-result")
+                        ThorbisSegmented(options: MeasureDistanceFormatter.Unit.allCases.map { ($0, $0.label) }, selection: unitBinding)
                     }
                     if !cameraDenied {
-                        Text(session.hint).font(Theme.font(14)).multilineTextAlignment(.center)
+                        Text(sampleMeters != nil ? "Save to add this to the job, or tap to measure again." : session.hint)
+                            .font(Theme.font(15)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                    }
+                    if let distance {
+                        Button { save(distance) } label: {
+                            Label("Save to job", systemImage: "square.and.arrow.down").inkCommit(height: 56)
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("measure-save")
                     }
                 }
-                .foregroundStyle(.white)
-                .padding(14)
-                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                if let distance = session.distance {
-                    Button { save(distance) } label: {
-                        Label("Save to job", systemImage: "square.and.arrow.down").inkCommit()
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("measure-save")
-                }
+                .foregroundStyle(Theme.foreground)
+                .padding(16)
+                .frame(maxWidth: .infinity)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             }
             .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
         }
         .onAppear {
-            cameraDenied = [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video))
+            cameraDenied = [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video)) && sampleMeters == nil
         }
         .onDisappear { session.pause() }
     }
 
     private func save(_ distance: Double) {
-        let text = MeasureDistanceFormatter.format(meters: distance, locale: locale)
-        let stamped = SiteMeasure.stamp(session.sceneView.snapshot(), text: text)
+        let text = MeasureDistanceFormatter.format(meters: distance, unit: unit, locale: locale)
+        let snapshot = sampleMeters != nil ? UIGraphicsImageRenderer(size: CGSize(width: 600, height: 800)).image { context in
+            UIColor.gray.setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 800))
+        } : session.sceneView.snapshot()
+        let stamped = SiteMeasure.stamp(snapshot, text: text)
         do {
-            try onSave(stamped, MeasureDistanceFormatter.caption(meters: distance, locale: locale))
+            try onSave(stamped, MeasureDistanceFormatter.caption(meters: distance, unit: unit, locale: locale))
             session.pause()
         } catch {
             self.error = error.localizedDescription

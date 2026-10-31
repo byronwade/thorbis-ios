@@ -102,6 +102,15 @@ struct MediaThumbnail: View {
             loadedScope = nil
             loadedID = nil
             guard let currentScope, record.uploadState == "stored", MediaThumbnailCache.isImage(record) else { return }
+            #if DEBUG
+            if PaperPreview.enabled {
+                // Screenshot fixtures: a labelled solid tile, never a network read.
+                loadedScope = currentScope
+                loadedID = record.id
+                image = MediaSample.image(caption: record.caption ?? record.originalFilename, tags: record.tags)
+                return
+            }
+            #endif
             let pixelSize = 240 * scale
             let loaded = await MediaThumbnailCache.shared.load(id: record.id, scope: currentScope, isCurrent: {
                 scope == currentScope

@@ -32,6 +32,9 @@ final class PendingMediaStore: ObservableObject {
     @Published private(set) var errors: [String: String] = [:]
     @Published private(set) var storageWarning: String?
     @Published private(set) var uploadingID: String?
+    /// Items whose last attempt stopped for want of a connection. They are waiting, not failed;
+    /// `errors` still carries the message so saved-work review reads exactly as before.
+    @Published private(set) var waitingForConnection: Set<String> = []
     @Published private(set) var legacyCount = 0
     @Published private(set) var totalPendingCount = 0
 
@@ -86,7 +89,7 @@ final class PendingMediaStore: ObservableObject {
                   let origin = APIClient.normalizedOrigin(value.origin) else { return nil }
             return PendingMediaScope(actorID: value.actorID, organizationID: value.organizationID, origin: origin)
         }
-        if scope != normalized { binding = UUID(); errors = [:]; validated = [] }
+        if scope != normalized { binding = UUID(); errors = [:]; validated = []; waitingForConnection = [] }
         scope = normalized
         reload()
     }
@@ -141,6 +144,13 @@ final class PendingMediaStore: ObservableObject {
             try? FileManager.default.removeItem(at: staging)
             throw error
         }
+    }
+
+    /// Where a saved item's bytes sit, for a downsampled thumbnail only. Read-only: no hash check,
+    /// no change to `validated`, `errors` or `unverifiedIDs`; uploads still go through `read`.
+    func payloadURL(_ media: PendingMedia) -> URL? {
+        guard let scope, items.contains(media), let path = try? unit(media, scope: scope) else { return nil }
+        return path.appendingPathComponent("payload")
     }
 
     func read(_ media: PendingMedia) throws -> Data {
@@ -229,7 +239,7 @@ final class PendingMediaStore: ObservableObject {
     }
 
     func clearAll() {
-        binding = UUID(); scope = nil; items = []; errors = [:]; validated = []; unverifiedIDs = []
+        binding = UUID(); scope = nil; items = []; errors = [:]; validated = []; unverifiedIDs = []; waitingForConnection = []
         var failed = false
         for folder in [directory, legacyDirectory] where FileManager.default.fileExists(atPath: folder.path) {
             do { try FileManager.default.removeItem(at: folder) }
@@ -263,10 +273,12 @@ final class PendingMediaStore: ObservableObject {
                 guard current() else { return }
                 try FileManager.default.removeItem(at: unit(item, scope: owner))
                 errors[item.id] = nil
+                waitingForConnection.remove(item.id)
                 reload()
             } catch {
                 guard current() else { return }
                 if !(error is CancellationError) { errors[item.id] = error.localizedDescription }
+                if error.isConnectivityFailure { waitingForConnection.insert(item.id) } else { waitingForConnection.remove(item.id) }
                 if error is CancellationError || error.isConnectivityFailure { return }
             }
         }

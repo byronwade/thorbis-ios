@@ -1153,6 +1153,15 @@ extension APIClient {
         try await send("POST", fieldPath("/v1/media", id: mediaID, suffix: "/confirm"), body: EmptyObject())
     }
 
+    /// Archive a stored photo or document (`POST /v1/media/{id}/archive`, no body, `job.edit`).
+    /// Field media is archive-only: the server keeps the asset and can unarchive it.
+    func archiveFieldMedia(_ mediaID: String) async throws -> MediaAssetRecord {
+        guard UUID(uuidString: mediaID) != nil else {
+            throw Problem(title: "Invalid media ID", status: nil, detail: mediaID)
+        }
+        return try await send("POST", fieldPath("/v1/media", id: mediaID, suffix: "/archive"), body: EmptyObject())
+    }
+
     /// Replace the tags on a stored photo (`POST /v1/media/{id}/tags`). A blank caption is omitted.
     func tagFieldMedia(_ mediaID: String, tags: [String], caption: String? = nil) async throws -> MediaAssetRecord {
         guard UUID(uuidString: mediaID) != nil else {

@@ -118,7 +118,11 @@ struct JobChecklistSheet: View {
             .navigationTitle(template?.title ?? "Checklist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) { PaperCircleButton(symbol: "xmark", label: finished ? "Done" : "Close, progress stays on this phone", action: onDone) }
+                ThorbisToolbarItem(placement: .topBarLeading) {
+                    Button(finished ? "Done" : "Close", action: onDone)
+                        .accessibilityHint(finished ? "" : "Progress stays on this phone.")
+                        .accessibilityIdentifier("checklist-close")
+                }
                 if run != nil, !finished {
                     ThorbisToolbarItem(placement: .topBarTrailing) { Button("Start over") { confirmRestart = true } }
                 }
@@ -219,7 +223,7 @@ struct JobChecklistSheet: View {
                             .font(Theme.font(15, weight: .medium)).monospacedDigit()
                             .keyboardType(.numbersAndPunctuation)
                             .focused($focused, equals: item.id)
-                            .padding(.horizontal, 10).frame(width: 110, height: 36)
+                            .padding(.horizontal, 10).frame(width: 110, height: 44)
                             .background(Theme.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             .accessibilityLabel("\(item.label) in \(reading.unit)")
                         Text(reading.unit).font(Theme.font(14)).foregroundStyle(Theme.muted)
@@ -232,7 +236,7 @@ struct JobChecklistSheet: View {
             .padding(.vertical, 8)
             Spacer(minLength: 0)
             if canPhoto {
-                PaperCircleButton(symbol: "camera", label: "Add a photo for \(item.label)", size: 32) { photoFor = item }
+                PaperCircleButton(symbol: "camera", label: "Add a photo for \(item.label)", size: 44) { photoFor = item }
             }
         }
         .padding(.leading, PaperCardMetrics.inset - 10).padding(.trailing, PaperCardMetrics.inset - 6)

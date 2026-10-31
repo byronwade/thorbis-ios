@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-media-before-after",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "rectangle.split.2x1", title: "Faster photos with Before/After compare",
+                      detail: "Tag each shot Before or After as you go, shoot in bursts, and show the customer a side-by-side."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-builder-redesign",
             date: "2026-10-31",
             highlights: [
