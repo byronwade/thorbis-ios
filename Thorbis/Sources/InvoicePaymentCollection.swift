@@ -326,22 +326,17 @@ struct InvoicePaymentsSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(15)
                 } else {
-                    ForEach(Array(model.payments.enumerated()), id: \.element.id) { row in
-                        let index = row.offset
-                        let payment = row.element
+                    ForEach(model.payments, id: \.id) { payment in
                         Button { selectedPayment = payment } label: {
                             paymentRow(payment)
                         }
                         .buttonStyle(.plain)
                         .padding(.horizontal, 15)
                         .frame(minHeight: 60)
-                        if index < model.payments.count - 1 {
-                            Divider().overlay(Theme.border).padding(.leading, 15)
-                        }
                     }
                 }
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .documentPanel()
 
             if let modelError = model.paymentError {
                 ErrorBanner(message: modelError)
@@ -382,10 +377,6 @@ struct InvoicePaymentsSection: View {
 
     private func paymentRow(_ payment: FieldPaymentRecord) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: payment.status == .refunded ? "arrow.uturn.backward.circle" : "checkmark.circle")
-                .font(.system(size: 20))
-                .foregroundStyle(payment.status == .refunded ? Theme.warning : Theme.success)
-                .frame(width: 24)
             VStack(alignment: .leading, spacing: 4) {
                 Text(FieldPaymentMethod(rawValue: payment.method)?.displayName ?? payment.method.capitalized)
                     .font(Theme.font(15, weight: .medium))
@@ -400,11 +391,14 @@ struct InvoicePaymentsSection: View {
                 Text(money(amount.amount, currency: amount.currency))
                     .moneyStyle(.row)
                     .foregroundStyle(Theme.foreground)
-                if payment.status == .refunded {
-                    Text("Refunded").font(Theme.font(12)).foregroundStyle(Theme.warning)
+                // Status is a word with its dot beside it, never a coloured icon.
+                HStack(spacing: 5) {
+                    Circle().fill(payment.status == .refunded ? Theme.warning : Theme.success).frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                    Text(payment.status == .refunded ? "Refunded" : "Received").font(Theme.font(12, weight: .medium))
+                        .foregroundStyle(Theme.foreground)
                 }
             }
-            PaperDisclosure()
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -440,7 +434,7 @@ struct InvoiceDetailFooter: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 8)
-        .background(Theme.chrome)
+        .background(Theme.background)
     }
 }
 
@@ -986,9 +980,9 @@ struct InvoicePaymentCollectionSheet: View {
             VStack(spacing: 10) {
                 Image(systemName: "wave.3.right")
                     .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Theme.brandText)
-                    .frame(width: 60, height: 60)
-                    .overlay(Circle().stroke(Theme.brand, lineWidth: 1.5))
+                    .foregroundStyle(Theme.foreground)
+                    .frame(width: 52, height: 52)
+                    .background(Theme.fill, in: Circle())
                 Text(tapToPayHeadline)
                     .font(Theme.font(17, weight: .medium))
                     .foregroundStyle(Theme.foreground)
@@ -997,9 +991,11 @@ struct InvoicePaymentCollectionSheet: View {
                     .foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
             }
-            .frame(maxWidth: .infinity, minHeight: 168)
-            .background(option == .tapToPay ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(option == .tapToPay ? Theme.brand.opacity(0.5) : Theme.border, lineWidth: 1))
+            .frame(maxWidth: .infinity, minHeight: 160)
+            // Selection is the accent ring, the same as every other choice.
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .strokeBorder(option == .tapToPay ? Theme.brand : Theme.border, lineWidth: option == .tapToPay ? 2 : 1))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Tap to Pay on iPhone")
@@ -1054,19 +1050,16 @@ struct InvoicePaymentCollectionSheet: View {
                     option = .paymentLink
                     amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
                 }
-                Divider().overlay(Theme.border).padding(.leading, 48)
                 optionRow(title: "Check", subtitle: "Record a check already received", icon: "doc.text.viewfinder",
                           selected: option == .check) {
                     guard !hasLockedIntent && !model.waitingForProjection else { return }
                     option = .check
                 }
-                Divider().overlay(Theme.border).padding(.leading, 48)
                 optionRow(title: "Cash", subtitle: "Record cash received", icon: "banknote",
                           selected: option == .cash) {
                     guard !hasLockedIntent && !model.waitingForProjection else { return }
                     option = .cash
                 }
-                Divider().overlay(Theme.border).padding(.leading, 48)
                 ThorbisMenu(items: [
                     ThorbisMenuItem("Bank transfer (ACH) received", icon: "building.columns") { option = .bankTransfer },
                     ThorbisMenuItem("Card collected elsewhere", icon: "creditcard") { option = .externalCard }
@@ -1080,9 +1073,8 @@ struct InvoicePaymentCollectionSheet: View {
                 .accessibilityIdentifier("received-payment-methods")
 
             }
-            .padding(.horizontal, 12)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border, lineWidth: 1))
+            .padding(.horizontal, 14).padding(.vertical, 4)
+            .documentPanel()
             .disabled(hasLockedIntent || model.waitingForProjection)
         }
     }
@@ -1133,7 +1125,7 @@ struct InvoicePaymentCollectionSheet: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 10)
-        .background(Theme.chrome)
+        .background(Theme.background)
     }
 
     private func optionRow(title: String, subtitle: String, icon: String, selected: Bool,
@@ -1144,26 +1136,36 @@ struct InvoicePaymentCollectionSheet: View {
         .buttonStyle(.plain)
         .disabled(busy || !session.can("invoice.payment.create", feature: "payments") || !model.canRecordPayment)
         .accessibilityHint(subtitle)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func optionLabel(title: String, subtitle: String, icon: String, selected: Bool, busy: Bool) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(selected ? Theme.brand : Theme.muted)
+                .foregroundStyle(Theme.muted)
                 .frame(width: 24)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(15, weight: .medium))
-                Text(subtitle).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                Text(title).font(Theme.font(16, weight: .medium))
+                Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
             if busy {
                 ProgressView().controlSize(.small)
-            } else if selected {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.brandText)
-            }
-            else {
-                PaperDisclosure()
+            } else {
+                // A radio, not a chevron: these rows choose, they don't navigate.
+                ZStack {
+                    if selected {
+                        Circle().fill(Theme.brand)
+                        Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    } else {
+                        Circle().strokeBorder(Theme.foreground.opacity(0.3), lineWidth: 1.5)
+                    }
+                }
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
             }
         }
         .frame(minHeight: 56)

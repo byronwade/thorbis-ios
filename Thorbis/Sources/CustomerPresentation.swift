@@ -62,7 +62,10 @@ struct CustomerEstimateFlow: Equatable {
         guard let option = selectedOption else { return "Choose an option" }
         return "Review \(option.title) · \(money(option.totalAmount, currency: option.currency))"
     }
-    var approveTitle: String { total == nil ? "Approve and sign" : "Approve and sign · \(totalText)" }
+    var approveTitle: String {
+        let what = selectedOption.map { "Approve \($0.title)" } ?? "Approve and sign"
+        return total == nil ? what : "\(what) · \(totalText)"
+    }
     var signTitle: String { total == nil ? "Approve" : "Approve \(totalText)" }
 
     mutating func choose(_ optionID: String) { selectedOptionID = optionID }
@@ -106,7 +109,6 @@ struct CustomerEstimatePresentation: View {
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var flow: CustomerEstimateFlow
-    @State private var detailsFor: FieldEstimateOption?
     @State private var confirmNotToday = false
     @State private var name: String
     @State private var strokes: [[CGPoint]] = []
@@ -199,7 +201,6 @@ struct CustomerEstimatePresentation: View {
             if handoff != nil, handoff?.signature == nil, handoff?.outcome == nil, reviewReady { await startSigning() }
         }
         .animation(.easeOut(duration: 0.2), value: flow.step)
-        .sheet(item: $detailsFor) { option in includedSheet(option) }
         .thorbisConfirm("Not ready to decide?",
                         message: "You can think about it and decide later, or decline this estimate now.",
                         isPresented: $confirmNotToday,
@@ -214,8 +215,9 @@ struct CustomerEstimatePresentation: View {
     private var chooseScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
             header(eyebrow: "Estimate for \(customerName)", title: "Choose an option")
-            Text("Tap the one you want. You'll see everything again before you sign.")
-                .font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                .padding(.bottom, -8)
+            Text("Tap one. You'll see every line before you sign.")
+                .font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
                 .fixedSize(horizontal: false, vertical: true)
             let options = flow.options
             if type.regular && options.count <= 3 {
@@ -229,31 +231,37 @@ struct CustomerEstimatePresentation: View {
     }
 
     /// The whole card is the choice (F25): price first, then the option's name and what it is.
-    /// "See what's included" sits below the tap area so it never doubles as a choice.
+    /// "See what's included" sits below the tap area so it never doubles as a choice; it opens
+    /// the option's lines (the review step) with this option chosen.
     private func optionCard(_ option: FieldEstimateOption) -> some View {
         let selected = flow.selectedOptionID == option.id
         let total = money(option.totalAmount, currency: option.currency)
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 0) {
             Button { flow.choose(option.id) } label: {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 12) {
                         Text(total)
-                            .font(Theme.monoFont(type.total, weight: .medium))
+                            .font(Theme.font(type.total, weight: .medium)).monospacedDigit().tracking(-0.3)
                             .minimumScaleFactor(0.6).lineLimit(1)
                         Spacer(minLength: 8)
-                        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 26))
-                            .foregroundStyle(selected ? Theme.brandText : Theme.muted)
+                        CustomerRadio(selected: selected)
                     }
                     Text(option.title).font(Theme.font(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
                     if !option.description.isEmpty {
-                        Text(option.description).font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                        Text(option.description).font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
+                            .lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
                     }
+                    Text("\(option.lines.count) \(option.lines.count == 1 ? "item" : "items")")
+                        .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                        .padding(.top, 10)
                 }
                 .foregroundStyle(Theme.foreground)
                 .frame(maxWidth: .infinity, minHeight: type.target, alignment: .topLeading)
+                .padding([.horizontal, .top], 18)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
@@ -262,28 +270,43 @@ struct CustomerEstimatePresentation: View {
             .accessibilityValue("Total \(total)")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             Spacer(minLength: 0)
-            Button { detailsFor = option } label: {
-                Text("See what's included").font(Theme.font(type.body)).underline()
-                    .foregroundStyle(Theme.brandText)
-                    .frame(minHeight: type.target, alignment: .leading)
+            Button {
+                flow.choose(option.id)
+                flow.review()
+            } label: {
+                Text("See what's included").font(Theme.font(type.small, weight: .medium))
+                    .foregroundStyle(Theme.foreground).underline()
+                    .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
+                    .padding(.horizontal, 18)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityHint("Shows every line in \(option.title)")
         }
-        .padding(18)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Selection is the blue pointer and a firmer rim; the screen's only ink is the commit (CP-07).
-        .background(selected ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(selected ? Theme.foreground : Theme.border, lineWidth: selected ? 2 : 1))
+        // Selection is the blue ring and the radio; the screen's only ink is the commit (CP-07).
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(selected ? Theme.brand : Theme.border, lineWidth: selected ? 2 : 1))
+        .animation(.easeOut(duration: 0.15), value: selected)
     }
 
+    /// "What's included": the chosen option (or the single scope) with every line in full,
+    /// its quantity and amount, and the total that will be signed.
     private var reviewScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
-            header(eyebrow: "You're approving", title: flow.choiceName)
+            let index = flow.options.firstIndex { $0.id == flow.selectedOptionID }
+            header(eyebrow: flow.hasOptions ? "Option \((index ?? 0) + 1) of \(flow.options.count)" : "Your estimate",
+                   title: flow.choiceName)
             if flow.hasOptions, let description = flow.selectedOption?.description, !description.isEmpty {
-                Text(description).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                Text(description).font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, -10)
             }
-            CustomerLinesCard(lines: flow.lines, currency: flow.currency, type: type,
-                              rows: flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? [])
+            CustomerIncludedLines(lines: flow.lines, type: type,
+                                  rows: flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? [])
         }
     }
 
@@ -392,20 +415,23 @@ struct CustomerEstimatePresentation: View {
             case .choose:
                 CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
                 if let error { hint(error, danger: true) } else if !flow.canReview { hint("Choose an option above to continue.") }
-                CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
-                if let returnToDocuments {
-                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
-                        .disabled(actionBusy || openingReview)
+                HStack(spacing: 8) {
+                    CustomerTextButton(title: "Not today", type: type) { confirmNotToday = true }
+                    if let returnToDocuments {
+                        CustomerTextButton(title: "Job documents", type: type, action: returnToDocuments)
+                            .disabled(actionBusy || openingReview)
+                            .accessibilityLabel("Back to job documents")
+                    }
                 }
             case .review:
                 CustomerPresentationCommit(title: flow.approveTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
                 if let error { hint(error, danger: true) }
-                HStack(spacing: 10) {
-                    if flow.hasOptions { CustomerSecondaryButton(title: "Back", type: type) { flow.back() } }
-                    CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
+                HStack(spacing: 8) {
+                    if flow.hasOptions { CustomerTextButton(title: "See other options", type: type) { flow.back() } }
+                    CustomerTextButton(title: "Not today", type: type) { confirmNotToday = true }
                 }
                 if let returnToDocuments {
-                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                    CustomerTextButton(title: "Back to job documents", type: type, action: returnToDocuments)
                         .disabled(actionBusy || openingReview)
                 }
             case .sign:
@@ -415,7 +441,7 @@ struct CustomerEstimatePresentation: View {
                 }
                 .accessibilityIdentifier(handoff == nil ? "customer-estimate-submit-approval" : "handoff-submit-approval")
                 if let reason { hint(reason) }
-                CustomerSecondaryButton(title: "Back", type: type) {
+                CustomerTextButton(title: "Back", type: type) {
                     if let handoff { handoff.backToReview() } else { flow.back(); error = nil }
                 }
             case .done:
@@ -443,7 +469,6 @@ struct CustomerEstimatePresentation: View {
         .frame(maxWidth: type.regular ? 640 : .infinity)
         .frame(maxWidth: .infinity)
         .background(Theme.background)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
         .disabled(actionBusy && handoff == nil)
     }
 
@@ -468,37 +493,6 @@ struct CustomerEstimatePresentation: View {
             Text(eyebrow).font(Theme.font(type.body)).foregroundStyle(Theme.muted)
             Text(title).font(Theme.font(type.heading + 4, weight: .medium)).accessibilityAddTraits(.isHeader)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func includedSheet(_ option: FieldEstimateOption) -> some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(option.title).font(Theme.font(type.heading + 4, weight: .medium))
-                    CustomerLinesCard(lines: option.lines, currency: option.currency, type: type,
-                                      rows: [CustomerAmountRow(label: "Total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
-                }
-                .padding(Theme.gutter)
-            }
-            .background(Theme.background)
-            .foregroundStyle(Theme.foreground)
-            .navigationTitle("What's included")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) {
-                    Button("Close") { detailsFor = nil }
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                CustomerPresentationCommit(title: flow.selectedOptionID == option.id ? "Selected" : "Choose \(option.title)",
-                                           enabled: true, busy: false, type: type) {
-                    flow.choose(option.id)
-                    detailsFor = nil
-                }
-                .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
-                .background(Theme.background)
-            }
         }
     }
 
@@ -1015,6 +1009,103 @@ struct CustomerPresentationCommit: View {
     }
 }
 
+/// The choice mark on an option card: an empty ring, or the accent disc with a check.
+struct CustomerRadio: View {
+    let selected: Bool
+    var body: some View {
+        ZStack {
+            if selected {
+                Circle().fill(Theme.brand)
+                Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+            } else {
+                Circle().strokeBorder(Theme.foreground.opacity(0.3), lineWidth: 1.5)
+            }
+        }
+        .frame(width: 26, height: 26)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A quiet action under the commit: words only, still a 56pt target.
+struct CustomerTextButton: View {
+    let title: String
+    let type: CustomerType
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(Theme.font(type.small + 1, weight: .medium))
+                .foregroundStyle(Theme.subtle)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: type.target)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+    }
+}
+
+/// Every line of what the customer is approving on one sheet: the line's whole description,
+/// its amount, "2 × $120.00" when there's more than one, then the total. No separators.
+struct CustomerIncludedLines: View {
+    let lines: [FieldLine]
+    let type: CustomerType
+    let rows: [CustomerAmountRow]
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(lines) { line in
+                VStack(alignment: .leading, spacing: 6) {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        description(line)
+                        amount(line).frame(maxWidth: .infinity, alignment: .trailing)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 14) {
+                            description(line)
+                            amount(line).fixedSize()
+                        }
+                    }
+                    Text(line.quantity == 1
+                         ? "1 × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))"
+                         : "\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
+                        .font(Theme.font(type.small)).monospacedDigit().foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, 18).padding(.vertical, 16)
+                .accessibilityElement(children: .combine)
+            }
+            if lines.isEmpty {
+                Text("Nothing listed yet.").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(18)
+            }
+            ForEach(rows, id: \.self) { row in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(row.label).font(Theme.font(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+                    Spacer(minLength: 8)
+                    Text(row.amount)
+                        .font(Theme.font(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular)).monospacedDigit()
+                        .minimumScaleFactor(0.6).lineLimit(1)
+                }
+                .padding(.horizontal, 18).padding(.vertical, row.emphasis ? 18 : 12)
+                .background(Theme.background.opacity(0.6))
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .documentPanel()
+    }
+
+    private func description(_ line: FieldLine) -> some View {
+        Text(line.description).font(Theme.font(type.body))
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func amount(_ line: FieldLine) -> some View {
+        Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
+            .font(Theme.font(type.body, weight: .medium)).monospacedDigit()
+    }
+}
+
 /// A plain secondary action: 56pt, filled well, never ink.
 struct CustomerSecondaryButton: View {
     let title: String
@@ -1033,7 +1124,7 @@ struct CustomerSecondaryButton: View {
 }
 
 #if DEBUG
-/// `--paper-preview-screen present-estimate | present-estimate-review | present-invoice`.
+/// `--paper-preview-screen present-estimate | present-estimate-review | present-estimate-detail | present-invoice`.
 struct CustomerPresentationPreview: View {
     let screen: String
     var body: some View {
@@ -1044,7 +1135,8 @@ struct CustomerPresentationPreview: View {
                                             onPay: {}, onSigned: { _ in }, onDone: handBack)
             default:
                 CustomerEstimatePresentation(estimate: PaperPreview.optionsEstimate, jobID: PaperPreview.jobID, customerName: "Danielle Marlowe",
-                                             preselectedOptionID: screen == "present-estimate-review" ? PaperPreview.optionsEstimate.options?[1].id : nil,
+                                             preselectedOptionID: screen == "present-estimate-review" ? PaperPreview.optionsEstimate.options?[1].id
+                                                : screen == "present-estimate-detail" ? PaperPreview.optionsEstimate.options?[0].id : nil,
                                              onApproved: { _ in }, onDone: handBack)
             }
         }
