@@ -195,6 +195,13 @@ struct JobDetailView: View {
                             : args.contains("--paper-preview-scroll-toolkit") ? "job-toolkit"
                             // `--paper-preview-scroll-wrapup`: at "Before you wrap up" and what's on the invoice.
                             : args.contains("--paper-preview-scroll-wrapup") ? "job-wrap-up" : nil
+                        // `--paper-preview-scroll center|bottom`: the job loads after the scroll view
+                        // appears, so the app-wide default anchor never moves it; scroll once it has.
+                        if target == nil, let anchor = PaperPreview.scrollAnchor {
+                            try? await Task.sleep(for: .seconds(3))
+                            proxy.scrollTo(anchor == .bottom ? "job-details" : "job-latest-activity", anchor: anchor == .bottom ? .bottom : .center)
+                            return
+                        }
                         guard let target else { return }
                         try? await Task.sleep(for: .seconds(3))
                         proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: 0.22))
@@ -1055,7 +1062,7 @@ struct JobDetailView: View {
                                       visits: visits, visitsLoaded: visitsLoaded)
                 .id("job-property-history")
             photosStrip(job)
-            latestActivity(job)
+            latestActivity(job).id("job-latest-activity")
             // Left out once the visits answer with none here, so an empty section adds no gap above Money.
             if !visitsLoaded || !JobPropertyHistory.make(job: job, locations: [], equipment: [], visits: visits, listedJobs: store.jobs,
                                                          currentUserID: session.user?.id).visits.isEmpty {
@@ -1078,7 +1085,7 @@ struct JobDetailView: View {
                                            loaded: placesCurrent, failed: locationsFailed) { await loadLocations(job) }
             }
             CustomerMembershipSection(customerID: job.customerId, editable: false)
-            detailsGroup(job)
+            detailsGroup(job).id("job-details")
         }
     }
 
