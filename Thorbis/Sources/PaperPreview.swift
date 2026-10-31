@@ -742,6 +742,24 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["id": PaperPreview.savedWorkUncachedJobID, "organizationId": org, "customerId": PaperPreview.customerID,
                     "title": "Uncached drain visit", "status": "dispatched", "createdAt": now, "updatedAt": now, "allowedTransitions": ["en_route"]]
         }
+        // `job-activity`: every kind of entry on the timeline: a long note (folds with "More"),
+        // a short one, the sent estimate, the booking call, status changes and photos.
+        if PaperPreview.screen == "job-activity" {
+            if path == "/v1/jobs/\(PaperPreview.jobID)/notes" {
+                return ["items": [
+                    ["id": "00000000-0000-4000-8000-000000009002", "organizationId": org, "jobId": PaperPreview.jobID, "authorUserId": actor,
+                     "body": "Sample note: Outdoor unit is behind the shed; the path floods after rain, so bring boot covers. The dog is friendly but jumps, keep the side gate shut. Customer works from home and asked for a text before anyone rings the bell. Upstairs thermostat was replaced last spring by another company.",
+                     "createdAt": today(hour: 9, minute: 40)],
+                    ["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": PaperPreview.jobID, "authorUserId": actor,
+                     "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]
+                ]]
+            }
+            if path == "/v1/jobs/\(PaperPreview.jobID)/estimates" {
+                return ["items": [["id": "00000000-0000-4000-8000-000000009301", "organizationId": org, "jobId": PaperPreview.jobID,
+                                   "estimateId": PaperPreview.estimate.id, "linkedAt": now]]]
+            }
+            if path == "/v1/estimates/\(PaperPreview.estimate.id)" { return jsonObject(PaperPreview.estimate) }
+        }
         // `job-onsite`: "Before you wrap up · 3 of 6" (before photos, a note and the approved repair
         // done; after photos, signature and payment left). `--paper-preview-onsite-done`: all done.
         if PaperPreview.screen == "job-onsite" {
@@ -1621,7 +1639,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2170", "Furnace install", "completed", "2021-10-20T15:00:00Z", PaperPreview.homeLocationID, "00000000-0000-4000-8000-000000008801"),
             ("2160", "Thermostat swap", "canceled", "2021-03-09T15:00:00Z", PaperPreview.homeLocationID, nil)
         ]
-        let notes = ["2190": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit.",
+        let notes = ["2190": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit. Condensate line was slow; flushed it and added a tablet. Filter is a 20x25x4, customer keeps spares in the garage. Breaker 14 is the condenser.",
                      "2181": "Sediment heavy. Anode rod due next year.", "2170": "Passed inspection. Replaced filter."]
         return rows.map { ref, title, status, when, location, assignee in
             ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,

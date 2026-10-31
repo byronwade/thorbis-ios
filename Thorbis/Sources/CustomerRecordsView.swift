@@ -145,12 +145,10 @@ struct CustomerRecordsView: View {
 
     private func textSection(_ title: String, total: Int, groups: [CustomerJobGroup<JobNoteRecord>], symbol: String, line: @escaping (JobNoteRecord) -> String) -> some View {
         section(title, total: total, symbol: symbol, groups: groups, incomplete: compilation.notesIncomplete || compilation.identityIncomplete) { note in
-            DisclosureGroup {
-                Text(line(note)).font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } label: {
-                Text(line(note)).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
-            }.accessibilityHint("Expand to read the full note")
+            // Left-aligned, three lines, then "More" in place (was a stock disclosure that centered
+            // wrapped notes and repeated the text).
+            ExpandableNoteText(text: line(note), lines: 3, color: Theme.foreground)
+                .padding(.vertical, 6)
         }
     }
 

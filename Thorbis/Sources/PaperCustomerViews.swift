@@ -886,7 +886,7 @@ struct CustomerDetailView: View {
             PaperListRow(leading: .text(shortDate(job, record: full)), title: job.title,
                          subtitle: open ? openLine(job) : summary(job, record: full),
                          meta: open ? nil : meta(job),
-                         subtitleLines: open ? 1 : 3) {
+                         subtitleLines: open ? 1 : 3, expandsSubtitle: !open) {
                 if open || job.status == "canceled" { StatusWord(jobStatus: job.status) }
             }
         }
