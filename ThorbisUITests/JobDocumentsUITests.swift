@@ -11,7 +11,7 @@ final class JobDocumentsUITests: XCTestCase {
     func testTechnicianEstimateCardsKeepBothDocumentsOpenable() {
         continueAfterFailure = false
         let app = preview()
-        let money = thorbisStableButton(app, "Money")
+        let money = thorbisStableButton(app, "job-section-money")
         money.tap()
         let first = app.buttons["job-estimate-\(estimateA)"]
         let second = app.buttons["job-estimate-\(addonA)"]
@@ -22,7 +22,7 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
         let present = app.buttons["job-money-customer-view"]
         XCTAssertTrue(present.waitForExistence(timeout: 5))
-        XCTAssertEqual(present.label, "Customer view")
+        XCTAssertEqual(present.label, "Show customer")
         XCTAssertTrue(present.isHittable)
         XCTAssertLessThanOrEqual(second.frame.maxY, present.frame.minY, "Both estimates should be visible above the presentation action")
         XCTAssertLessThanOrEqual(present.frame.maxY, collect.frame.minY, "The estimates' door must not sit under the bar")
@@ -30,14 +30,14 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(first.isHittable)
         capture(app, "Job estimate cards")
         first.tap()
-        XCTAssertTrue(app.staticTexts["EST-2218"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EST-2218")).firstMatch.waitForExistence(timeout: 10))
     }
 
     func testNarrowJobSectionsCanReachEverySectionWithoutScrollingTabs() {
         continueAfterFailure = false
         let app = preview()
         for section in ["Money", "Activity", "Overview"] {
-            let destination = app.buttons[section]
+            let destination = thorbisSection(app, section)
             XCTAssertTrue(destination.waitForExistence(timeout: 10), section)
             XCTAssertTrue(destination.isHittable, "\(section) must be reachable without scrolling the tab row")
             destination.tap()
@@ -48,7 +48,7 @@ final class JobDocumentsUITests: XCTestCase {
     func testEstimateTotalsShowSentAmountAndExplainUnknownApprovedAmount() {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-approved-unknown-total"])
-        thorbisStableButton(app, "Money").tap()
+        thorbisStableButton(app, "job-section-money").tap()
         let totals = app.buttons["Estimate totals"]
         app.swipeUp()
         XCTAssertTrue(totals.waitForExistence(timeout: 5))
@@ -63,8 +63,8 @@ final class JobDocumentsUITests: XCTestCase {
         continueAfterFailure = false
         let app = preview()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Collect $340.00")).firstMatch.waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["Money"].waitForExistence(timeout: 15))
-        app.buttons["Money"].tap()
+        XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 15))
+        thorbisSection(app, "Money").tap()
         let issued = app.buttons["job-invoice-\(invoiceA)"]
         let deposit = app.buttons["job-invoice-\(depositA)"]
         XCTAssertTrue(issued.waitForExistence(timeout: 10))
@@ -72,8 +72,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["job-invoice-\(invoiceB)"].exists)
         capture(app, "Every invoice for this job")
         deposit.tap()
-        XCTAssertTrue(app.staticTexts["INV-2240"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["INV-2241"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2240")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2241")).firstMatch.exists)
     }
 
     func testCommercialHandoffListsOnlyThisJobsEstimatesAndInvoices() {
@@ -103,7 +103,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Sign to approve"].exists)
         XCTAssertFalse(app.buttons["Send estimate"].exists)
         XCTAssertTrue(app.buttons["Technician: unlock to leave customer mode"].exists)
-        app.navigationBars.buttons["Customer view"].tap()
+        // #170: the back control reads "Back" now, not the previous title.
+        app.navigationBars["EST-2238"].buttons["Back"].tap()
         XCTAssertTrue(app.buttons["customer-estimate-\(estimateA)"].waitForExistence(timeout: 5))
         app.buttons["customer-estimate-\(estimateA)"].tap()
         XCTAssertTrue(app.navigationBars["EST-2218"].waitForExistence(timeout: 5))
@@ -114,7 +115,7 @@ final class JobDocumentsUITests: XCTestCase {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-job-documents-partial"])
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Couldn't load all estimates")).firstMatch.waitForExistence(timeout: 15))
-        thorbisStableButton(app, "Money").tap()
+        thorbisStableButton(app, "job-section-money").tap()
         XCTAssertTrue(app.buttons["job-estimate-\(estimateA)"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["job-estimate-unavailable-\(addonA)"].exists)
         XCTAssertFalse(app.staticTexts["No estimates yet"].exists)
@@ -236,7 +237,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
     func testPartialReadRequiresRefreshBeforeBuildingAnotherEstimate() {
         let app = launch(["--paper-preview-job-documents-partial"])
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Couldn't load all estimates")).firstMatch.waitForExistence(timeout: 15))
-        app.buttons["Money"].tap()
+        thorbisSection(app, "Money").tap()
         XCTAssertTrue(app.buttons["job-estimate-\(invoice.replacingOccurrences(of: "2209", with: "2218"))"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Build an estimate"].exists)
     }
@@ -269,7 +270,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
     func testEstimateTotalsRemainAvailableInADisclosure() {
         let app = launch()
         ready(app)
-        let money = thorbisStableButton(app, "Money")
+        let money = thorbisStableButton(app, "job-section-money")
         money.tap()
         let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: money)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
@@ -282,14 +283,15 @@ final class JobDocumentsSafetyUITests: XCTestCase {
 
     func testStaffDetailRejectsSameInvoiceIDReturnedForAnotherJob() {
         let app = launch(["--paper-preview-job-invoice-foreign"])
-        XCTAssertTrue(app.buttons["Money"].waitForExistence(timeout: 15))
-        app.buttons["Money"].tap()
+        XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 15))
+        thorbisSection(app, "Money").tap()
         let paper = app.buttons["job-invoice-\(invoice)"]
         XCTAssertTrue(paper.waitForExistence(timeout: 10))
         paper.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This invoice couldn't be verified")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["INV-2209"].exists)
         XCTAssertFalse(app.buttons["Customer view"].exists)
+        XCTAssertFalse(app.buttons["Show customer"].exists)
         XCTAssertFalse(app.buttons["Collect payment"].exists)
     }
 

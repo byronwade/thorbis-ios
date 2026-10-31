@@ -41,7 +41,8 @@ final class JobMediaQueueUITests: XCTestCase {
         app.launch()
         let photo = app.buttons["Photo, Outdoor unit"]
         XCTAssertTrue(photo.waitForExistence(timeout: 20)); photo.tap()
-        let preview = app.descendants(matching: .any)["job-media-preview"]
+        // #184: photos open the full-screen viewer (documents keep the system preview).
+        let preview = app.buttons["media-viewer-done"]
         XCTAssertTrue(preview.waitForExistence(timeout: 5))
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: preview)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 15), .completed)
@@ -250,23 +251,25 @@ final class JobMediaQueueUITests: XCTestCase {
             app.terminate()
         }
         let scan = app.descendants(matching: .any).matching(identifier: "pending-media-00000000-0000-4000-8000-000000009701").firstMatch
-        let expectedCapture = "Captured " + Date(timeIntervalSince1970: 1_700_000_000).formatted(date: .abbreviated, time: .shortened)
+        // #184: pending items read "<upload state> · captured <date>"; the capture date must survive.
+        let expectedCapture = "captured " + Date(timeIntervalSince1970: 1_700_000_000).formatted(date: .abbreviated, time: .shortened)
         XCTAssertTrue(scan.waitForExistence(timeout: 20))
-        XCTAssertEqual(scan.value as? String, expectedCapture)
+        XCTAssertTrue((scan.value as? String)?.lowercased().hasSuffix(expectedCapture.lowercased()) == true, String(describing: scan.value))
         XCTAssertTrue(scan.label.contains("Field scan.pdf"))
         XCTAssertFalse(app.staticTexts["No photos yet"].exists)
-        XCTAssertTrue(app.buttons["Add a document"].exists)
-        XCTAssertTrue(app.buttons["Choose from library"].exists)
-        app.buttons["Overview"].tap()
+        // #184: Scan and Import are quiet circles beside Take photo.
+        XCTAssertTrue(app.buttons["job-media-scan"].exists)
+        XCTAssertTrue(app.buttons["Import a photo or PDF"].exists)
+        thorbisSection(app, "Overview").tap()
         // Photos live under Activity; the Photos filter is remembered.
-        app.buttons["Activity"].tap()
+        thorbisSection(app, "Activity").tap()
         XCTAssertTrue(scan.waitForExistence(timeout: 10))
-        XCTAssertEqual(scan.value as? String, expectedCapture)
+        XCTAssertTrue((scan.value as? String)?.lowercased().hasSuffix(expectedCapture.lowercased()) == true, String(describing: scan.value))
         app.terminate()
         app.launchArguments = base
         app.launch()
         XCTAssertTrue(scan.waitForExistence(timeout: 20))
-        XCTAssertEqual(scan.value as? String, expectedCapture)
+        XCTAssertTrue((scan.value as? String)?.lowercased().hasSuffix(expectedCapture.lowercased()) == true, String(describing: scan.value))
         XCTAssertTrue(scan.label.contains("Field scan.pdf"))
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "pending-media-00000000-0000-4000-8000-000000009702").firstMatch.exists)
         XCTAssertFalse(app.staticTexts["Other job scan.pdf"].exists)
@@ -299,10 +302,11 @@ final class JobMediaQueueUITests: XCTestCase {
         app.buttons["Done"].tap()
         let row = app.descendants(matching: .any).matching(identifier: "pending-media-00000000-0000-4000-8000-000000009703").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        let expected = "Captured " + Date(timeIntervalSince1970: 1_700_000_000).formatted(date: .abbreviated, time: .shortened)
-        XCTAssertEqual(row.value as? String, expected)
+        // #184: the tile reads "<upload state> · captured <date>"; the original capture date must survive.
+        let expected = "captured " + Date(timeIntervalSince1970: 1_700_000_000).formatted(date: .abbreviated, time: .shortened)
+        XCTAssertTrue((row.value as? String)?.hasSuffix(expected) == true, String(describing: row.value))
         app.terminate(); app.launchArguments = base; app.launch()
-        XCTAssertTrue(row.waitForExistence(timeout: 20)); XCTAssertEqual(row.value as? String, expected)
+        XCTAssertTrue(row.waitForExistence(timeout: 20)); XCTAssertTrue((row.value as? String)?.hasSuffix(expected) == true, String(describing: row.value))
         let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.name = "Explicitly recovered older photo after relaunch"; screenshot.lifetime = .keepAlways; add(screenshot)
         app.terminate(); app.launchArguments = base + ["--paper-preview-reset-media"]; app.launch(); app.terminate()
     }
