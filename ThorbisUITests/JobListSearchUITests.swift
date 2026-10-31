@@ -11,13 +11,14 @@ final class JobListSearchUITests: XCTestCase {
         // The list keeps no search field of its own.
         XCTAssertFalse(app.textFields["Search title or job number"].exists)
         app.buttons["bottom-bar-search"].tap()
-        let field = app.textFields["Jobs, customers, invoices"]
+        // #186: the bar's field reads "Street, name, phone or number"; result rows lead with the street, the job title follows.
+        let field = app.textFields["Street, name, phone or number"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.typeText("Kitchen")
         let results = app.otherElements["bar-search-results"]
         XCTAssertTrue(results.waitForExistence(timeout: 10))
-        XCTAssertTrue(results.staticTexts["Kitchen sink backup — Petrov"].waitForExistence(timeout: 10))
-        XCTAssertFalse(results.staticTexts["AC not cooling"].exists)
+        XCTAssertTrue(results.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Kitchen sink backup")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(results.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "AC not cooling")).firstMatch.exists)
         app.buttons["Close search"].tap()
         XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 10))
         app.buttons["Filter jobs"].tap()
@@ -38,14 +39,13 @@ final class JobListSearchUITests: XCTestCase {
         XCTAssertTrue(app.buttons["New estimate"].exists)
         XCTAssertTrue(app.buttons["New customer"].exists)
         newJob.tap()
-        let customer = app.buttons["Customer: Choose a customer"]
+        // #176: New job is the Book a job sheet. Who's calling comes first and nothing books without them.
+        let customer = app.descendants(matching: .any)["book-job-caller"]
         XCTAssertTrue(customer.waitForExistence(timeout: 10))
-        let title = app.textFields["Job title"]
-        XCTAssertTrue(title.exists)
-        // Customer comes before what the job is.
-        XCTAssertLessThan(customer.frame.minY, title.frame.minY)
-        XCTAssertTrue(app.buttons["Create job"].exists)
-        XCTAssertFalse(app.buttons["Create job"].isEnabled)
+        let commit = app.buttons["book-job-commit"]
+        XCTAssertTrue(commit.exists)
+        XCTAssertLessThan(customer.frame.minY, commit.frame.minY)
+        XCTAssertFalse(commit.isEnabled)
     }
 
     func testUnscheduledRowOpensScheduleSheetDirectly() {

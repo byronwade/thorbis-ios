@@ -1073,6 +1073,15 @@ struct JobMediaView: View {
         guard let scope = readScope, sourceScope == scope, records.contains(record), record.uploadState == "stored" else { return }
         if record.kind == "photo" {
             viewer = MediaViewerStart(id: record.id)
+            #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-revoke-preview") {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(7))
+                    PaperPreviewProtocol.revokeJobMediaView()
+                    await session.revalidate()
+                }
+            }
+            #endif
             return
         }
         previewScope = scope

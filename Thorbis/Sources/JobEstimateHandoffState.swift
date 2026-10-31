@@ -266,7 +266,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         let ticket = UUID(); request = ticket; loading = true; error = nil
         defer { if request == ticket { loading = false } }
         do {
-            let fresh = try await api.fieldJob(scope.jobID)
+            let fresh = try await api.liveFieldJob(scope.jobID)
             guard isCurrent, request == ticket, !Task.isCancelled else { return }
             guard sameJob(fresh) else { retire(); return }
             let published = await documents.loadEstimates(scope: scope, api: api) { [weak self] in
@@ -370,9 +370,9 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     func verifyMembership(_ item: JobEstimateReviewedItem) async throws {
         guard isCurrent, approvalAllowed(item) else { throw CancellationError() }
-        let fresh = try await api.fieldJob(scope.jobID)
+        let fresh = try await api.liveFieldJob(scope.jobID)
         guard isCurrent, sameJob(fresh) else { retire(); throw CancellationError() }
-        let links = try await api.fieldJobEstimateLinks(scope.jobID)
+        let links = try await api.liveFieldJobEstimateLinks(scope.jobID)
         guard isCurrent else { throw CancellationError() }
         let valid = links.filter { $0.jobId == scope.jobID }
         let ids = Set(valid.map(\.estimateId) + (fresh.estimateId.map { [$0] } ?? []))

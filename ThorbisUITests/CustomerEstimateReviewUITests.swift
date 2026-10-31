@@ -15,7 +15,7 @@ final class CustomerEstimateReviewUITests: XCTestCase {
         let app = preview(extra: ["--paper-preview-canonical-estimate"])
         XCTAssertTrue(app.staticTexts["Reviewed protection"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Verified surge protection"].exists)
-        XCTAssertTrue(app.buttons["Approve and sign · $543.21"].exists)
+        XCTAssertTrue(approveButton(app, total: "$543.21").exists)
         XCTAssertFalse(app.staticTexts["Surge protector, installed"].exists)
         capture(app, "Canonical customer estimate review")
     }
@@ -30,7 +30,13 @@ final class CustomerEstimateReviewUITests: XCTestCase {
         app.buttons["Restore sample connection"].tap()
         retry.tap()
         XCTAssertTrue(app.staticTexts["Reviewed protection"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Approve and sign · $543.21"].exists)
+        XCTAssertTrue(approveButton(app, total: "$543.21").exists)
+    }
+
+    /// #161: the commit names the chosen option ("Approve Reviewed protection · $543.21", or
+    /// "Approve · $543.21" when that doesn't fit). The exact total stays required.
+    private func approveButton(_ app: XCUIApplication, total: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "Approve", "· " + total)).firstMatch
     }
 
     private func preview(extra: [String]) -> XCUIApplication {

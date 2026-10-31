@@ -65,7 +65,7 @@ final class JobOverviewUITests: XCTestCase {
                 XCTAssertTrue(chooser.isHittable)
                 chooser.tap()
             }
-            let activity = app.buttons["Activity"]
+            let activity = thorbisSection(app, "Activity")
             if !accessible { for _ in 0..<4 where !activity.isHittable { app.swipeUp() } }
             XCTAssertTrue(activity.waitForExistence(timeout: 10))
             XCTAssertTrue(activity.isHittable, "Activity should be visible without horizontal scrolling")
@@ -126,7 +126,7 @@ final class JobOverviewUITests: XCTestCase {
         let app = preview("job", working: true)
         XCTAssertTrue(app.buttons["Call"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["job-customer-view"].exists)
-        XCTAssertTrue(app.buttons["Money"].waitForExistence(timeout: 20))
+        XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 20))
         for tab in ["Money", "Activity"] {
             app.buttons[tab].tap()
             XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 5), "\(tab) keeps the job's name")
@@ -139,7 +139,7 @@ final class JobOverviewUITests: XCTestCase {
                            "\(tab) must not repeat the balance")
             XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Step ")).firstMatch.exists)
         }
-        app.buttons["Overview"].tap()
+        thorbisSection(app, "Overview").tap()
         XCTAssertTrue(app.buttons["Call"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["job-customer-view"].exists)
     }
@@ -244,7 +244,7 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(chooser.isHittable)
         XCTAssertTrue(chooser.label.contains("Overview"))
         chooser.tap()
-        app.buttons["Activity"].tap()
+        thorbisSection(app, "Activity").tap()
         let photos = app.buttons["activity-filter-photos"]
         for _ in 0..<5 where !photos.isHittable { content.swipeUp() }
         XCTAssertTrue(photos.isHittable)

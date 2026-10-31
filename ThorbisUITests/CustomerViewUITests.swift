@@ -16,7 +16,7 @@ final class CustomerViewUITests: XCTestCase {
 
         let door = app.buttons["job-customer-view"]
         XCTAssertTrue(door.waitForExistence(timeout: 20), "The job needs one visible Customer view door")
-        XCTAssertEqual(door.label, "Customer view")
+        XCTAssertEqual(door.label, "Show customer")
         door.tap()
         XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
         capture(app, "Customer view home")
@@ -58,7 +58,7 @@ final class CustomerViewUITests: XCTestCase {
         let app = launch(screen: "job-estimates")
         let row = app.buttons["job-estimate-\(estimateA)"]
         XCTAssertTrue(row.waitForExistence(timeout: 20)); row.tap()
-        XCTAssertTrue(app.navigationBars["Estimate"].waitForExistence(timeout: 10))
+        // #161: the estimate detail has no bar title; its heading is in the page.
         let door = detailDoor(app)
         XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
         // Opened on this estimate inside the protected container, ready to decide.
@@ -67,7 +67,7 @@ final class CustomerViewUITests: XCTestCase {
                       || app.buttons["Technician: unlock to leave customer mode"].exists)
         capture(app, "Customer view estimate deep link")
         ownerExit(app)
-        XCTAssertTrue(app.buttons["Customer view"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Show customer"].firstMatch.waitForExistence(timeout: 15))
         XCTAssertFalse(app.staticTexts["Your job documents"].exists)
     }
 
@@ -75,15 +75,16 @@ final class CustomerViewUITests: XCTestCase {
         let app = launch(screen: "job-invoice")
         let paper = app.buttons["job-invoice-\(invoiceA)"]
         XCTAssertTrue(paper.waitForExistence(timeout: 20)); paper.tap()
-        let door = detailDoor(app)
-        XCTAssertTrue(door.waitForExistence(timeout: 10))
-        // The Actions row sits under the fixed Collect payment footer until scrolled up.
-        for _ in 0..<6 where !(door.isHittable && door.frame.maxY < app.frame.height * 0.85) { app.swipeUp(velocity: .slow) }
+        // #161: an invoice's Customer view moved into its ••• menu.
+        let menu = app.buttons["Customer view, edit or open the PDF"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
+        let door = app.buttons["Customer view"].firstMatch
+        XCTAssertTrue(door.waitForExistence(timeout: 5))
         door.tap()
         XCTAssertTrue(app.navigationBars["INV-2209"].waitForExistence(timeout: 15))
         capture(app, "Customer view invoice deep link")
         ownerExit(app)
-        XCTAssertTrue(app.buttons["Customer view"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.staticTexts["Your job documents"].exists)
     }
 
@@ -118,7 +119,7 @@ final class CustomerViewUITests: XCTestCase {
 
     /// The detail screen's own door, not the job header's one still in the stack beneath it.
     private func detailDoor(_ app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Customer view", "job-customer-view")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Show customer", "job-customer-view")).firstMatch
     }
 
     private func ownerExit(_ app: XCUIApplication) {
