@@ -871,7 +871,16 @@ struct InvoicePaymentCollectionSheet: View {
                     // the custom amount in a sunk well with its $ inside, then the one ink commit.
                     VStack(alignment: .leading, spacing: 24) {
                         amountHero
-                        if hasLockedIntent || model.waitingForProjection { pendingNote }
+                        if hasLockedIntent || model.waitingForProjection {
+                            VStack(alignment: .leading, spacing: 6) {
+                                pendingNote
+                                // What the last check said, quietly, so a second failed check still shows.
+                                if hasLockedIntent, let paymentError = model.paymentError {
+                                    Text("Last answer: \(paymentError)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
                         paymentOptions
                         if option.takesCustomAmount && !hasLockedIntent && !model.waitingForProjection { amountField }
                         receiptRow
@@ -992,7 +1001,7 @@ struct InvoicePaymentCollectionSheet: View {
             word: model.waitingForProjection ? "Recorded, updating" : "Not confirmed yet",
             message: model.waitingForProjection
                 ? "Thorbis accepted the payment. The invoice and its payment history are still catching up. Check again in a moment."
-                : "The last attempt\(amount.map { " to record \($0)" } ?? "") didn't answer in time, so the result isn't known yet. Check its status before you take money again; checking uses the same request and can't record it twice.")
+                : "The last attempt\(amount.map { " to record \($0)" } ?? "") didn't get a clear answer, so the result isn't known yet. Check its status before you take money again; checking uses the same request and can't record it twice.")
         .accessibilityIdentifier("payment-pending")
     }
 

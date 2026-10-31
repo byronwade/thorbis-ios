@@ -148,7 +148,7 @@ struct EvidenceLineRow: View {
                     }
                 }
                 if line.quantity != 1 {
-                    Text("\(unit) each").font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                    Text("\(unit)\u{00A0}each").font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
                 }
             }
             if let detail = text.detail {
@@ -161,7 +161,7 @@ struct EvidenceLineRow: View {
         .foregroundStyle(Theme.foreground)
         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([text.name, text.detail, "quantity \(line.quantity)", "\(unit) each", amount]
+        .accessibilityLabel([text.name, text.detail, "quantity \(line.quantity)", "\(unit)\u{00A0}each", amount]
             .compactMap { $0 }.joined(separator: ", "))
     }
 }
@@ -249,7 +249,7 @@ struct FormField<Content: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                if optional { Text("Optional").font(Theme.font(13)).foregroundStyle(Theme.muted.opacity(0.85)) }
+                if optional { Text("Optional").font(Theme.font(13)).foregroundStyle(Theme.muted) }
             }
             .accessibilityHidden(true)
             content

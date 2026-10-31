@@ -806,6 +806,14 @@ struct NewJobSheet: View {
         } else { callerProblem = nil }
         titleProblem = title.isEmpty ? "Say what's wrong, like \u{201C}AC not cooling.\u{201D}" : nil
         timeProblem = canAssign && dayChoice != .notYet && when == nil ? "Pick an arrival time, or choose Not yet." : nil
+        if callerProblem == nil, draft.customerID.isEmpty, addingCustomer {
+            if newPhone.count > 30 { callerProblem = "Keep the phone number to 30 characters." }
+            else if newAddress.count > 500 { callerProblem = "Keep the address to 500 characters." }
+        }
+        if callerProblem == nil, titleProblem == nil, timeProblem == nil, !draft.titleIsTooLong, !draft.notesAreTooLong {
+            // Nothing in a field explains it: say so where the page's problems go.
+            error = session.can("job.create", feature: "jobs") ? "This job can't be booked yet. Check each field above." : "Your role can't book jobs."
+        }
         if callerProblem != nil { focus = addingCustomer ? .newName : .caller }
         else if titleProblem != nil { focus = .title }
     }

@@ -47,7 +47,7 @@ struct NewCustomerSheet: View {
                             input($request.name, prompt: "Danielle Marlowe", focus: .name, label: "Name")
                                 .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
                         }
-                        FormField(label: "Phone", optional: true, help: "Used to call and text about visits.") {
+                        FormField(label: "Phone", optional: true, help: "Used to call and text about visits.", error: phoneProblem) {
                             input($phone, prompt: "(916) 555-0142", focus: .phone, label: "Phone")
                                 .textContentType(.telephoneNumber).keyboardType(.phonePad)
                         }
@@ -61,7 +61,7 @@ struct NewCustomerSheet: View {
                         }
                     }
                     FormCluster(title: "Where") {
-                        FormField(label: "Service address", optional: true, help: "Where the truck goes. You can add more places later.") {
+                        FormField(label: "Service address", optional: true, help: "Where the truck goes. You can add more places later.", error: addressProblem) {
                             input($address, prompt: "412 Birchwood Ln, Sacramento", focus: .address, label: "Service address")
                                 .textContentType(.fullStreetAddress).submitLabel(.done)
                                 .onSubmit { Task { await commit() } }
@@ -134,6 +134,10 @@ struct NewCustomerSheet: View {
         if trimmedName.count > 200 { return "Keep the name to 200 characters." }
         return nil
     }
+
+    /// Phone and address limits, said under their fields after Save is pressed.
+    private var phoneProblem: String? { commitPressed && phone.count > 30 ? "Keep the phone number to 30 characters." : nil }
+    private var addressProblem: String? { commitPressed && address.count > 500 ? "Keep the address to 500 characters." : nil }
 
     private func commit() async {
         commitPressed = true

@@ -636,7 +636,7 @@ struct BuilderLineRow: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 0) {
                 // The customer reads this line in full, so it's edited in full: it grows with the text.
-                TextField("What the customer will read", text: $description, axis: .vertical)
+                TextField("", text: $description, prompt: Text("Run capacitor, 45/5 µF").foregroundStyle(Theme.subtle), axis: .vertical)
                     .font(Theme.font(16, weight: .medium)).lineLimit(1...8)
                     .focused(focus, equals: .description(lineID))
                     .padding(.horizontal, 12).padding(.vertical, 12)
@@ -1065,6 +1065,7 @@ struct EstimateDiscountSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var percent = false
     @State private var text = ""
+    @State private var problem: String?
     @FocusState private var focused: Bool
 
     private var cents: Int? {
@@ -1093,6 +1094,7 @@ struct EstimateDiscountSheet: View {
                 .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             ThorbisSegmented(options: [(false, "Amount ($)"), (true, "Percent (%)")], selection: $percent)
+            // v2: the affix sits inside the sunk well; the problem shows under it after Add is pressed.
             HStack(spacing: 6) {
                 if !percent { Text("$").font(Theme.monoFont(22)).foregroundStyle(Theme.muted) }
                 TextField(percent ? "10" : "0.00", text: $text)
@@ -1102,23 +1104,26 @@ struct EstimateDiscountSheet: View {
                     .accessibilityLabel(percent ? "Discount percent" : "Discount amount in dollars")
                 if percent { Text("%").font(Theme.monoFont(22)).foregroundStyle(Theme.muted) }
             }
-            .padding(.horizontal, 14).frame(minHeight: 56)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
-            if let subtotal {
+            .fieldWell()
+            .onChange(of: text) { _, _ in problem = nil }
+            if let problem {
+                FieldProblem(message: problem)
+            } else if let subtotal {
                 Text("Before discount \(money(subtotal, currency: "USD"))")
                     .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
             }
             Button {
-                guard let cents else { return }
+                guard let cents else {
+                    problem = percent ? "Enter a percent from 1 to 100, like 10." : "Enter an amount up to the subtotal, like 25.00."
+                    return
+                }
                 apply(label, cents)
                 dismiss()
             } label: {
-                Text(cents.map { "Add \(label.lowercased()) · −\(money($0, currency: "USD"))" } ?? "Enter an amount")
-                    .inkCommit(enabled: cents != nil)
+                Text(cents.map { "Add \(label.lowercased()) · −\(money($0, currency: "USD"))" } ?? "Add discount")
+                    .inkCommit()
             }
             .buttonStyle(PressStyle())
-            .disabled(cents == nil)
         }
         .onChange(of: percent) { _, _ in text = "" }
         .task { focused = true }

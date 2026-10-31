@@ -135,6 +135,9 @@ struct NewEstimateView: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 PaperEyebrow(reference: jobID.map { "JOB-\($0.suffix(4).uppercased())" }, text: "New estimate")
+                // The label stays above the field; the placeholder is only an example.
+                Text("Title").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .padding(.top, 6).accessibilityHidden(true)
                 TextField("", text: $title, prompt: Text("Furnace replacement").foregroundStyle(Theme.subtle), axis: .vertical)
                     .font(Theme.font(24, weight: .medium)).tracking(-0.3)
                     .accessibilityLabel("Estimate title")
