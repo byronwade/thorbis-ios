@@ -36,7 +36,10 @@ struct DocumentStatus: Equatable {
         switch status {
         case "draft": self.init(tone: .unscheduled, word: "Draft")
         case "issued", "sent", "open":
-            if amountPaid > 0, (balance ?? 1) > 0 {
+            if amountPaid > 0, let balance, balance <= 0 {
+                // Paid in full, waiting for the server to mark it paid.
+                self.init(tone: .invoiced, word: "Paid")
+            } else if amountPaid > 0 {
                 self.init(tone: .inProgress, word: "Part paid")
             } else {
                 self.init(tone: .scheduled, word: "Unpaid")

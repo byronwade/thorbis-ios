@@ -41,20 +41,24 @@ struct SettingsView: View {
                                 row("Company", symbol: "building.2", value: session.activeOrganization?.name ?? "Choose")
                             }
                             .buttonStyle(RowPressStyle())
+                            WellDivider(leading: Self.rowDivider)
                             NavigationLink { CustomizeMenuView().thorbisBackButton() } label: {
                                 row("Customize menu", symbol: "slider.horizontal.3", value: nil)
                             }
                             .buttonStyle(RowPressStyle())
                             // Owners reach the business screens here, now that the More screen is off the menu.
                             if session.can("organization.settings.edit") {
+                                WellDivider(leading: Self.rowDivider)
                                 NavigationLink(value: PaperRoute.businessSetup) {
                                     row("Set up your business", symbol: "checklist", value: nil)
                                 }
                                 .buttonStyle(RowPressStyle())
+                                WellDivider(leading: Self.rowDivider)
                                 NavigationLink(value: PaperRoute.companyDetails) {
                                     row("Company details", symbol: "building.2", value: nil)
                                 }
                                 .buttonStyle(RowPressStyle())
+                                WellDivider(leading: Self.rowDivider)
                                 NavigationLink(value: PaperRoute.payments) {
                                     row("Payments", symbol: "creditcard", value: nil)
                                 }
@@ -62,6 +66,7 @@ struct SettingsView: View {
                             }
                             // Who hears about booked and changed jobs; the feed itself is Inbox.
                             if MenuItem.notices.permitted(session) {
+                                WellDivider(leading: Self.rowDivider)
                                 NavigationLink(value: PaperRoute.notices) {
                                     row("Notification rules", symbol: "bell.badge", value: nil)
                                 }
@@ -81,6 +86,7 @@ struct SettingsView: View {
                                 row("Appearance", symbol: "circle.lefthalf.filled",
                                     value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System")
                             }
+                            WellDivider(leading: Self.rowDivider)
                             Button {
                                 Task { await notificationsTapped() }
                             } label: {
@@ -174,6 +180,9 @@ struct SettingsView: View {
         .padding(.horizontal, PaperCardMetrics.inset)
         .contentShape(Rectangle())
     }
+
+    /// The hairline between rows starts under the words, past the place mark.
+    private static let rowDivider: CGFloat = PaperCardMetrics.inset + 26 + 12
 
     /// One hue per kind of setting, from the place-mark palette (decorative; the word carries it).
     private static func markTint(_ symbol: String) -> Color {

@@ -33,7 +33,8 @@ struct WorkspaceNoticesView: View {
                     PaperEmptyState(symbol: "bell.slash", title: "Inbox is off for your role",
                                     message: "Ask your office for access to notices.")
                 } else {
-                    PaperTabs(options: ["All", "Unread"], selection: $filter)
+                    // Linear text tabs under the title, as on Today.
+                    PaperTabs(options: ["All", "Unread"], selection: $filter, textTabs: true)
                     if let error { ErrorBanner(message: error) { await refresh() } }
                     if loading && items.isEmpty && error == nil { SkeletonRows(count: 5) }
                     let notices = visible
