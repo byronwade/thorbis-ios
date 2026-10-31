@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections", "owner-home"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -891,6 +891,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
         }
+        if path == "/v1/invoices" && PaperPreview.screen == "owner-home" { return ["items": ownerHomeInvoices()] }
+        if path == "/v1/estimates" && PaperPreview.screen == "owner-home" {
+            var waiting = (jsonObject(PaperPreview.estimate) as? [String: Any]) ?? [:]
+            waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
+            var fresh = waiting
+            fresh["id"] = "00000000-0000-4000-8000-000000002228"
+            fresh["customerId"] = "00000000-0000-4000-8000-000000000416"
+            fresh["title"] = "Ductless mini-split for the garage"
+            fresh["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86_400))
+            fresh["options"] = NSNull()
+            return ["items": [waiting, fresh]]
+        }
         if path == "/v1/invoices" && PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
         if path == "/v1/invoices" {
             let item = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice)) as? [String: Any]
@@ -937,6 +949,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "job-onsite" { capabilities += ["job.complete", "invoice.create"] }
             if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
+            if PaperPreview.screen == "owner-home" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
             if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
@@ -945,7 +958,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
-            if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" { enabledFeatures.append("payments") }
+            if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
             let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
@@ -1377,6 +1390,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     : row.merging(["locationId": "00000000-0000-4000-8000-000000007001"]) { _, new in new }
             }
         }
+        // The owner's Home: three people out on the day, one visit with nobody on it and no site.
+        if PaperPreview.screen == "owner-home" {
+            let jorge = "00000000-0000-4000-8000-000000008801", sam = "00000000-0000-4000-8000-000000008802"
+            let plan: [String: (String, Any)] = ["2214": ("en_route", jorge), "2212": ("in_progress", sam), "2209": ("completed", PaperPreview.actorID),
+                                                 "2218": ("scheduled", PaperPreview.actorID), "2224": ("scheduled", NSNull()), "2201": ("completed", jorge)]
+            listed = listed.map { row in
+                guard let id = row["id"] as? String, let entry = plan[String(id.suffix(4))] else { return row }
+                var next = row
+                next["status"] = entry.0
+                next["assignedToUserId"] = entry.1
+                if !id.hasSuffix("2224") { next["locationId"] = "00000000-0000-4000-8000-000000007001" }
+                return next
+            }
+            listed.append(["id": "00000000-0000-4000-8000-000000002231", "organizationId": PaperPreview.organizationID,
+                           "customerId": "00000000-0000-4000-8000-000000000414", "title": "Furnace not igniting — Chen", "status": "open",
+                           "createdAt": "2026-10-27T15:00:00Z", "updatedAt": "2026-10-27T15:00:00Z", "allowedTransitions": [String]()])
+        }
         // Booked work with no time and no tech yet, only where the Unscheduled queue is the subject.
         if PaperPreview.screen == "schedule-unscheduled" {
             listed += [("2231", "0414", "Furnace not igniting — Chen", "2026-10-27T15:00:00Z"),
@@ -1387,6 +1417,26 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         return listed
+    }
+    /// Owner Home: the July invoice still owed, one sent this morning and one paid off today.
+    private static func ownerHomeInvoices() -> [[String: Any]] {
+        guard let base = jsonObject(PaperPreview.issuedInvoice) as? [String: Any] else { return [] }
+        let morning = today(hour: 9, minute: 40)
+        func variant(_ ref: String, customer: String, status: String, cents: Int, paid: Int, paidAt: String?) -> [String: Any] {
+            var row = base
+            row["id"] = "00000000-0000-4000-8000-00000000\(ref)"
+            row["customerId"] = "00000000-0000-4000-8000-00000000\(customer)"
+            row["sourceOperationKey"] = "paper-preview-owner-\(ref)"
+            row["status"] = status
+            row["amountPaid"] = paid
+            row["issuedAt"] = morning
+            row["paidAt"] = paidAt ?? NSNull()
+            row["lines"] = [["id": "00000000-0000-4000-8000-00000000\(ref)1", "description": "Service", "quantity": 1,
+                             "unitPrice": ["amount": cents, "currency": "USD"], "source": ["kind": "manual"]]]
+            return row
+        }
+        return [base, variant("2241", customer: "0414", status: "issued", cents: 124_000, paid: 0, paidAt: nil),
+                variant("2242", customer: "0412", status: "paid", cents: 18_500, paid: 18_500, paidAt: today(hour: 11, minute: 5))]
     }
     /// Danielle's earlier jobs for `job-history`: four at Home (newest three show) and one with no site.
     private static func propertyHistoryJobs() -> [[String: Any]] {
