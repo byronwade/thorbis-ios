@@ -22,6 +22,7 @@ struct JobDetailView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var outbox: FieldOutbox
+    @EnvironmentObject private var pendingMedia: PendingMediaStore
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
@@ -64,6 +65,8 @@ struct JobDetailView: View {
     /// Set by a new estimate's save, opened once its sheet has closed (TF-06).
     @State private var createdEstimateID: String?
     @State private var showWrapUp = false
+    /// The on-site commit at "0 left": one confirm, then the job completes in place.
+    @State private var confirmComplete = false
     /// The customer’s locations are account records, not verified job-site associations.
     @State private var locations: [ServiceLocationRecord] = []
     @State private var locationsContext: String?
@@ -187,7 +190,9 @@ struct JobDetailView: View {
                         let args = ProcessInfo.processInfo.arguments
                         // `--paper-preview-scroll-toolkit`: screenshots start at the on-site toolkit.
                         let target = args.contains("--paper-preview-scroll-history") ? "job-property-history"
-                            : args.contains("--paper-preview-scroll-toolkit") ? "job-toolkit" : nil
+                            : args.contains("--paper-preview-scroll-toolkit") ? "job-toolkit"
+                            // `--paper-preview-scroll-wrapup`: at "Before you wrap up" and what's on the invoice.
+                            : args.contains("--paper-preview-scroll-wrapup") ? "job-wrap-up" : nil
                         guard let target else { return }
                         try? await Task.sleep(for: .seconds(3))
                         proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: 0.22))
@@ -220,6 +225,8 @@ struct JobDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         .deviceHandoffs($handoff)
         .sensoryFeedback(.success, trigger: committed)
+        .thorbisConfirm("Complete this job?", message: "Everything before wrap up is done.", isPresented: $confirmComplete,
+                        actions: [ThorbisConfirmAction("Complete job") { Task { await completeHere() } }])
         .sheet(isPresented: $showDeposit) {
             JobDepositSheet(jobID: jobId) { invoice in
                 selectedInvoiceID = invoice.id
@@ -228,15 +235,15 @@ struct JobDetailView: View {
         }
         .thorbisDestination(item: $documentInvoiceID) { id in
             InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) })
-                .onDisappear { Task { await loadInvoices() } }
+                .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
         .thorbisDestination(item: $reviewInvoiceID) { id in
             InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) })
-                .onDisappear { Task { await loadInvoices() } }
+                .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
         .thorbisDestination(item: $openEstimate) { opened in
             EstimateDetailView(id: opened.id, jobID: jobId, presentsOnOpen: opened.present)
-                .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices() } } }
+                .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices(); await loadCloseout() } } }
         }
         .sheet(isPresented: $showScan) {
             if let job { DataPlateScannerSheet(job: job) { showScan = false; Task { await load() } } }
@@ -359,7 +366,10 @@ struct JobDetailView: View {
             if tab != "Activity" { dictation.stop(); noteFocused = false }
             if tab == "Money" { Task { await loadInvoices() } }
             // Photos added under Activity show in the Overview count straight away (JS-09).
-            if previous == "Activity", activityFilter == "Photos" { Task { await loadMediaCount(); await loadCloseout() } }
+            // Back on site from a note or the camera, the wrap-up rows read the job again.
+            if previous == "Activity", activityFilter == "Photos" || (tab == "Overview" && isOnSite) {
+                Task { await loadMediaCount(); await loadCloseout() }
+            }
         }
         .onChange(of: activityFilter) { previous, _ in
             if previous == "Photos" { Task { await loadMediaCount() } }
@@ -412,7 +422,7 @@ struct JobDetailView: View {
             }
         }
         // A payment changes the balance the next step reads, wherever it was collected from.
-        .sheet(isPresented: $showCollectPayment, onDismiss: { Task { await loadInvoices() } }) {
+        .sheet(isPresented: $showCollectPayment, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) {
             if let invoice = selectedInvoice, let model = invoicePaymentModel {
                 InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
                     .presentationDetents([.large])
@@ -450,12 +460,14 @@ struct JobDetailView: View {
             transitions: availableTransitions(job).filter { nextStep != .transition($0) },
             canSchedule: session.can("job.assign", feature: "jobs"),
             canAssign: session.can("job.assign", feature: "jobs"),
-            canBillWithoutEstimate: invoicesLoaded && !invoicesFailed && invoices.isEmpty && nextStep != .createInvoice
+            canBillWithoutEstimate: invoicesLoaded && !invoicesFailed && invoices.isEmpty && (onSiteWrapsUp || nextStep != .createInvoice)
                 && job.status == "in_progress" && session.can("invoice.create", feature: "invoicing"),
             canRequestDeposit: invoicesLoaded && !invoicesFailed && invoices.isEmpty && job.estimateId != nil
                 && session.can("invoice.create", feature: "progress_billing"),
             // The bar shows only on Overview; on the other tabs Wrap up stays in the menu.
-            barIsWrapUp: selectedTab == "Overview" && nextStep == .wrapUp,
+            // On site the bar walks the wrap-up rows, so the closeout screen (checks, unpaid
+            // follow-up, cancel) stays in the menu.
+            barIsWrapUp: selectedTab == "Overview" && nextStep == .wrapUp && !onSiteWrapsUp,
             canShowToCustomer: session.can("estimate.view", feature: "estimates") || session.can("invoice.view", feature: "invoicing"),
             canEditCustomer: session.can("customer.edit", feature: "core_crm"),
             canAddToCalendar: JobFiltering.date(job.scheduledFor) != nil,
@@ -575,10 +587,11 @@ struct JobDetailView: View {
                     .padding(.top, 2)
             }
             statusLine(job).padding(.top, 2)
-            reachCircles(job).padding(.top, 8)
+            // On site, what to know before touching anything comes before every action.
             if isOnSite, let banner = accessBanner(job) {
-                banner.padding(.top, 18)
+                banner.padding(.top, 16)
             }
+            reachCircles(job).padding(.top, isOnSite && accessBanner(job) != nil ? 16 : 8)
         }
         .padding(.horizontal, Theme.gutter)
         .padding(.top, 4)
@@ -864,7 +877,7 @@ struct JobDetailView: View {
 
     @ViewBuilder private var primaryAction: some View {
         if selectedTab == "Overview", let step = nextStep {
-            if isOnSite {
+            if onSiteWrapsUp {
                 onSiteBar(step)
             } else {
                 PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
@@ -875,42 +888,74 @@ struct JobDetailView: View {
         }
     }
 
-    /// OnSite.dc.html: a quiet call circle beside the one ink commit.
+    /// On site with the work started, the bar is the wrap-up: a status step (Start work, Resume)
+    /// still leads while there is one.
+    private var onSiteWrapsUp: Bool {
+        guard isOnSite, let step = nextStep else { return false }
+        if case .transition = step { return false }
+        return true
+    }
+
+    /// OnSite.dc.html: a quiet call-the-office circle beside the one ink commit, "Wrap up · N left".
+    /// With rows left it goes to the first one; at 0 it completes the job (one confirm), or opens
+    /// the closeout screen when the server or this role can't complete yet.
     private func onSiteBar(_ step: TechJobStep) -> some View {
-        HStack(spacing: 10) {
+        let rows = wrapUpRows
+        let next = rows.first { !$0.done }
+        return HStack(spacing: 10) {
             callCircle
-            Button { run(step) } label: {
+            Button {
+                if let next { openWrapUpRow(next) } else if canCompleteHere { confirmComplete = true } else { showWrapUp = true }
+            } label: {
                 HStack(spacing: 7) {
                     if busy || creatingInvoice { ProgressView().tint(Theme.onInk) }
-                    else { Image(systemName: step.symbol).font(.system(size: 15, weight: .medium)) }
-                    Text(commitTitle(step))
+                    else { Image(systemName: canCompleteHere && next == nil ? "checkmark" : "checkmark.seal").font(.system(size: 15, weight: .medium)) }
+                    Text(commitTitle(rows))
                 }
                 .inkCommit()
             }
             .buttonStyle(PressStyle())
             .disabled(busy || creatingInvoice)
+            .accessibilityHint(next.map { "Opens \($0.title.lowercased())" } ?? (canCompleteHere ? "Completes the job" : "Opens the closeout checklist"))
             .accessibilityIdentifier("job-commit")
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
         .background(Theme.background)
     }
 
-    /// "Wrap up · 3 left" while the closeout checklist has open rows; otherwise the step's words.
-    private func commitTitle(_ step: TechJobStep) -> String {
-        if step == .wrapUp, let closeout {
-            let progress = CloseoutChecklist.progress(closeout)
-            let left = progress.total - progress.done
-            if left > 0 { return "Wrap up · \(left) left" }
-        }
-        return step.title(resuming: job?.status == "paused")
+    /// "Wrap up · 3 left" while rows are open; "Complete job" once the server will take it.
+    private func commitTitle(_ rows: [WrapUpRow]) -> String {
+        let left = WrapUpList.left(rows)
+        if left > 0 { return "Wrap up · \(left) left" }
+        return canCompleteHere ? "Complete job" : "Wrap up job"
     }
 
-    /// Calls the office when the workspace has a business phone this role can read, else the customer.
+    /// Completing straight from the bar: the server says it's completable, allows the move and
+    /// this role may make it. Otherwise the closeout screen explains what's holding it.
+    private var canCompleteHere: Bool {
+        guard let job, let closeout, closeout.completable, session.can("job.complete", feature: "jobs"),
+              outbox.pendingStatus(for: job.id) == nil else { return false }
+        return job.allowedTransitions?.contains("completed") == true
+    }
+
+    private func completeHere() async {
+        busy = true
+        defer { busy = false }
+        do {
+            let updated = try await api.completeFieldJob(jobId, request: .init())
+            job = updated
+            committed += 1
+            closeout = nil
+            await store.refresh(api)
+            await load()
+        } catch is CancellationError {
+        } catch { self.error = error.localizedDescription }
+    }
+
+    /// Calls the office when the workspace has a business phone this role can read. The customer's
+    /// Call is already in the header's circles, so it isn't repeated here (BYR-1599: no office phone, no circle).
     @ViewBuilder private var callCircle: some View {
-        let office = officeContact?.callURL
-        let customer = job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil }
-            .flatMap { JobReach(phone: $0, email: nil).call }
-        if let url = office ?? customer {
+        if let url = officeContact?.callURL {
             Button { openURL(url) } label: {
                 Image(systemName: "phone")
                     .font(.system(size: 18, weight: .medium))
@@ -920,7 +965,7 @@ struct JobDetailView: View {
                     .overlay(Circle().strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
             }
             .buttonStyle(PressStyle())
-            .accessibilityLabel(office != nil ? "Call the office" : "Call \(job.map { store.customerName($0.customerId) } ?? "the customer")")
+            .accessibilityLabel("Call the office")
             .accessibilityIdentifier("job-onsite-call")
         }
     }
@@ -961,7 +1006,7 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 22) {
             if isOnSite {
                 toolkit(job).id("job-toolkit")
-                wrapUpPanel(job)
+                wrapUpPanel(job).id("job-wrap-up")
                 partsPanel
             }
             customerPanel(job)
@@ -1265,48 +1310,70 @@ struct JobDetailView: View {
         .accessibilityIdentifier("job-toolkit")
     }
 
-    /// "Before you wrap up": the closeout checklist the server computes, ticked as it's met.
-    /// Tapping an open row goes to the tool that satisfies it.
+    /// Photos filed under a stage: the visit's first page from the server plus any still on this
+    /// phone. Nil while unknown (not read yet, or none on the first page of a longer list).
+    private func stagedPhotoCount(_ tag: String) -> Int? {
+        guard mediaCount != nil else { return nil }
+        let stored = mediaPhotos.filter { $0.tags.contains(tag) }.count
+        let waiting = pendingMedia.items.filter { $0.jobID == jobId && $0.kind == "photo" && $0.tags.contains(tag) }.count
+        if stored + waiting == 0, mediaHasMore { return nil }
+        return stored + waiting
+    }
+
+    /// OnSite.dc.html "Before you wrap up": one list for the panel and the bar's count.
+    private var wrapUpRows: [WrapUpRow] {
+        let canViewInvoices = session.can("invoice.view", feature: "invoicing")
+        return WrapUpList.rows(.init(
+            beforePhotos: stagedPhotoCount("Before"),
+            afterPhotos: stagedPhotoCount("After"),
+            estimates: estimatesLoaded && !estimatesFailed ? jobEstimates : nil,
+            invoices: canViewInvoices && invoicesLoaded && !invoicesFailed ? invoices : nil,
+            closeout: closeout))
+    }
+
+    /// "Before you wrap up · 3 of 6", each open row one tap from what completes it. Wrap up itself
+    /// is the bar below, and the closeout screen stays in •••.
     @ViewBuilder
     private func wrapUpPanel(_ job: JobRecord) -> some View {
-        if let closeout {
-            let items = CloseoutChecklist.items(closeout)
-            let progress = CloseoutChecklist.progress(closeout)
-            JobPanelSection(title: items.isEmpty ? "Before you wrap up" : "Before you wrap up · \(progress.done) of \(progress.total)",
-                            actionTitle: "Wrap up", actionIdentifier: "job-wrap-up-open", action: { showWrapUp = true }) {
-                if items.isEmpty {
-                    JobPanelRow(title: "Nothing else is required before closing.", titleSize: 15)
-                }
-                ForEach(items) { item in
-                    Button { openCloseoutItem(item) } label: {
+        let rows = wrapUpRows
+        if !rows.isEmpty {
+            JobPanelSection(title: "Before you wrap up · \(rows.count - WrapUpList.left(rows)) of \(rows.count)") {
+                ForEach(rows) { row in
+                    Button { openWrapUpRow(row) } label: {
                         HStack(spacing: 12) {
-                            JobTick(done: item.done)
-                            Text(item.title).font(Theme.font(15)).foregroundStyle(item.done ? Theme.subtle : Theme.foreground)
+                            JobTick(done: row.done)
+                            Text(row.title).font(Theme.font(15)).foregroundStyle(row.done ? Theme.subtle : Theme.foreground)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            if let detail = row.detail {
+                                Text(detail).font(Theme.monoFont(13)).foregroundStyle(Theme.muted).fixedSize()
+                            }
                         }
                         .padding(.horizontal, 16).padding(.vertical, 12)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(RowPressStyle())
-                    .disabled(item.done)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(item.title), \(item.done ? "done" : "not done")")
-                    .accessibilityAddTraits(item.done ? [] : .isButton)
+                    .accessibilityLabel([row.title, row.detail].compactMap { $0 }.joined(separator: ", "))
+                    .accessibilityValue(row.done ? "Done" : "Not done")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("job-wrap-up-\(row.id)")
                 }
             }
             .accessibilityIdentifier("job-wrap-up-panel")
         }
     }
 
-    /// What's on the draft invoice so far; Add opens the price book on it.
+    /// What's on the job's bill so far (the draft, else the completion invoice); Add opens the
+    /// price book on a draft. Lines don't say which are parts or where they came from (BYR-1599).
     @ViewBuilder private var partsPanel: some View {
         if session.can("invoice.view", feature: "invoicing"),
-           let draft = invoices.first(where: { $0.status == "draft" }), !draft.lines.isEmpty {
-            JobPanelSection(title: "On the invoice", actionTitle: session.can("invoice.edit", feature: "invoicing") ? "Add" : nil,
-                            actionIdentifier: "job-parts-add", action: { partsInvoice = draft }) {
-                ForEach(draft.lines) { line in
+           let bill = invoices.first(where: { $0.status == "draft" }) ?? WrapUpList.billingInvoice(invoices), !bill.lines.isEmpty {
+            let editable = bill.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+            JobPanelSection(title: "On the invoice", actionTitle: editable ? "Add" : nil,
+                            actionIdentifier: "job-parts-add", action: { partsInvoice = bill }) {
+                ForEach(bill.lines) { line in
                     JobPanelRow(title: line.description, titleSize: 15) {
                         Text("\(line.quantity)").font(Theme.monoFont(14)).foregroundStyle(Theme.muted)
                     }
@@ -1315,24 +1382,42 @@ struct JobDetailView: View {
         }
     }
 
-    /// Routes a closeout row to what satisfies it, by the server's next action, then its kind.
+    /// Each wrap-up row goes where its fact is made; a done row opens it to look again.
+    private func openWrapUpRow(_ row: WrapUpRow) {
+        let bill = WrapUpList.billingInvoice(invoices)
+        switch row.step {
+        case .beforePhotos: row.done ? openPhotos() : openCapture(.camera(stage: "Before"))
+        case .afterPhotos: row.done ? openPhotos() : openCapture(.camera(stage: "After"))
+        case .diagnosisNote: openNoteTool()
+        case .approval:
+            if !row.done, let step = nextStep {
+                switch step {
+                case .showEstimate, .presentEstimates: run(step); return
+                default: break
+                }
+            }
+            withMotion(.snappy) { selectedTab = "Money" }
+        case .signature:
+            // The signature is taken on the invoice, which holds its lines revision.
+            if let bill { documentInvoiceID = bill.id } else { Task { if let created = await createInvoice() { documentInvoiceID = created.id } } }
+        case .payment:
+            guard let bill else { run(.createInvoice); return }
+            if bill.status == "draft" { reviewInvoiceID = bill.id; return }
+            if !row.done, let due = TechJobFlow.due(bill), due > 0, session.can("invoice.payment.create", feature: "payments") {
+                run(.collect(invoiceID: bill.id, due: due, currency: bill.currency))
+            } else {
+                reviewInvoiceID = bill.id
+            }
+        case .server(let item):
+            if item.done || item.kind == "acknowledgement" { showWrapUp = true } else { openCloseoutItem(item) }
+        }
+    }
+
+    /// Routes a server closeout rule to what satisfies it, by its next action, then its kind.
     private func openCloseoutItem(_ item: CloseoutChecklistItem) {
         switch item.nextAction {
         case "add_job_note": openNoteTool()
         case "add_job_photo": openCapture(.camera(stage: nil))
-        case "collect_customer_authorization":
-            // The signature is taken on the invoice, which holds its lines revision.
-            let live = invoices.filter { $0.status != "void" }
-            if let invoice = live.first(where: { $0.origin == "job_completion" }) ?? live.first { documentInvoiceID = invoice.id }
-            else { showWrapUp = true }
-        case "reconcile_commercial_state", "collect_payment":
-            if let step = nextStep {
-                switch step {
-                case .createInvoice, .collect, .reviewInvoice: run(step); return
-                default: break
-                }
-            }
-            showWrapUp = true
         default:
             switch item.kind {
             case "notes": openNoteTool()

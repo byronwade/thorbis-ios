@@ -40,6 +40,127 @@ enum CloseoutChecklist {
     }
 }
 
+/// OnSite.dc.html "Before you wrap up · 3 of 6": what's left at the house, read from the job's own
+/// record (photos by stage, notes, the estimate, the completion invoice) and then any server
+/// closeout rule those rows don't already say. A row whose fact hasn't loaded yet is left out
+/// rather than shown as missing. A blocked server requirement always keeps its row open, so the
+/// list never reaches 0 while the server still holds closing.
+struct WrapUpRow: Identifiable, Hashable {
+    enum Step: Hashable {
+        case beforePhotos
+        case diagnosisNote
+        case approval
+        case afterPhotos
+        case signature
+        case payment
+        /// A closeout rule the rows above don't cover (an acknowledgement, a photo count, ...).
+        case server(CloseoutChecklistItem)
+    }
+
+    let step: Step
+    let title: String
+    /// Short and on the right: a count or an amount ("3", "$480 due").
+    var detail: String? = nil
+    let done: Bool
+
+    var id: String {
+        if case .server(let item) = step { return item.id }
+        return "\(step)"
+    }
+}
+
+enum WrapUpList {
+    struct Inputs {
+        /// Photos filed Before / After on this job (server and still on this phone); nil when unknown.
+        var beforePhotos: Int?
+        var afterPhotos: Int?
+        /// The job's estimates once read; nil while loading.
+        var estimates: [EstimateRecord]?
+        /// The job's invoices once read (void ones included); nil while loading or not viewable.
+        var invoices: [InvoiceRecord]?
+        var closeout: FieldCloseout?
+    }
+
+    /// The row that already speaks for a server requirement, by its next action, then its kind.
+    static func covering(_ requirement: FieldCloseoutRequirement) -> WrapUpRow.Step? {
+        switch requirement.nextAction {
+        case "add_job_note": return .diagnosisNote
+        case "collect_customer_authorization": return .signature
+        case "collect_payment", "reconcile_commercial_state", "record_unpaid_disposition": return .payment
+        default: break
+        }
+        switch requirement.kind {
+        case "notes": return .diagnosisNote
+        case "payment_or_unpaid_disposition": return .payment
+        default: return nil
+        }
+    }
+
+    /// The completion invoice when there is one, else the first live invoice on the job.
+    static func billingInvoice(_ invoices: [InvoiceRecord]) -> InvoiceRecord? {
+        let live = invoices.filter { $0.status != "void" }
+        return live.first(where: { $0.origin == "job_completion" }) ?? live.first
+    }
+
+    static func rows(_ inputs: Inputs) -> [WrapUpRow] {
+        let requirements = inputs.closeout?.requirements ?? []
+        let blockedSteps = Set(requirements.filter { $0.outcome == "blocked" }.compactMap(covering))
+        var rows: [WrapUpRow] = []
+
+        if let before = inputs.beforePhotos {
+            rows.append(WrapUpRow(step: .beforePhotos, title: "Before photos", detail: before > 0 ? "\(before)" : nil, done: before > 0))
+        }
+        if let closeout = inputs.closeout {
+            let notes = closeout.facts.noteCount
+            rows.append(WrapUpRow(step: .diagnosisNote, title: "Diagnosis note", detail: notes > 1 ? "\(notes)" : nil,
+                                  done: notes > 0 && !blockedSteps.contains(.diagnosisNote)))
+        }
+        // Approval only when the visit has an estimate in play; a call billed from the truck has none.
+        if let estimates = inputs.estimates, !estimates.isEmpty, !estimates.allSatisfy({ $0.status == "declined" }) {
+            if let approved = estimates.first(where: { $0.status == "approved" }) {
+                let currency = approved.lines.first?.unitPrice.currency ?? "USD"
+                rows.append(WrapUpRow(step: .approval, title: "Customer approved \(approved.title)",
+                                      detail: paperLinesTotal(approved.lines).map { jobShortMoney($0, currency: currency) }, done: true))
+            } else {
+                rows.append(WrapUpRow(step: .approval, title: "Customer approval", done: false))
+            }
+        }
+        if let after = inputs.afterPhotos {
+            rows.append(WrapUpRow(step: .afterPhotos, title: "After photos", detail: after > 0 ? "\(after)" : nil, done: after > 0))
+        }
+        if let invoices = inputs.invoices {
+            let invoice = billingInvoice(invoices)
+            let signed = invoice.map { invoice in invoice.customerAuthorization?.linesRevision == invoice.linesRevision } ?? false
+            rows.append(WrapUpRow(step: .signature, title: "Customer signature", done: signed && !blockedSteps.contains(.signature)))
+            let due = invoice.flatMap { TechJobFlow.due($0) }
+            let owed = invoice?.status == "draft" ? invoice.flatMap { paperLinesTotal($0.lines) } : due
+            let paid = invoice.map { $0.status == "paid" || ($0.status == "issued" && due == 0) } ?? false
+            let currency = invoice?.currency ?? "USD"
+            rows.append(WrapUpRow(step: .payment, title: "Collect payment",
+                                  detail: paid ? "Paid" : owed.flatMap { $0 > 0 ? "\(jobShortMoney($0, currency: currency)) due" : nil },
+                                  done: paid && !blockedSteps.contains(.payment)))
+        }
+
+        // Whatever else the server holds closing on: a blocked rule no row above speaks for (a
+        // photo count lands here), then the acknowledgement checks the policy asks for.
+        if let closeout = inputs.closeout {
+            let items = CloseoutChecklist.items(closeout)
+            for (offset, requirement) in requirements.enumerated() where requirement.outcome == "blocked" {
+                if let step = covering(requirement), rows.contains(where: { $0.step == step }) { continue }
+                if let item = items.first(where: { $0.id == "requirement-\(offset)-\(requirement.requirement)" }) {
+                    rows.append(WrapUpRow(step: .server(item), title: item.title, done: false))
+                }
+            }
+            for item in items where item.kind == "acknowledgement" {
+                rows.append(WrapUpRow(step: .server(item), title: item.title, done: item.done))
+            }
+        }
+        return rows
+    }
+
+    static func left(_ rows: [WrapUpRow]) -> Int { rows.filter { !$0.done }.count }
+}
+
 struct JobCloseoutView: View {
     let jobID: String
     /// The job's street when the opener already knows it (street first, the ID after it).
@@ -103,7 +224,7 @@ struct JobCloseoutView: View {
                         HStack(spacing: 12) {
                             checklistRow(done: requirement.outcome != "blocked", title: requirement.detail, detail: step?.detail)
                             if let step, let title = step.buttonTitle, step.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) {
-                                Button(title) { Task { await recover(step) } }
+                                Button { Task { await recover(step) } } label: { Text(title) }
                                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                     .frame(minHeight: 44).contentShape(Rectangle())
                                     .buttonStyle(PressStyle())
@@ -117,7 +238,7 @@ struct JobCloseoutView: View {
                         HStack(spacing: 12) {
                             checklistRow(done: acknowledged, title: check.label, detail: nil)
                             if !acknowledged && session.can("job.edit", feature: "jobs") {
-                                Button("Confirm") { Task { await acknowledge(check.key) } }
+                                Button { Task { await acknowledge(check.key) } } label: { Text("Confirm") }
                                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                     .frame(minHeight: 44).contentShape(Rectangle())
                                     .buttonStyle(PressStyle())
@@ -157,9 +278,13 @@ struct JobCloseoutView: View {
                         }
                     }
                     if session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
-                        Button("Cancel job", role: .destructive) { confirmCancel = true }
-                            .font(Theme.font(15, weight: .medium)).frame(minHeight: 44).padding(.top, 18)
-                            .disabled(busy)
+                        Button { confirmCancel = true } label: {
+                            Text("Cancel job").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .padding(.top, 18)
+                        .disabled(busy)
                     }
                 } else if error == nil {
                     SkeletonRows(count: 4, leading: false, inset: 0)
@@ -178,7 +303,8 @@ struct JobCloseoutView: View {
         }
         .task { await load() }
         .refreshable { await load() }
-        .thorbisDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0) }
+        // Collecting from the checklist comes back here once it's paid, ready to complete.
+        .thorbisDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0, returnsWhenPaid: true).onDisappear { Task { await load() } } }
         .thorbisDestination(isPresented: $openBilling) { BillingSchedulesView() }
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
@@ -187,10 +313,8 @@ struct JobCloseoutView: View {
                         actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancel() } }])
     }
     private func checklistRow(done: Bool, title: String, detail: String?) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 17)).foregroundStyle(done ? Theme.success : Theme.muted)
-                .accessibilityLabel(done ? "Done" : "Not done")
+        HStack(alignment: .center, spacing: 12) {
+            JobTick(done: done)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(15, weight: done ? .regular : .medium))
                     .foregroundStyle(done ? Theme.muted : Theme.foreground)
@@ -200,6 +324,7 @@ struct JobCloseoutView: View {
         }
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
+        .accessibilityValue(done ? "Done" : "Not done")
     }
 
     private func wellField(_ prompt: String, text: Binding<String>) -> some View {

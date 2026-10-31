@@ -204,6 +204,30 @@ enum PaperPreview {
                                         option(3, "Replace", "A new high-efficiency unit with a ten-year warranty.", replace)],
                               createdAt: estimate.createdAt, updatedAt: estimate.updatedAt, sentAt: estimate.sentAt, approvedAt: nil, declinedAt: nil)
     }
+    /// `job-onsite --paper-preview-onsite-done`: every wrap-up row met, the server ready to complete.
+    static var onSiteDone: Bool { screen == "job-onsite" && ProcessInfo.processInfo.arguments.contains("--paper-preview-onsite-done") }
+    /// The on-site visit's approved repair ($340, the same lines as its invoice).
+    static var onSiteEstimate: EstimateRecord {
+        let record = estimate
+        return EstimateRecord(id: record.id, organizationId: record.organizationId, customerId: record.customerId,
+                              createdByUserId: record.createdByUserId, locationId: record.locationId, status: "approved",
+                              currentRevisionNumber: record.currentRevisionNumber, title: "Repair", lines: issuedInvoice.lines, options: nil,
+                              createdAt: record.createdAt, updatedAt: record.updatedAt, sentAt: record.sentAt,
+                              approvedAt: record.sentAt, declinedAt: nil)
+    }
+    /// The on-site visit's completion invoice: issued and unpaid, or signed and paid when done.
+    static var onSiteInvoice: InvoiceRecord {
+        var record = issuedInvoice
+        guard onSiteDone else { return record }
+        let json = #"{"id":"00000000-0000-4000-8000-000000009520","signerName":"Danielle Marlowe","signedAt":"2026-10-31T15:20:00Z","imageMediaId":"00000000-0000-4000-8000-000000009521","linesRevision":3}"#
+        record.customerAuthorization = try? JSONDecoder().decode(FieldSignatureRecord.self, from: Data(json.utf8))
+        let paid = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
+        var object = paid
+        object["status"] = "paid"
+        object["amountPaid"] = 34_000
+        object["paidAt"] = "2026-10-31T15:22:00Z"
+        return try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: object))
+    }
     static var invoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"draft","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":null,"paidAt":null,"voidedAt":null,"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
         return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
@@ -700,6 +724,35 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["id": PaperPreview.savedWorkUncachedJobID, "organizationId": org, "customerId": PaperPreview.customerID,
                     "title": "Uncached drain visit", "status": "dispatched", "createdAt": now, "updatedAt": now, "allowedTransitions": ["en_route"]]
         }
+        // `job-onsite`: "Before you wrap up · 3 of 6" (before photos, a note and the approved repair
+        // done; after photos, signature and payment left). `--paper-preview-onsite-done`: all done.
+        if PaperPreview.screen == "job-onsite" {
+            let done = PaperPreview.onSiteDone
+            if path == "/v1/jobs/\(PaperPreview.jobID)/closeout" {
+                let target: [String: Any] = ["id": PaperPreview.jobID, "organizationId": org, "customerId": PaperPreview.customerID,
+                                             "locationId": NSNull(), "estimateId": NSNull(), "estimateRevisionNumber": NSNull()]
+                func requirement(_ name: String, _ kind: String, _ met: Bool, _ detail: String, _ next: String) -> [String: Any] {
+                    ["requirement": name, "kind": kind, "outcome": met ? "satisfied" : "blocked", "detail": detail,
+                     "nextAction": met ? NSNull() : next, "commercialSource": met ? NSNull() : "invoice"]
+                }
+                let requirements = [requirement("photos", "photos", true, "2 of 2 photos added", "add_job_photo"),
+                                    requirement("notes", "notes", true, "A note is on the job", "add_job_note"),
+                                    requirement("payment", "payment_or_unpaid_disposition", done, done ? "Paid in full" : "$340 still due", "collect_payment")]
+                return ["policy": ["organizationId": org, "requireNotes": true, "requiredPhotoCount": 2,
+                                   "requiredChecks": done ? [["key": "site-clean", "label": "Work area cleaned up", "kind": "acknowledgement", "allowUnpaidDisposition": NSNull()]] : [],
+                                   "updatedByUserId": NSNull(), "updatedAt": NSNull()],
+                        "facts": ["noteCount": done ? 2 : 1, "photoCount": 6, "acknowledgedCheckKeys": done ? ["site-clean"] : [], "authorizationTarget": target],
+                        "acknowledged": done ? [["checkKey": "site-clean", "acknowledgedByUserId": actor, "acknowledgedAt": now]] : [],
+                        "requirements": requirements, "unmet": requirements.filter { ($0["outcome"] as? String) == "blocked" }, "completable": done]
+            }
+            if path == "/v1/jobs/\(PaperPreview.jobID)/estimates" {
+                return ["items": [["id": "00000000-0000-4000-8000-000000009301", "organizationId": org, "jobId": PaperPreview.jobID,
+                                   "estimateId": PaperPreview.onSiteEstimate.id, "linkedAt": now]]]
+            }
+            if path == "/v1/estimates/\(PaperPreview.onSiteEstimate.id)" { return jsonObject(PaperPreview.onSiteEstimate) }
+            if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" { return ["items": [jsonObject(PaperPreview.onSiteInvoice)!]] }
+            if path == "/v1/invoices/\(PaperPreview.onSiteInvoice.id)" { return jsonObject(PaperPreview.onSiteInvoice) }
+        }
         // `job-closeout`: the wrap-up checklist with one met and one open requirement and one check.
         if path == "/v1/jobs/\(PaperPreview.jobID)/closeout" {
             let target: [String: Any] = ["id": PaperPreview.jobID, "organizationId": org, "customerId": PaperPreview.customerID,
@@ -955,9 +1008,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 ("primary_email", "Primary email", 1, false), ("industry", "Industry / trades", 1, false),
                 ("email_sender_name", "Email sender name", 1, false), ("email_sender_address", "Email reply-to address", 1, false),
             ]
+            // `job-onsite`: the workspace has a business phone, so the bar's call-the-office circle shows.
+            let phone: [[String: Any]] = PaperPreview.screen == "job-onsite"
+                ? [["factKey": "primary_phone", "label": "Primary phone", "tier": 1, "value": "(555) 010-0199", "source": "user_confirmed", "confirmedAt": now, "version": 1]] : []
             return ["organizationId": org, "coreReady": false, "missingCore": ["business_address", "primary_phone"],
                     "facts": [["factKey": "legal_name", "label": "Legal business name", "tier": 1, "value": "Wade’s Plumbing LLC",
-                               "source": "user_confirmed", "confirmedAt": now, "version": 1]],
+                               "source": "user_confirmed", "confirmedAt": now, "version": 1]] + phone,
                     "catalog": catalog.map { ["factKey": $0.0, "label": $0.1, "tier": $0.2, "required": $0.3, "confirmed": $0.0 == "legal_name"] }] as [String: Any]
         }
         if PaperPreview.isEmptyWorkspace, ["/v1/jobs", "/v1/customers", "/v1/invoices", "/v1/estimates"].contains(path) {
@@ -1232,7 +1288,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 // Six photos from this visit: three Before this morning, the rest untagged.
                 let shots: [(String, String, [String])] = [("Outdoor unit", "09:12", ["Before"]), ("Coil", "09:13", ["Before"]),
                                                             ("Unit tag", "09:14", ["Before"]), ("Capacitor", "10:05", []),
-                                                            ("Breaker panel", "10:20", []), ("Thermostat", "10:41", [])]
+                                                            ("Breaker panel", "10:20", PaperPreview.onSiteDone ? ["After"] : []),
+                                                            ("Thermostat", "10:41", PaperPreview.onSiteDone ? ["After"] : [])]
                 return ["items": Array(shots.enumerated().map { offset, shot in
                     let parts = shot.1.split(separator: ":").compactMap { Int($0) }
                     return ["id": String(format: "00000000-0000-4000-8000-%012d", 9311 + offset), "organizationId": org, "jobId": id,
@@ -1446,7 +1503,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 listed[index]["enRouteAt"] = formatter.string(from: arrived.addingTimeInterval(-24 * 60))
                 listed[index]["arrivedAt"] = formatter.string(from: arrived)
                 listed[index]["startedAt"] = formatter.string(from: arrived.addingTimeInterval(3 * 60))
-                listed[index]["allowedTransitions"] = ["paused"]
+                listed[index]["allowedTransitions"] = PaperPreview.onSiteDone ? ["paused", "completed"] : ["paused"]
             }
         }
         if PaperPreview.screen == "customer-jobs" { listed += propertyHistoryJobs() }
