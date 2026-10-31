@@ -95,15 +95,15 @@ struct MemberAccessView: View {
         }
         .searchable(text: $search, prompt: "Find a permission")
         .scrollContentBackground(.hidden)
-        .background(Theme.background)
-        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.background) } }
+        .background(Theme.canvas)
+        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.canvas) } }
         .navigationTitle(member.member.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
             ThorbisToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(busy || !changed) }
         }
-        .sheet(isPresented: $changingRole) { MemberRoleSheet(member: member) { await onChanged() } }
+        .sheet(isPresented: $changingRole) { SheetSurface { MemberRoleSheet(member: member) { await onChanged() } } }
         .task { await load() }
     }
 

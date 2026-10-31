@@ -117,7 +117,7 @@ struct BillingSchedulesView: View {
             .paperCardMargin().padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
@@ -232,7 +232,7 @@ struct BillingScheduleDetailView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if let progress, progress.schedule.status == "open", progress.remaining > 0, canBill {
@@ -320,7 +320,7 @@ struct JobDepositSheet: View {
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 8)
             .foregroundStyle(Theme.foreground)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .safeAreaInset(edge: .bottom) {

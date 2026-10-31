@@ -28,7 +28,7 @@ struct WorkspaceNoticesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    // Redesign phase 3: a place's title, 34 semibold like the tab roots.
+                    // A place's title, Medium on the root-title step like the tab roots.
                     Text("Inbox").font(Theme.font(34, weight: .medium)).tracking(-0.8).accessibilityAddTraits(.isHeader)
                     Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
@@ -93,7 +93,7 @@ struct WorkspaceNoticesView: View {
             }
             .padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -221,7 +221,7 @@ struct WorkspaceRevenueView: View {
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
             }
             .foregroundStyle(Theme.foreground)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await load() }
             .task { await load() }
@@ -504,7 +504,7 @@ struct WorkspacePriceBookView: View {
                             }
                                 .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .frame(maxWidth: .infinity).frame(minHeight: 44)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                                .panelBackground(cornerRadius: Theme.controlRadius)
                                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
                                 .buttonStyle(PressStyle())
                                 .disabled(loading)
@@ -537,7 +537,7 @@ struct WorkspacePriceBookView: View {
                             Label("Add price book item", systemImage: "plus").inkCommit()
                         }
                         .buttonStyle(PressStyle()).padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                        .background(Theme.background)
+                        .background(Theme.canvas)
                     }
                 }
                 #if DEBUG
@@ -563,17 +563,17 @@ struct WorkspacePriceBookView: View {
                     }
                 }
                 #endif
-                .sheet(isPresented: $creating) { PriceBookItemEditor(api: api) { Task { await refresh() } } }
-                .sheet(item: $localDetail) { selection in
+                .sheet(isPresented: $creating) { SheetSurface { PriceBookItemEditor(api: api) { Task { await refresh() } } } }
+                .sheet(item: $localDetail) { selection in SheetSurface {
                     if localScope == selection.scope {
                         PriceBookLocalDetail(item: selection.item)
                     } else {
                         Text("Price book access changed.")
                     }
-                }
+                } }
             }
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -713,7 +713,7 @@ private struct PriceBookLocalDetail: View {
                                         + (item.archivedAt != nil ? [("Status", "Archived")] : []))
                     .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationTitle("Price book item")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
@@ -748,7 +748,7 @@ private struct PriceBookItemSummary: View {
                 .padding(.vertical, PaperCardMetrics.edge)
             }
         }
-        // Redesign phase 3: semibold headers over grouped wells.
+        // Medium headers over grouped wells (v2: 500 is the heaviest weight).
         .environment(\.paperGroupedWells, true)
     }
 }
@@ -792,7 +792,7 @@ private struct WorkspacePriceBookDetailView: View {
             }
             .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Price book item")
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
@@ -800,11 +800,11 @@ private struct WorkspacePriceBookDetailView: View {
                 ThorbisToolbarItem(placement: .topBarTrailing) { Button("Edit") { editing = true } }
             }
         }
-        .sheet(isPresented: $editing) {
+        .sheet(isPresented: $editing) { SheetSurface {
             if let detail {
                 PriceBookItemEditor(api: api, existing: detail) { Task { await load() } }
             }
-        }
+        } }
         .thorbisConfirm("Remove this item from the price book?", isPresented: $confirmArchive,
                         actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await archive() } }])
         .task { await load() }
@@ -867,7 +867,7 @@ struct PriceBookItemEditor: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .safeAreaInset(edge: .bottom) {
                 PaperActionBar(title: existing == nil ? "Add to price book" : "Save item", busy: busy, disabled: !valid) {
                     Task { await save() }

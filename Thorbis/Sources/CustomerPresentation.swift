@@ -287,7 +287,7 @@ struct CustomerEstimatePresentation: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Selection is the blue ring and the radio; the screen's only ink is the commit (CP-07).
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .panelBackground(cornerRadius: 14)
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .strokeBorder(selected ? Theme.brand : Theme.border, lineWidth: selected ? 2 : 1))
         .animation(.easeOut(duration: 0.15), value: selected)
@@ -465,7 +465,7 @@ struct CustomerEstimatePresentation: View {
         .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
         .frame(maxWidth: type.regular ? 640 : .infinity)
         .frame(maxWidth: .infinity)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .disabled(actionBusy && handoff == nil)
     }
 
@@ -847,7 +847,7 @@ struct CustomerInvoicePresentation: View {
         .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
         .frame(maxWidth: type.regular ? 640 : .infinity)
         .frame(maxWidth: .infinity)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .disabled(busy)
     }
 
@@ -938,7 +938,7 @@ struct CustomerLinesCard: View {
             }
         }
         .padding(.horizontal, 18)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .panelBackground(cornerRadius: 14)
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
     }
 

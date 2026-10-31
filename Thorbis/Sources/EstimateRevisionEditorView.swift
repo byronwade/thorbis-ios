@@ -92,7 +92,7 @@ struct EstimateRevisionEditorView: View {
                         scrollTarget = nil
                     }
             }
-            .background(Theme.background)
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationTitle(editingDraft ? "Edit estimate" : "Revise estimate")
             .navigationBarTitleDisplayMode(.inline)
@@ -115,7 +115,7 @@ struct EstimateRevisionEditorView: View {
                     }
                 }
             }
-            .sheet(item: $picker) { target in
+            .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: optionName(target.optionID),
                     canUsePriceBook: canUsePriceBook,
@@ -126,12 +126,12 @@ struct EstimateRevisionEditorView: View {
                     refresh: { await refreshCatalog(force: $0) }
                 )
                 .environmentObject(session).environmentObject(api)
-            }
-            .sheet(item: $discountTarget) { target in
+            } }
+            .sheet(item: $discountTarget) { target in SheetSurface {
                 EstimateDiscountSheet(target: optionName(target.optionID), subtotal: lines(for: target.optionID).subtotal()) { label, cents in
                     mutateLines(target.optionID) { _ = $0.addCreditLine(label, cents: cents) }
                 }
-            }
+            } }
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .task(id: estimate.customerId) { memberPricing = try? await api.memberPricing(estimate.customerId) }

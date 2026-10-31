@@ -176,7 +176,7 @@ struct ThorbisApp: App {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .environmentObject(estimateHandoff)
             .environmentObject(api)
             .environmentObject(store)

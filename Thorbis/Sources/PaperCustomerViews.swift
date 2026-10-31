@@ -75,17 +75,17 @@ struct CustomersView: View {
             .padding(.bottom, 24)
         }
         .refreshable { await store.refresh(api); await SavedCopies.$liveOnly.withValue(true) { await loadCustomers() } }
-        .background(Theme.background).toolbar(.hidden, for: .navigationBar)
+        .background(Theme.canvas).toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             if session.can("customer.create", feature: "core_crm") && !items.isEmpty {
                 FloatingCreateButton(title: "New customer", disabled: busy) { showNew = true }
             }
         }
         .task(id: store.customers.map(\.id).sorted().joined(separator: "|")) { await loadCustomers() }
-        .sheet(isPresented: $showNew) {
+        .sheet(isPresented: $showNew) { SheetSurface {
             NewCustomerSheet { _ in Task { await loadCustomers() } }
-        }
-        .sheet(item: $newJobFor) { customer in NewJobSheet(preselected: customer) }
+        } }
+        .sheet(item: $newJobFor) { customer in SheetSurface { NewJobSheet(preselected: customer) } }
     }
     private func customerRow(_ customer: CustomerRecord, jobs: [Job]) -> some View {
         let now = Date()
@@ -338,9 +338,9 @@ struct CustomerDetailView: View {
         }
         #endif
         }
-        .foregroundStyle(Theme.foreground).background(Theme.background)
+        .foregroundStyle(Theme.foreground).background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(Theme.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
@@ -384,23 +384,23 @@ struct CustomerDetailView: View {
                 if tab == "Jobs" { await loadJobRecords() }
             }
         }
-        .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
+        .sheet(isPresented: $showNewJob) { SheetSurface { NewJobSheet(preselected: customer) } }
         .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task { await load(); await loadSmsConsent() } }) {
             CustomerSelfEditView(customerID: customer.id) { showCustomerMode = false }
         }
-        .sheet(item: $contactSheet, onDismiss: { Task { await load() } }) { item in
+        .sheet(item: $contactSheet, onDismiss: { Task { await load() } }) { item in SheetSurface {
             CustomerContactSheet(customerID: customer.id, contact: item.contact) { contact in
                 contactState.save(contact)
                 contactMutationError = nil
                 error = nil
             }
-        }
-        .sheet(item: $locationSheet) { item in
+        } }
+        .sheet(item: $locationSheet) { item in SheetSurface {
             ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
                 locationState.save(saved)
                 locationError = nil
             }
-        }
+        } }
         .thorbisConfirm(item: $locationToRemove,
                         title: { _ in "Remove service location?" },
                         message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
@@ -471,7 +471,7 @@ struct CustomerDetailView: View {
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("customer-new-job-action")
-            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 8).background(Theme.background)
+            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 8).background(Theme.canvas)
         }
     }
 

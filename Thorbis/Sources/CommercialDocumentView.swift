@@ -10,7 +10,7 @@ struct CommercialDocumentView: View {
             else if let error = preview.error {
                 PaperEmptyState(symbol: "doc.badge.ellipsis", title: "Document unavailable", message: error,
                                 actionTitle: preview.loading ? nil : "Try again", action: { load() })
-                    .frame(maxHeight: .infinity).background(Theme.background)
+                    .frame(maxHeight: .infinity).background(Theme.canvas)
             } else { ProgressView("Preparing document…") }
         }
         .navigationTitle("Document")

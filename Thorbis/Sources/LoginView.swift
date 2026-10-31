@@ -176,7 +176,7 @@ struct LoginView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .scrollBounceBehavior(.basedOnSize)
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         // MA-16: the one commit, under the thumb and above the keyboard.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Button { Task { await signIn() } } label: {
@@ -192,14 +192,14 @@ struct LoginView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
             .frame(maxWidth: 470)
             .frame(maxWidth: .infinity)
-            .background(Theme.background)
+            .background(Theme.canvas)
         }
-        .sheet(isPresented: $showingSignUp) {
+        .sheet(isPresented: $showingSignUp) { SheetSurface {
             SignUpView(initialEmail: email)
-        }
-        .sheet(isPresented: $showingReset) {
+        } }
+        .sheet(isPresented: $showingReset) { SheetSurface {
             PasswordResetRequestView(initialEmail: email).environmentObject(api)
-        }
+        } }
     }
 
     private func signIn() async {
@@ -290,7 +290,7 @@ private struct PasswordResetRequestView: View {
                 .frame(maxWidth: 430, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .navigationTitle("Password reset")
             .navigationBarTitleDisplayMode(.inline)
             // MA-16: Cancel leading, the commit trailing in the sheet's bar.

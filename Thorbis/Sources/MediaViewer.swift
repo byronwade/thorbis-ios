@@ -97,7 +97,7 @@ struct MediaPhotoViewer: View {
             .background(Color.black)
             if let record { info(record) }
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .environment(\.colorScheme, .dark)
         .task(id: current) { await prefetch() }
@@ -324,7 +324,7 @@ struct MediaCompareView: View {
             if afters.count > 1 { chooser("After", records: afters, selection: $afterID) }
         }
         .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .task(id: "\(beforeID)|\(afterID)") {
             if let before { await loader.fetch(before, pixels: 2000) }

@@ -23,7 +23,7 @@ struct JobDocumentRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, customerFacing ? 16 : 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(grouped ? Color.clear : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .background(grouped ? AnyShapeStyle(Color.clear) : AnyShapeStyle(ThorbisPanelStyle()), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .contentShape(Rectangle())
     }
 

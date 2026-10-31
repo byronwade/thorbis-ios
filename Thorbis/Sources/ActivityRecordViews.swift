@@ -66,7 +66,7 @@ struct JobNoteDetailView: View {
             .padding(.horizontal, Theme.gutter)
             .padding(.vertical, 16)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Note")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
@@ -119,7 +119,7 @@ struct JobMediaDetailView: View {
             .padding(.horizontal, Theme.gutter)
             .padding(.vertical, 16)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle(asset?.kind == "photo" ? "Photo" : "File")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
@@ -173,7 +173,7 @@ struct CustomerContactDetailView: View {
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Contact")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
@@ -230,7 +230,7 @@ struct ServiceLocationDetailView: View {
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Location")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }

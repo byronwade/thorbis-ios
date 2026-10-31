@@ -126,7 +126,7 @@ struct SettingsView: View {
                             }
                             .padding(.horizontal, PaperCardMetrics.inset)
                             .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                            .panelBackground(cornerRadius: Theme.cardRadius)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(RowPressStyle())
@@ -138,19 +138,19 @@ struct SettingsView: View {
                     .padding(.top, 24)
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 32)
-                // Redesign phase 3: semibold section headers over grouped wells.
+                // Medium section headers over grouped wells (v2: 500 is the heaviest weight).
                 .environment(\.paperGroupedWells, true)
             }
             #if DEBUG
             .modifier(PaperPreviewScrollAnchor())
             #endif
-            .background(Theme.background)
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .paperDestinations()
             .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-            .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
+            .sheet(isPresented: $showWorkspaces) { SheetSurface { WorkspaceSelectionView() } }
             .thorbisConfirm("Sign out of Thorbis?",
                             message: signOutWarning,
                             isPresented: $confirmSignOut,

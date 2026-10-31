@@ -15,7 +15,7 @@ struct SidebarSearchButton: View {
             .foregroundStyle(Theme.muted)
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.controlRadius)
             .overlay {
                 RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                     .stroke(Theme.border, lineWidth: 1)

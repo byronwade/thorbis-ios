@@ -453,7 +453,7 @@ struct CustomizeMenuView: View {
         }
         .environment(\.editMode, .constant(editable ? .active : .inactive))
         .scrollContentBackground(.hidden)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Customize menu")
         .navigationBarTitleDisplayMode(.inline)
         .task { await layout.refreshCompanyLayout(api: api) }

@@ -61,7 +61,7 @@ struct PublicEstimateActionView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .safeAreaInset(edge: .bottom, spacing: 0) { approvalFooter }
         .task(id: token) { await model.load(api: api, token: token) }
         .thorbisConfirm("Decline this estimate?",

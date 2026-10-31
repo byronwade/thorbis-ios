@@ -338,6 +338,71 @@ private struct InkCommit: ViewModifier {
     }
 }
 
+// MARK: - Sheet surfaces
+
+private struct ThorbisSheetCanvasKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// True inside a sheet (and every screen pushed in it): the canvas is the panel, and groups of
+    /// rows sink one step below it (golden rules: a modal is "a clean system sheet on the panel").
+    var thorbisSheetCanvas: Bool {
+        get { self[ThorbisSheetCanvasKey.self] }
+        set { self[ThorbisSheetCanvasKey.self] = newValue }
+    }
+}
+
+/// The ground a screen is drawn on: the canvas on a route, the panel inside a sheet, so a screen
+/// shown in a sheet (Settings, an invoice's lines) matches the modals beside it.
+struct ThorbisCanvasStyle: ShapeStyle {
+    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        (environment.thorbisSheetCanvas ? Theme.surface : Theme.background).resolve(in: environment)
+    }
+}
+
+/// The ground a group of rows sits on: the panel (`Theme.well`) on a route; inside a sheet, where
+/// the canvas already is the panel, the sink (`Theme.field`), as `ThorbisSheetGroup` draws it.
+struct ThorbisPanelStyle: ShapeStyle {
+    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        (environment.thorbisSheetCanvas ? Theme.field : Theme.well).resolve(in: environment)
+    }
+}
+
+extension Theme {
+    /// A screen's ground: `background` on a route, `surface` in a sheet. Use for a screen's own
+    /// background and for bars pinned to it, so nothing shows as a band of another tone.
+    static let canvas = ThorbisCanvasStyle()
+}
+
+/// A group's rounded ground: the panel on a route (no rim, v2); in a sheet the sink with its 1px rim.
+private struct PanelBackground: ViewModifier {
+    let radius: CGFloat
+    @Environment(\.thorbisSheetCanvas) private var inSheet
+    func body(content: Content) -> some View {
+        content
+            .background(ThorbisPanelStyle(), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay {
+                if inSheet {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1)
+                }
+            }
+    }
+}
+
+extension View {
+    /// The rounded ground under a group of rows (`Well`, a card): see `PanelBackground`.
+    func panelBackground(cornerRadius: CGFloat = Theme.cardRadius) -> some View {
+        modifier(PanelBackground(radius: cornerRadius))
+    }
+
+    /// A sheet that shows whole screens (a NavigationStack, Settings, an editor): the panel behind it
+    /// (no Liquid Glass) and `thorbisSheetCanvas` for every screen inside, pushed ones included.
+    /// Put it outside the sheet's NavigationStack, at the `.sheet` content.
+    func thorbisSheetSurface() -> some View {
+        self
+            .environment(\.thorbisSheetCanvas, true)
+            .presentationBackground(Theme.surface)
+    }
+}
+
 private struct ThorbisPressedKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
     /// True while the enclosing `PressStyle` button is held, so a lifted commit can sink.

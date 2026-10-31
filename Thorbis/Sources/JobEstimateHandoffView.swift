@@ -29,7 +29,7 @@ struct JobEstimateHandoffView: View {
                 }.padding(Theme.gutter)
             }
         }
-        .background(Theme.background).foregroundStyle(Theme.foreground)
+        .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .navigationTitle("Estimates").navigationBarTitleDisplayMode(.inline)
         .task { await model.refresh() }
         .onChange(of: model.isCurrent) { _, current in
@@ -251,7 +251,7 @@ struct JobEstimateHandoffView: View {
                 .accessibilityIdentifier("handoff-review-selected")
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.background)
+        .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
         }
     }
     private func nextPending(after current: String?) -> String? {

@@ -196,19 +196,19 @@ struct JobMediaView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width - Theme.gutter * 2 } action: { contentWidth = $0 }
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .safeAreaInset(edge: .bottom) {
             if selecting {
                 selectionBar
             } else if canAdd && !dynamicTypeSize.isAccessibilitySize {
                 captureControls
                     .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-                    .background(Theme.background)
+                    .background(Theme.canvas)
             }
         }
-        .sheet(isPresented: $showLegacyRecovery) {
+        .sheet(isPresented: $showLegacyRecovery) { SheetSurface {
             LegacyMediaRecoveryView(jobID: jobID, workspaceName: session.activeOrganization?.name ?? "Current workspace")
-        }
+        } }
         .fullScreenCover(isPresented: $showScanner) {
             DocumentScanner { pdf in
                 showScanner = false
@@ -753,7 +753,7 @@ struct JobMediaView: View {
             if busy { ProgressView().frame(height: 20) }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.background)
+        .background(Theme.canvas)
     }
 
     // MARK: Actions

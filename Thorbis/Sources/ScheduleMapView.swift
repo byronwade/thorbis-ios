@@ -128,7 +128,7 @@ struct ScheduleMapView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .panelBackground(cornerRadius: Theme.cardRadius)
     }
 
     /// A stop: its number on the route, the time in a tabular column, the street over the problem,

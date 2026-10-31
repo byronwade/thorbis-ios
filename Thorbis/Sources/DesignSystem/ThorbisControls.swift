@@ -243,7 +243,7 @@ extension View {
                                  selection: $account)
             }
             .padding().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(Theme.background)
+            .background(Theme.canvas)
         }
     }
     return Demo()
@@ -254,6 +254,6 @@ extension View {
                        message: "It stays on past invoices and estimates.",
                        actions: [ThorbisConfirmAction("Remove", role: .destructive) {}],
                        onChoose: { _ in }, onCancel: {})
-    .background(Theme.background)
+    .background(Theme.canvas)
 }
 #endif

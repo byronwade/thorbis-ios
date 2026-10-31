@@ -378,7 +378,7 @@ struct JobToolTile: View {
             }
             .padding(.horizontal, 4).padding(.vertical, 10)
             .frame(maxWidth: .infinity, minHeight: 84)
-            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.cardRadius)
             .opacity(enabled ? 1 : 0.45)
             .contentShape(Rectangle())
         }

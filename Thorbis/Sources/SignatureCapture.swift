@@ -84,7 +84,7 @@ struct SignatureCaptureSheet: View {
                 }
             }
             .padding(20)
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .navigationTitle("Customer signature")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -198,6 +198,6 @@ struct SignatureBadge: View {
         .foregroundStyle(Theme.success)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .panelBackground(cornerRadius: Theme.cardRadius)
     }
 }

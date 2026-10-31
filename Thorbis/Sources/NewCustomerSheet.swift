@@ -82,7 +82,7 @@ struct NewCustomerSheet: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
@@ -168,7 +168,7 @@ struct NewCustomerSheet: View {
             .buttonStyle(.plain)
         }
         .padding(14)
-        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .panelBackground(cornerRadius: Theme.cardRadius)
         .accessibilityElement(children: .contain)
     }
 

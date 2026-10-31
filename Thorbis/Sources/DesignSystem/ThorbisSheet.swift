@@ -34,7 +34,7 @@ extension View {
         self
             .presentationDetents(detents)
             .presentationDragIndicator(.visible)
-            .presentationBackground(Theme.surface)
+            .thorbisSheetSurface()
     }
 }
 
@@ -349,3 +349,11 @@ struct DisplayOptions: Equatable {
     return Color.clear.sheet(isPresented: .constant(true)) { Demo() }
 }
 #endif
+
+/// A sheet's content on the panel (`thorbisSheetSurface`): wrap a `.sheet` content closure that
+/// shows an app screen or an editor, so screens in sheets share one ground with the modals.
+/// System UI (share, Safari, Quick Look, Mail, Calendar and Contacts editors) stays native.
+struct SheetSurface<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    var body: some View { content().thorbisSheetSurface() }
+}

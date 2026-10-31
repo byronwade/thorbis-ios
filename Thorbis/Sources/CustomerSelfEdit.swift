@@ -388,7 +388,7 @@ struct CustomerModeContainer<Content: View>: View {
             Group {
                 if handingBack { handBackScreen } else { content({ handingBack = true }) }
             }
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ownerToolbar }
@@ -654,7 +654,7 @@ struct CustomerSelfEditForm: View {
                 .frame(maxWidth: CustomerModeStyle.readableWidth)
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
                 .frame(maxWidth: .infinity)
-                .background(Theme.background)
+                .background(Theme.canvas)
             }
         } else if let loadError = model.loadError {
             ScrollView {
@@ -704,7 +704,7 @@ struct CustomerSelfEditForm: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
             .frame(minHeight: 68, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+            .panelBackground(cornerRadius: 12)
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(error == nil ? Theme.border : Theme.destructive))
             if let error { Text(error).font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.destructive) }
         }
@@ -732,7 +732,7 @@ struct CustomerSelfEditReview: View {
     var body: some View {
         NavigationStack {
             Group { if model.savedAll { saved } else { review } }
-                .background(Theme.background.ignoresSafeArea())
+                .background(Theme.canvas)
                 .foregroundStyle(Theme.foreground)
                 .navigationTitle("Customer view")
                 .navigationBarTitleDisplayMode(.inline)
@@ -755,7 +755,7 @@ struct CustomerSelfEditReview: View {
                     }
                 }
                 .padding(.horizontal, 14)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                .panelBackground(cornerRadius: 12)
                 if let saveError = model.saveError {
                     Text(saveError).font(Theme.customerFont(13)).foregroundStyle(Theme.destructive)
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -775,7 +775,7 @@ struct CustomerSelfEditReview: View {
             .frame(maxWidth: CustomerModeStyle.readableWidth)
             .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(Theme.background)
+            .background(Theme.canvas)
         }
     }
 

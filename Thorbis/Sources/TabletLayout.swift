@@ -75,7 +75,7 @@ struct TabletReadable: ViewModifier {
             content
                 .frame(maxWidth: width)
                 .frame(maxWidth: .infinity)
-                .background(Theme.background.ignoresSafeArea())
+                .background(Theme.canvas)
         } else {
             content
         }
@@ -162,7 +162,7 @@ struct TabletRoot: View {
                             .accessibilityLabel("Close sidebar")
                             .accessibilityAddTraits(.isButton)
                         sidebar(fold: { withAnimation(motion) { sidebarOpen = false } })
-                            .background(Theme.background.ignoresSafeArea())
+                            .background(Theme.canvas)
                             .shadow(color: .black.opacity(0.18), radius: 24, x: 4)
                             .transition(.move(edge: .leading))
                     }
@@ -170,7 +170,7 @@ struct TabletRoot: View {
                 }
             }
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         // iPad: the sidebar holds Create and Settings, so no header menu circle or floating + pill.
         .environment(\.paperMenuButton, false)
@@ -181,22 +181,22 @@ struct TabletRoot: View {
             let run = afterSearch
             afterSearch = nil
             run?()
-        }) { PaperGlobalSearch(initialQuery: searchSeed, actions: searchActions) }
-        .sheet(isPresented: $settings) { SettingsView() }
-        .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
-        .sheet(isPresented: $createJob) { NewJobSheet() }
-        .sheet(isPresented: $newEstimate) { NewEstimateView() }
-        .sheet(isPresented: $newCustomer) { NewCustomerSheet() }
+        }) { SheetSurface { PaperGlobalSearch(initialQuery: searchSeed, actions: searchActions) } }
+        .sheet(isPresented: $settings) { SheetSurface { SettingsView() } }
+        .sheet(isPresented: $workspace) { SheetSurface { WorkspaceSelectionView() } }
+        .sheet(isPresented: $createJob) { SheetSurface { NewJobSheet() } }
+        .sheet(isPresented: $newEstimate) { SheetSurface { NewEstimateView() } }
+        .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet() } }
         .sheet(isPresented: $createMenuOpen, onDismiss: {
             let run = pendingCreate
             pendingCreate = nil
             run?()
-        }) {
+        }) { SheetSurface {
             ThorbisMenuCard(items: createChoices, title: "Create") { item in
                 pendingCreate = item.action
                 createMenuOpen = false
             }
-        }
+        } }
         .onChange(of: scheduleSelection) { path = NavigationPath() }
         .onChange(of: scheduleRange) { path = NavigationPath() }
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob() }
@@ -269,7 +269,7 @@ struct TabletRoot: View {
     private var detailStack: some View {
         NavigationStack(path: $path) {
             detailRoot
-                .background(Theme.background)
+                .background(Theme.canvas)
                 .paperDestinations()
         }
         .environment(\.paperReadableWidth, Self.readableWidth)
@@ -355,7 +355,7 @@ struct TabletRoot: View {
             if !createChoices.isEmpty { createButton }
         }
         .padding(.horizontal, 12).frame(height: 56)
-        .background(Theme.background)
+        .background(Theme.canvas)
     }
 
     private var createButton: some View {
@@ -647,7 +647,7 @@ struct TabletSidebar: View {
         }
         .padding(.vertical, 12).padding(.horizontal, 12)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
     }
 
@@ -656,7 +656,7 @@ struct TabletSidebar: View {
             HStack(spacing: 10) {
                 Image("ThorbisMark").resizable().scaledToFit().padding(5)
                     .frame(width: 30, height: 30)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .panelBackground(cornerRadius: 8)
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.border))
                     .accessibilityHidden(true)
                 Text(session.activeOrganization?.name ?? "Workspace")
@@ -717,7 +717,7 @@ struct TabletSidebar: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.cardRadius)
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
             .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
@@ -745,7 +745,7 @@ struct TabletSearchField: View {
             .foregroundStyle(Theme.muted)
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: compact ? 40 : 44)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.controlRadius)
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.border))
             .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         }
@@ -815,7 +815,7 @@ struct TabletWeekBoard: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .refreshable { await store.refresh(api) }
     }
@@ -851,7 +851,7 @@ struct TabletWeekBoard: View {
                     ForEach(members) { job in card(job) }
                 }
                 .padding(4)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                .panelBackground(cornerRadius: Theme.cardRadius)
                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
                 .padding(.bottom, 16)
             }

@@ -44,6 +44,26 @@ final class TodayStopCardsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["drawer-search"].waitForExistence(timeout: 5), "The edge swipe should open the drawer")
     }
 
+    /// The phone's saved copy opens first, then the server's answer: when the saved copy had another
+    /// stop under way (here 2209, in progress on the Jobs preview), the answer finishes it and the
+    /// stops reorder. The pager must then open on the stop under way by the server's word, with that
+    /// card on screen, not a different card under the focus (the order-dependent failure, #131).
+    func testOpensOnTheRightStopWhenTheSavedCopyWasStale() {
+        let seed = XCUIApplication()
+        seed.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "tech"]
+        seed.launch()
+        XCTAssertTrue(seed.buttons["drawer-menu"].waitForExistence(timeout: 30))
+        sleep(2)
+        seed.terminate()
+        let app = launch()
+        let card = stopCard(app, dispatched)
+        XCTAssertTrue(card.waitForExistence(timeout: 30), "Today should open on the dispatched 10:30 stop")
+        XCTAssertTrue(card.label.hasPrefix("Stop 3 of 6"), card.label)
+        let pager = app.descendants(matching: .any).matching(identifier: "today-stop-cards").firstMatch
+        XCTAssertGreaterThanOrEqual(card.frame.minX, pager.frame.minX - 1, "The focused card is the one on screen")
+        XCTAssertLessThanOrEqual(card.frame.maxX, app.frame.maxX + 1, "The focused card is the one on screen")
+    }
+
     func testToggleSwitchesToTheListAndBack() {
         let app = launch()
         XCTAssertTrue(stopCard(app, dispatched).waitForExistence(timeout: 30))

@@ -216,7 +216,7 @@ struct JobBookingCallSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             // v2 Record room: no box around the section (never a 1px rim); its words meet the label.
             .padding(.horizontal, recordRoom ? RecordRoom.labelInset : 14).padding(.vertical, recordRoom ? 6 : 14)
-            .background(recordRoom ? Color.clear : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .background(recordRoom ? AnyShapeStyle(Color.clear) : AnyShapeStyle(ThorbisPanelStyle()), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
         .onDisappear { player.stop() }
     }

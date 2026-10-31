@@ -58,7 +58,7 @@ struct EstimatesView: View {
             .environment(\.paperRowInset, ListRoom.gutter)
             .padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Title, customer or EST number")
@@ -68,7 +68,7 @@ struct EstimatesView: View {
             // Neutral like the back button beside it; blue stays for links and selection.
             if session.can("estimate.create", feature: "estimates") { Button("New estimate", systemImage: "plus") { showCreate = true }.tint(Theme.foreground) }
         }
-        .sheet(isPresented: $showCreate, onDismiss: { Task { await load() } }) { NewEstimateView() }
+        .sheet(isPresented: $showCreate, onDismiss: { Task { await load() } }) { SheetSurface { NewEstimateView() } }
     }
     private func load() async {
         loading = true
@@ -224,7 +224,7 @@ struct EstimateDetailView: View {
 
     var body: some View {
         scrollContent
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -246,14 +246,14 @@ struct EstimateDetailView: View {
         .sensoryFeedback(.success, trigger: succeeded)
         .thorbisConfirm("\(action) this estimate?", isPresented: $confirm,
                         actions: [ThorbisConfirmAction(action, role: action == "Decline" ? .destructive : nil) { Task { await performAction() } }])
-        .sheet(isPresented: $showRevisionEditor) {
+        .sheet(isPresented: $showRevisionEditor) { SheetSurface {
             if let record {
                 EstimateRevisionEditorView(estimate: record) { revised in
                     self.record = revised
                     error = nil
                 }
             }
-        }
+        } }
         .task { await loadAndMaybePresent() }
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
         .fullScreenCover(isPresented: $showToCustomer) {
@@ -420,7 +420,7 @@ struct InvoicesView: View {
             .environment(\.paperRowInset, ListRoom.gutter)
             .padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Customer or INV number")
@@ -525,7 +525,7 @@ struct InvoiceDetailView: View {
         #if DEBUG
         .modifier(PaperPreviewScrollAnchor())
         #endif
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -543,7 +543,7 @@ struct InvoiceDetailView: View {
             CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar)
         }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
-        .sheet(isPresented: $showSignature) {
+        .sheet(isPresented: $showSignature) { SheetSurface {
             if let record, let jobID = record.jobId {
                 let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                 SignatureCaptureSheet(title: "Sign for \(money(total, currency: record.currency))",
@@ -555,7 +555,7 @@ struct InvoiceDetailView: View {
                     } catch { return error.localizedDescription }
                 }
             }
-        }
+        } }
         .safeAreaInset(edge: .bottom) {
             if let paymentModel {
                 InvoiceDetailFooter(
@@ -570,13 +570,13 @@ struct InvoiceDetailView: View {
             } else if let record, record.status == "draft", session.can("invoice.issue", feature: "invoicing") {
                 PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
                     .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
-                    .background(Theme.background)
+                    .background(Theme.canvas)
             }
         }
         .sensoryFeedback(.success, trigger: issued)
         .thorbisConfirm("Issue this invoice? Its line items will become final.", isPresented: $confirmIssue,
                         actions: [ThorbisConfirmAction(issueCollects ? "Issue and collect" : "Issue invoice") { Task { await issueThenCollect() } }])
-        .sheet(isPresented: $showEditDraft) {
+        .sheet(isPresented: $showEditDraft) { SheetSurface {
             if let record {
                 NavigationStack {
                     InvoiceLineEditorView(invoice: record) { updated in
@@ -590,7 +590,7 @@ struct InvoiceDetailView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
-        }
+        } }
         .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
             if collectAfterCustomer { collectAfterCustomer = false; showCollectPayment = true }
         }) {
@@ -619,7 +619,7 @@ struct InvoiceDetailView: View {
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
-                    .presentationBackground(Theme.surface)
+                    .thorbisSheetSurface()
                     .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
@@ -850,7 +850,7 @@ extension View {
     /// costume, so there is no rim).
     func documentPanel() -> some View {
         clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.cardRadius)
     }
 }
 

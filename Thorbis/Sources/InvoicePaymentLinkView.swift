@@ -50,7 +50,7 @@ struct InvoicePaymentLinkView: View {
             }
             .refreshable { await model.load() }
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Payment link")
         .navigationBarTitleDisplayMode(.inline)

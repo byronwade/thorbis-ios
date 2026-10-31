@@ -35,6 +35,15 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   space with 20pt padding, fields as sunk wells (`ThorbisSheetField`: label, well, one slot for
   help or the error), one ink commit in the pad. Never pre-disable the commit; when it must be
   off, `commitDisabledReason` / `PaperActionBar(disabledReason:)` says why.
+- **Every sheet is on the panel:** a sheet that shows a whole screen (Settings, an invoice's lines,
+  a NavigationStack) wraps its `.sheet` content in `SheetSurface { … }` (or calls
+  `.thorbisSheetSurface()` outside the stack); `thorbisSheetPresentation` does the same. Inside,
+  `Theme.canvas` (a screen's ground: `background` on a route, `surface` in a sheet) and
+  `.panelBackground(cornerRadius:)` / `ThorbisPanelStyle` (a group's ground: the panel on a route,
+  the sink with its 1px rim in a sheet) follow the `thorbisSheetCanvas` environment, so one screen
+  reads right as a route and in a sheet. Never paint a screen `Theme.background` directly. System
+  UI (share, Safari, Quick Look, Mail, Calendar, Contacts, camera and scanner covers) and customer
+  mode covers stay as they are.
 - **Popovers:** `ThorbisMenu` is an anchored `.popover` with compact adaptation: overlay depth,
   ~44pt rows, a leading mark, a check on the current value, destructive rows in their own group,
   a 120ms fade. Status, the ••• overflow, selects and filters all use it.

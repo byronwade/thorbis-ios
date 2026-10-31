@@ -122,12 +122,12 @@ struct ServiceLocationSheet: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
         .foregroundStyle(Theme.foreground)
-        .background(Theme.card)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
         .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(Theme.cardRadius)
-        .presentationBackground(Theme.card)
+        .thorbisSheetSurface()
         .interactiveDismissDisabled(busy)
     }
 
@@ -155,7 +155,7 @@ struct ServiceLocationSheet: View {
                 .onSubmit { focusedField = next(after: field) }
                 .padding(.horizontal, 14)
                 .frame(minHeight: multiline ? 70 : 48, maxHeight: multiline ? 84 : 48, alignment: .topLeading)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                         .stroke(focusedField == field ? Theme.foreground : Theme.border,

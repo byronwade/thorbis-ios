@@ -64,7 +64,7 @@ private struct SearchRouteContent: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("bar-search-results")
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {

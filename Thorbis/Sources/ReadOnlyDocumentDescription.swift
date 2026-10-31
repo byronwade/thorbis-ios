@@ -72,7 +72,7 @@ struct ReadOnlyDocumentDescription: View {
                 .contentShape(Rectangle())
             }
         }
-        .sheet(item: $opening) { snapshot in
+        .sheet(item: $opening) { snapshot in SheetSurface {
             if snapshot.access == access && snapshot.session == DescriptionSessionIdentity(session) && access.permits(session) {
                 NavigationStack {
                     ScrollView {
@@ -85,11 +85,11 @@ struct ReadOnlyDocumentDescription: View {
                     .navigationTitle("Description")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Done") { opening = nil } } }
-                    .background(Theme.background)
+                    .background(Theme.canvas)
                 }
                 .presentationDetents([.large])
             }
-        }
+        } }
         .onChange(of: text) { _, _ in opening = nil }
         .onChange(of: access) { _, _ in opening = nil }
         .onChange(of: session.authorityRevision) { _, _ in opening = nil }

@@ -122,7 +122,7 @@ struct RowSwipeContainer<Content: View>: View {
 
     var body: some View {
         content()
-            .background(Theme.background)
+            .background(Theme.canvas)
             .overlay {
                 // An open row closes on a tap instead of opening the record under it.
                 if offset != 0 && !dragging {

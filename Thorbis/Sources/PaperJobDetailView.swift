@@ -191,7 +191,7 @@ struct JobDetailView: View {
                         .padding(.top, selectedTab == "Overview" ? (isOnSite ? 12 : 14) : 8)
                         .padding(.bottom, 28)
                     } header: {
-                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.background) }
+                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.canvas) }
                     }
                     }
                     }
@@ -235,12 +235,12 @@ struct JobDetailView: View {
                 Spacer(minLength: 0)
             }
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         // v2 Record room: sections are space and a 13 Medium label, no panels ("the page is one pour").
         .environment(\.paperRecordRoom, true)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(Theme.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
@@ -257,12 +257,12 @@ struct JobDetailView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: wrapUpTaps)
         .thorbisConfirm("Complete this job?", message: "Everything before wrap up is done.", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await completeHere() } }])
-        .sheet(isPresented: $showDeposit) {
+        .sheet(isPresented: $showDeposit) { SheetSurface {
             JobDepositSheet(jobID: jobId) { invoice in
                 selectedInvoiceID = invoice.id
                 Task { await loadInvoices() }
             }
-        }
+        } }
         .thorbisDestination(item: $documentInvoiceID) { id in
             InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) })
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
@@ -275,17 +275,17 @@ struct JobDetailView: View {
             EstimateDetailView(id: opened.id, jobID: jobId, presentsOnOpen: opened.present)
                 .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices(); await loadCloseout() } } }
         }
-        .sheet(isPresented: $showScan) {
+        .sheet(isPresented: $showScan) { SheetSurface {
             if let job { DataPlateScannerSheet(job: job) { showScan = false; Task { await load() } } }
-        }
-        .sheet(isPresented: $showChecklist) {
+        } }
+        .sheet(isPresented: $showChecklist) { SheetSurface {
             if let job { JobChecklistSheet(job: job) { showChecklist = false; Task { await load() } } }
-        }
+        } }
         .thorbisDestination(isPresented: $showWrapUp) {
             JobCloseoutView(jobID: jobId, place: job.flatMap { street($0) }).onDisappear { Task { await loadCloseout() } }
         }
         // Add part: the price book on the job's draft invoice, as the invoice screen edits it.
-        .sheet(item: $partsInvoice, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) { invoice in
+        .sheet(item: $partsInvoice, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) { invoice in SheetSurface {
             NavigationStack {
                 InvoiceLineEditorView(invoice: invoice) { updated in
                     updateInvoice(updated)
@@ -293,9 +293,9 @@ struct JobDetailView: View {
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
-        }
+        } }
         // v2: assigning a tech is a modal (one task), not a pushed page.
-        .sheet(isPresented: $showAssign, onDismiss: { Task { await load() } }) { JobAssignmentView(jobID: jobId) }
+        .sheet(isPresented: $showAssign, onDismiss: { Task { await load() } }) { SheetSurface { JobAssignmentView(jobID: jobId) } }
         .task {
             #if DEBUG
             // Screenshot-only: the job's modals open over the job (job-assign, --paper-preview-pause).
@@ -313,14 +313,14 @@ struct JobDetailView: View {
         .sheet(isPresented: $showNewEstimate, onDismiss: {
             // A saved estimate opens next, so the tech reviews it and hands it over (TF-06).
             if let id = createdEstimateID { createdEstimateID = nil; openEstimate = OpenedEstimate(id: id, present: false) }
-        }) {
+        }) { SheetSurface {
             if let job {
                 NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { estimate in
                     createdEstimateID = estimate.id
                     Task { await loadJobEstimates(job) }
                 }
             }
-        }
+        } }
         .task(id: customerAuthorityToken) {
             if customerAuthorityID != customerAuthorityToken {
                 customerAuthorityID = customerAuthorityToken
@@ -435,7 +435,7 @@ struct JobDetailView: View {
                     }
             } else if !typeSize.isAccessibilitySize { primaryAction }
         }
-        .sheet(isPresented: $showPause) {
+        .sheet(isPresented: $showPause) { SheetSurface {
             // v2 modal: two sunk fields, one ink commit in the sheet's pad. The commit is never
             // pre-disabled: pressing it says what is missing under the field. The form keeps what was typed.
             ThorbisModalSheet(title: "Pause job", closeLabel: "Cancel", onClose: { showPause = false },
@@ -452,19 +452,19 @@ struct JobDetailView: View {
                 }
             }
             .interactiveDismissDisabled(busy || !reason.isEmpty || !nextAction.isEmpty)
-        }
-        .sheet(isPresented: $showSchedule, onDismiss: { Task { await load() } }) {
+        } }
+        .sheet(isPresented: $showSchedule, onDismiss: { Task { await load() } }) { SheetSurface {
             if let job {
                 JobScheduleView(job: job) { updatedJob in
                     self.job = updatedJob
                 }
             }
-        }
+        } }
         // A payment changes the balance the next step reads, wherever it was collected from.
         .sheet(isPresented: $showCollectPayment, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) {
             if let invoice = selectedInvoice, let model = invoicePaymentModel {
                 InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
-                    .presentationBackground(Theme.surface)
+                    .thorbisSheetSurface()
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
@@ -1010,7 +1010,7 @@ struct JobDetailView: View {
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-            .background(Theme.background)
+            .background(Theme.canvas)
         }
     }
 
@@ -2033,7 +2033,7 @@ struct JobDetailView: View {
                     .lineLimit(1...6)
                     .focused($noteFocused)
                     .padding(.horizontal, 16).padding(.vertical, 12)
-                    .background(Theme.well, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                    .panelBackground(cornerRadius: 23)
                     .accessibilityIdentifier("job-note-field")
                 DictateNoteButton(isListening: dictation.isListening) {
                     if dictation.isListening { dictation.stop(); return }
@@ -2240,7 +2240,7 @@ struct JobDetailView: View {
         Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.cardRadius)
     }
 
     /// TF-01: the one next step for this job, from its status, its estimates and its invoices.

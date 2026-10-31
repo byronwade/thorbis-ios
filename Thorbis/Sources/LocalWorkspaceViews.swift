@@ -280,7 +280,7 @@ struct LocalWorkspaceView: View {
             }
             .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             PaperActionBar(title: "Add to \(section.title.lowercased())", symbol: "plus", disabled: !bound) {
@@ -293,7 +293,7 @@ struct LocalWorkspaceView: View {
             actionError = nil
             model.bind(actorID: actorID, organizationID: organizationID)
         }
-        .sheet(item: $editor) { draft in
+        .sheet(item: $editor) { draft in SheetSurface {
             if editorOwner == identityKey && model.actorID == actorID && model.organizationID == organizationID {
                 LocalWorkspaceEditor(section: section, draft: draft) { saved in
                     guard editorOwner == identityKey && model.actorID == actorID && model.organizationID == organizationID else {
@@ -305,7 +305,7 @@ struct LocalWorkspaceView: View {
             } else {
                 Text("Session changed").foregroundStyle(.secondary)
             }
-        }
+        } }
     }
 }
 
@@ -348,7 +348,7 @@ private struct LocalWorkspaceEditor: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
                 PaperActionBar(title: "Save", disabled: section.fields.filter { $0.required }.contains { draft.required($0.key).isEmpty }) {
