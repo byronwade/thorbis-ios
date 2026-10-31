@@ -455,16 +455,16 @@ private struct CustomerJobReadOnlyPaper: View {
         }
     }
 
-    /// A section label at customer size (17pt): the customer reads this screen, not the tech.
-    private func customerSectionLabel(_ title: String, count: Int? = nil) -> some View {
-        Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
-            .font(Theme.font(17, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
-            .accessibilityAddTraits(.isHeader)
-            .frame(minHeight: 32, alignment: .leading)
-    }
-
     @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, type: CustomerType) -> some View {
         CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: lines, type: type, rows: paperLinesTotal(lines).map { [CustomerAmountRow(label: "Total", amount: money($0, currency: currency), emphasis: true)] } ?? [])
     }
+}
+
+/// A section label at customer size (17pt): the customer reads this screen, not the tech.
+private func customerSectionLabel(_ title: String, count: Int? = nil) -> some View {
+    Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
+        .font(Theme.font(17, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+        .accessibilityAddTraits(.isHeader)
+        .frame(minHeight: 32, alignment: .leading)
 }
