@@ -586,7 +586,7 @@ struct RootView: View {
             if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
             if PaperPreview.screen == "estimate-revision" || PaperPreview.screen == "estimate-draft" { previewEstimateRevision = true; return }
             switch PaperPreview.screen {
-            case "jobs": primaryTab = .jobs
+            case "jobs", "jobs-filters": primaryTab = .jobs
             case "my-day", "schedule": primaryTab = .schedule
             case "customers": primaryTab = .customers
             case "menu", "more": primaryTab = .more

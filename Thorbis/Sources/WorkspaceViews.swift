@@ -655,16 +655,47 @@ private struct PriceBookLocalDetail: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
-            List {
-                Section("Description") { Text(PriceBookPresentation.readableDescription(item.description)).textSelection(.enabled) }
-                LabeledContent("Price") { Text(money(item.sellPrice.amount, currency: item.sellPrice.currency)) }
-                LabeledContent("Unit", value: item.unit)
-                LabeledContent("Kind", value: item.kind.capitalized)
-                if item.archivedAt != nil { LabeledContent("Status", value: "Archived") }
+            ScrollView {
+                PriceBookItemSummary(description: item.description,
+                                     price: money(item.sellPrice.amount, currency: item.sellPrice.currency),
+                                     facts: [("Unit", item.unit), ("Kind", item.kind.capitalized)]
+                                        + (item.archivedAt != nil ? [("Status", "Archived")] : []))
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
+            .background(Theme.background)
             .navigationTitle("Price book item")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+/// A price book item read top-down: the price, the name and full description, then its facts.
+private struct PriceBookItemSummary: View {
+    let description: String
+    let price: String
+    let facts: [(String, String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(price).font(Theme.font(34, weight: .medium)).monospacedDigit()
+                Text(PriceBookPresentation.title(description)).font(Theme.font(20, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 4)
+            PaperSection("Description") {
+                Text(PriceBookPresentation.readableDescription(description)).font(Theme.font(16))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(PaperCardMetrics.inset)
+            }
+            PaperSection("Details") {
+                VStack(spacing: 0) {
+                    ForEach(facts, id: \.0) { fact in PaperDetailRow(fact.0, value: fact.1).cardRow() }
+                }
+                .padding(.vertical, PaperCardMetrics.edge)
+            }
         }
     }
 }
@@ -680,28 +711,34 @@ private struct WorkspacePriceBookDetailView: View {
     @State private var confirmArchive = false
 
     var body: some View {
-        List {
-            if let error { Text(error).foregroundStyle(Theme.destructive) }
-            if let detail {
-                Section("Description") {
-                    Text(PriceBookPresentation.readableDescription(detail.revision.description))
-                        .textSelection(.enabled)
-                }
-                LabeledContent("Price") { Text(money(detail.revision.sellPrice.amount, currency: detail.revision.sellPrice.currency)).moneyStyle(.total) }
-                LabeledContent("Unit", value: detail.revision.unit)
-                LabeledContent("Kind", value: detail.revision.kind.capitalized)
-                LabeledContent("Tax", value: detail.revision.taxClassification.replacingOccurrences(of: "_", with: " ").capitalized)
-                if detail.item.status != "active" { LabeledContent("Status", value: detail.item.status.capitalized) }
-                if canEdit && detail.item.status == "active" {
-                    Section {
-                        Button("Remove from price book", role: .destructive) { confirmArchive = true }
-                    } footer: {
-                        Text("Estimates and invoices that already use it keep their prices.")
+        // design 2026-10-30: price first, the full description, the facts on one panel.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
+                if let detail {
+                    PriceBookItemSummary(description: detail.revision.description,
+                                         price: money(detail.revision.sellPrice.amount, currency: detail.revision.sellPrice.currency),
+                                         facts: [("Unit", detail.revision.unit), ("Kind", detail.revision.kind.capitalized),
+                                                 ("Tax", detail.revision.taxClassification.replacingOccurrences(of: "_", with: " ").capitalized)]
+                                            + (detail.item.status != "active" ? [("Status", detail.item.status.capitalized)] : []))
+                    if canEdit && detail.item.status == "active" {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Button { confirmArchive = true } label: {
+                                Text("Remove from price book").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.destructive)
+                                    .frame(minHeight: 44)
+                            }
+                            .buttonStyle(PressStyle())
+                            Text("Estimates and invoices that already use it keep their prices.")
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        }
+                        .padding(.horizontal, 4)
                     }
+                } else if error == nil {
+                    SkeletonRows(count: 3, leading: false, inset: 0)
                 }
             }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
         }
-        .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("Price book item")
         .toolbar(.visible, for: .navigationBar)
