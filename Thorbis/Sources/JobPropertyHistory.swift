@@ -31,6 +31,8 @@ struct JobPropertyHistory: Codable, Hashable {
         /// "You" or "Another tech": visit history carries a user id, not a name.
         let technician: String?
         let status: String
+        /// What was done, from the visit's own notes, when it has any.
+        var notes: String? = nil
     }
 
     let organizationId: String
@@ -53,16 +55,8 @@ struct JobPropertyHistory: Codable, Hashable {
     static func make(job: JobRecord, locations: [ServiceLocationRecord], equipment: [EquipmentRecord],
                      visits: [JobVisitRecord], listedJobs: [Job], currentUserID: String?,
                      now: Date = .now) -> JobPropertyHistory {
-        let ownLocations = locations.filter { $0.customerId == job.customerId && $0.organizationId == job.organizationId }
         let scope: Scope = job.locationId == nil ? .customer : .address
-        let place: ServiceLocationRecord?
-        if let locationID = job.locationId {
-            place = ownLocations.first { $0.id == locationID }
-        } else {
-            // Without a job site, access facts are shown only when the account has one service address.
-            let service = ownLocations.filter { $0.kind != "billing" }
-            place = service.count == 1 ? service.first : nil
-        }
+        let place = accessPlace(job: job, locations: locations)
 
         let units = equipment
             .filter { $0.customerId == job.customerId }
@@ -81,12 +75,36 @@ struct JobPropertyHistory: Codable, Hashable {
             .map { visit in
                 Visit(id: visit.id, title: visit.title, date: visit.when,
                       technician: visit.assignedToUserId.map { $0 == currentUserID ? "You" : "Another tech" },
-                      status: visit.status)
+                      status: visit.status,
+                      notes: visit.notes.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 })
             }
 
         return JobPropertyHistory(organizationId: job.organizationId, jobId: job.id, customerId: job.customerId,
                                   scope: scope, place: place.map(placeLine), facts: place.map(facts) ?? [],
                                   equipment: units, visits: Array(shownVisits))
+    }
+
+    /// The place whose access facts apply: the job's own location, or, without one, the account's
+    /// only service address (shown with that caveat). Never a guess between several addresses.
+    static func accessPlace(job: JobRecord, locations: [ServiceLocationRecord]) -> ServiceLocationRecord? {
+        let ownLocations = locations.filter { $0.customerId == job.customerId && $0.organizationId == job.organizationId }
+        if let locationID = job.locationId {
+            return ownLocations.first { $0.id == locationID }
+        }
+        // Without a job site, access facts are shown only when the account has one service address.
+        let service = ownLocations.filter { $0.kind != "billing" }
+        return service.count == 1 ? service.first : nil
+    }
+
+    /// The job's street (the first line of its own location's address), or nil when the job
+    /// records no site (BYR-1593). The account's addresses are never promoted to the job site.
+    static func street(job: JobRecord, locations: [ServiceLocationRecord]) -> String? {
+        guard let locationID = job.locationId,
+              let place = locations.first(where: { $0.id == locationID && $0.customerId == job.customerId && $0.organizationId == job.organizationId })
+        else { return nil }
+        let first = place.address.split(separator: ",", maxSplits: 1).first.map(String.init) ?? place.address
+        let street = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        return street.isEmpty ? nil : street
     }
 
     static func facts(_ place: ServiceLocationRecord) -> [Fact] {
@@ -137,10 +155,16 @@ enum JobPropertyHistoryLayout {
     }
 }
 
-/// The Overview section. It reads equipment on its own, after the job is on screen, and shows the
-/// last copy saved on this phone when a source can't be read (offline). Hidden when there's nothing.
+
+/// The Overview's history, in two panels (Job.dc.html): "At this address" (access facts and
+/// equipment) and "Past visits here". The place part reads equipment on its own, after the job is
+/// on screen, and saves the last copy on this phone; both parts show that copy when a source
+/// can't be read (offline). Each part is hidden when it has nothing to show.
 struct JobPropertyHistorySection: View {
+    enum Part { case place, visits }
+
     let job: JobRecord
+    var part: Part = .place
     /// The customer's locations, already checked against the current customer context.
     let locations: [ServiceLocationRecord]
     let locationsLoaded: Bool
@@ -157,7 +181,12 @@ struct JobPropertyHistorySection: View {
 
     private var canViewCustomer: Bool { session.can("customer.view", feature: "core_crm") }
     private var canEditEquipment: Bool { session.can("customer.edit", feature: "core_crm") }
-    private var ready: Bool { visitsLoaded && equipment != nil && (locationsLoaded || !canViewCustomer) }
+    private var ready: Bool {
+        switch part {
+        case .place: visitsLoaded && equipment != nil && (locationsLoaded || !canViewCustomer)
+        case .visits: visitsLoaded
+        }
+    }
 
     private var live: JobPropertyHistory {
         JobPropertyHistory.make(job: job, locations: locations, equipment: equipment ?? [], visits: visits,
@@ -179,15 +208,20 @@ struct JobPropertyHistorySection: View {
         // A zero-size anchor keeps the load task alive while nothing is shown.
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(width: 0, height: 0)
-            if !history.isEmpty { content(history, savedAt: savedAt) }
+            switch part {
+            case .place:
+                if !history.facts.isEmpty || !history.equipment.isEmpty { placePanel(history, savedAt: savedAt) }
+            case .visits:
+                if !history.visits.isEmpty { visitsPanel(history, savedAt: savedAt) }
+            }
         }
-        .accessibilityIdentifier("job-property-history")
-        .task(id: "\(job.customerId)|\(session.generation.uuidString)") {
+        .accessibilityIdentifier(part == .place ? "job-property-history" : "job-property-visits")
+        .task(id: "\(job.customerId)|\(session.generation.uuidString)|\(part == .place)") {
             cached = JobDetailCache.history(job.id)
-            await loadEquipment()
+            if part == .place { await loadEquipment() }
         }
-        .task(id: ready ? live : nil) {
-            guard ready else { return }
+        .task(id: ready && part == .place ? live : nil) {
+            guard ready, part == .place else { return }
             JobDetailCache.save(history: live)
         }
         .sheet(item: $editing) { item in
@@ -195,62 +229,46 @@ struct JobPropertyHistorySection: View {
         }
     }
 
-    @ViewBuilder
-    private func content(_ history: JobPropertyHistory, savedAt: Date?) -> some View {
-        let rows = expanded ? (history.equipment[...], history.visits[...]) : JobPropertyHistoryLayout.collapsed(history)
-        VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: history.title)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("job-property-history-title")
+    private func savedLine(_ savedAt: Date?) -> some View {
+        Group {
             if let savedAt {
                 Text("Saved on this phone \(savedAt.formatted(.relative(presentation: .named)))")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.bottom, 4)
-            }
-            if !history.facts.isEmpty { accessFacts(history) }
-            ForEach(rows.0) { unit in equipmentRow(unit) }
-            ForEach(rows.1) { visit in visitRow(visit) }
-            if JobPropertyHistoryLayout.needsShowAll(history) {
-                Button { withMotion(.snappy) { expanded.toggle() } } label: {
-                    Text(expanded ? "Show less" : "Show all \(history.equipment.count + history.visits.count)")
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("job-property-history-show-all")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 16).padding(.top, 10)
             }
         }
     }
 
-    /// Safety first: a warning mark on the heading, each fact on its own row. No card, no border.
-    private func accessFacts(_ history: JobPropertyHistory) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.warning)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Before you go in").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    if let place = history.place {
-                        Text(history.scope == .address ? place : "\(place) · only address on file")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+    @ViewBuilder
+    private func placePanel(_ history: JobPropertyHistory, savedAt: Date?) -> some View {
+        let units = expanded || history.equipment.count <= JobPropertyHistoryLayout.collapsedRows + 1
+            ? history.equipment[...] : history.equipment.prefix(JobPropertyHistoryLayout.collapsedRows)
+        JobPanelSection(title: history.title,
+                        actionTitle: history.equipment.count > JobPropertyHistoryLayout.collapsedRows + 1 ? (expanded ? "Show less" : "Show all \(history.equipment.count)") : nil,
+                        actionIdentifier: "job-property-history-show-all",
+                        action: { withMotion(.snappy) { expanded.toggle() } }) {
+            savedLine(savedAt)
+            if let place = history.place, !history.facts.isEmpty {
+                Text(history.scope == .address ? place : "\(place) · only address on file")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16).padding(.top, 10)
             }
-            .padding(.vertical, 6)
-            .accessibilityElement(children: .combine)
             ForEach(history.facts) { fact in
                 if fact.isCode {
-                    PaperDetailRow(label: fact.label) { Text(fact.value).font(Theme.monoFont(15, weight: .medium)) }
+                    JobPanelFact(label: fact.label, value: fact.value, mono: true)
                         .contentShape(Rectangle())
                         .contextMenu {
                             Button("Copy \(fact.label.lowercased())", systemImage: "doc.on.doc") { UIPasteboard.general.string = fact.value }
                         }
                         .accessibilityHint("Touch and hold to copy")
                 } else {
-                    PaperDetailRow(fact.label, value: fact.value)
+                    JobPanelFact(label: fact.label, value: fact.value)
                 }
             }
+            ForEach(units) { unit in equipmentRow(unit) }
         }
-        .padding(.bottom, 6)
+        .accessibilityIdentifier("job-property-history-title")
     }
 
     @ViewBuilder
@@ -258,29 +276,37 @@ struct JobPropertyHistorySection: View {
         let record = equipment?.first { $0.id == unit.id }
         if canEditEquipment, let record {
             Button { editing = EquipmentEditorItem(record: record) } label: {
-                PaperMenuRow(unit.name, symbol: "shippingbox", subtitle: unit.detail)
+                JobPanelRow(title: unit.name, subtitle: unit.detail, titleSize: 15)
             }
             .buttonStyle(RowPressStyle())
             .accessibilityHint("Opens the equipment")
         } else {
-            PaperMenuRow(title: unit.name, symbol: "shippingbox", subtitle: unit.detail) { EmptyView() }
+            JobPanelRow(title: unit.name, subtitle: unit.detail, titleSize: 15)
                 .accessibilityElement(children: .combine)
         }
     }
 
-    private func visitRow(_ visit: JobPropertyHistory.Visit) -> some View {
-        NavigationLink(value: PaperRoute.job(visit.id)) {
-            PaperMenuRow(visit.title, symbol: "clock.arrow.circlepath", subtitle: visitLine(visit))
+    private func visitsPanel(_ history: JobPropertyHistory, savedAt: Date?) -> some View {
+        JobPanelSection(title: "\(history.scope == .address ? "Past visits here" : "Past visits") · \(history.visits.count)") {
+            savedLine(savedAt)
+            ForEach(history.visits) { visit in
+                NavigationLink(value: PaperRoute.job(visit.id)) {
+                    JobPanelRow(title: visit.title, subtitle: visitLine(visit),
+                                leading: visit.date?.formatted(.dateTime.month(.abbreviated).day()) ?? "—", titleSize: 15)
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("job-property-visit-\(visit.id)")
+                .accessibilityHint("Opens that job")
+            }
         }
-        .buttonStyle(RowPressStyle())
-        .accessibilityIdentifier("job-property-visit-\(visit.id)")
-        .accessibilityHint("Opens that job")
     }
 
-    /// "Apr 14, 2026 · You · Completed": status always as a word.
+    /// What was done when the visit says so, else "2026 · You · Completed": status always as a word.
     private func visitLine(_ visit: JobPropertyHistory.Visit) -> String {
-        [visit.date?.formatted(.dateTime.month(.abbreviated).day().year()), visit.technician, visit.status.statusLabel]
+        let facts = [visit.date.map { $0.formatted(.dateTime.year()) }, visit.technician, visit.status.statusLabel]
             .compactMap { $0 }.joined(separator: " · ")
+        guard let notes = visit.notes else { return facts }
+        return "\(notes)\n\(facts)"
     }
 
     private func loadEquipment() async {
