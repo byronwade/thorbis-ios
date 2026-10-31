@@ -95,7 +95,8 @@ struct CustomersView: View {
         let summaryJob = JobFiltering.customerJobSummary(jobs, customerID: customer.id, now: now)?.job
         let jobCount = jobs.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
-        return NavigationLink(value: listCustomer) {
+        // iPad selects into the detail column beside the list; iPhone pushes.
+        return PaperSplitLink(id: customer.id, value: listCustomer) {
             // design 2026-10-30: name, where and how many jobs, the open job's state as a word.
             PaperListRow(title: customer.name, subtitle: rowDetail(customer, jobCount: jobCount, open: summaryJob, now: now),
                          dimmed: customer.archived) {

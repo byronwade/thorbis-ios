@@ -29,7 +29,9 @@ struct EstimatesView: View {
                     PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 14)
                         .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                     PaperCardList(data: group) { record in
-                        NavigationLink { EstimateDetailView(id: record.id).thorbisBackButton() } label: {
+                        PaperSplitDestinationLink(id: record.id, value: PaperRoute.estimate(record.id)) {
+                            EstimateDetailView(id: record.id).thorbisBackButton()
+                        } label: {
                             // The status is a word on every row; the tile's colour only reinforces it.
                             PaperDocumentRow(kind: .estimate, reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
                                              subtitle: store.customerName(record.customerId), status: record.status,
@@ -344,7 +346,9 @@ struct InvoicesView: View {
                         .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                     // The subtitle carries the status as a word ("Balance due", "Paid").
                     PaperCardList(data: group) { record in
-                        NavigationLink { InvoiceDetailView(id: record.id).thorbisBackButton() } label: {
+                        PaperSplitDestinationLink(id: record.id, value: PaperRoute.invoice(record.id)) {
+                            InvoiceDetailView(id: record.id).thorbisBackButton()
+                        } label: {
                             let total = paperLinesTotal(record.lines)
                             let due = total.map { max(0, $0 - record.amountPaid) }
                             PaperDocumentRow(kind: .invoice, reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),

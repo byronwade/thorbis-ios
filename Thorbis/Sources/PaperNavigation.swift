@@ -16,7 +16,6 @@ struct RootView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var pendingMedia: PendingMediaStore
-    @State private var tab: TabletSection = .more
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject private var whatsNew: WhatsNew
     /// The selected phone tab: a MenuItem id, "more" or "search".
@@ -44,15 +43,11 @@ struct RootView: View {
     @State private var phoneWidth: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
-    @State private var path = NavigationPath()
     @State private var schedulePath = NavigationPath()
     @State private var jobsPath = NavigationPath()
     @State private var customersPath = NavigationPath()
     @State private var morePath = NavigationPath()
     @State private var search = false
-    /// Words a Siri or Shortcuts search asked for, typed into the iPad search sheet.
-    @State private var searchSeed = ""
-    @State private var settings = false
     @State private var workspace = false
     @State private var createJob = false
     #if DEBUG
@@ -68,11 +63,12 @@ struct RootView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            HStack(spacing: 0) {
-                if geometry.size.width >= 1000 { sidebar }
-                navigation(wide: geometry.size.width >= 1000)
-            }.background(Theme.background)
+            navigation(wide: usesTabletLayout(width: geometry.size.width))
+                .background(Theme.background)
         }
+        #if DEBUG
+        .modifier(PreviewLandscape())
+        #endif
         // The Home Screen widget reads today's jobs from the shared container.
         .onChange(of: store.jobs, initial: true) { writeTodaySnapshot() }
         .onChange(of: store.customers) { writeTodaySnapshot() }
@@ -121,109 +117,27 @@ struct RootView: View {
         TodaySnapshot.save(TodaySnapshot(items: items, writtenAt: Date()))
     }
 
+    /// iPad at regular width gets the sidebar and split columns; compact width (Slide Over, a
+    /// narrow Split View) and every iPhone get the phone layout.
     @ViewBuilder private func navigation(wide: Bool) -> some View {
-        if wide { tabletNavigation() } else { phoneNavigation() }
+        if wide { TabletRoot() } else { phoneNavigation() }
     }
 
-    private func tabletNavigation() -> some View {
-        NavigationStack(path: $path) {
-            Group {
-                switch tab {
-                case .schedule:
-                    PaperTabletSchedule()
-                case .jobs: JobsView()
-                case .customers: CustomersView()
-                case .more: MoreView()
-                case .place(let item): if let route = item.route { PaperRouteView(route: route) }
-                case .local(let section): PaperRouteView(route: .local(section))
-                }
-            }
-            .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
-            .background(Theme.background)
-            .paperDestinations()
-        }
-        .sheet(isPresented: $search, onDismiss: { searchSeed = "" }) { PaperGlobalSearch(initialQuery: searchSeed) }
-        // The same one Settings as the phone.
-        .sheet(isPresented: $settings) { SettingsView() }
-        .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
-        .sheet(isPresented: $createJob) { NewJobSheet() }
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    /// Regular width on an iPad, and room for a list beside a detail. Below that the phone layout.
+    private func usesTabletLayout(width: CGFloat) -> Bool {
         #if DEBUG
-        .sheet(isPresented: $previewInvoiceEditor) {
-            NavigationStack {
-                InvoiceLineEditorView(invoice: PaperPreview.invoice) { _ in }
-            }
-            .presentationDetents([.large])
-        }
-        .sheet(isPresented: $previewInvoiceDetail) {
-            NavigationStack {
-                InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations()
-            }
-        }
-        .sheet(isPresented: $previewEstimateRevision) {
-            EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate : PaperPreview.estimate) { _ in }
-                .environmentObject(api)
-                .environmentObject(session)
-                .environmentObject(store)
-        }
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-compact") { return false }
         #endif
-        .task {
-            await store.refresh(api)
-            #if DEBUG
-            if PaperPreview.enabled {
-                if PaperPreview.screen == "invoice-editor" {
-                    previewInvoiceEditor = true
-                    return
-                }
-                if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview {
-                    previewInvoiceDetail = true
-                    return
-                }
-                if PaperPreview.screen == "estimate-revision" || PaperPreview.screen == "estimate-draft" {
-                    previewEstimateRevision = true
-                    return
-                }
-                switch PaperPreview.screen {
-                case "jobs": tab = .jobs
-                case "my-day": tab = .schedule
-                case "customers": tab = .customers
-                case "menu", "more": settings = true
-                case "job", "job-invoice", "job-history", "job-history-empty", "job-onsite": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
-                case "customer", "customer-activity", "customer-records", "customer-jobs", "customer-money": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
-                default: break
-                }
-            }
-            #endif
-        }
-        .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: false) }
-        .onChange(of: store.jobs) { openRequestedJob(phone: false) }
-        .onChange(of: store.requestedSchedule) { path = NavigationPath(); tab = .schedule }
-        .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord(phone: false) }
-        .onChange(of: store.requestedSearch, initial: true) { openRequestedSearch(phone: false) }
-        .onAppear {
-            if session.can("job.view", feature: "jobs") { path = NavigationPath(); tab = .schedule }
-            else if session.can("customer.view", feature: "core_crm") { path = NavigationPath(); tab = .customers }
-        }
+        return UIDevice.current.userInterfaceIdiom == .pad && sizeClass == .regular && width >= 700
     }
 
     /// Linear-style phone navigation: no side menu and no system tab bar. A floating bar holds the
     /// pinned places and a switcher slot; the switcher opens a menu of every place, with the business
     /// switcher on top. The bar shows on a place's first screen and steps aside for pushed screens.
     @ViewBuilder private func phoneNavigation() -> some View {
-        #if DEBUG
-        if PaperPreview.enabled, PaperPreview.screen == "ipad-sidebar" {
-            // Screenshot-only: this phone is narrower than the 1000pt sidebar breakpoint.
-            // The column is the same 244pt sidebar the regular-width layout uses.
-            sidebar
-                .frame(maxHeight: .infinity, alignment: .top)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface.ignoresSafeArea())
-                .task { await store.refresh(api) }
-        } else {
-            phoneShell()
-        }
-        #else
         phoneShell()
-        #endif
     }
 
     private func phoneShell() -> some View {
@@ -734,10 +648,6 @@ struct RootView: View {
                 morePath = NavigationPath()
                 morePath.append(job)
             }
-        } else {
-            tab = .schedule
-            path = NavigationPath()
-            path.append(job)
         }
     }
 
@@ -748,9 +658,6 @@ struct RootView: View {
         if phone {
             barQuery = query
             if !barSearching { openBarSearch() }
-        } else {
-            searchSeed = query
-            search = true
         }
     }
 
@@ -775,9 +682,6 @@ struct RootView: View {
                 primaryTab = .more
                 morePath = target
             }
-        } else {
-            if case .customer = record { tab = .customers } else { tab = .schedule }
-            path = target
         }
     }
 
@@ -796,88 +700,6 @@ struct RootView: View {
         }
     }
 
-    /// The same places as the phone menu, in the person's Customize menu order, grouped like More.
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button { workspace = true } label: {
-                HStack(spacing: 9) {
-                    Image("ThorbisMark").resizable().scaledToFit().padding(4)
-                        .frame(width: 24, height: 24).background(Theme.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Theme.border))
-                        .accessibilityHidden(true)
-                    Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(15, weight: .medium)).lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.down").font(.system(size: 12))
-                }.padding(.horizontal, 8).frame(minHeight: 44)
-            }.padding(.bottom, 10)
-            SidebarSearchButton { search = true }.padding(.bottom, 12)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(MenuItem.Group.allCases, id: \.self) { group in
-                        let items = menuPlaces.filter { $0.group == group }
-                        let local = group == .phone ? localSections : []
-                        if !items.isEmpty || !local.isEmpty {
-                            if group != .work {
-                                Text(group.rawValue).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                                    .padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 4)
-                                    .accessibilityAddTraits(.isHeader)
-                            }
-                            ForEach(items) { item in
-                                sidebarRow(item.title, icon: item.symbol, target: tabletSection(item), count: sidebarCount(item))
-                            }
-                            ForEach(local, id: \.self) { section in
-                                sidebarRow(section.title, icon: section.moreSymbol, target: .local(section))
-                            }
-                        }
-                    }
-                    menuRow("Settings", icon: "gearshape") { settings = true }.padding(.top, 14)
-                }
-            }
-            .scrollIndicators(.hidden)
-            SidebarAccountButton(name: session.user?.name ?? "") { settings = true }
-                .padding(.top, 12)
-        }.padding(.vertical, 14).padding(.horizontal, 10).frame(width: 244)
-            .foregroundStyle(Theme.foreground).buttonStyle(.plain)
-            .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
-    }
-
-    private func tabletSection(_ item: MenuItem) -> TabletSection {
-        switch item {
-        case .schedule: .schedule
-        case .jobs: .jobs
-        case .customers: .customers
-        default: .place(item)
-        }
-    }
-
-    private func sidebarCount(_ item: MenuItem) -> Int? {
-        switch item {
-        case .schedule: JobFiltering.schedule(store.jobs, range: .today).count
-        case .jobs: store.jobs.count
-        default: nil
-        }
-    }
-
-    private func sidebarRow(_ title: String, icon: String, target: TabletSection, count: Int? = nil) -> some View {
-        Button { path = NavigationPath(); tab = target } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon).font(.system(size: 17)).frame(width: 18).foregroundStyle(Theme.muted)
-                Text(title).font(Theme.font(15, weight: tab == target ? .medium : .regular))
-                Spacer()
-                if let count { Text("\(count)").font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted) }
-            }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-        }.accessibilityAddTraits(tab == target ? .isSelected : [])
-    }
-
-    private func menuRow(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon).font(.system(size: 17)).frame(width: 18).foregroundStyle(Theme.muted)
-                Text(title).font(Theme.font(15))
-                Spacer(minLength: 0)
-            }.padding(.horizontal, 8).frame(minHeight: 44).contentShape(Rectangle())
-        }
-    }
 }
 
 /// Secondary destinations pushed onto the current tab's stack.
@@ -913,9 +735,10 @@ private struct PaperDestinations: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .thorbisDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
-            .thorbisDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
-            .thorbisDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
+            // tabletReadable: iPad's detail column caps pushed screens at a readable width.
+            .thorbisDestination(for: Job.self) { JobDetailView(jobId: $0.id).tabletReadable() }
+            .thorbisDestination(for: Customer.self) { CustomerDetailView(customer: $0).tabletReadable() }
+            .thorbisDestination(for: PaperRoute.self) { PaperRouteView(route: $0).tabletReadable() }
     }
 }
 
@@ -1390,6 +1213,26 @@ private struct PreviewFormSheet: ViewModifier {
             } else {
                 EquipmentEditor(customerID: PaperPreview.customerID, locations: [], existing: nil) {}
             }
+        }
+    }
+}
+#endif
+
+#if DEBUG
+/// Screenshot-only (`--paper-preview-landscape`): iPadOS's windowed mode refuses programmatic
+/// rotation, so the app is laid out at the landscape size and turned a quarter. The capture is
+/// turned back afterwards. Layout is real; safe areas are approximate.
+private struct PreviewLandscape: ViewModifier {
+    func body(content: Content) -> some View {
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-landscape") {
+            GeometryReader { geometry in
+                content
+                    .frame(width: geometry.size.height, height: geometry.size.width)
+                    .rotationEffect(.degrees(90))
+                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            }
+        } else {
+            content
         }
     }
 }
