@@ -1831,7 +1831,10 @@ struct JobDetailView: View {
         .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        // One spoken item: when, what happened (and who), then the whole note, never the folded part.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([timeLabel(entry.date, showsDay: showsDay), entry.title, entry.body]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
     /// JobActivity.dc.html: quick notes, then the field with the mic and a camera circle. Send

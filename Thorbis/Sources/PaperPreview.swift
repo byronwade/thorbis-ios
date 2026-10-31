@@ -1529,8 +1529,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
              "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
         }
-        if PaperPreview.isJobScreenPreview, let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
+        if PaperPreview.isJobScreenPreview || PaperPreview.screen == "customer-jobs",
+           let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
             listed[index]["locationId"] = PaperPreview.homeLocationID
+            if PaperPreview.screen == "job-activity" { listed[index]["dispatchedAt"] = today(hour: 8, minute: 2) }
             if PaperPreview.screen == "job-onsite" {
                 // Arrived 42 minutes ago, working since: the on-site clock reads from these taps.
                 let arrived = Date().addingTimeInterval(-42 * 60)
@@ -1639,7 +1641,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2170", "Furnace install", "completed", "2021-10-20T15:00:00Z", PaperPreview.homeLocationID, "00000000-0000-4000-8000-000000008801"),
             ("2160", "Thermostat swap", "canceled", "2021-03-09T15:00:00Z", PaperPreview.homeLocationID, nil)
         ]
-        let notes = ["2190": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit. Condensate line was slow; flushed it and added a tablet. Filter is a 20x25x4, customer keeps spares in the garage. Breaker 14 is the condenser.",
+        // `customer-jobs` gets a long note on 2190 so the past row shows "More"; `job-history` keeps the short one.
+        let long = PaperPreview.screen == "customer-jobs"
+            ? " Condensate line was slow; flushed it and added a tablet. Filter is a 20x25x4, customer keeps spares in the garage. Breaker 14 is the condenser."
+            : ""
+        let notes = ["2190": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit." + long,
                      "2181": "Sediment heavy. Anode rod due next year.", "2170": "Passed inspection. Replaced filter."]
         return rows.map { ref, title, status, when, location, assignee in
             ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
