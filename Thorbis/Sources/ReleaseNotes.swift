@@ -13,6 +13,19 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-ux-cleanup-leftovers",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "magnifyingglass", title: "Search starts where you are",
+                      detail: "Open search on Jobs or Customers and the jobs or customers you opened lately come first."),
+                .init(symbol: "person.text.rectangle", title: "Customer details always showing",
+                      detail: "Address, phone and email sit open on the customer page, with New job as the one button."),
+                .init(symbol: "hand.tap", title: "Tap anywhere on an option to choose it",
+                      detail: "In the customer's estimate, each option card is one big target with its price first."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
             id: "2026-10-30-calm-job",
             date: "2026-10-30",
             highlights: [
