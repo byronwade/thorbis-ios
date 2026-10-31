@@ -26,6 +26,8 @@ struct RootView: View {
     @State private var menuOpen = false
     /// The last place opened from the menu that is not pinned; the bar's switcher slot shows it.
     @State private var lastPlace: MenuItem?
+    /// Set once the launch place is settled, so a later capability refresh never moves the person.
+    @State private var settledLaunchPlace = false
     /// iPhone search: the bar turns into a field and results rise in a drawer above it.
     @State private var barSearching = false
     /// How much of a place's root the floating chip and bar cover, above the home indicator. Each
@@ -101,11 +103,22 @@ struct RootView: View {
 
     private func applyRoleDefaults() {
         #if DEBUG
-        // Screenshots and UI tests keep the standard bar.
+        // Screenshots and UI tests keep the standard bar (the owner Home screenshot sets its own).
         if PaperPreview.enabled { return }
         #endif
         guard session.phase == .ready else { return }
         layout.applyRoleDefaults(WorkRole(session), permitted: { $0.permitted(session) })
+        openHomeAtLaunch()
+    }
+
+    /// Owners whose bar leads with Home open there; everyone else still opens on Schedule. Only at
+    /// launch, only from the untouched first place, and never over a record a link asked for.
+    private func openHomeAtLaunch() {
+        guard !settledLaunchPlace else { return }
+        settledLaunchPlace = true
+        guard layout.visibleTabs(session).first == .home, selectedTab == PrimaryTab.initial.rawValue,
+              schedulePath.isEmpty, !store.openedForRecord else { return }
+        selectedTab = MenuItem.home.rawValue
     }
 
     private func writeTodaySnapshot() {
@@ -574,6 +587,9 @@ struct RootView: View {
                 outbox.enqueue(.note(.init(jobId: PaperPreview.jobID, body: "Replaced the capacitor.")), policyVersion: session.policyVersion ?? 1)
                 primaryTab = .jobs
             case "attention": primaryTab = .more; morePath.append(PaperRoute.attention)
+            case "owner-home":
+                layout.tabs = [.home, .schedule, .money, .customers]
+                selectedTab = MenuItem.home.rawValue
             case "estimate-detail", "estimate-draft-detail": primaryTab = .more; morePath.append(PaperRoute.estimate(PaperPreview.estimate.id))
             case "reports": primaryTab = .more; morePath.append(PaperRoute.reports)
             case "billing": primaryTab = .more; morePath.append(PaperRoute.billing)
@@ -750,6 +766,9 @@ enum PaperRoute: Hashable {
     case customizeMenu
     case whatsNew
     case attention
+    /// The owner's Home and the lists behind its figures.
+    case home
+    case homeList(HomeList)
     case payments
     case businessSetup
     case companyDetails
@@ -806,6 +825,8 @@ struct PaperRouteView: View {
         case .customizeMenu: CustomizeMenuView()
         case .whatsNew: WhatsNewHistoryView()
         case .attention: NeedsAttentionView()
+        case .home: OwnerHomeView()
+        case .homeList(let list): OwnerHomeListView(list: list)
         case .payments: PaymentsSetupView()
         case .businessSetup: BusinessSetupView()
         case .companyDetails: CompanyDetailsView()
@@ -874,7 +895,7 @@ enum SearchFocus: Equatable {
     /// The bar's current place (a `MenuItem` raw value) to the records it is about.
     static func of(place: String?) -> SearchFocus {
         switch place.flatMap(MenuItem.init(rawValue:)) {
-        case .jobs, .schedule, .attention: .jobs
+        case .jobs, .schedule, .attention, .home: .jobs
         case .customers: .customers
         default: .none
         }
