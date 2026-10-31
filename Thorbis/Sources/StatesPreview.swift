@@ -18,6 +18,8 @@ struct StatesPreview: View {
             case "state-errors": NavigationStack { ErrorStatesGallery() }
             case "state-loading": NavigationStack { LoadingStatesGallery() }
             case "state-customer": NavigationStack { CustomerStatesGallery() }
+            case "state-sheets": SheetStatesGallery()
+            case "state-toasts": NavigationStack { ToastStatesGallery() }
             case "state-workspaces":
                 if forced { WorkspaceGateView() } else { SessionLoadingView(message: "Opening your workspace…") }
             default:
@@ -139,6 +141,42 @@ private struct CustomerStatesGallery: View {
 
     private func label(_ text: String) -> some View {
         Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 18)
+    }
+}
+
+/// The job's status picker as the status chip opens it (a dispatched job's moves), shown open.
+private struct SheetStatesGallery: View {
+    var body: some View {
+        Color.clear
+            .background(Theme.background.ignoresSafeArea())
+            .sheet(isPresented: .constant(true)) {
+                ThorbisMenuCard(items: StatesPreviewFixtures.statusPickerItems, title: StatesPreviewFixtures.statusPickerTitle) { _ in }
+            }
+    }
+}
+
+/// The undo confirmation the estimate builder shows after a line is removed.
+private struct ToastStatesGallery: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            LineRemovedToast(removed: StatesPreviewFixtures.removedLine, undo: {}, expire: {})
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.background)
+        .navigationTitle("Confirmations")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+enum StatesPreviewFixtures {
+    static let statusPickerTitle = "Change status"
+    static var statusPickerItems: [ThorbisMenuItem] {
+        [ThorbisMenuItem("On my way") {}, ThorbisMenuItem("Mark arrived") {}, ThorbisMenuItem("Start work") {},
+         ThorbisMenuItem("Pause job…") {}, ThorbisMenuItem("Move back to scheduled") {}]
+    }
+    static var removedLine: RemovedLine {
+        RemovedLine(line: EstimateRevisionLineDraft(description: "PEX crimp rings, 1-in.", quantity: "1", unitPrice: "15.13"), index: 0, optionID: nil)
     }
 }
 

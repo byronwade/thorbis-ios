@@ -31,12 +31,17 @@ enum PaperPreview {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
               ["state-login", "state-login-error", "state-session-expired", "state-restore-failed", "state-opening",
-               "state-signing-out", "state-workspaces", "state-empty", "state-errors", "state-loading", "state-customer"].contains(args[index + 1]) else { return nil }
+               "state-signing-out", "state-workspaces", "state-empty", "state-errors", "state-loading", "state-customer",
+               "state-sheets", "state-toasts"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
     /// `--paper-preview-empty`: the workspace has no jobs, customers, estimates or invoices yet,
     /// so the real list screens show their empty states.
     static var isEmptyWorkspace: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-empty") }
+    /// `--paper-preview-hold-lists`: list reads (jobs, customers, estimates, invoices, notices, price
+    /// book) never answer, so the real list screens stay on their loading skeletons for a capture.
+    static var holdsLists: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-hold-lists") }
+    static let heldListPaths: Set<String> = ["/v1/jobs", "/v1/customers", "/v1/invoices", "/v1/estimates", "/v1/staff/notices", "/v1/query", "/v1/search"]
     static var isJobEstimateHandoff: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-handoff") }
     /// A data seed (the job's estimates and invoices), not a screen: it still opens the plain job.
     /// To capture the documents themselves use `--paper-preview-screen customer-view`.
@@ -657,6 +662,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        // Left unanswered on purpose: the screen keeps showing what it draws while it waits.
+        if PaperPreview.holdsLists, PaperPreview.heldListPaths.contains(url.path) { return }
         if PaperPreview.screen == "customer-records",
            ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup"),
            request.httpMethod == "GET",
@@ -1052,8 +1059,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                "source": "user_confirmed", "confirmedAt": now, "version": 1]] + phone,
                     "catalog": catalog.map { ["factKey": $0.0, "label": $0.1, "tier": $0.2, "required": $0.3, "confirmed": $0.0 == "legal_name"] }] as [String: Any]
         }
-        if PaperPreview.isEmptyWorkspace, ["/v1/jobs", "/v1/customers", "/v1/invoices", "/v1/estimates"].contains(path) {
+        if PaperPreview.isEmptyWorkspace, ["/v1/jobs", "/v1/customers", "/v1/invoices", "/v1/estimates", "/v1/staff/notices"].contains(path) {
             return ["items": [Any]()]
+        }
+        if PaperPreview.isEmptyWorkspace, path == "/v1/query", queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
+            return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
+                    "items": [Any](), "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
         }
         switch path {
         case "/api/auth/get-session":
