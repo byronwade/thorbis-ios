@@ -4,10 +4,13 @@ import UIKit
 struct JobDetailView: View {
     let jobId: String
     let showsBack: Bool
+    /// Today's stop card's Customer view circle: open the job, then its Customer view once loaded.
+    let opensCustomerView: Bool
 
-    init(jobId: String, showsBack: Bool = true) {
+    init(jobId: String, showsBack: Bool = true, opensCustomerView: Bool = false) {
         self.jobId = jobId
         self.showsBack = showsBack
+        self.opensCustomerView = opensCustomerView
         #if DEBUG
         // The old five sections' links land on the three that hold them now: estimates and
         // invoices on Money, photos as Activity's Photos filter.
@@ -117,6 +120,8 @@ struct JobDetailView: View {
     #if DEBUG
     @State private var previewOpenedCustomerView = false
     #endif
+    /// Set once the stop card's Customer view has opened, so coming back never opens it again.
+    @State private var openedCustomerViewOnArrival = false
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -347,6 +352,10 @@ struct JobDetailView: View {
             // The next step needs the job's paper, so it loads with the job, not only on its tab.
             await loadInvoices()
             if let job { await loadJobEstimates(job) }
+            if opensCustomerView, !openedCustomerViewOnArrival, job != nil {
+                openedCustomerViewOnArrival = true
+                openCustomerView(.home)
+            }
             #if DEBUG
             // `--paper-preview-screen customer-view[-estimates|-invoice|-details]`: Customer view, opened as a tech would.
             if PaperPreview.enabled, PaperPreview.screen.hasPrefix("customer-view"), !previewOpenedCustomerView {
