@@ -71,8 +71,9 @@ source evidence; verify platform/API/version claims before relying on them.
    mobile):* grouped sections are the norm — a semibold section header with its
    count above rows on one rounded well (`Theme.well`, radius 14), with inset
    hairlines between rows (`Well`, `WellList`, `WellDivider`, `SectionHeader`).
-   Job rows lead with a Linear-style `StatusGlyph`; VoiceOver still reads the
-   status word, and the word stays on screen wherever it was the only cue.
+   Job rows lead with a Linear-style `StatusGlyph` in place of the trailing word:
+   its shape (not only colour) carries the state and VoiceOver reads the word. The
+   lead card and chips still show the word.
    Avatars (`InitialsAvatar`) and property chips (`PropertyChip`) are allowed.
 
 ## Visual and interaction system
