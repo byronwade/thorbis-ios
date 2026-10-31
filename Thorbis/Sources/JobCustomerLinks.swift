@@ -35,8 +35,8 @@ struct JobServiceAddressesSection: View {
     let retry: () async -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: "Service addresses", count: places.count)
+        VStack(alignment: .leading, spacing: 6) {
+            JobPanelLabel(title: "Service addresses", count: places.isEmpty ? nil : "\(places.count)")
             if failed && places.isEmpty {
                 HStack(spacing: 8) {
                     ListErrorRow(message: "Addresses didn't load.")
@@ -51,15 +51,20 @@ struct JobServiceAddressesSection: View {
                 Text("No addresses on file for this customer.")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .frame(minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 4)
             } else {
-                Text(places.count == 1
-                     ? "The customer's only address on file. The job doesn't record a site."
-                     : "The customer's addresses. The job doesn't record which one it's at.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 4)
-                ForEach(Self.ordered(places)) { place in
-                    JobServiceAddressRow(customerID: customerID, place: place)
+                JobPanel {
+                    Text(places.count == 1
+                         ? "The customer's only address on file. The job doesn't record a site."
+                         : "The customer's addresses. The job doesn't record which one it's at.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16).padding(.top, 10)
+                        .jobPanelJoinsNext()
+                    ForEach(Self.ordered(places)) { place in
+                        JobServiceAddressRow(customerID: customerID, place: place)
+                            .padding(.horizontal, 16)
+                    }
                 }
                 // Access facts are shown once, in "Before you go in" above (JobPropertyHistorySection).
             }

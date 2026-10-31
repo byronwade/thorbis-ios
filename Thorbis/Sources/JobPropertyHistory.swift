@@ -235,6 +235,7 @@ struct JobPropertyHistorySection: View {
                 Text("Saved on this phone \(savedAt.formatted(.relative(presentation: .named)))")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, 16).padding(.top, 10)
+                    .jobPanelJoinsNext()
             }
         }
     }
@@ -243,7 +244,8 @@ struct JobPropertyHistorySection: View {
     private func placePanel(_ history: JobPropertyHistory, savedAt: Date?) -> some View {
         let units = expanded || history.equipment.count <= JobPropertyHistoryLayout.collapsedRows + 1
             ? history.equipment[...] : history.equipment.prefix(JobPropertyHistoryLayout.collapsedRows)
-        JobPanelSection(title: history.title,
+        // Access codes, dogs and parking are what to know before going in: a warning mark leads.
+        JobPanelSection(title: history.title, mark: history.facts.isEmpty ? nil : "exclamationmark.triangle.fill",
                         actionTitle: history.equipment.count > JobPropertyHistoryLayout.collapsedRows + 1 ? (expanded ? "Show less" : "Show all \(history.equipment.count)") : nil,
                         actionIdentifier: "job-property-history-show-all",
                         action: { withMotion(.snappy) { expanded.toggle() } }) {
@@ -253,6 +255,7 @@ struct JobPropertyHistorySection: View {
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 16).padding(.top, 10)
+                    .jobPanelJoinsNext()
             }
             ForEach(history.facts) { fact in
                 if fact.isCode {
@@ -287,7 +290,7 @@ struct JobPropertyHistorySection: View {
     }
 
     private func visitsPanel(_ history: JobPropertyHistory, savedAt: Date?) -> some View {
-        JobPanelSection(title: "\(history.scope == .address ? "Past visits here" : "Past visits") · \(history.visits.count)") {
+        JobPanelSection(title: history.scope == .address ? "Past visits here" : "Past visits", count: "\(history.visits.count)") {
             savedLine(savedAt)
             ForEach(history.visits) { visit in
                 NavigationLink(value: PaperRoute.job(visit.id)) {
