@@ -163,45 +163,56 @@ struct BillingScheduleDetailView: View {
                         Text("SOV-\(progress.schedule.id.suffix(4).uppercased()) · \(store.customerName(progress.schedule.customerId))")
                             .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
                         Text("Billing schedule").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
-                        PaperStatusChip(status: progress.schedule.status == "open" ? "open" : "closed")
+                        StatusWord(text: progress.schedule.status == "open" ? "Open" : "Closed",
+                                   tint: progress.schedule.status == "open" ? Theme.warning : nil)
                     }
                     .padding(.bottom, 14)
-                    HStack(spacing: 0) {
-                        figure("Billed", money(progress.billedToDate, currency: "USD"))
-                        Rectangle().fill(Theme.border).frame(width: 1, height: 40).padding(.horizontal, 16)
-                        figure("Remaining", money(progress.remaining, currency: "USD"))
-                    }
-                    .padding(.bottom, 8)
-                    if progress.depositsBilled > 0 || progress.retainedToDate > 0 {
-                        PaperGroupHeader(title: "Deposits and retainage").padding(.top, 8)
-                        if progress.depositsBilled > 0 {
-                            PaperDetailRow("Deposits billed", money: money(progress.depositsBilled, currency: "USD"))
-                            PaperDetailRow("Not yet applied", money: money(progress.depositOutstanding, currency: "USD"))
-                        }
-                        if progress.retainedToDate > 0 {
-                            PaperDetailRow("Retained", money: money(progress.retainedToDate, currency: "USD"))
-                            PaperDetailRow("Releasable now", money: money(progress.retainageOutstanding, currency: "USD"))
-                        }
-                    }
-                    PaperGroupHeader(title: "Schedule of values", count: progress.schedule.lines.count).padding(.top, 8)
-                    ForEach(progress.schedule.lines.sorted { $0.position < $1.position }) { line in
-                        let lineProgress = progress.lines.first { $0.lineId == line.id }
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(line.description).font(Theme.font(15, weight: .medium))
-                                Spacer(minLength: 8)
-                                Text(money(line.scheduledAmount.amount, currency: "USD")).moneyStyle(.row)
-                            }
-                            if let lineProgress {
-                                ProgressView(value: Double(lineProgress.billedToDate), total: Double(max(line.scheduledAmount.amount, 1)))
-                                    .tint(Theme.brand)
-                                Text("\(money(lineProgress.billedToDate, currency: "USD")) billed · \(money(lineProgress.remaining, currency: "USD")) left")
-                                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                    // design 2026-10-30: figures on one panel, every group on its own panel, no rules.
+                    VStack(alignment: .leading, spacing: 22) {
+                        PaperStatRow(stats: [
+                            .init(label: "Billed", value: money(progress.billedToDate, currency: "USD")),
+                            .init(label: "Remaining", value: money(progress.remaining, currency: "USD")),
+                        ])
+                        if progress.depositsBilled > 0 || progress.retainedToDate > 0 {
+                            PaperSection("Deposits and retainage") {
+                                VStack(spacing: 0) {
+                                    if progress.depositsBilled > 0 {
+                                        PaperDetailRow("Deposits billed", money: money(progress.depositsBilled, currency: "USD")).cardRow()
+                                        PaperDetailRow("Not yet applied", money: money(progress.depositOutstanding, currency: "USD")).cardRow()
+                                    }
+                                    if progress.retainedToDate > 0 {
+                                        PaperDetailRow("Retained", money: money(progress.retainedToDate, currency: "USD")).cardRow()
+                                        PaperDetailRow("Releasable now", money: money(progress.retainageOutstanding, currency: "USD")).cardRow()
+                                    }
+                                }
+                                .padding(.vertical, PaperCardMetrics.edge)
                             }
                         }
-                        .padding(.vertical, 8)
-                        .accessibilityElement(children: .combine)
+                        PaperSection("Schedule of values", count: progress.schedule.lines.count) {
+                            VStack(spacing: 0) {
+                                ForEach(progress.schedule.lines.sorted { $0.position < $1.position }) { line in
+                                    let lineProgress = progress.lines.first { $0.lineId == line.id }
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(alignment: .firstTextBaseline) {
+                                            Text(line.description).font(Theme.font(16, weight: .medium))
+                                            Spacer(minLength: 8)
+                                            Text(money(line.scheduledAmount.amount, currency: "USD")).moneyStyle(.row)
+                                        }
+                                        if let lineProgress {
+                                            ProgressView(value: Double(lineProgress.billedToDate), total: Double(max(line.scheduledAmount.amount, 1)))
+                                                .tint(Theme.foreground)
+                                            Text("\(money(lineProgress.billedToDate, currency: "USD")) billed · \(money(lineProgress.remaining, currency: "USD")) left")
+                                                .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                                        }
+                                    }
+                                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                                    .accessibilityElement(children: .combine)
+                                }
+                            }
+                            .padding(.vertical, PaperCardMetrics.edge)
+                        }
                     }
+                    .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
                     if let createdInvoiceID {
                         NavigationLink { InvoiceDetailView(id: createdInvoiceID).thorbisBackButton() } label: {
                             PaperMenuRow("Open the new draft invoice", symbol: "doc.plaintext")
@@ -210,7 +221,7 @@ struct BillingScheduleDetailView: View {
                     }
                     if progress.retainageOutstanding > 0, canBill {
                         Button("Release retainage · \(money(progress.retainageOutstanding, currency: "USD"))") { confirm = "release-retainage" }
-                            .font(Theme.font(15, weight: .medium)).monospacedDigit().foregroundStyle(Theme.brandText)
+                            .font(Theme.font(15, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
                             .frame(minHeight: 44).padding(.top, 8).disabled(busy)
                     }
                 } else if error == nil {
@@ -240,13 +251,6 @@ struct BillingScheduleDetailView: View {
     }
 
     private var canBill: Bool { session.can("invoice.create", feature: "progress_billing") }
-
-    private func figure(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).moneyStyle(.total)
-        }
-    }
 
     private func load() async {
         let generation = session.generation
