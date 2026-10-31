@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-10-31-polish-tech-flow",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "sparkles", title: "A tidier visit, start to finish",
+                      detail: "Wrap up, Money, payment and the customer profile line up better, and large text no longer crowds them.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-dark-and-large-text",
             date: "2026-10-30",
             highlights: [

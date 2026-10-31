@@ -318,6 +318,9 @@ struct CustomerDetailView: View {
                 case "Money": moneySection
                 default: overview
                 }
+                // At accessibility sizes a pinned New job would cover half the screen, so it
+                // follows the content instead (as on the customer presentation).
+                if typeSize.isAccessibilitySize { customerPrimaryActions.padding(.horizontal, -Theme.gutter) }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
@@ -334,7 +337,7 @@ struct CustomerDetailView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom) { customerPrimaryActions }
+        .safeAreaInset(edge: .bottom) { if !typeSize.isAccessibilitySize { customerPrimaryActions } }
         .deviceHandoffs($handoff)
         .task { await load() }
         .task { await loadSmsConsent() }
@@ -434,21 +437,34 @@ struct CustomerDetailView: View {
         let dialable = primaryPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
         let mail = MailDraft(recipient: primaryEmail)
         if dialable != nil || mail != nil || directionsURL != nil {
-            // At accessibility sizes the circles sit two to a row (as on the job) so every word stays whole.
             let count = (dialable != nil ? 2 : 0) + (mail != nil ? 1 : 0) + (directionsURL != nil ? 1 : 0)
-            let columns = typeSize.isAccessibilitySize ? min(2, count) : count
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4, alignment: .top), count: columns), spacing: 12) {
-                if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
-                    PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
-                    PaperLabeledCircle(symbol: "message", title: "Text") { openURL(text) }
+            if typeSize.isAccessibilitySize {
+                // At accessibility sizes the circles ride one horizontal row so the header stays short
+                // and the customer's details are reachable without scrolling past a wall of buttons.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 20) { actionCircleItems(dialable: dialable, mail: mail) }
+                        .padding(.horizontal, Theme.gutter)
                 }
-                if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { handoff = .mail(mail) } }
-                if let directionsURL {
-                    PaperLabeledCircle(symbol: "arrow.triangle.turn.up.right.diamond", title: "Directions",
-                                       accessibilityLabel: "Directions in Maps") { openURL(directionsURL) }
+                .padding(.horizontal, -Theme.gutter)
+                .accessibilityElement(children: .contain)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4, alignment: .top), count: count), spacing: 12) {
+                    actionCircleItems(dialable: dialable, mail: mail)
                 }
+                .accessibilityElement(children: .contain)
             }
-            .accessibilityElement(children: .contain)
+        }
+    }
+
+    @ViewBuilder private func actionCircleItems(dialable: String?, mail: MailDraft?) -> some View {
+        if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
+            PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
+            PaperLabeledCircle(symbol: "message", title: "Text") { openURL(text) }
+        }
+        if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { handoff = .mail(mail) } }
+        if let directionsURL {
+            PaperLabeledCircle(symbol: "arrow.triangle.turn.up.right.diamond", title: "Directions",
+                               accessibilityLabel: "Directions in Maps") { openURL(directionsURL) }
         }
     }
 
@@ -467,13 +483,19 @@ struct CustomerDetailView: View {
     private var customerIdentity: some View {
         let name = record?.name ?? customer.name
         return VStack(alignment: .leading, spacing: 4) {
+            // At accessibility sizes the header collapses to the name and one line; the full
+            // identity line is read by VoiceOver and shown as the first row of Details.
+            let compact = typeSize.isAccessibilitySize
             Text(name)
                 .font(Theme.font(30, weight: .medium)).tracking(-0.5)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(compact ? 2 : nil).minimumScaleFactor(compact ? 0.6 : 1)
+                .fixedSize(horizontal: false, vertical: !compact)
                 .accessibilityAddTraits(.isHeader)
             if let identityLine {
                 Text(identityLine).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(compact ? 1 : nil).truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: !compact)
+                    .accessibilityLabel(identityLine)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -484,6 +506,10 @@ struct CustomerDetailView: View {
         if let record {
             PaperCard {
                 VStack(alignment: .leading, spacing: 0) {
+                    // At accessibility sizes the header shows one line of this; the whole of it lives here.
+                    if typeSize.isAccessibilitySize, let identityLine {
+                        detailLine("Customer") { Text(identityLine) }
+                    }
                     if let address = record.address, !address.isEmpty {
                         detailLine("Address") { AddressLink(address: address) }
                     }

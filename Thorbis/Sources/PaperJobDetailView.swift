@@ -241,7 +241,7 @@ struct JobDetailView: View {
             if let job { JobChecklistSheet(job: job) { showChecklist = false; Task { await load() } } }
         }
         .thorbisDestination(isPresented: $showWrapUp) {
-            JobCloseoutView(jobID: jobId).onDisappear { Task { await loadCloseout() } }
+            JobCloseoutView(jobID: jobId, place: job.flatMap { street($0) }).onDisappear { Task { await loadCloseout() } }
         }
         // Add part: the price book on the job's draft invoice, as the invoice screen edits it.
         .sheet(item: $partsInvoice, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) { invoice in
@@ -364,7 +364,12 @@ struct JobDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if job != nil, selectedTab == "Activity", !showsPhotos, session.can("job.note", feature: "jobs") {
                 // JobActivity.dc.html: the composer stays at the bottom, quick notes above it.
-                composer.background(Theme.background.ignoresSafeArea(edges: .bottom))
+                // Its ground runs past the home indicator to the screen's edge, so no timeline
+                // scrolls visibly beneath it (the destination's bottom inset isn't always ignorable).
+                composer.frame(maxWidth: .infinity)
+                    .background(alignment: .top) {
+                        Theme.background.padding(.bottom, -120).ignoresSafeArea()
+                    }
             } else if !typeSize.isAccessibilitySize { primaryAction }
         }
         .sheet(isPresented: $showPause) {
@@ -577,7 +582,9 @@ struct JobDetailView: View {
     /// "● Dispatched · Today 10:30 AM · Ramon": the word opens the status menu, the time reschedules.
     private func statusLine(_ job: JobRecord) -> some View {
         let canSchedule = session.can("job.assign", feature: "jobs")
-        return FlowRow(spacing: 6, lineSpacing: 0) {
+        // Each fact is laid out at its text height and keeps a 44pt hit area beyond it, so a
+        // wrapped fact ("· Ramon M.") sits right under the line instead of 44pt boxes apart.
+        return FlowRow(spacing: 6, lineSpacing: 2) {
             statusControl(job)
             if isOnSite, outbox.pendingStatus(for: job.id) == nil, let arrived = JobFiltering.date(job.arrivedAt) {
                 statusFact("· arrived \(arrived.tradeTime)")
@@ -598,8 +605,9 @@ struct JobDetailView: View {
         Text(text)
             .font(Theme.monoFont(14))
             .foregroundStyle(Theme.muted)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle().inset(by: -10))
     }
 
     /// The access facts for the job's place, from the loaded locations or, offline, the copy saved on this phone.
@@ -721,8 +729,8 @@ struct JobDetailView: View {
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
             }
         }
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
+        .padding(.vertical, 3)
+        .contentShape(Rectangle().inset(by: -10))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Job status, \(statusWordText(job, queued: queued, now: .now))")
         .accessibilityIdentifier("job-status")
@@ -911,7 +919,7 @@ struct JobDetailView: View {
         } else if moneyBarCollects, let model = invoicePaymentModel {
             PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
         } else if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
-            PaperActionBar(title: "Customer view", symbol: "person.crop.rectangle") { openCustomerView(.estimates) }
+            PaperActionBar(title: "Show customer", symbol: "iphone") { openCustomerView(.estimates) }
                 .accessibilityIdentifier("job-customer-view-bar")
         } else if canBuildEstimate {
             PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
@@ -1425,11 +1433,13 @@ struct JobDetailView: View {
                 }
                 // When the bar is busy with the invoice, the estimates' customer door stays here, quieter.
                 if !jobEstimates.isEmpty, !moneyBarIsCustomerView, canOpenCustomerView {
+                    // A quiet text button: the screen's one ink commit stays the bar at the bottom.
                     Button { openCustomerView(.estimates) } label: {
-                        Label("Customer view", systemImage: "person.crop.rectangle")
+                        Label("Show customer", systemImage: "iphone")
                             .font(Theme.font(15, weight: .medium))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                            .foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityHint("Shows this job's estimates to the customer")
@@ -1463,8 +1473,10 @@ struct JobDetailView: View {
                     } label: { Text("Estimate totals") }
                     .font(Theme.font(15))
                     .tint(Theme.foreground)
-                    .padding(15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .padding(PaperCardMetrics.inset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: PaperCardMetrics.radius))
+                    .overlay(RoundedRectangle(cornerRadius: PaperCardMetrics.radius).strokeBorder(Theme.border, lineWidth: 1))
                 }
             }
         }

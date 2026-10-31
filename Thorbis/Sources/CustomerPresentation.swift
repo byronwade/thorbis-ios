@@ -66,6 +66,9 @@ struct CustomerEstimateFlow: Equatable {
         let what = selectedOption.map { "Approve \($0.title)" } ?? "Approve and sign"
         return total == nil ? what : "\(what) · \(totalText)"
     }
+    /// When the option's name doesn't fit on one line beside the amount, the commit drops the
+    /// name (it is the heading right above) instead of breaking over two lines.
+    var approveShortTitle: String { total == nil ? "Approve and sign" : "Approve · \(totalText)" }
     var signTitle: String { total == nil ? "Approve" : "Approve \(totalText)" }
 
     mutating func choose(_ optionID: String) { selectedOptionID = optionID }
@@ -428,7 +431,7 @@ struct CustomerEstimatePresentation: View {
                     }
                 }
             case .review:
-                CustomerPresentationCommit(title: flow.approveTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
+                CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
                 if let error { hint(error, danger: true) }
                 HStack(spacing: 8) {
                     if flow.hasOptions { CustomerTextButton(title: "See other options", type: type) { flow.back() } }
@@ -993,6 +996,8 @@ func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, in
 /// Dynamic Type sizes.
 struct CustomerPresentationCommit: View {
     let title: String
+    /// A shorter label used only when `title` would not fit on one line.
+    var compactTitle: String? = nil
     let enabled: Bool
     let busy: Bool
     let type: CustomerType
@@ -1002,8 +1007,17 @@ struct CustomerPresentationCommit: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if busy { ProgressView().tint(Theme.background) }
-                Text(title).font(Theme.font(type.body, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.8)
+                if let compactTitle {
+                    ViewThatFits(in: .horizontal) {
+                        Text(title).lineLimit(1)
+                        Text(compactTitle).lineLimit(2).minimumScaleFactor(0.8)
+                    }
+                    .font(Theme.font(type.body, weight: .medium)).multilineTextAlignment(.center)
+                    .accessibilityLabel(title)
+                } else {
+                    Text(title).font(Theme.font(type.body, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                        .minimumScaleFactor(0.8)
+                }
             }
             .frame(maxWidth: .infinity, minHeight: type.regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
             .padding(.horizontal, 16)

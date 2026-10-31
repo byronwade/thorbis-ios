@@ -661,7 +661,7 @@ private struct InvoicePaymentRefundForm: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
-                .background(Theme.chrome)
+                .background(Theme.background)
             }
         }
         .navigationTitle("Refund payment")
@@ -1171,6 +1171,8 @@ struct InvoicePaymentCollectionSheet: View {
                 .accessibilityHidden(true)
             }
         }
+        // Each choice gets room to breathe so two-line subtitles don't touch the next row.
+        .padding(.vertical, 8)
         .frame(minHeight: 56)
         .contentShape(Rectangle())
     }

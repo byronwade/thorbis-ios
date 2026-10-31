@@ -127,23 +127,39 @@ struct JobPanelFact: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        // At accessibility sizes the value reads under its label, left aligned, at full width.
-        let stacked = typeSize.isAccessibilitySize
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 16))
-        layout {
-            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            if !stacked { Spacer(minLength: 8) }
-            Text(value)
-                .font(mono ? Theme.monoFont(15, weight: .medium) : Theme.font(15))
-                .foregroundStyle(Theme.foreground)
-                .multilineTextAlignment(stacked ? .leading : .trailing)
-                .fixedSize(horizontal: false, vertical: true)
+        // A short value sits on the label's line; a long one (or any at accessibility sizes) reads
+        // under its label, left aligned, instead of a ragged right-aligned paragraph.
+        Group {
+            if typeSize.isAccessibilitySize {
+                stacked
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 16) {
+                        labelText.fixedSize()
+                        Spacer(minLength: 8)
+                        valueText.lineLimit(1).fixedSize()
+                    }
+                    stacked
+                }
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 11)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+
+    private var labelText: some View { Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted) }
+    private var valueText: some View {
+        Text(value)
+            .font(mono ? Theme.monoFont(15, weight: .medium) : Theme.font(15))
+            .foregroundStyle(Theme.foreground)
+    }
+    private var stacked: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            labelText.fixedSize(horizontal: false, vertical: true)
+            valueText.multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
