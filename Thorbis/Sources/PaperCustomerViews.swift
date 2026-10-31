@@ -850,7 +850,8 @@ struct CustomerDetailView: View {
         let ordered = CustomerJobOrder.sorted(jobs)
         let open = ordered.filter { !["completed", "canceled"].contains($0.status) }
         let past = ordered.filter { ["completed", "canceled"].contains($0.status) }
-        let shownPast = showAllPast ? past : Array(past.prefix(6))
+        // CustomerJobs.dc.html: four past jobs, then "Show N older jobs" (nothing is dropped).
+        let shownPast = showAllPast ? past : Array(past.prefix(4))
         return VStack(alignment: .leading, spacing: 18) {
             if !open.isEmpty {
                 PaperSection("Open", count: open.count) {
@@ -886,7 +887,7 @@ struct CustomerDetailView: View {
             PaperListRow(leading: .text(shortDate(job, record: full)), title: job.title,
                          subtitle: open ? openLine(job) : summary(job, record: full),
                          meta: open ? nil : meta(job),
-                         subtitleLines: open ? 1 : 3) {
+                         subtitleLines: open ? 2 : 3, expandsSubtitle: !open) {
                 if open || job.status == "canceled" { StatusWord(jobStatus: job.status) }
             }
         }

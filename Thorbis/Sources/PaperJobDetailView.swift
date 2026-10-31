@@ -117,7 +117,7 @@ struct JobDetailView: View {
 
     /// Overview for the visit, Money for its estimates and invoices, Activity for notes, status and photos.
     private let tabs = ["Overview", "Money", "Activity"]
-    private let activityFilters = ["All", "Notes", "Status", "Photos"]
+    private let activityFilters = ["All", "Notes", "Status", "Estimates", "Photos"]
     private var showsPhotos: Bool { selectedTab == "Activity" && activityFilter == "Photos" }
 
     private var liveActivityKey: String {
@@ -1783,6 +1783,10 @@ struct JobDetailView: View {
             Button { openPhotos() } label: { timelineRowContent(entry, showsDay: showsDay) }
                 .buttonStyle(RowPressStyle())
                 .accessibilityHint("Opens the job's photos")
+        } else if entry.opensOverview {
+            Button { withMotion(.snappy) { selectedTab = "Overview" } } label: { timelineRowContent(entry, showsDay: showsDay) }
+                .buttonStyle(RowPressStyle())
+                .accessibilityHint("Opens the recording and transcript on Overview")
         } else {
             // Opens what the entry is about; the row style rule leaves out a chevron on every row.
             if let destination = ActivityDestinationMapping.destination(for: entry.subject) {
@@ -1802,9 +1806,9 @@ struct JobDetailView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                if let body = entry.body {
-                    Text(body).font(Theme.font(15)).foregroundStyle(Theme.subtle).lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                if let body = entry.body, !body.isEmpty {
+                    // Long notes fold to four lines with "More"; nothing is cut off for good.
+                    ExpandableNoteText(text: body, lines: 4)
                 }
                 if !entry.photos.isEmpty {
                     HStack(spacing: 6) {
@@ -1827,7 +1831,10 @@ struct JobDetailView: View {
         .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        // One spoken item: when, what happened (and who), then the whole note, never the folded part.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([timeLabel(entry.date, showsDay: showsDay), entry.title, entry.body]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
     /// JobActivity.dc.html: quick notes, then the field with the mic and a camera circle. Send
@@ -1902,6 +1909,8 @@ struct JobDetailView: View {
         let subject: ActivityFeedSubject
         /// The day's photos, shown inline as thumbnails.
         var photos: [MediaAssetRecord] = []
+        /// The booking call: its recording and transcript live on Overview.
+        var opensOverview = false
     }
 
     /// Everything that happened on the visit, newest first. `filter` is one of `activityFilters`;
@@ -1914,12 +1923,23 @@ struct JobDetailView: View {
                 let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
                 return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, subject: ActivityFeedSubject(kind: "note", jobID: job.id))
             }
-            entries += notes.compactMap { record in
-                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
+            entries += notes.compactMap { record -> TimelineEntry? in
+                // Only the signed-in person can be named; other authors need the roster (BYR-1599).
+                let title = record.authorUserId == session.user?.id ? "Note · You" : "Note"
+                return JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: title, body: record.body, date: $0, subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
             }
         }
         if filter == "All" || filter == "Status" {
             entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, subject: ActivityFeedSubject(kind: "status", jobID: job.id)) }
+        }
+        if filter == "All" || filter == "Estimates", session.can("estimate.view", feature: "estimates") {
+            entries += jobEstimates.flatMap { estimateEvents($0, job: job) }
+        }
+        if filter == "All", let call = bookingCall, let started = JobFiltering.date(call.startedAt) {
+            let minutes = call.durationSeconds.map { max(1, Int((Double($0) / 60).rounded())) }
+            entries.append(TimelineEntry(id: "call-\(call.id)", title: "Booking call" + (minutes.map { " · \($0) min" } ?? ""),
+                                         body: call.summary?.text ?? call.callerName, date: started,
+                                         subject: ActivityFeedSubject(kind: "call", jobID: job.id), opensOverview: true))
         }
         if filter == "All", liveMediaCountContext != nil, liveMediaCountContext == mediaCountContext {
             let calendar = Calendar.current
@@ -1939,6 +1959,27 @@ struct JobDetailView: View {
     }
 
     private func activityCount(_ job: JobRecord) -> Int { timeline(job, filter: "All").count }
+
+    /// One row for each step the estimate took: created, sent (with its amount), approved, declined.
+    private func estimateEvents(_ estimate: EstimateRecord, job: JobRecord) -> [TimelineEntry] {
+        let options = estimate.options ?? []
+        let amount = options.isEmpty
+            ? paperLinesTotal(estimate.lines).map { " · " + jobShortMoney($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? ""
+            : ""
+        let body = estimate.title + (options.isEmpty ? "" : ", \(options.count) \(options.count == 1 ? "option" : "options")")
+        let steps: [(String, String, String?)] = [
+            ("created", "Estimate created", estimate.createdAt),
+            ("sent", "Estimate sent" + amount, estimate.sentAt),
+            ("approved", "Estimate approved", estimate.approvedAt),
+            ("declined", "Estimate declined", estimate.declinedAt)
+        ]
+        return steps.compactMap { key, title, raw in
+            raw.flatMap(JobFiltering.date).map {
+                TimelineEntry(id: "estimate-\(estimate.id)-\(key)", title: title, body: body, date: $0,
+                              subject: ActivityFeedSubject(kind: "estimate", subjectID: estimate.id, jobID: job.id))
+            }
+        }
+    }
 
     private func statusEvents(_ job: JobRecord) -> [(String, Date)] {
         let raw: [(String, String?)] = [

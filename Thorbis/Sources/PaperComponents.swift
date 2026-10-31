@@ -1221,6 +1221,9 @@ struct PaperListRow<Trailing: View>: View {
     /// A quieter third line (tech · photos · paid).
     var meta: String? = nil
     var subtitleLines = 1
+    /// A note-like supporting line (a past job's notes): folds at `subtitleLines` with "More"
+    /// instead of cutting the rest off.
+    var expandsSubtitle = false
     /// Finished work reads quieter.
     var dimmed = false
     /// Search: the typed words, marked where they appear in the title and supporting line.
@@ -1243,8 +1246,12 @@ struct PaperListRow<Trailing: View>: View {
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle, !subtitle.isEmpty {
-                    PaperHighlight.text(subtitle, words: highlight).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                        .lineLimit(stacked ? nil : subtitleLines)
+                    if expandsSubtitle {
+                        ExpandableNoteText(text: subtitle, lines: subtitleLines, size: 14)
+                    } else {
+                        PaperHighlight.text(subtitle, words: highlight).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                            .lineLimit(stacked ? nil : subtitleLines)
+                    }
                 }
                 if let meta, !meta.isEmpty {
                     Text(meta).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
@@ -1460,5 +1467,56 @@ extension Date {
         let hour = hour24 % 12 == 0 ? 12 : hour24 % 12
         let suffix = hour24 < 12 ? "a.m." : "p.m."
         return minute == 0 ? "\(hour) \(suffix)" : String(format: "%d:%02d %@", hour, minute, suffix)
+    }
+}
+
+/// A note that may run long: the first few lines, then a quiet "More" that opens the rest in place
+/// (and "Less" to fold it again). Short notes show whole with no control. VoiceOver reads the full
+/// text either way, so the toggle stays out of the spoken row.
+struct ExpandableNoteText: View {
+    let text: String
+    var lines = 4
+    var size: CGFloat = 15
+    var color: Color = Theme.subtle
+    @State private var expanded = false
+    @State private var shownHeight: CGFloat = 0
+    @State private var fullHeight: CGFloat = 0
+
+    /// Only measured while folded, so "Less" stays once the note is open.
+    private var isLong: Bool { fullHeight > shownHeight + 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(text).font(Theme.font(size)).foregroundStyle(color).lineSpacing(2)
+                .multilineTextAlignment(.leading)
+                .lineLimit(expanded ? nil : lines)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { if !expanded { shownHeight = $0 } }
+                .background(alignment: .topLeading) {
+                    Text(text).font(Theme.font(size)).lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .hidden()
+                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { fullHeight = $0 }
+                        .accessibilityHidden(true)
+                }
+                .accessibilityLabel(text)
+            if isLong || expanded {
+                Button { withMotion(.snappy) { expanded.toggle() } } label: {
+                    HStack(spacing: 4) {
+                        Text(expanded ? "Less" : "More")
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 11, weight: .semibold))
+                    }
+                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .frame(minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .padding(.vertical, -6)
+                .accessibilityHidden(true)
+                .accessibilityIdentifier("note-more")
+            }
+        }
     }
 }
