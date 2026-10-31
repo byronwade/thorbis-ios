@@ -412,6 +412,18 @@ struct CustomerModeContainer<Content: View>: View {
 
     @ToolbarContentBuilder private var ownerToolbar: some ToolbarContent {
         ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) {
+            if ownerControlTitle == nil {
+                // Present.dc.html: the lock is a quiet 44pt circle, not a pill; same action and label.
+                Button { Task { await unlock() } } label: {
+                    PaperCircleLabel(symbol: "lock", size: 44, fill: Theme.fill)
+                        .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Technician: unlock to leave customer mode")
+                .accessibilityHint("Technician authentication is required to leave customer mode.")
+                .accessibilityIdentifier("lock")
+                .disabled(unlocking)
+            } else {
             Button { Task { await unlock() } } label: {
                 Group {
                     if let ownerControlTitle { HStack(spacing: 8) { Image(systemName: "lock"); Text(ownerControlTitle) }.font(Theme.font(17, weight: .medium)) }
@@ -422,6 +434,7 @@ struct CustomerModeContainer<Content: View>: View {
             .accessibilityHint("Technician authentication is required to leave customer mode.")
             .accessibilityIdentifier(ownerControlTitle == nil ? "lock" : "customer-mode-owner-exit")
             .disabled(unlocking)
+            }
         }
     }
 
