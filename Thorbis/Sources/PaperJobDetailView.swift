@@ -791,9 +791,11 @@ struct JobDetailView: View {
             }
             .accessibilityLabel("Directions")
             .accessibilityHint("Choose a customer location")
+            .accessibilityIdentifier("job-directions")
         } else {
             JobCircleLabel(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond", enabled: false)
                 .accessibilityLabel("Directions, no address on file")
+                .accessibilityIdentifier("job-directions")
         }
     }
 

@@ -242,19 +242,28 @@ final class JobOverviewUITests: XCTestCase {
         let call = app.buttons["job-call"]
         let text = app.buttons["job-text"]
         // Directions is a popover of the account's places, or says why it's off ("no address on file").
-        let directions = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Directions")).firstMatch
+        // By identifier: the service address row further down has its own "Directions to Home" circle,
+        // and a label query picks that one first (it sits shallower in the tree), which scrolled the
+        // test to the bottom of the job, past the commit and out of the lazy stack.
+        let directions = app.descendants(matching: .any)["job-directions"]
         // The one commit ("On my way" for a dispatched job); at large text it follows the content.
         let primary = app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", "job-next-step", "On my way")).firstMatch
         XCTAssertTrue(call.waitForExistence(timeout: 15))
         capture(app, name: "Job Overview with accessible text")
+        // The grid's second row starts below the fold at this size; offscreen it isn't in the tree.
+        for _ in 0..<6 where !directions.exists { drag(app, up: true) }
+        XCTAssertTrue(directions.exists, "Directions must be on the job")
         // v2: the contact circles wrap into a grid at large text; each keeps its own target.
         XCTAssertFalse(text.frame.intersects(call.frame), "Call and Text must not overlap")
         XCTAssertFalse(directions.frame.intersects(text.frame), "Text and Directions must not overlap")
         XCTAssertFalse(directions.frame.intersects(call.frame), "Call and Directions must not overlap")
         reveal(directions, in: app)
         XCTAssertTrue(directions.isHittable, "Directions must remain reachable below the enlarged header")
-        // It follows the content, so it may not be built until it scrolls near.
-        for _ in 0..<15 where !(primary.exists && primary.isHittable) { app.swipeUp(velocity: .slow) }
+        // It follows the content, so it may not be built until it scrolls near. Short drags, so the
+        // 82pt commit can't be stepped over between the section chooser and the bottom edge.
+        for _ in 0..<15 where !(primary.exists && primary.isHittable) {
+            drag(app, up: !primary.exists || primary.frame.midY > app.frame.height / 2)
+        }
         XCTAssertTrue(primary.isHittable, "The primary action must remain reachable")
         XCTAssertGreaterThan(primary.frame.height, 50)
         capture(app, name: "Accessible contact actions after scrolling")
@@ -334,6 +343,13 @@ final class JobOverviewUITests: XCTestCase {
             if element.isHittable && frame.minY > barBottom && frame.maxY < app.frame.height * 0.75 { return }
             if frame.minY <= barBottom { app.swipeDown(velocity: .slow) } else { app.swipeUp(velocity: .slow) }
         }
+    }
+
+    /// A short, slow scroll (about 220pt) that settles before the next check.
+    private func drag(_ app: XCUIApplication, up: Bool) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: up ? 0.7 : 0.4))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: up ? -220 : 220)),
+                    withVelocity: .slow, thenHoldForDuration: 0.3)
     }
 
     /// A row in the open `ThorbisMenu` popover (the last match: the popover sits above the page).
