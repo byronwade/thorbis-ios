@@ -29,6 +29,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Thorbis
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Thorbis listens only while you tap the mic to dictate a job note."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Thorbis turns what you say into job note text, on this iPhone when it can."
         INFOPLIST_FILE: Thorbis/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Thorbis/Resources/Thorbis.entitlements
         DEVELOPMENT_TEAM: T677262U5B

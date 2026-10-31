@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "side-menu", "side-menu-search", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "job-history", "job-history-empty"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "side-menu", "side-menu-search", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -1286,9 +1286,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2214", "0412", arguments.contains("--paper-preview-long-job-title")
                 ? "Diagnose the upstairs air conditioner and replace the damaged compressor at the back of the property"
                 : (arguments.contains("--paper-preview-customer-long-job") ? longTitle : "AC not cooling"),
-             PaperPreview.isWorkingJobPreview ? "in_progress" : "dispatched", 10, 30),
+             PaperPreview.isWorkingJobPreview || PaperPreview.screen == "next-stop-active" ? "in_progress" : "dispatched", 10, 30),
             ("2212", "0413", "Kitchen sink backup — Petrov", "scheduled", 12, 15),
-            ("2209", "0414", "Water heater install — Chen", "in_progress", 13, 0),
+            // Next stop: an earlier visit is finished, so the dispatched 10:30 call leads the day.
+            ("2209", "0414", "Water heater install — Chen", PaperPreview.screen.hasPrefix("next-stop") ? "completed" : "in_progress",
+             PaperPreview.screen.hasPrefix("next-stop") ? 9 : 13, 0),
             ("2218", "0415", "Outlet replacement — Alvarez", "scheduled", 14, 30),
             ("2224", "0416", "AC recheck — Nakamura", "scheduled", 16, 0),
             ("2201", "0412", "Drain cleaning", "completed", 8, 30)
@@ -1306,6 +1308,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 listed[index]["locationId"] = PaperPreview.homeLocationID
             }
             listed += propertyHistoryJobs()
+        }
+        // Next stop: each visit is at its customer's "Home" service location, so the card has an address.
+        if PaperPreview.screen.hasPrefix("next-stop") {
+            listed = listed.map { $0.merging(["locationId": "00000000-0000-4000-8000-000000007001"]) { _, new in new } }
         }
         // Booked work with no time and no tech yet, only where the Unscheduled queue is the subject.
         if PaperPreview.screen == "schedule-unscheduled" {
