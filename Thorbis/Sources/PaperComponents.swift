@@ -21,9 +21,10 @@ struct ThorbisLogoLockup: View {
     }
 }
 
-/// The tab-root header (redesign 2026-10-31, after Linear): a 34pt semibold title with round circles
-/// at top right (filter, then + on tab roots that opt in), then one muted subtitle line. On iPad a
-/// 44-tall top row holds the menu button. The title scrolls with its content; the tab bar stays put.
+/// The place-root header (redesign 2026-10-31, after Linear): a 34pt semibold title with round circles
+/// at top right (filter, then + on roots that opt in), then one muted subtitle line. On a phone's
+/// place root a 44-tall top row leads with the drawer's menu circle (after the Claude and ChatGPT
+/// apps) and carries the circles on its right. The title scrolls with its content.
 struct PaperHeader: View {
     let title: String
     var icon: String = ""
@@ -39,15 +40,22 @@ struct PaperHeader: View {
     @Environment(\.paperCreate) private var create
     @EnvironmentObject private var session: SessionController
     @Environment(\.paperShowMenu) private var openAccount
-    @Environment(\.paperMenuButton) private var showsMenuButton
+    @Environment(\.paperMenuButton) private var menuButtonSetting
+    /// Set by the phone shell on a place's root only, so pushed screens never offer the drawer.
+    @Environment(\.paperDrawer) private var drawer
+
+    private var showsMenuButton: Bool { menuButtonSetting || drawer != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // The menu button sits top-left on iPad. On iPhone the bottom bar opens the menu, so the
-            // filter joins the title's line and no near-empty row sits above it.
+            // The menu circle sits top left with the header's circles on the right of the same row.
             if showsMenuButton {
                 HStack(alignment: .center, spacing: 8) {
-                    PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
+                    if let drawer {
+                        DrawerMenuCircle(control: drawer)
+                    } else {
+                        PaperCircleButton(symbol: "line.3.horizontal", label: "Menu", action: openAccount)
+                    }
                     Spacer(minLength: 0)
                     filterButton
                     createButton
@@ -585,6 +593,26 @@ extension EnvironmentValues {
     var paperMenuButton: Bool {
         get { self[PaperMenuButtonKey.self] }
         set { self[PaperMenuButtonKey.self] = newValue }
+    }
+}
+
+/// The phone drawer, as a place root's menu circle sees it: how to open it and whether anything in
+/// it is new (the circle's dot). Nil on pushed screens and on iPad.
+struct PaperDrawerControl: @unchecked Sendable {
+    let open: () -> Void
+    /// Something in the drawer carries a dot (unread Inbox, Needs attention, a changed recent).
+    var hasNews = false
+    /// Saved-work words for VoiceOver ("2 saved items waiting to sync"), when any is on the phone.
+    var status: String? = nil
+}
+
+private struct PaperDrawerKey: EnvironmentKey {
+    static let defaultValue: PaperDrawerControl? = nil
+}
+extension EnvironmentValues {
+    var paperDrawer: PaperDrawerControl? {
+        get { self[PaperDrawerKey.self] }
+        set { self[PaperDrawerKey.self] = newValue }
     }
 }
 

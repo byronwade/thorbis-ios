@@ -41,19 +41,20 @@ final class SavedWorkReviewUITests: XCTestCase {
         }
         XCTAssertTrue(element.isHittable)
     }
-    func testBottomBarOpensScopedSavedWorkWithCommandsAndMedia() {
+    func testDrawerOpensScopedSavedWorkWithCommandsAndMedia() {
         continueAfterFailure = false
         let app = XCUIApplication(), id = UUID().uuidString
         let base = arguments(id)
         cleanupArguments = base
         app.launchArguments = base + ["--paper-preview-reset-saved-work", "--paper-preview-seed-saved-work"]
         app.launch()
-        let search = app.buttons["bottom-bar-search"]
-        XCTAssertTrue(search.waitForExistence(timeout: 20))
-        let status = NSPredicate(format: "label CONTAINS %@", "saved item")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: status, object: search)], timeout: 15), .completed)
-        search.press(forDuration: 1)
-        let review = app.collectionViews.buttons["Review saved work"]
+        // The menu circle says what is still on the phone; the drawer's row opens the review.
+        let menu = app.drawerMenu
+        XCTAssertTrue(menu.waitForExistence(timeout: 20))
+        let status = NSPredicate(format: "value CONTAINS %@", "saved item")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: status, object: menu)], timeout: 15), .completed)
+        app.openDrawer()
+        let review = app.drawerRow("saved-work")
         XCTAssertTrue(review.waitForExistence(timeout: 5))
         review.tap()
         XCTAssertTrue(app.navigationBars["Saved on this phone"].waitForExistence(timeout: 5))

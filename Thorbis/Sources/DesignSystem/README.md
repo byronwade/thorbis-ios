@@ -17,8 +17,16 @@ mobile app. Later passes must not undo them:
   Status hues: `Theme.status*` (glyph), `status*Text` (words), `status*Surface` (chip grounds).
 - **Grouping:** `SectionHeader` (semibold 15, secondary, count) over a `Well`; inset hairlines
   between rows are allowed. Avatars and property chips are allowed.
-- **Navigation:** floating labeled tab bar (pinned places + More), Search a separate circle, New in
-  the tab root header's + (`PaperHeader(showsCreate: true)`), More lists every other place. **No stock SwiftUI controls** in app screens:
+- **Navigation (phone):** a side drawer (`AppDrawer`, `../DrawerNavigation.swift`) after the Claude
+  and ChatGPT iOS apps. Each place root shows `DrawerMenuCircle` top left — `PaperHeader` draws it
+  when the shell sets `\.paperDrawer` (roots only, never pushed screens); roots without a Paper
+  header or with a visible navigation bar get it in the bar (`DrawerCircleInBar`). Edge swipe opens it on roots. The drawer:
+  business name + search circle, the Now row, pinned places, Places, Edit menu, Recents; rows are an
+  outline icon + 17pt label, ≥50pt, no wells; section labels semibold primary; `DrawerDot` (brand)
+  for unread / needs attention. Bottom: ink New job capsule left, gear circle right. New also stays
+  in the root header's + (`PaperHeader(showsCreate: true)`). UI tests: `drawer-menu`, then
+  `drawer-<id>` rows (`openDrawer()` / `openFromDrawer(_:)` in `ThorbisUITests`). iPad keeps its
+  sidebar. **No stock SwiftUI controls** in app screens:
 no `Menu {}`, `Picker`, `confirmationDialog`, `.buttonStyle(.bordered*)`, or `.borderedProminent`.
 Everything is built from `Theme` tokens (see `../Theme.swift`) so it looks the same everywhere,
 in light and dark, and scales with Dynamic Type.
@@ -28,6 +36,7 @@ in light and dark, and scales with Dynamic Type.
 | Need | Use | Where |
 |------|-----|-------|
 | Round icon button (36–40pt, 44pt hit) | `PaperCircleButton` | `../PaperComponents.swift` |
+| Phone drawer, its menu circle and dot | `AppDrawer`, `DrawerMenuCircle`, `DrawerDot` | `../DrawerNavigation.swift` |
 | Rimmed square button beside a commit | `PaperSquareButton` | `../PaperComponents.swift` |
 | The screen's one primary action | `PrimaryButton` / `.inkCommit()` / `PaperActionBar` | `../Theme.swift`, `../PaperComponents.swift` |
 | Pill segmented tabs | `PaperTabs` | `../PaperComponents.swift` |
