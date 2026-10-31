@@ -470,7 +470,8 @@ struct RootView: View {
             NavigationStack { InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations() }
         }
         .sheet(isPresented: $previewEstimateRevision) {
-            EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate : PaperPreview.estimate) { _ in }
+            EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate
+                                       : PaperPreview.screen.hasPrefix("builder-") ? PaperPreview.optionsEstimate : PaperPreview.estimate) { _ in }
                 .environmentObject(api).environmentObject(session).environmentObject(store)
         }
         .sheet(isPresented: $previewNewCustomer) { NewCustomerSheet() }
@@ -530,9 +531,9 @@ struct RootView: View {
                 }
                 return
             }
-            if PaperPreview.screen == "invoice-editor" { previewInvoiceEditor = true; return }
+            if ["invoice-editor", "invoice-editor-line"].contains(PaperPreview.screen) { previewInvoiceEditor = true; return }
             if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
-            if PaperPreview.screen == "estimate-revision" || PaperPreview.screen == "estimate-draft" { previewEstimateRevision = true; return }
+            if ["estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line"].contains(PaperPreview.screen) { previewEstimateRevision = true; return }
             switch PaperPreview.screen {
             case "jobs", "jobs-filters": primaryTab = .jobs
             case "my-day", "schedule": primaryTab = .schedule

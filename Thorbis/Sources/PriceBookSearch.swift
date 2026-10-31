@@ -167,6 +167,15 @@ struct PriceBookSearchIndex {
             .map(\.0)
     }
 
+    /// Items this person starred on this device, A to Z. Local only: there are no server favourites.
+    func favorites(kind: PriceBookKindFilter = .all, ids: Set<String>) -> [PriceBookListItem] {
+        guard !ids.isEmpty else { return [] }
+        return entries
+            .filter { kind.includes($0.item) && ids.contains($0.item.id) }
+            .map(\.item)
+            .sorted { $0.description.localizedStandardCompare($1.description) == .orderedAscending }
+    }
+
     // MARK: Matching
 
     /// Each letter word joined to the number next to it ("r", "410a" → "r410a"); two numbers never
@@ -311,6 +320,31 @@ struct PriceBookUsageStore {
     }
 }
 
+/// Price book items a person starred on this device, per organization. Never leaves the device
+/// and never stands in for server data.
+struct PriceBookFavoritesStore {
+    static let maximumEntries = 200
+    private let defaults: UserDefaults
+    private let key: String
+
+    init(organizationID: String, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        key = "priceBookFavorites.\(organizationID)"
+    }
+
+    func load() -> Set<String> {
+        Set(defaults.stringArray(forKey: key) ?? [])
+    }
+
+    @discardableResult
+    func toggle(_ itemID: String) -> Set<String> {
+        var ids = load()
+        if ids.contains(itemID) { ids.remove(itemID) } else if ids.count < Self.maximumEntries { ids.insert(itemID) }
+        defaults.set(ids.sorted(), forKey: key)
+        return ids
+    }
+}
+
 /// The whole active price book for the signed-in organization, kept on the device so search is
 /// instant and works offline (EB-01). Opening a builder shows the cached copy at once and
 /// refreshes it in the background.
@@ -330,6 +364,8 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var loading = false
     @Published private(set) var error: String?
     @Published private(set) var usage: [String: PriceBookUsage] = [:]
+    /// Local stars (this device only).
+    @Published private(set) var favorites: Set<String> = []
     private(set) var organizationID: String?
     private var lastRefresh: Date?
     private(set) var context: PriceBookCatalogContext?
@@ -345,6 +381,7 @@ final class PriceBookCatalog: ObservableObject {
             self.organizationID = organizationID
             apply(organizationID.flatMap(Self.readCache) ?? [])
             usage = organizationID.map { PriceBookUsageStore(organizationID: $0).load() } ?? [:]
+            favorites = organizationID.map { PriceBookFavoritesStore(organizationID: $0).load() } ?? []
             lastRefresh = nil
             error = nil
         }
@@ -417,6 +454,11 @@ final class PriceBookCatalog: ObservableObject {
         usage = PriceBookUsageStore(organizationID: organizationID).record(itemID)
     }
 
+    func toggleFavorite(_ itemID: String) {
+        guard let organizationID else { return }
+        favorites = PriceBookFavoritesStore(organizationID: organizationID).toggle(itemID)
+    }
+
     func item(id: String) -> PriceBookListItem? {
         items.first { $0.id == id }
     }
@@ -475,6 +517,7 @@ final class PriceBookCatalog: ObservableObject {
         error = nil
         loading = false
         usage = [:]
+        favorites = []
         apply([])
         if let directory = Self.directory { try? FileManager.default.removeItem(at: directory) }
     }
