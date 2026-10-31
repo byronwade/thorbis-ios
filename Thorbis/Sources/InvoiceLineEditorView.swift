@@ -261,7 +261,7 @@ struct InvoiceLineEditorView: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.chrome)
+        .background(Theme.background)
     }
 
     private var priceBookOverrideReasonField: some View {

@@ -250,7 +250,7 @@ struct PaperInvoiceCollectionFooter: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
-                .background(Theme.chrome)
+                .background(Theme.background)
         }
     }
 }

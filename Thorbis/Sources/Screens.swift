@@ -388,7 +388,7 @@ struct AddressLink: View {
     var coordinates: FieldCoordinates? = nil
     var body: some View {
         if let url {
-            Link(destination: url) { Label(address, systemImage: "map").frame(minHeight: 44) }
+            Link(destination: url) { Label(address, systemImage: "map").multilineTextAlignment(.leading).frame(minHeight: 44, alignment: .leading) }
         } else { Text(address) }
     }
     private var url: URL? {
