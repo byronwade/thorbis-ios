@@ -243,7 +243,6 @@ struct AppBottomBar: View {
                     if !reduceMotion { taps[Self.moreID, default: 0] += 1 }
                     openMore()
                 }
-                .accessibilityIdentifier("bottom-bar-more")
             }
             .padding(4)
             // The selection pill glides to the new tab instead of jumping.
@@ -381,6 +380,7 @@ struct AppBottomBar: View {
         .accessibilityLabel(title)
         .accessibilityAddTraits(here ? [.isButton, .isSelected] : .isButton)
         .accessibilityShowsLargeContentViewer { Label(title, systemImage: symbol) }
+        .accessibilityIdentifier("bottom-bar-\(id)")
     }
 
     /// One pill shared by every tab, so selection slides between them.

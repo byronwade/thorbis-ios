@@ -254,6 +254,7 @@ struct ScheduleView: View {
                     ScheduleHero(job: first, customer: store.customerName(first.customerId), pendingStatus: outbox.pendingStatus(for: first.id),
                                  nextStop: isToday, place: place, street: addresses.street(first),
                                  etaMinutes: place != nil && driving ? eta.minutes : nil,
+                                 onSiteSince: onSiteSince(first),
                                  locationNotice: place?.coordinates != nil && driving && !session.isOffline && eta.locationOff && !locationNoticeDismissed
                                     ? { NextStopLocationNotice.dismissedThisLaunch = true
                                         withMotion(.easeOut(duration: 0.2)) { locationNoticeDismissed = true } } : nil) { commit(for: first) }
@@ -280,6 +281,14 @@ struct ScheduleView: View {
             }
             .paperCardMargin()
         }
+    }
+
+    /// When the tech reached the lead job, from the server's own arrival (or start) time. Nil when the
+    /// record has not loaded or carries neither, so the card never guesses a duration.
+    private func onSiteSince(_ job: Job) -> Date? {
+        guard let hero, hero.id == job.id, ["arrived", "in_progress", "paused"].contains(outbox.pendingStatus(for: job.id) ?? job.status)
+        else { return nil }
+        return JobFiltering.date(hero.arrivedAt) ?? JobFiltering.date(hero.startedAt)
     }
 
     /// A grouped section: semibold header with its count over one well of rows.
@@ -569,6 +578,8 @@ private struct ScheduleHero<Commit: View>: View {
     /// The job's street from the list's address book, when the stop itself is not loaded.
     var street: String? = nil
     var etaMinutes: Int? = nil
+    /// The server's arrival time while on site: the card says "On site 42m".
+    var onSiteSince: Date? = nil
     /// Set when Location is off and the drive time is missing because of it: shows the quiet
     /// "Turn on location" line, and is called when the person dismisses it.
     var locationNotice: (() -> Void)? = nil
@@ -600,9 +611,17 @@ private struct ScheduleHero<Commit: View>: View {
                     layout {
                         HStack(spacing: 8) {
                             StatusGlyph(jobStatus: status, hasTime: job.scheduledFor != nil, pending: pendingStatus != nil)
-                            Text(pendingStatus != nil ? "\(status.statusLabel) · waiting to sync" : status.statusLabel)
-                                .font(Theme.font(15, weight: .semibold))
-                                .foregroundStyle(tone.text)
+                            if let onSiteSince, pendingStatus == nil {
+                                TimelineView(.everyMinute) { context in
+                                    Text("On site \(Self.duration(from: onSiteSince, to: context.date))")
+                                        .font(Theme.font(15, weight: .semibold)).monospacedDigit()
+                                        .foregroundStyle(tone.text)
+                                }
+                            } else {
+                                Text(pendingStatus != nil ? "\(status.statusLabel) · waiting to sync" : status.statusLabel)
+                                    .font(Theme.font(15, weight: .semibold))
+                                    .foregroundStyle(tone.text)
+                            }
                         }
                         Text(when).font(Theme.font(15, weight: .medium)).monospacedDigit()
                             .foregroundStyle(Theme.muted)
@@ -652,6 +671,12 @@ private struct ScheduleHero<Commit: View>: View {
         .clipShape(shape)
     }
 
+    /// "42m", "1h 5m".
+    static func duration(from start: Date, to now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(start) / 60))
+        return minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h \(minutes % 60)m"
+    }
+
     @ViewBuilder private var chips: some View {
         if nextStop, let directions = place?.directions {
             ActionChip(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond") { openURL(directions) }
@@ -669,6 +694,7 @@ private struct ScheduleHero<Commit: View>: View {
         var parts = [headline, job.title == headline ? nil : job.title, customer].compactMap { $0 }
         parts.append(when)
         parts.append(status.statusLabel + (pendingStatus != nil ? ", waiting to sync" : ""))
+        if let onSiteSince, pendingStatus == nil { parts.append("on site \(Self.duration(from: onSiteSince, to: .now))") }
         return parts.joined(separator: ", ")
     }
 }
