@@ -259,8 +259,8 @@ struct RootView: View {
                             guard !barSearching, !menuOpen else { return }
                             barReserve = max(0, height + AppBottomBar.bottomGap - geometry.safeAreaInsets.bottom)
                         }
-                        // With the chip up, chip and bar sit on one ground so nothing floats over rows.
-                        .background { if currentJob != nil && !barSearching && !menuOpen { BarGround() } }
+                        // The bar (and the chip, when up) sit on one ground, so rows never show between the circles.
+                        .background { if !barSearching && !menuOpen { BarGround() } }
                         .padding(.bottom, AppBottomBar.bottomGap)
                         .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85), value: currentJob?.id)
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: barSync)
