@@ -64,7 +64,7 @@ enum NextStopDay {
 }
 
 extension NextStopDay {
-    /// "Fri, Oct 30 · visit 3 of 6": the day and where the tech is in it, for the Today subtitle.
+    /// "Fri, Oct 30 · 2 of 6 done": the day and how far through it the tech is, for the Today subtitle.
     /// Nil when there are no visits; "all 6 done" once every visit is finished.
     static func subtitle(day: Date = .now, jobs: [Job], lead: Job?) -> String {
         let date = day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
@@ -75,10 +75,9 @@ extension NextStopDay {
         if visits.allSatisfy({ $0.status == "completed" }) {
             return visits.count == 1 ? "\(date) · today's visit done" : "\(date) · all \(visits.count) visits done"
         }
-        if let lead, let index = visits.firstIndex(where: { $0.id == lead.id }) {
-            return "\(date) · visit \(index + 1) of \(visits.count)"
-        }
-        return "\(date) · \(visits.count) visit\(visits.count == 1 ? "" : "s")"
+        // Redesign 2026-10-31: progress as Linear counts it, "4 of 6 done".
+        let done = visits.filter { $0.status == "completed" }.count
+        return "\(date) · \(done) of \(visits.count) done"
     }
 }
 

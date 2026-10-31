@@ -150,6 +150,9 @@ struct PaperTabs: View {
     var wrapOverflow = false
     /// Offer a button as well as a swipe when a row has hidden sections.
     var explicitScrollControl = false
+    /// Linear text tabs (redesign 2026-10-31): plain words on the ground, the chosen one on a light
+    /// well pill, left-aligned under the large title. Used by Today; other screens keep the segments.
+    var textTabs = false
     /// True while tabs remain past the trailing edge; the fade shows only then, so the
     /// last tab is never left dimmed once you've scrolled to it.
     @State private var moreTrailing = true
@@ -188,6 +191,12 @@ struct PaperTabs: View {
                 // Accessibility sizes: the job screen's chooser. Three words at XXXL never fit one
                 // row, and a row of fixed-width words would widen the whole screen past its edges.
                 accessibleChooser
+            } else if textTabs {
+                HStack(spacing: 4) {
+                    ForEach(options, id: \.self) { option in tab(option, padding: 12) }
+                }
+                .padding(.horizontal, Theme.gutter - 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else if let fit = fittingCandidate {
                 // design 2026-10-30: one selector style everywhere, the segmented pill. A field
                 // track, the chosen segment raised as a white pill, every segment the same width.
