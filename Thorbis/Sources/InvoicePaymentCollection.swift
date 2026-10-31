@@ -1318,7 +1318,7 @@ private func paymentDetail(_ label: String, _ value: String) -> some View {
 }
 
 private func paymentDate(_ value: String) -> String {
-    guard let date = ISO8601DateFormatter().date(from: value) else { return value }
+    guard let date = JobFiltering.date(value) else { return value }
     return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
 }
 

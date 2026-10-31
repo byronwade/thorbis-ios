@@ -77,7 +77,7 @@ struct CustomersView: View {
             }
             .padding(.bottom, 24)
         }
-        .refreshable { await store.refresh(api); await loadCustomers() }
+        .refreshable { await store.refresh(api); await SavedCopies.$liveOnly.withValue(true) { await loadCustomers() } }
         .background(Theme.background).toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             if session.can("customer.create", feature: "core_crm") && !items.isEmpty {
@@ -304,6 +304,8 @@ struct CustomerDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                OfflineBanner().padding(.horizontal, -Theme.gutter)
+                SavedCopyNote(savedAt: api.savedCopyDate("/v1/customers/\(customer.id)")).padding(.horizontal, -Theme.gutter)
                 customerIdentity
                 actionCircles
                 PaperTabs(options: ["Overview", jobsLabel, "Money"], selection: tabBinding)
@@ -363,10 +365,12 @@ struct CustomerDetailView: View {
             if selectedTab == "Jobs" { Task { await loadJobRecords() } }
         }
         .refreshable {
-            await load()
-            await loadActivity(reset: true)
-            if tab != "Overview" { await loadRecords() }
-            if tab == "Jobs" { await loadJobRecords() }
+            await SavedCopies.$liveOnly.withValue(true) {
+                await load()
+                await loadActivity(reset: true)
+                if tab != "Overview" { await loadRecords() }
+                if tab == "Jobs" { await loadJobRecords() }
+            }
         }
         .sheet(isPresented: $showNewJob) { NewJobSheet(preselected: customer) }
         .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task { await load(); await loadSmsConsent() } }) {
@@ -1067,9 +1071,7 @@ struct CustomerDetailView: View {
     }
     private func activityTimestamp(_ raw: String) -> String {
         guard let date = JobFiltering.date(raw) else { return raw }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: .now)
+        return ActivityStamp.abbreviated.localizedString(for: date, relativeTo: .now)
     }
     private func activitySymbol(for kind: String) -> String {
         switch kind {
@@ -1144,4 +1146,13 @@ enum CustomerJobOrder {
         }
         return open + done
     }
+}
+
+/// Made once: the customer's activity list formats a stamp per row on every render.
+@MainActor private enum ActivityStamp {
+    static let abbreviated: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
 }

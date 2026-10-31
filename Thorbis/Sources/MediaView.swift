@@ -998,9 +998,8 @@ enum JobPhotoDateGroups {
     }
 
     static func group(_ photos: [MediaAssetRecord], calendar: Calendar) -> [Group] {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let standard = ISO8601DateFormatter()
+        let fractional = JobFiltering.isoFractional
+        let standard = JobFiltering.isoPlain
         var byDay: [Date: [MediaAssetRecord]] = [:]
         var unavailable: [MediaAssetRecord] = []
         for photo in photos {

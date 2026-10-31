@@ -34,14 +34,22 @@ struct CustomerJobGroups {
 }
 
 enum JobFiltering {
+    /// Server timestamps, with or without fractional seconds. Called inside list sorts, so the two
+    /// formatters are made once (ISO8601DateFormatter is thread-safe; their options never change).
     static func date(_ raw: String?) -> Date? {
         guard let raw else { return nil }
+        return isoFractional.date(from: raw) ?? isoPlain.date(from: raw)
+    }
+    nonisolated(unsafe) static let isoFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: raw) { return date }
+        return formatter
+    }()
+    nonisolated(unsafe) static let isoPlain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: raw)
-    }
+        return formatter
+    }()
 
     /// A list summary can call a visit upcoming only when it has a valid future time.
     static func nextScheduledVisit(_ jobs: [Job], customerID: String, now: Date = Date()) -> Job? {
@@ -107,14 +115,14 @@ enum JobFiltering {
             case .week: return calendar.dateInterval(of: .weekOfYear, for: now)?.contains(scheduled) ?? false
             case .unscheduled: return false
             }
-        }.sorted { (date($0.scheduledFor) ?? .distantFuture) < (date($1.scheduledFor) ?? .distantFuture) }
+        }.sortedByDate(\.scheduledFor, missing: .distantFuture)
     }
 
     static func jobs(_ jobs: [Job], assignedTo: String?, search: String) -> [Job] {
         jobs.filter { job in
             (assignedTo == nil || job.assignedToUserId == assignedTo) &&
             (search.isEmpty || job.title.localizedCaseInsensitiveContains(search) || job.shortRef.localizedCaseInsensitiveContains(search))
-        }.sorted { (date($0.updatedAt) ?? .distantPast) > (date($1.updatedAt) ?? .distantPast) }
+        }.sortedByDate(\.updatedAt, missing: .distantPast, descending: true)
     }
 
     /// The jobs board with the Display sheet applied: the `jobs(_:assignedTo:search:)` base, then
@@ -129,7 +137,7 @@ enum JobFiltering {
         switch ordering {
         case .recent: break // base is already most-recently-updated first
         case .scheduled:
-            result.sort { (date($0.scheduledFor) ?? .distantFuture) < (date($1.scheduledFor) ?? .distantFuture) }
+            result = result.sortedByDate(\.scheduledFor, missing: .distantFuture)
         case .name:
             result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         }
@@ -156,5 +164,14 @@ enum MyDayRules {
 
     static func canStartDriving(_ job: Job, canEdit: Bool) -> Bool {
         canEdit && job.status == "dispatched" && job.allowedTransitions?.contains("en_route") == true
+    }
+}
+
+extension Array where Element == Job {
+    /// Sorts by a server timestamp, parsing each one once instead of twice per comparison.
+    func sortedByDate(_ key: KeyPath<Job, String?>, missing: Date, descending: Bool = false) -> [Job] {
+        map { ($0, JobFiltering.date($0[keyPath: key]) ?? missing) }
+            .sorted { descending ? $0.1 > $1.1 : $0.1 < $1.1 }
+            .map(\.0)
     }
 }

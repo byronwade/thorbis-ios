@@ -214,7 +214,8 @@ enum JobDocumentsLoader {
                     continue
                 }
                 records.append(record)
-                fresh.insert(record.id)
+                // A copy saved on this phone is shown, but is not a fresh read to act on.
+                if api.savedCopyDate("/v1/estimates/\(id)") == nil { fresh.insert(record.id) }
             } catch is CancellationError { return nil }
             catch {
                 guard isCurrent(), !Task.isCancelled else { return nil }
@@ -245,6 +246,10 @@ enum JobDocumentsLoader {
                 let incoming = try await api.fieldJobInvoices(scope.jobID)
                 guard isCurrent(), !Task.isCancelled else { return nil }
                 let mine = incoming.filter(scope.contains)
+                if api.savedCopyDate("/v1/jobs/\(scope.jobID)/invoices") != nil {
+                    // Saved on this phone: shown to read, never treated as fresh enough to collect on.
+                    return invoiceRead(scope, mine, freshIDs: [], complete: mine.count == incoming.count)
+                }
                 // Empty is authoritative here; cached IDs must not resurrect deleted/unlinked paper.
                 return invoiceRead(scope, mine, freshIDs: Set(mine.map(\.id)), complete: mine.count == incoming.count)
             } catch let problem as Problem where problem.status == 404 || problem.status == 405 {

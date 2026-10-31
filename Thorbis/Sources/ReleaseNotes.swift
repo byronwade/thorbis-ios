@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-offline-day",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "wifi.slash", title: "More of your day works without signal",
+                      detail: "Today's jobs, customers, estimates and invoices open offline, and follow-ups send once you're back.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-ipad-layout",
             date: "2026-10-31",
             highlights: [

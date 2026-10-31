@@ -11,7 +11,7 @@ struct JobDetailView: View {
         #if DEBUG
         // The old five sections' links land on the three that hold them now: estimates and
         // invoices on Money, photos as Activity's Photos filter.
-        let previewTabs = ["job-invoice": "Money", "job-estimates": "Money", "job-activity": "Activity", "job-notes": "Activity", "job-media": "Activity", "job-invoice-empty": "Money"]
+        let previewTabs = ["offline-job-money": "Money", "job-invoice": "Money", "job-estimates": "Money", "job-activity": "Activity", "job-notes": "Activity", "job-media": "Activity", "job-invoice-empty": "Money"]
         _selectedTab = State(initialValue: PaperPreview.enabled ? previewTabs[PaperPreview.screen] ?? "Overview" : "Overview")
         if PaperPreview.enabled, PaperPreview.screen == "job-media" { _activityFilter = State(initialValue: "Photos") }
         // The composer with a quick note already tapped in, ready to edit before saving.
@@ -134,8 +134,10 @@ struct JobDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OfflineBanner().padding(.top, 4)
-            // Offline already says so above; a second "no connection" banner would only repeat it.
-            if let error, !session.isOffline { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
+            SavedCopyNote(savedAt: api.savedCopyDate("/v1/jobs/\(jobId)"))
+            // Offline, a load with no saved copy clears `error` (the banner above says so); what is
+            // left is an action that needs a connection, which must say so rather than fail silently.
+            if let error { ErrorBanner(message: error) { await retry() }.padding(.top, 4) }
             if let issue = documentReadIssue {
                 ErrorBanner(message: issue) { await retry() }.padding(.top, 4)
             }
@@ -313,10 +315,12 @@ struct JobDetailView: View {
             #endif
         }
         .refreshable {
-            await load()
-            if let job { await loadContacts(job) }
-            await loadInvoices()
-            if let job { await loadJobEstimates(job) }
+            await SavedCopies.$liveOnly.withValue(true) {
+                await load()
+                if let job { await loadContacts(job) }
+                await loadInvoices()
+                if let job { await loadJobEstimates(job) }
+            }
         }
         // The Lock Screen card follows the status shown here, queued steps included.
         .task(id: liveActivityKey) {
