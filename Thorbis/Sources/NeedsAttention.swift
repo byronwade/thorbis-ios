@@ -102,7 +102,9 @@ struct NeedsAttentionView: View {
             }
             .padding(.bottom, 24)
         }
+        #if DEBUG
         .modifier(PaperPreviewScrollAnchor())
+        #endif
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .task { await load() }
