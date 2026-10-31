@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-10-31-owner-home",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "house", title: "See how today is going at a glance",
+                      detail: "Owners open on Home: today's jobs by state, money, what needs you and where each tech is.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-offline-day",
             date: "2026-10-31",
             highlights: [

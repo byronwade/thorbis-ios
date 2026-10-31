@@ -3,12 +3,13 @@ import SwiftUI
 /// Everything an owner can place in the tab bar or the More menu. Search and More stay fixed so
 /// nothing can be lost: whatever is not in the tab bar is in More (or under Hidden in Customize).
 enum MenuItem: String, CaseIterable, Codable, Identifiable {
-    case schedule, jobs, customers, attention, inbox, estimates, invoices, billing, priceBook, money, reports, team, notices, drafts
+    case home, schedule, jobs, customers, attention, inbox, estimates, invoices, billing, priceBook, money, reports, team, notices, drafts
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .home: "Home"
         case .schedule: "Schedule"
         case .jobs: "Jobs"
         case .customers: "Customers"
@@ -40,6 +41,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .home: "house"
         case .schedule: "calendar"
         case .jobs: "briefcase"
         case .customers: "person.2"
@@ -60,7 +62,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     /// Quiet mark hue in menus: a few soft families, not a rainbow (design.thorbis.com Color).
     var tint: Color {
         switch self {
-        case .schedule, .jobs, .attention: Theme.markAccent
+        case .home, .schedule, .jobs, .attention: Theme.markAccent
         case .customers, .team, .notices, .inbox: Theme.markOlive
         case .estimates, .invoices, .billing, .money: Theme.markForest
         case .priceBook, .reports: Theme.markPumpkin
@@ -70,6 +72,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     var subtitle: String? {
         switch self {
+        case .home: "Today at a glance, money and what needs you"
         case .attention: "Unpaid invoices, waiting estimates, jobs without a time"
         case .inbox: "Booked, changed and assigned jobs"
         case .billing: "Progress billing, deposits, retainage"
@@ -95,6 +98,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     var route: PaperRoute? {
         switch self {
         case .schedule, .jobs, .customers: nil
+        case .home: .home
         case .attention: .attention
         case .inbox: .inbox
         case .estimates: .estimates
@@ -134,6 +138,8 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     @MainActor func permitted(_ session: SessionController) -> Bool {
         switch self {
         case .schedule, .jobs: session.can("job.view", feature: "jobs")
+        // The owner's day at a glance; other roles keep their menus exactly as they were.
+        case .home: session.can("job.view", feature: "jobs") && WorkRole(session) == .owner
         case .customers: session.can("customer.view", feature: "core_crm")
         case .attention: session.can("invoice.view", feature: "invoicing") || session.can("estimate.view", feature: "estimates")
         case .inbox: session.can("job.view", feature: "job_booking_notices")
@@ -177,12 +183,13 @@ final class MenuLayout: ObservableObject {
 
     /// The bar a role starts with when neither the company nor this phone has saved one.
     /// Places the role cannot open drop out and the technician bar fills the gap, so the bar
-    /// never shrinks to one place. Schedule stays, because the app opens on it.
+    /// never shrinks to one place. Schedule stays, because the app opens on it (owners open on
+    /// Home when it leads their bar; Needs attention moved into Home and the menu).
     static func defaultTabs(for role: WorkRole, permitted: (MenuItem) -> Bool) -> [MenuItem] {
         let wanted: [MenuItem] = switch role {
         case .technician: [.schedule, .jobs, .customers]
         case .office: [.schedule, .inbox, .customers, .jobs]
-        case .owner: [.schedule, .attention, .money, .customers]
+        case .owner: [.home, .schedule, .money, .customers]
         }
         let allowed = (wanted + defaultTabs).reduce(into: [MenuItem]()) { result, item in
             if !result.contains(item), permitted(item) || defaultTabs.contains(item) { result.append(item) }
@@ -294,7 +301,8 @@ final class MenuLayout: ObservableObject {
         let body = CompanyMobileLayout(tabs: tabs.filter(MenuItem.companyTabs.contains).map(\.serverID) + ["more"],
                                        hiddenTabs: [],
                                        moreMenu: (menuOrder + MenuItem.allCases).reduce(into: [MenuItem]()) { if !$0.contains($1) { $0.append($1) } }
-                                           .filter { $0.route != nil }.map {
+                                           // Home is this app's own place; the company layout API does not list it.
+                                           .filter { $0.route != nil && $0 != .home }.map {
                                            .init(id: $0.serverID, hidden: hidden.contains($0))
                                        },
                                        jobTabs: companyJobTabs, version: nil, updatedAt: nil, updatedBy: nil)
