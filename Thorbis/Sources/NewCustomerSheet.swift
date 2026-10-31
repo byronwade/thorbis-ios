@@ -5,6 +5,9 @@ import SwiftUI
 struct NewCustomerSheet: View {
     /// Seeds the name, e.g. with what was typed into a customer search before tapping New.
     var initialName: String = ""
+    /// Seeds the phone and address, e.g. from the inline new-customer fields in a booking.
+    var initialPhone: String = ""
+    var initialAddress: String = ""
     var onCreated: (Customer) -> Void = { _ in }
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
@@ -72,6 +75,8 @@ struct NewCustomerSheet: View {
             }
             .onAppear {
                 if request.name.isEmpty { request.name = initialName.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if phone.isEmpty { phone = initialPhone.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if address.isEmpty { address = initialAddress.trimmingCharacters(in: .whitespacesAndNewlines) }
                 focused = .name
             }
             .task(id: CustomerPhoneLookup.digits(phone)) { await checkPhone() }

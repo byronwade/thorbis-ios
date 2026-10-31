@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections", "book-job", "book-job-filled", "dispatch-board"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -1359,6 +1359,27 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         if PaperPreview.screen == "customer-jobs" { listed += propertyHistoryJobs() }
+        if PaperPreview.screen == "dispatch-board" {
+            // The board needs a team's day: spread the visits across the roster, leave one
+            // without a tech and two waiting for a time.
+            let jorge = "00000000-0000-4000-8000-000000008801", sam = "00000000-0000-4000-8000-000000008802"
+            for index in listed.indices {
+                switch listed[index]["id"] as? String {
+                case "00000000-0000-4000-8000-000000002212": listed[index]["assignedToUserId"] = jorge
+                case "00000000-0000-4000-8000-000000002209": listed[index]["assignedToUserId"] = sam
+                case "00000000-0000-4000-8000-000000002218": listed[index].removeValue(forKey: "assignedToUserId")
+                case "00000000-0000-4000-8000-000000002224":
+                    listed[index].removeValue(forKey: "assignedToUserId")
+                    listed[index].removeValue(forKey: "scheduledFor")
+                    listed[index]["createdAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3 * 86_400))
+                default: break
+                }
+            }
+            listed.append(["id": "00000000-0000-4000-8000-000000002230", "organizationId": PaperPreview.organizationID,
+                           "customerId": "00000000-0000-4000-8000-000000000413", "title": "Garbage disposal jammed", "status": "scheduled",
+                           "createdAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86_400)),
+                           "updatedAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86_400)), "allowedTransitions": [String]()])
+        }
         if PaperPreview.isPropertyHistoryPreview {
             if let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
                 listed[index]["locationId"] = PaperPreview.homeLocationID
@@ -1414,7 +1435,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let rows = [("0412", firstName, "412 Birchwood Ln"), ("0413", "Alex Petrov", "88 Larch Ave"), ("0414", "David Chen", "245 Rosemont Dr"), ("0415", "Elena Alvarez", "19 Fenwick Ct"), ("0416", "Mei Nakamura", "731 Cassia Way")]
         return rows.map { ref, name, address in
             ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID, "name": name, "address": address,
-             "accountType": "residential", "archived": false, "createdAt": "2022-03-01T12:00:00Z", "updatedAt": "2026-07-20T12:00:00Z", "billingTerms": "Due on receipt"] as [String: Any]
+             "accountType": "residential", "archived": false, "createdAt": "2022-03-01T12:00:00Z", "updatedAt": "2026-07-20T12:00:00Z", "billingTerms": "Due on receipt",
+             "phone": PaperPreview.screen.hasPrefix("book-job") ? "(916) 555-0\(ref.suffix(3))" : NSNull()] as [String: Any]
         }
     }
 }

@@ -56,6 +56,8 @@ struct FieldJobDraft: Equatable {
     var customerID = ""
     var title = ""
     var notes = ""
+    /// The service location the job happens at, when one was picked.
+    var locationID: String? = nil
 
     init(customerID: String = "", title: String = "", notes: String = "") {
         self.customerID = customerID
@@ -75,6 +77,7 @@ struct FieldJobDraft: Equatable {
         return FieldJobCreate(
             customerId: customerID,
             title: trimmedTitle,
+            locationId: locationID,
             notes: trimmedNotes.isEmpty ? nil : trimmedNotes
         )
     }
