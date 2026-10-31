@@ -41,6 +41,13 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// Places whose root screen leads with `PaperHeader`, which carries the drawer's menu circle;
+    /// the others get it in the navigation bar.
+    var hasPaperHeader: Bool { [.home, .schedule, .jobs, .customers, .estimates, .invoices, .priceBook].contains(self) }
+
+    /// The drawer's word: the schedule reads as the day's work, everything else by its name.
+    var drawerTitle: String { self == .schedule ? "Today" : title }
+
     var symbol: String {
         switch self {
         case .home: "house"
@@ -401,14 +408,14 @@ struct CustomizeMenuView: View {
                 .moveDisabled(!editable)
                 .deleteDisabled(!editable)
             } header: {
-                Text("Bottom bar")
+                Text("Pinned to the top")
             } footer: {
                 Text(footer)
             }
 
             let addable = MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && canBeTab($0) }
             if editable, layout.tabs.count < MenuLayout.maxTabs, !addable.isEmpty {
-                Section("Add to bottom bar") {
+                Section("Pin to the top") {
                     ForEach(addable) { item in
                         Button { withAnimation { layout.addTab(item) } } label: {
                             Label(item.title, systemImage: item.symbol)
@@ -436,7 +443,7 @@ struct CustomizeMenuView: View {
                 Section {
                     Button("Use this layout for everyone") { withAnimation { layout.makeCompanyLayout() } }
                 } footer: {
-                    Text("Everyone in \(session.activeOrganization?.name ?? "your company") gets these tabs and this More menu.")
+                    Text("Everyone in \(session.activeOrganization?.name ?? "your company") gets these pinned places and this menu.")
                 }
             } else if !company && !layout.isDefault {
                 Section {
@@ -454,8 +461,8 @@ struct CustomizeMenuView: View {
 
     private var footer: String {
         let name = session.activeOrganization?.name ?? "your company"
-        if company && isOwner { return "Up to \(MenuLayout.maxTabs) places in the bar. Changes apply to everyone in \(name)." }
+        if company && isOwner { return "Up to \(MenuLayout.maxTabs) pinned places. Changes apply to everyone in \(name)." }
         if company { return "Set by \(name). Ask an owner to change it." }
-        return "Up to \(MenuLayout.maxTabs) places in the bar. Drag to reorder, swipe to remove."
+        return "Up to \(MenuLayout.maxTabs) pinned places. Drag to reorder, swipe to remove."
     }
 }
