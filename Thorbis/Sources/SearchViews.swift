@@ -613,6 +613,7 @@ private struct SearchScreen: View {
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var recents = RecentItems.shared
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var path = NavigationPath()
     /// Groups opened past their first rows with "Show all".
     @State private var expanded: Set<String> = []
@@ -680,10 +681,9 @@ private struct SearchScreen: View {
                 .accessibilityLabel("Clear search")
             }
         }
-        .padding(.horizontal, 14)
-        .background(Theme.card, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 8)
+        .padding(.vertical, -10)
+        .fieldWell()
+        .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
         .background(Theme.background)
     }
 
@@ -742,13 +742,12 @@ private struct SearchScreen: View {
     private var content: some View {
         ScrollViewReader { reader in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                // v2 Search room: results grouped by kind on the canvas, a 13 Medium label over each
+                // group, space between groups, no panels or lines.
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if terms.isEmpty { emptyQuery } else { typed }
                 }
-                .padding(.horizontal, PaperCardMetrics.margin)
-                .padding(.top, 8).padding(.bottom, 24)
-                // Redesign phase 2: results grouped by kind, a semibold header over each well.
-                .environment(\.paperGroupedWells, true)
+                .padding(.top, 4).padding(.bottom, 24)
             }
             .onChange(of: model.selection) { _, selection in
                 guard let selection else { return }
@@ -772,31 +771,32 @@ private struct SearchScreen: View {
             savedNote
         }
         if let top = built.top {
-            PaperSection("Top hit") { row(top) }
+            ListGroupLabel(title: "Top hit", first: true)
+            row(top)
         }
-        ForEach(built.groups) { group in
+        ForEach(Array(built.groups.enumerated()), id: \.element.id) { index, group in
             let shown = visible(group)
-            PaperSection(title: group.title, count: group.hits.count) {
-                ForEach(shown) { hit in row(hit) }
-                if shown.count < group.hits.count {
-                    Button { expanded.insert(group.id) } label: {
-                        Text("Show all \(group.hits.count)").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .padding(.horizontal, PaperCardMetrics.inset).contentShape(Rectangle())
-                    }
-                    .buttonStyle(RowPressStyle())
+            ListGroupLabel(title: group.title, count: group.hits.count, first: built.top == nil && index == 0)
+            ForEach(shown) { hit in row(hit) }
+            if shown.count < group.hits.count {
+                Button { expanded.insert(group.id) } label: {
+                    Text("Show all \(group.hits.count)").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, ListRoom.gutter).contentShape(Rectangle())
                 }
-            } accessory: { EmptyView() }
+                .buttonStyle(RowPressStyle())
+            }
         }
         if waiting || model.searching {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Searching…").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 4).frame(minHeight: 28)
-                Well { SkeletonRows(count: built.isEmpty ? 3 : 2, leading: false, inset: PaperCardMetrics.inset, dividers: true) }
-                    .accessibilityLabel("Searching")
+                ListGroupLabel(title: "Searching…", first: built.isEmpty)
+                ListRoomSkeleton(count: built.isEmpty ? 3 : 2, threeLines: false, label: false)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Searching")
         } else if built.isEmpty {
-            PaperEmptyState.search(terms.text)
+            // design.thorbis.com States: say what found nothing and the next move.
+            ListRoomEmpty(title: "No matches for \u{201C}\(terms.text)\u{201D}.", message: "Try a street or a phone number.")
         }
     }
 
@@ -820,39 +820,59 @@ private struct SearchScreen: View {
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, ListRoom.gutter).padding(.top, 8)
         .accessibilityElement(children: .combine)
     }
 
+    /// A result in the List room grammar: the street or name leads (15 Medium, the typed words
+    /// marked), what and who follow; the status word, or an amount over a document's word, trails.
+    /// Records carry no leading glyph (the group's label names the kind); recent searches and
+    /// actions keep their small symbol.
     private func row(_ hit: SearchHit) -> some View {
         let selected = isSelected(hit)
-        let hasGlyph: Bool = { if case .none = hit.glyph { false } else { true } }()
-        // Redesign phase 2: the kind's glyph leads (status, initials, place mark), then the words.
-        let label = HStack(alignment: .firstTextBaseline, spacing: 0) {
-            if hasGlyph {
-                hit.glyph.view
-                    .frame(minWidth: 26)
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-                    .padding(.leading, PaperCardMetrics.inset)
-            }
-            PaperListRow(leading: hit.leading, title: hit.title, subtitle: hit.subtitle, dimmed: hit.dimmed,
-                         highlight: terms.marks) {
-                if hit.amount != nil || hit.status != nil || hit.jobStatus != nil {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        if let amount = hit.amount {
-                            Text(amount).font(Theme.moneyFont(.line, regular: false)).foregroundStyle(Theme.foreground)
-                        }
-                        if let status = hit.status { status }
-                        // v2: a job's status is a word with its mark, never a coloured glyph alone.
-                        if let job = hit.jobStatus { StatusLabel(jobStatus: job.status, hasTime: job.hasTime, emphasis: .quiet) }
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        let label = layout {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                if case .icon(let symbol) = hit.glyph {
+                    Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(width: 20).accessibilityHidden(true)
+                } else if case .icon(let symbol) = hit.leading {
+                    Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(width: 20).accessibilityHidden(true)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    PaperHighlight.text(hit.title, words: terms.marks).font(Theme.font(15, weight: .medium))
+                        .foregroundStyle(hit.dimmed ? Theme.muted : Theme.foreground)
+                        .lineLimit(stacked ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle = hit.subtitle, !subtitle.isEmpty {
+                        PaperHighlight.text(subtitle, words: terms.marks).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .lineLimit(stacked ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            .environment(\.paperRowInset, hasGlyph ? 12 : PaperCardMetrics.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if hit.amount != nil || hit.status != nil || hit.jobStatus != nil {
+                VStack(alignment: stacked ? .leading : .trailing, spacing: 3) {
+                    if let amount = hit.amount {
+                        Text(amount).font(Theme.font(14, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
+                    }
+                    if let status = hit.status { status }
+                    // v2: a job's status is a word with its mark, never a coloured glyph alone.
+                    if let job = hit.jobStatus { StatusLabel(jobStatus: job.status, hasTime: job.hasTime, emphasis: .quiet) }
+                }
+                .fixedSize(horizontal: !stacked, vertical: true)
+            }
         }
+        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .contentShape(Rectangle())
         .background {
             if selected {
-                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.brandSurface).padding(4)
+                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.brandSurface).padding(.horizontal, 8).padding(.vertical, 2)
             }
         }
         return Group {
@@ -918,21 +938,20 @@ private struct SearchScreen: View {
         if !searches.isEmpty { groups.append(SearchGroup(id: "searches", title: "Recent searches", hits: searches)) }
         let opened = recentlyOpened
         let split = focus.split(opened.map(\.0))
+        // One "Recently viewed" (Linear's search): the place's own records first, then the rest.
         let lead = opened.filter { split.relevant.contains($0.0) }.prefix(5)
         let rest = opened.filter { split.rest.contains($0.0) }.prefix(5)
-        let leadJobIDs = Set(lead.compactMap { $0.0.kind == .job ? $0.0.id : nil })
-        let openJobs = open.filter { !leadJobIDs.contains($0.id) }.map(builder.jobHit)
-        if !lead.isEmpty {
-            groups.append(SearchGroup(id: "lead", title: focus == .customers ? "Recent customers" : "Recent jobs", hits: lead.map(\.1)))
-        }
+        let viewed = Array(lead) + Array(rest)
+        let viewedJobIDs = Set(viewed.compactMap { $0.0.kind == .job ? $0.0.id : nil })
+        let openJobs = open.filter { !viewedJobIDs.contains($0.id) }.map(builder.jobHit)
+        if !viewed.isEmpty { groups.append(SearchGroup(id: "opened", title: "Recently viewed", hits: viewed.map(\.1))) }
         // On Customers, the people with open work follow the ones opened lately.
         if focus == .customers && session.can("customer.view", feature: "core_crm") {
-            let active = activeCustomers(from: Array(open), excluding: Set(lead.map(\.0.id))).map(builder.customerHit)
+            let active = activeCustomers(from: Array(open), excluding: Set(viewed.map(\.0.id))).map(builder.customerHit)
             if !active.isEmpty { groups.append(SearchGroup(id: "active", title: "Customers with open jobs", hits: active)) }
         }
         // On Jobs the open jobs are the place's records too, so they follow its recents.
         if focus == .jobs && !openJobs.isEmpty { groups.append(SearchGroup(id: "open", title: "Open jobs", hits: openJobs)) }
-        if !rest.isEmpty { groups.append(SearchGroup(id: "opened", title: "Recently viewed", hits: rest.map(\.1))) }
         if focus != .jobs && !openJobs.isEmpty { groups.append(SearchGroup(id: "open", title: "Open jobs", hits: openJobs)) }
         return groups
     }
@@ -940,19 +959,18 @@ private struct SearchScreen: View {
     @ViewBuilder private var emptyQuery: some View {
         let groups = emptyGroups
         if recents.searches.isEmpty && recents.items.isEmpty {
-            PaperEmptyState(symbol: "magnifyingglass", title: "No recent searches",
-                            message: "Find a job by street, a customer by name or phone, or an invoice by number.")
+            ListRoomEmpty(title: "Nothing viewed yet.",
+                          message: "Search for a job by street, a customer by name or phone, or an invoice by number.")
         }
-        ForEach(groups) { group in
-            PaperSection(title: group.title, count: nil) {
-                ForEach(group.hits) { hit in row(hit) }
-            } accessory: {
+        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+            ListGroupLabel(title: group.title, first: index == 0) {
                 if group.id == "searches" {
                     clearButton("Clear recent searches") { recents.clearSearches() }
-                } else if group.id == "opened" || (group.id == "lead" && !groups.contains { $0.id == "opened" }) {
-                    clearButton("Clear recently opened") { recents.clearOpened() }
+                } else if group.id == "opened" {
+                    clearButton("Clear recently viewed") { recents.clearOpened() }
                 }
             }
+            ForEach(group.hits) { hit in row(hit) }
         }
     }
 
