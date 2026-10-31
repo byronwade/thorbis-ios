@@ -403,7 +403,7 @@ struct MoreView: View {
     private func places(in group: MenuItem.Group) -> [MenuItem] {
         AppMenuContent.menu(tabs: pinned, hidden: layout.hidden, order: layout.menuOrder,
                             permitted: { $0.permitted(session) })
-            .filter { $0.group == group }
+            .filter { $0.group == group && ($0.route != nil || openPlace != nil) }
     }
 
     private var localSections: [LocalWorkspaceSection] {
@@ -482,7 +482,7 @@ struct MoreView: View {
         if let route = item.route {
             NavigationLink(value: route) { row }
         } else {
-            Button { openPlace(item) } label: { row }
+            Button { openPlace?(item) } label: { row }
         }
     }
 

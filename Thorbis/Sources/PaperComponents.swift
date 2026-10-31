@@ -611,7 +611,7 @@ private struct PaperCreateKey: EnvironmentKey {
     static let defaultValue: PaperCreateAction? = nil
 }
 private struct PaperOpenPlaceKey: EnvironmentKey {
-    static let defaultValue: @Sendable (MenuItem) -> Void = { _ in }
+    static let defaultValue: (@Sendable (MenuItem) -> Void)? = nil
 }
 private struct PaperManageBusinessesKey: EnvironmentKey {
     static let defaultValue: (@Sendable () -> Void)? = nil
@@ -622,8 +622,9 @@ extension EnvironmentValues {
         get { self[PaperCreateKey.self] }
         set { self[PaperCreateKey.self] = newValue }
     }
-    /// Opens a place the way the bar would (More lists every place).
-    var paperOpenPlace: @Sendable (MenuItem) -> Void {
+    /// Opens a place the way the bar would (More lists every place). Nil where the shell has its own
+    /// list of places (the iPad sidebar), so More leaves out places it could not open.
+    var paperOpenPlace: (@Sendable (MenuItem) -> Void)? {
         get { self[PaperOpenPlaceKey.self] }
         set { self[PaperOpenPlaceKey.self] = newValue }
     }
