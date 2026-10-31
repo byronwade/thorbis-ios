@@ -88,6 +88,8 @@ enum JobDetailCache {
     static func save(_ job: JobRecord) { write(job, "\(job.id).job.json") }
     static func save(notes: [JobNoteRecord], jobID: String) { write(notes, "\(jobID).notes.json") }
     static func job(_ id: String) -> JobRecord? { read(JobRecord.self, "\(id).job.json") }
+    static func save(stop: NextStopPlace) { write(stop, "\(stop.jobID).stop.json") }
+    static func stop(_ id: String) -> NextStopPlace? { read(NextStopPlace.self, "\(id).stop.json") }
     static func notes(_ id: String) -> [JobNoteRecord] { read([JobNoteRecord].self, "\(id).notes.json") ?? [] }
     static func clearAll() { try? FileManager.default.removeItem(at: directory) }
 }
