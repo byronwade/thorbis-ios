@@ -34,6 +34,7 @@ in light and dark, and scales with Dynamic Type.
 | Status / value chip (display only) | `Chip` | `../Theme.swift` |
 | Job status as a Linear progress ring | `StatusGlyph` (+ `StatusTone` mapping) | `StatusGlyph.swift` |
 | Tinted property chip (status, time, tech, amount) | `PropertyChip` | `StatusGlyph.swift` |
+| Property chip whose words wrap at large text (job header) | `WrappingPropertyChip` | `WrappingPropertyChip.swift` |
 | Person's initials circle | `InitialsAvatar` | `StatusGlyph.swift` |
 | Place mark (tinted square + white glyph) | `PlaceMark` | `StatusGlyph.swift` |
 | Grouped rows on a well, inset hairlines | `Well`, `WellList`, `WellDivider` | `StatusGlyph.swift` |
@@ -44,6 +45,7 @@ in light and dark, and scales with Dynamic Type.
 | Old `PaperSection`/`PaperCard` drawn as header + well | `.environment(\.paperGroupedWells, true)` | `PaperComponents.swift` |
 | Section header with count | `SectionHeader` | `../Theme.swift` |
 | Linear text tabs (plain words, well pill) | `PaperTabs(textTabs: true)` | `../PaperComponents.swift` |
+| Activity timeline row (glyph on a thin line) | `JobTimelineItem`, `JobActivityGlyph` | `../JobScreenParts.swift` |
 | **Dropdown menu** (replaces `Menu {}`) | **`ThorbisMenu`** | `ThorbisMenu.swift` |
 | **Filter / display bottom sheet** | **`ThorbisSheet*`** | `ThorbisSheet.swift` |
 | **Select row** (replaces menu/default `Picker`) | **`ThorbisSelect`** | `ThorbisControls.swift` |

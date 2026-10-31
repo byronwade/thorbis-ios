@@ -162,10 +162,8 @@ struct JobContactsSection: View {
     let retry: () async -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: "Contacts", count: people.count) {
-                if let preference { Text(preference).font(Theme.font(13)).foregroundStyle(Theme.muted) }
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            JobPanelLabel(title: "Contacts", count: people.isEmpty ? nil : "\(people.count)")
             if failed && people.isEmpty {
                 // JS-11: the section says what didn't load and offers one Try again; the job still shows.
                 HStack(spacing: 8) {
@@ -180,12 +178,24 @@ struct JobContactsSection: View {
             } else if people.isEmpty {
                 Text("No phone or email on file for this customer.")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                    .padding(.horizontal, 4)
             }
-            ForEach(people) { person in
-                JobContactRow(person: person,
-                              route: customerID.flatMap { id in
-                                  person.id.hasPrefix("customer-") ? nil : PaperRoute.contact(customerID: id, contactID: person.id)
-                              })
+            if !people.isEmpty {
+                JobPanel {
+                    if let preference {
+                        Text(preference).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 16).padding(.top, 10)
+                            .jobPanelJoinsNext()
+                    }
+                    ForEach(people) { person in
+                        JobContactRow(person: person,
+                                      route: customerID.flatMap { id in
+                                          person.id.hasPrefix("customer-") ? nil : PaperRoute.contact(customerID: id, contactID: person.id)
+                                      })
+                            .padding(.horizontal, 16)
+                    }
+                }
             }
         }
     }
