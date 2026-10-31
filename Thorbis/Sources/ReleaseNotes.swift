@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-ownership-transfer",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "key", title: "Hand the company to a new owner",
+                      detail: "Owners can make a teammate the owner from their Team page. You stay on as an admin."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-member-savings",
             date: "2026-10-31",
             highlights: [
