@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-mockup-parity",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "list.bullet.rectangle", title: "Tidier rows and estimate lines",
+                      detail: "Each estimate line shows its name, then what it covers. Share job now sits in the job's ••• menu."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-onsite-wrap-up",
             date: "2026-10-31",
             highlights: [

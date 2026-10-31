@@ -851,8 +851,9 @@ struct DocumentLineRow: View {
             // description is squeezed into a column and breaks mid-word.
             let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
                                                       : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            let text = LineText(line.description)
             layout {
-                Text(line.description).font(Theme.font(15, weight: .medium))
+                Text(text.name).font(Theme.font(15, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let total = paperLinesTotal([line]) {
@@ -861,12 +862,46 @@ struct DocumentLineRow: View {
                         .lineLimit(1).fixedSize()
                 }
             }
+            if let detail = LineText(line.description).detail {
+                Text(detail).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
                 .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
         }
         .foregroundStyle(Theme.foreground)
         .padding(.horizontal, 16).padding(.vertical, 13)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A line's one text shown as a name and its explanation (EstimateDetail.dc.html): "Coil cleaning"
+/// then "Clean the outdoor and indoor coils…". Lines carry a single description, so this splits only
+/// at a first sentence that reads like a name (2–8 words, at most 48 characters, not ending in an
+/// abbreviation or number); anything else stays whole as the name. Nothing is dropped either way.
+struct LineText: Equatable {
+    let name: String
+    let detail: String?
+
+    private static let abbreviations: Set<String> = [
+        "approx", "incl", "excl", "misc", "etc", "est", "qty", "ea", "no", "nos", "in", "ft", "yd", "lb", "lbs",
+        "oz", "gal", "hr", "hrs", "min", "max", "std", "dia", "mr", "mrs", "ms", "dr", "st", "ave", "rd", "vs", "pt", "sq"]
+
+    init(_ description: String) {
+        let text = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let stop = text.range(of: ". ") else { name = text; detail = nil; return }
+        let head = String(text[..<stop.lowerBound]).trimmingCharacters(in: .whitespaces)
+        let rest = String(text[stop.upperBound...]).trimmingCharacters(in: .whitespaces)
+        let words = head.split(whereSeparator: \.isWhitespace)
+        let last = words.last.map { String($0).lowercased().trimmingCharacters(in: .punctuationCharacters) } ?? ""
+        guard (2...8).contains(words.count), head.count <= 48, !rest.isEmpty,
+              !Self.abbreviations.contains(last), last.rangeOfCharacter(from: .letters) != nil,
+              last.count > 1, rest.first?.isUppercase == true || rest.first?.isNumber == true
+        else { name = text; detail = nil; return }
+        name = head
+        detail = rest
     }
 }
 

@@ -237,8 +237,7 @@ struct CustomerEstimatePresentation: View {
     }
 
     /// The whole card is the choice (F25): price first, then the option's name and what it is.
-    /// "See what's included" sits below the tap area so it never doubles as a choice; it opens
-    /// the option's lines (the review step) with this option chosen.
+    /// Every line is shown on the next step ("Review <option>"), so the card carries no second link.
     private func optionCard(_ option: FieldEstimateOption) -> some View {
         let selected = flow.selectedOptionID == option.id
         let total = money(option.totalAmount, currency: option.currency)
@@ -267,7 +266,7 @@ struct CustomerEstimatePresentation: View {
                 }
                 .foregroundStyle(Theme.foreground)
                 .frame(maxWidth: .infinity, minHeight: type.target, alignment: .topLeading)
-                .padding([.horizontal, .top], 18)
+                .padding(18)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
@@ -275,21 +274,7 @@ struct CustomerEstimatePresentation: View {
             .accessibilityLabel(selected ? "\(option.title), selected" : "Choose \(option.title)")
             .accessibilityValue("Total \(total)")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-            Spacer(minLength: 0)
-            Button {
-                flow.choose(option.id)
-                flow.review()
-            } label: {
-                Text("See what's included").font(Theme.font(type.small, weight: .medium))
-                    .foregroundStyle(Theme.foreground).underline()
-                    .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
-                    .padding(.horizontal, 18)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Shows every line in \(option.title)")
         }
-        .padding(.bottom, 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Selection is the blue ring and the radio; the screen's only ink is the commit (CP-07).
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -420,7 +405,8 @@ struct CustomerEstimatePresentation: View {
             switch flow.step {
             case .choose:
                 CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
-                if let error { hint(error, danger: true) } else if !flow.canReview { hint("Choose an option above to continue.") }
+                // The disabled commit already reads "Choose an option", so no second line repeats it.
+                if let error { hint(error, danger: true) }
                 HStack(spacing: 8) {
                     CustomerTextButton(title: "Not today", type: type) { confirmNotToday = true }
                     if let returnToDocuments {
@@ -1082,10 +1068,18 @@ struct CustomerIncludedLines: View {
                             amount(line).fixedSize()
                         }
                     }
-                    Text(line.quantity == 1
-                         ? "1 × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))"
-                         : "\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
-                        .font(Theme.font(type.small)).monospacedDigit().foregroundStyle(Theme.muted)
+                    if let detail = readingAccess == nil ? LineText(line.description).detail : nil {
+                        Text(detail).font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    // The line amount already says it for one; "2 × $120.00" shows how a bigger amount adds up.
+                    // Consent screens keep the explicit quantity on every line.
+                    if line.quantity != 1 || readingAccess != nil {
+                        Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
+                            .font(Theme.font(type.small)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
                 }
                 .padding(.horizontal, 18).padding(.vertical, 16)
                 .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
@@ -1115,7 +1109,7 @@ struct CustomerIncludedLines: View {
             ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            Text(line.description).font(Theme.font(type.body))
+            Text(LineText(line.description).name).font(Theme.font(type.body, weight: .medium))
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
