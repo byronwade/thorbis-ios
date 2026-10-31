@@ -232,6 +232,8 @@ struct JobDetailView: View {
         }
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
+        // v2 Record room: sections are space and a 13 Medium label, no panels ("the page is one pour").
+        .environment(\.paperRecordRoom, true)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -1642,7 +1644,7 @@ struct JobDetailView: View {
     }
 
     private func detailsGroup(_ job: JobRecord) -> some View {
-        Well {
+        JobPanel(dividers: false) {
         VStack(alignment: .leading, spacing: 0) {
             // The visit's time and the job number are said once, in the header (chip and eyebrow).
             DisclosureGroup("More job details") {
@@ -1753,9 +1755,8 @@ struct JobDetailView: View {
                     } label: { Text("Estimate totals") }
                     .font(Theme.font(15))
                     .tint(Theme.foreground)
-                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    .padding(.horizontal, RecordRoom.labelInset).padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 }
             }
         }

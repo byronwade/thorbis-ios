@@ -326,6 +326,8 @@ struct CustomerDetailView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
             // Redesign phase 2: every section here is a semibold header over a grouped well.
             .environment(\.paperGroupedWells, true)
+            // v2 Record room, as on the job: sections are space and a label, no panels.
+            .environment(\.paperRecordRoom, true)
         }
         #if DEBUG
         // `--paper-preview-scroll center|bottom`: the lower sections, once they have loaded.

@@ -17,14 +17,26 @@ extension View {
     func jobPanelJoinsNext() -> some View { containerValue(\.jobPanelJoinsNext, true) }
 }
 
-/// A section's grouped well (radius 14, `Theme.well`), with an inset hairline between rows. Pass
-/// `dividers: false` for content that draws its own structure (the activity timeline).
+/// A section's rows. On the job (a Record room, `paperRecordRoom`) they sit on the page with no
+/// panel; elsewhere on a grouped well (radius 14, `Theme.well`). Space, never a line, between rows.
 struct JobPanel<Content: View>: View {
     var dividers = true
     @ViewBuilder var content: Content
+    @Environment(\.paperRecordRoom) private var recordRoom
 
     var body: some View {
-        Well {
+        if recordRoom {
+            // v2 Record room: no panel; rows sit on the page, their words under the section label.
+            VStack(alignment: .leading, spacing: 0) { rows }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, RecordRoom.outset(rowInset: 16))
+        } else {
+            Well { rows }
+        }
+    }
+
+    @ViewBuilder private var rows: some View {
+        Group {
             if dividers {
                 Group(subviews: content) { rows in
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in

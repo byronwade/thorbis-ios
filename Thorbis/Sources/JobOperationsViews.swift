@@ -295,6 +295,7 @@ struct JobCloseoutView: View {
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
+        .environment(\.paperRecordRoom, true)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if job?.status != "completed", session.can("job.complete", feature: "jobs"), job?.allowedTransitions?.contains("completed") == true {

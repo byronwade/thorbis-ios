@@ -192,6 +192,8 @@ struct JobBookingCallSection: View {
     @State private var showTranscript = false
     @State private var scrubbing: Double?
 
+    @Environment(\.paperRecordRoom) private var recordRoom
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PaperGroupHeader(title: "Booking call")
@@ -212,9 +214,9 @@ struct JobBookingCallSection: View {
                 if !call.transcript.isEmpty { transcript }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+            // v2 Record room: no box around the section (never a 1px rim); its words meet the label.
+            .padding(.horizontal, recordRoom ? RecordRoom.labelInset : 14).padding(.vertical, recordRoom ? 6 : 14)
+            .background(recordRoom ? Color.clear : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
         .onDisappear { player.stop() }
     }

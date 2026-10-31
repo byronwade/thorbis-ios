@@ -159,7 +159,7 @@ struct ScheduleView: View {
                     DispatchBoardView()
                 } else if jobs.isEmpty {
                     emptyState
-                    if range == .today { doneToday.paperCardMargin().padding(.top, 4) }
+                    if range == .today { doneToday }
                 } else if tab == "Map" {
                     ScheduleMapView(jobs: jobs.filter { $0.status != "canceled" })
                 } else if range == .week {
@@ -248,9 +248,12 @@ struct ScheduleView: View {
             let driving = ["scheduled", "dispatched", "en_route"].contains(outbox.pendingStatus(for: first.id) ?? first.status)
             // Today hides finished visits from the open list; they sit under Done.
             let rest = jobs.filter { $0.id != first.id && !(isToday && $0.status == "completed") }
-            VStack(alignment: .leading, spacing: 28) {
-                VStack(alignment: .leading, spacing: 6) {
-                    SectionHeader(title: range == .unscheduled ? "Needs a time" : isActive ? "Now" : isToday && booked ? "Next stop" : "Next up")
+            // v2 List room (as Jobs, Customers, Search): labels and rows on the canvas at the gutter;
+            // only the Now job sits on a panel.
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ListGroupLabel(title: range == .unscheduled ? "Needs a time" : isActive ? "Now" : isToday && booked ? "Next stop" : "Next up",
+                                   first: true)
                     ScheduleHero(job: first, customer: store.customerName(first.customerId), pendingStatus: outbox.pendingStatus(for: first.id),
                                  nextStop: isToday, place: place, street: addresses.street(first),
                                  etaMinutes: place != nil && driving ? eta.minutes : nil,
@@ -268,6 +271,8 @@ struct ScheduleView: View {
                             await eta.update(to: place.coordinates, key: "\(place.jobID)|\(place.locationID ?? "")",
                                              enabled: driving && !session.isOffline)
                         }
+                        .paperCardMargin()
+                        .padding(.top, 4)
                 }
                 if isToday && isActive, let next = rest.first {
                     // On a job now: the stop after it, then the rest of the day.
@@ -279,7 +284,6 @@ struct ScheduleView: View {
                 }
                 if isToday { doneToday }
             }
-            .paperCardMargin()
         }
     }
 
@@ -291,11 +295,11 @@ struct ScheduleView: View {
         return JobFiltering.date(hero.arrivedAt) ?? JobFiltering.date(hero.startedAt)
     }
 
-    /// A group: the 13 Medium header with its count, then the rows on the page (v2: no panel, no
-    /// line; tight inside the group, generous between groups).
-    private func section(_ title: String, _ list: [Job], leading: ScheduleCompactRow.TimeStyle) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            SectionHeader(title: title, count: list.count)
+    /// A group: the list room's 13 Medium label with its count, then the rows on the page (v2: no
+    /// panel, no line; tight inside the group, generous between groups).
+    private func section(_ title: String, _ list: [Job], leading: ScheduleCompactRow.TimeStyle, first: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ListGroupLabel(title: title, count: list.count, first: first)
             VStack(alignment: .leading, spacing: 0) { jobRows(list, leading: leading) }
         }
     }
@@ -304,8 +308,8 @@ struct ScheduleView: View {
     @ViewBuilder private var doneToday: some View {
         let done = todayVisits.filter { $0.status == "completed" }
         if !done.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                SectionHeader(title: "Done", count: done.count) {
+            VStack(alignment: .leading, spacing: 0) {
+                ListGroupLabel(title: "Done", count: done.count) {
                     Button { withMotion(.easeOut(duration: 0.2)) { showDone.toggle() } } label: {
                         Text(showDone ? "Hide" : "Show")
                             .font(Theme.font(15, weight: .medium))
@@ -350,13 +354,13 @@ struct ScheduleView: View {
     @ViewBuilder private var weekContent: some View {
         let calendar = Calendar.current
         let days = Dictionary(grouping: jobs) { calendar.startOfDay(for: JobFiltering.date($0.scheduledFor) ?? .now) }
-        VStack(alignment: .leading, spacing: 28) {
-            ForEach(days.keys.sorted(), id: \.self) { day in
+        let sorted = days.keys.sorted()
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(sorted, id: \.self) { day in
                 let dayJobs = days[day] ?? []
-                section(dayTitle(day), dayJobs, leading: .time)
+                section(dayTitle(day), dayJobs, leading: .time, first: day == sorted.first)
             }
         }
-        .paperCardMargin()
     }
 
     private func dayTitle(_ day: Date) -> String {
@@ -755,14 +759,16 @@ struct TodayRow: View {
                 .accessibilityLabel(spoken)
                 .accessibilityHint("Opens the job")
             if let schedule {
-                ScheduleRowButton(job: job, action: schedule).padding(.leading, 8)
+                ScheduleRowButton(job: job, action: schedule).padding(.trailing, ListRoom.gutter)
             }
         }
     }
 
+    /// The time column, then the list room's own job row (`JobRoomRow`: street, problem · customer,
+    /// who where it varies, the status word trailing), so Today reads like Jobs and Search.
     private var content: some View {
         let stacked = typeSize.isAccessibilitySize
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
                              : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
         return layout {
             VStack(alignment: .leading, spacing: 0) {
@@ -773,28 +779,12 @@ struct TodayRow: View {
                 }
             }
             .frame(width: stacked ? nil : column, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(street ?? job.title).font(Theme.font(16, weight: .medium))
-                    .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
-                    .lineLimit(stacked ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(street != nil ? "\(job.title) · \(customer)" : customer)
-                    .font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                    .lineLimit(stacked ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if schedule == nil {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    if let assignee { InitialsAvatar(name: assignee, size: 20).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 } }
-                    // v2: the status as a word with its mark (never a coloured glyph alone).
-                    StatusLabel(jobStatus: status, hasTime: job.scheduledFor != nil, pending: pendingStatus != nil, emphasis: .quiet)
-                }
-                .fixedSize(horizontal: !stacked, vertical: true)
-            }
+            .padding(.top, stacked ? 10 : 0)
+            JobRoomRow(job: job, street: street, customer: customer, who: assignee, pendingStatus: pendingStatus,
+                       showsStatus: schedule == nil, inset: 0)
         }
-        .padding(.horizontal, 4).padding(.vertical, 9)
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .padding(.horizontal, ListRoom.gutter)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
 
