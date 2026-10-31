@@ -93,7 +93,7 @@ struct ScheduleView: View {
         switch tab {
         case "Week": .week
         case "Unscheduled": .unscheduled
-        case "Map": .today
+        case "Map", "Board": .today
         default: .today
         }
     }
@@ -108,7 +108,10 @@ struct ScheduleView: View {
     }
     private var canSchedule: Bool { session.can("job.assign", feature: "jobs") }
 
-    /// One selector row: Today | Week | Map. Unscheduled lives in the header's filter circle,
+    /// Board is the dispatcher's view of every tech's day, so only roles that assign see it.
+    private var tabOptions: [String] { canSchedule ? ["Today", "Week", "Board", "Map"] : ["Today", "Week", "Map"] }
+
+    /// One selector row: Today | Week | (Board) | Map. Unscheduled lives in the header's filter circle,
     /// so while it shows no segment is chosen and tapping one goes back.
     private var segment: Binding<String> {
         Binding(get: { tab == "Unscheduled" ? "" : tab }, set: { tab = $0 })
@@ -140,12 +143,14 @@ struct ScheduleView: View {
                 PaperHeader(title: title, subtitle: subtitle, filterMenu: filterItems,
                             filterActive: tab == "Unscheduled" || (showsScope && scope == .everyone && WorkRole(session).schedulesOwnDay))
                 OfflineBanner()
-                PaperTabs(options: ["Today", "Week", "Map"], selection: segment)
+                PaperTabs(options: tabOptions, selection: segment)
                     .padding(.bottom, 12)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if store.loading && store.jobs.isEmpty {
                     SkeletonRows()
+                } else if tab == "Board" && canSchedule {
+                    DispatchBoardView()
                 } else if jobs.isEmpty {
                     emptyState
                     if range == .today { doneToday.paperCardMargin().padding(.top, 4) }
@@ -175,12 +180,14 @@ struct ScheduleView: View {
             if PaperPreview.enabled && PaperPreview.screen == "schedule-map" { tab = "Map" }
             if PaperPreview.enabled && PaperPreview.screen == "schedule-week" { tab = "Week" }
             if PaperPreview.enabled && PaperPreview.screen == "schedule-unscheduled" { tab = "Unscheduled" }
+            if PaperPreview.enabled && PaperPreview.screen == "dispatch-board" { tab = "Board" }
         }
         #endif
     }
 
     private var title: String {
-        switch range {
+        if tab == "Board" { return "Board" }
+        return switch range {
         case .today: "Today"
         case .week: "This week"
         case .unscheduled: "Unscheduled"
@@ -188,6 +195,11 @@ struct ScheduleView: View {
     }
 
     private var subtitle: String {
+        if tab == "Board" {
+            let today = store.jobs.filter { $0.status != "canceled" && (JobFiltering.date($0.scheduledFor).map { Calendar.current.isDateInToday($0) } ?? false) }
+            let waiting = JobFiltering.schedule(store.jobs, range: .unscheduled).count
+            return "Today · \(today.count) booked · \(waiting) unscheduled"
+        }
         let count = jobs.count
         let who = showsScope && scope == .mine ? "Your jobs" : "Everyone"
         return switch range {

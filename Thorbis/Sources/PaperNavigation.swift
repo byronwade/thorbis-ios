@@ -571,7 +571,8 @@ struct RootView: View {
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
             case "job-schedule", "equipment-editor", "equipment-sections": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
-            case "new-job": createJob = true
+            case "new-job", "book-job", "book-job-filled": createJob = true
+            case "dispatch-board": primaryTab = .schedule
             case "create-menu": primaryTab = .jobs; createMenuOpen = true
             case "schedule-unscheduled": primaryTab = .schedule
             case "settings": showSettings = true
