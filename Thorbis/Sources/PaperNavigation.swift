@@ -308,7 +308,7 @@ struct RootView: View {
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 8).onEnded { if $0.translation.height > 60 { closeBarSearch() } })
                 .accessibilityHidden(true)
-            PaperGlobalSearch(externalQuery: $barQuery, openResult: openSearchResult)
+            PaperGlobalSearch(externalQuery: $barQuery, openResult: openSearchResult, focus: .of(place: selectedTab))
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bar-search-results")
@@ -585,7 +585,9 @@ struct RootView: View {
             case "my-day", "schedule": primaryTab = .schedule
             case "customers": primaryTab = .customers
             case "menu", "more": primaryTab = .more
-            case "search", "search-typed":
+            case "search", "search-typed", "search-customers":
+                // `search-customers` opens the same drawer over Customers, where customers lead.
+                if PaperPreview.screen == "search-customers" { primaryTab = .customers }
                 RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
                 RecentItems.shared.clear()
                 RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
@@ -605,7 +607,7 @@ struct RootView: View {
             case "create-menu": primaryTab = .jobs; createMenuOpen = true
             case "schedule-unscheduled": primaryTab = .schedule
             case "settings": showSettings = true
-            case "app-menu", "app-menu-edit", "side-menu", "side-menu-search": menuOpen = true
+            case "app-menu", "app-menu-edit": menuOpen = true
             case "bar-live", "bar-syncing":
                 // A tech mid-job on Jobs, with two changes saved on the phone.
                 RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
@@ -1001,6 +1003,28 @@ extension APIClient {
     }
 }
 
+/// What the bottom search leads with before anything is typed: records of the place showing.
+enum SearchFocus: Equatable {
+    case jobs, customers, none
+
+    /// The bar's current place (a `MenuItem` raw value) to the records it is about.
+    static func of(place: String?) -> SearchFocus {
+        switch place.flatMap(MenuItem.init(rawValue:)) {
+        case .jobs, .schedule, .attention: .jobs
+        case .customers: .customers
+        default: .none
+        }
+    }
+
+    /// Recently opened records split into the place's kind first and everything else after, each
+    /// keeping its newest-first order. With no focus, everything is "rest" in the original order.
+    func split(_ items: [RecentItems.Item]) -> (relevant: [RecentItems.Item], rest: [RecentItems.Item]) {
+        let kind: RecentItems.Item.Kind? = switch self { case .jobs: .job; case .customers: .customer; case .none: nil }
+        guard let kind else { return ([], items) }
+        return (items.filter { $0.kind == kind }, items.filter { $0.kind != kind })
+    }
+}
+
 /// Where a search result leads, for callers that push it themselves.
 enum SearchDestination {
     case job(Job)
@@ -1018,6 +1042,8 @@ struct PaperGlobalSearch: View {
     var openResult: ((SearchDestination) -> Void)? = nil
     /// Words to start with, from a Siri or Shortcuts search.
     var initialQuery = ""
+    /// The place the bottom search opened over; its records lead the empty-query list.
+    var focus: SearchFocus = .none
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
@@ -1033,8 +1059,9 @@ struct PaperGlobalSearch: View {
     @State private var path = NavigationPath()
     /// Recent items that still resolve to a record this person can open.
     private enum RecentTarget { case job(Job), customer(Customer) }
+    /// Every resolvable recent record, filtered before any limit so one kind can't crowd out the other.
     private var recentlyOpened: [(RecentItems.Item, RecentTarget)] {
-        recents.items.prefix(5).compactMap { item in
+        recents.items.compactMap { item in
             switch item.kind {
             case .job:
                 guard session.can("job.view", feature: "jobs"), let job = store.jobs.first(where: { $0.id == item.id }) else { return nil }
@@ -1103,6 +1130,66 @@ struct PaperGlobalSearch: View {
         Button(action: { go(.route(route)) }, label: label)
     }
 
+    private func recentRow(_ item: RecentItems.Item, _ destination: RecentTarget) -> some View {
+        Button {
+            switch destination {
+            case .job(let job): go(.job(job))
+            case .customer(let customer): go(.customer(customer))
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: item.kind == .job ? "briefcase" : "person")
+                    .font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                    Text(item.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+                Spacer(minLength: 8)
+            }
+            .frame(minHeight: 52).contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+    }
+
+    /// Customers of the open jobs, newest job first, once each, skipping archived ones.
+    private func activeCustomers(from jobs: [Job], excluding shown: Set<String>) -> [Customer] {
+        var seen = shown
+        return jobs.compactMap { job in
+            guard let customerID = job.customerId, !seen.contains(customerID),
+                  let customer = store.customers.first(where: { $0.id == customerID && $0.archived != true }) else { return nil }
+            seen.insert(customer.id)
+            return customer
+        }.prefix(5).map { $0 }
+    }
+
+    private func customerRow(_ customer: Customer) -> some View {
+        searchLink(customer) {
+            HStack(spacing: 12) {
+                Avatar(name: customer.name, size: 26)
+                Text(customer.name).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                Spacer(minLength: 8)
+            }
+            .frame(minHeight: 52).contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+    }
+
+    private func openJobRow(_ job: Job) -> some View {
+        searchLink(job) {
+            HStack(spacing: 12) {
+                StatusRing(status: job.status).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                    Text("\(job.shortRef) · \(store.customerName(job.customerId)) · \(job.status.statusLabel)")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+                Spacer(minLength: 8)
+            }
+            .frame(minHeight: 52).contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+    }
+
     private var results: some View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -1111,51 +1198,42 @@ struct PaperGlobalSearch: View {
                         let canViewJobs = session.can("job.view", feature: "jobs")
                         let recent = (canViewJobs ? store.jobs : []).filter { !["completed", "canceled"].contains($0.status) }
                             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }.prefix(6)
-                        // What this person opened last comes first, like Mail and Maps search.
+                        // The place's own records lead (recent jobs on Jobs, recent customers on
+                        // Customers), then what this person opened last, like Mail and Maps search.
                         let opened = recentlyOpened
-                        if !opened.isEmpty {
-                            PaperGroupHeader(title: "Recently opened").padding(.top, 8)
-                            ForEach(opened, id: \.0) { item, destination in
-                                Button {
-                                    switch destination {
-                                    case .job(let job): go(.job(job))
-                                    case .customer(let customer): go(.customer(customer))
-                                    }
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: item.kind == .job ? "briefcase" : "person")
-                                            .font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 26)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(item.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                            Text(item.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
-                                        }
-                                        Spacer(minLength: 8)
-                                    }
-                                    .frame(minHeight: 52).contentShape(Rectangle())
-                                }
-                                .buttonStyle(RowPressStyle())
+                        let split = focus.split(opened.map(\.0))
+                        let lead = opened.filter { split.relevant.contains($0.0) }.prefix(5)
+                        let rest = opened.filter { split.rest.contains($0.0) }.prefix(5)
+                        let leadJobIDs = Set(lead.compactMap { if case .job(let job) = $0.1 { job.id } else { nil } })
+                        let openJobs = recent.filter { !leadJobIDs.contains($0.id) }
+                        if !lead.isEmpty {
+                            PaperGroupHeader(title: focus == .customers ? "Recent customers" : "Recent jobs").padding(.top, 8)
+                            ForEach(Array(lead), id: \.0) { item, destination in recentRow(item, destination) }
+                        }
+                        // On Customers, the people with open work follow the ones opened lately.
+                        if focus == .customers && session.can("customer.view", feature: "core_crm") {
+                            let shown = Set(lead.map(\.0.id))
+                            let active = activeCustomers(from: Array(recent), excluding: shown)
+                            if !active.isEmpty {
+                                PaperGroupHeader(title: "Customers with open jobs").padding(.top, lead.isEmpty ? 8 : 16)
+                                ForEach(active) { customer in customerRow(customer) }
                             }
+                        }
+                        // On Jobs the open jobs are the place's records too, so they follow its recents.
+                        if focus == .jobs && !openJobs.isEmpty {
+                            PaperGroupHeader(title: "Open jobs").padding(.top, lead.isEmpty ? 8 : 16)
+                            ForEach(Array(openJobs)) { job in openJobRow(job) }
+                        }
+                        if !rest.isEmpty {
+                            PaperGroupHeader(title: "Recently opened").padding(.top, lead.isEmpty && (focus != .jobs || openJobs.isEmpty) ? 8 : 16)
+                            ForEach(Array(rest), id: \.0) { item, destination in recentRow(item, destination) }
                         }
                         if recent.isEmpty && opened.isEmpty {
                             PaperEmptyState(symbol: "magnifyingglass", title: "Search your workspace",
                                             message: "Jobs, customers, estimates and invoices across the company.")
-                        } else if !recent.isEmpty {
+                        } else if focus != .jobs && !openJobs.isEmpty {
                             PaperGroupHeader(title: "Open jobs").padding(.top, opened.isEmpty ? 8 : 16)
-                            ForEach(Array(recent)) { job in
-                                searchLink(job) {
-                                    HStack(spacing: 12) {
-                                        StatusRing(status: job.status).accessibilityHidden(true)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                            Text("\(job.shortRef) · \(store.customerName(job.customerId)) · \(job.status.statusLabel)")
-                                                .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
-                                        }
-                                        Spacer(minLength: 8)
-                                    }
-                                    .frame(minHeight: 52).contentShape(Rectangle())
-                                }
-                                .buttonStyle(RowPressStyle())
-                            }
+                            ForEach(Array(openJobs)) { job in openJobRow(job) }
                         }
                     } else if useServer {
                         ForEach(serverGroups, id: \.0) { type, results in

@@ -300,8 +300,8 @@ struct CustomerDetailView: View {
                     HStack(spacing: 6) { metadataChips }.fixedSize()
                     VStack(alignment: .leading, spacing: 6) { metadataChips }
                 }.padding(.horizontal, Theme.gutter).padding(.bottom, 10)
+                // Call, Text and Directions; Email is in the ••• menu (F18).
                 PaperQuickActions(phone: contacts.first(where: \.primary)?.phone ?? record?.phone,
-                                  email: contacts.first(where: \.primary)?.email ?? record?.email,
                                   directions: (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) })
                     .padding(.horizontal, Theme.gutter).padding(.bottom, 14)
                 // Next visit sits above everything else: it's why most people open a customer.
@@ -311,6 +311,7 @@ struct CustomerDetailView: View {
                 if typeSize.isAccessibilitySize {
                     customerPrimaryActions
                 }
+                customerViewDoor.padding(.horizontal, Theme.gutter).padding(.bottom, 14)
                 if let error {
                     ErrorBanner(message: error) { await load() }.padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 }
@@ -323,12 +324,7 @@ struct CustomerDetailView: View {
                         if record == nil && error == nil {
                             SkeletonRows(count: 4, leading: false, inset: 0)
                         } else {
-                            DisclosureGroup("Customer details") {
-                                details
-                            }
-                            .font(Theme.font(15, weight: .medium))
-                            .tint(Theme.foreground)
-                            .accessibilityIdentifier("customer-details-disclosure")
+                            details
                         }
                         CustomerMembershipSection(customerID: customer.id)
                         contactsSection
@@ -432,44 +428,35 @@ struct CustomerDetailView: View {
         if let type = record?.accountType { Chip(text: type.statusLabel) }
         MemberChip(customerID: customer.id)
     }
-    private var customerPrimaryActions: some View {
-        let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
-        return actions {
-            if canEdit {
-                Button { showCustomerMode = true } label: {
-                    // Keep the customer handoff clear even when space is tight.
-                    Group {
-                        if typeSize.isAccessibilitySize {
-                            Text("Customer view")
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            ViewThatFits(in: .horizontal) {
-                                Label("Customer view", systemImage: "person.crop.rectangle").fixedSize()
-                                Text("Customer view")
-                                    .multilineTextAlignment(.center)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                    .font(Theme.font(17, weight: .medium))
-                    .padding(.horizontal, 12).padding(.vertical, typeSize.isAccessibilitySize ? 10 : 8)
-                    .frame(maxWidth: .infinity, minHeight: Theme.commitHeight)
-                    .foregroundStyle(Theme.foreground).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Customer view")
-                .accessibilityHint("Hands the device to the customer to check and fix their details")
-                .accessibilityIdentifier("customer-handoff-action")
+    /// Customer view: hands the phone to the customer to check and fix their details. A quiet
+    /// door under the identity, so New job stays the page's one commit (F18).
+    @ViewBuilder private var customerViewDoor: some View {
+        if canEdit {
+            Button { showCustomerMode = true } label: {
+                Label("Customer view", systemImage: "person.crop.rectangle")
+                    .font(Theme.font(15, weight: .medium))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12).padding(.vertical, typeSize.isAccessibilitySize ? 10 : 0)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .foregroundStyle(Theme.foreground)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             }
-            if session.can("job.create", feature: "jobs") {
-                Button { showNewJob = true } label: {
-                    Label("New job", systemImage: "plus").inkCommit()
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("customer-new-job-action")
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Customer view")
+            .accessibilityHint("Hands the device to the customer to check and fix their details")
+            .accessibilityIdentifier("customer-handoff-action")
+        }
+    }
+    @ViewBuilder private var customerPrimaryActions: some View {
+        if session.can("job.create", feature: "jobs") {
+            Button { showNewJob = true } label: {
+                Label("New job", systemImage: "plus").inkCommit()
             }
-        }.padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
+            .buttonStyle(PressStyle())
+            .accessibilityIdentifier("customer-new-job-action")
+            .padding(.horizontal, 20).padding(.vertical, 10).background(Theme.background)
+        }
     }
     private var customerIdentity: some View {
         let name = record?.name ?? customer.name
@@ -497,28 +484,40 @@ struct CustomerDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+    /// Always open and planar: address first, then phone and email, then the rest (F18).
     private var details: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let record {
-                PaperCard {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if let phone = record.phone { detailRow("Phone", value: phone).cardRow() }
-                        if let email = record.email {
-                            HStack { Text("Email").foregroundStyle(Theme.muted); Spacer(); ContactActions(phone: nil, email: email) }.font(Theme.font(15)).cardRow()
-                        }
-                        if let address = record.address {
-                            HStack { Text("Address").foregroundStyle(Theme.muted); Spacer(); AddressLink(address: address) }.font(Theme.font(15)).cardRow()
-                        }
-                        if let industry = record.industry { detailRow("Industry", value: industry).cardRow() }
-                        if let preferred = record.preferredContact { detailRow("Contact preference", value: preferred.statusLabel).cardRow() }
-                        if let terms = record.billingTerms { detailRow("Billing terms", value: terms).cardRow() }
-                        if smsConsentLoaded { smsConsentRow.cardRow() }
+                PaperGroupHeader(title: "Details")
+                VStack(alignment: .leading, spacing: 0) {
+                    if let address = record.address, !address.isEmpty {
+                        detailLine("Address") { AddressLink(address: address) }
                     }
-                    .padding(.vertical, PaperCardMetrics.edge)
+                    if let phone = record.phone, !phone.isEmpty {
+                        detailLine("Phone") { ContactActions(phone: phone, email: nil) }
+                    }
+                    if let email = record.email, !email.isEmpty {
+                        detailLine("Email") { ContactActions(phone: nil, email: email) }
+                    }
+                    if let industry = record.industry { detailLine("Industry") { Text(industry) } }
+                    if let preferred = record.preferredContact { detailLine("Contact preference") { Text(preferred.statusLabel) } }
+                    if let terms = record.billingTerms { detailLine("Billing terms") { Text(terms) } }
+                    if smsConsentLoaded { smsConsentRow }
                 }
-                .padding(.top, 8)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("customer-details")
+    }
+    /// One quiet fact: a muted label above its value, no rule between rows.
+    private func detailLine<V: View>(_ title: String, @ViewBuilder value: () -> V) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            value().font(Theme.font(15)).tint(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
     }
     /// The customer's open job first: what a dispatcher or tech opens a customer to find.
     @ViewBuilder private var nextVisit: some View {
@@ -564,7 +563,6 @@ struct CustomerDetailView: View {
         }
         guard canEdit else { return items }
         return items + [
-            ThorbisMenuItem("Customer view", icon: "person.crop.rectangle") { showCustomerMode = true },
             ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add },
             ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add },
         ]

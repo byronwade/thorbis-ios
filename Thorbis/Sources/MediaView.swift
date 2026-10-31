@@ -154,28 +154,28 @@ struct JobMediaView: View {
                     .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
                 }
                 if !allPhotos.isEmpty || hasMore {
+                    // Activity's All/Notes/Status/Photos chips are the screen's one chip row; the
+                    // photo stage filter under them is a quieter row of words, not a second chip row.
                     if dynamicTypeSize.isAccessibilitySize {
-                        Menu {
-                            ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
-                                Button(filterLabel(option)) { filter = option }
-                            }
-                        } label: {
+                        ThorbisMenu(items: ["All", "Before", "After", "Untagged"].map { option in
+                            ThorbisMenuItem(filterLabel(option), isSelected: filter == option) { filter = option }
+                        }, title: "Show photos") {
                             Label("Filter photos · \(filter)", systemImage: "line.3.horizontal.decrease.circle")
                                 .font(.body.weight(.medium))
+                                .foregroundStyle(Theme.foreground)
                                 .frame(minHeight: 44, alignment: .leading)
                         }
                         .accessibilityIdentifier("photo-filter-menu")
                     } else {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 16) {
                             ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
                                 Button { filter = option } label: {
-                                    Text(filterLabel(option)).font(Theme.font(13, weight: .medium))
-                                        .foregroundStyle(filter == option ? Theme.background : Theme.muted)
-                                        .padding(.horizontal, 11).frame(height: 28)
-                                        .background(filter == option ? Theme.foreground : Theme.fill, in: Capsule())
+                                    Text(filterLabel(option))
+                                        .font(Theme.font(13, weight: filter == option ? .semibold : .regular))
+                                        .foregroundStyle(filter == option ? Theme.foreground : Theme.muted)
                                         .frame(minHeight: 44).contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(PressStyle())
                                 .accessibilityAddTraits(filter == option ? .isSelected : [])
                             }
                         }

@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "side-menu", "side-menu-search", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -25,6 +25,8 @@ enum PaperPreview {
         return args[index + 1]
     }
     static var isJobEstimateHandoff: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-handoff") }
+    /// A data seed (the job's estimates and invoices), not a screen: it still opens the plain job.
+    /// To capture the documents themselves use `--paper-preview-screen customer-view`.
     static var isJobDocumentsPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents") }
     static func replacedDescriptionEstimate(_ estimate: EstimateRecord) -> EstimateRecord {
         changed(estimate, ["currentRevisionNumber": (estimate.currentRevisionNumber ?? 0) + 1])
@@ -659,6 +661,20 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.isSavedWorkPreview, path == "/v1/jobs/\(PaperPreview.savedWorkUncachedJobID)" {
             return ["id": PaperPreview.savedWorkUncachedJobID, "organizationId": org, "customerId": PaperPreview.customerID,
                     "title": "Uncached drain visit", "status": "dispatched", "createdAt": now, "updatedAt": now, "allowedTransitions": ["en_route"]]
+        }
+        // `job-closeout`: the wrap-up checklist with one met and one open requirement and one check.
+        if path == "/v1/jobs/\(PaperPreview.jobID)/closeout" {
+            let target: [String: Any] = ["id": PaperPreview.jobID, "organizationId": org, "customerId": PaperPreview.customerID,
+                                         "locationId": NSNull(), "estimateId": NSNull(), "estimateRevisionNumber": NSNull()]
+            let photos: [String: Any] = ["requirement": "photos", "kind": "photos", "outcome": "satisfied",
+                                         "detail": "2 of 2 photos added", "nextAction": NSNull(), "commercialSource": NSNull()]
+            let notes: [String: Any] = ["requirement": "notes", "kind": "notes", "outcome": "blocked",
+                                        "detail": "Add a note about the work", "nextAction": "Add a note", "commercialSource": NSNull()]
+            return ["policy": ["organizationId": org, "requireNotes": true, "requiredPhotoCount": 2,
+                               "requiredChecks": [["key": "site-clean", "label": "Work area cleaned up", "kind": "acknowledgement", "allowUnpaidDisposition": NSNull()]],
+                               "updatedByUserId": NSNull(), "updatedAt": NSNull()],
+                    "facts": ["noteCount": 0, "photoCount": 2, "acknowledgedCheckKeys": [], "authorizationTarget": target],
+                    "acknowledged": [], "requirements": [photos, notes], "unmet": [notes], "completable": false]
         }
         if PaperPreview.screen.hasPrefix("present-estimate") {
             let record = PaperPreview.optionsEstimate

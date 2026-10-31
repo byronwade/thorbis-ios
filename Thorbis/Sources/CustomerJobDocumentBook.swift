@@ -150,14 +150,13 @@ struct CustomerJobDocumentBook: View {
     }
 
     private var documentMenu: some View {
-        Menu {
-            ForEach(selection.ids) { id in Button(id.reference) { selection.select(id) } }
-        } label: {
+        ThorbisMenu(items: selection.ids.map { id in
+            ThorbisMenuItem(id.reference, isSelected: id == selection.selected) { selection.select(id) }
+        }, title: "Job documents", accessibilityLabel: "Choose a job document", customerFacing: true) {
             Label("All documents", systemImage: "square.stack")
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(minWidth: 56, minHeight: 56).contentShape(Rectangle())
         }
-        .accessibilityLabel("Choose a job document")
     }
 
     private func move(_ id: CustomerJobDocumentID?) {

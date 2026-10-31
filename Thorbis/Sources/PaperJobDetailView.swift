@@ -667,22 +667,17 @@ struct JobDetailView: View {
     @ViewBuilder
     private var directionsAction: some View {
         if !customerLocations.isEmpty {
-            Menu {
-                ForEach(customerLocations) { place in
-                    Button {
-                        if let url = JobLocationPolicy.directions(for: place.id, in: customerLocations) { openURL(url) }
-                    } label: {
-                        Text(place.label)
-                        Text("\(place.kind == "billing" ? "Billing" : "Service") · \(place.address)")
-                    }
+            ThorbisMenu(items: customerLocations.map { place in
+                ThorbisMenuItem(place.label, icon: place.kind == "billing" ? "creditcard" : "mappin.and.ellipse",
+                                subtitle: "\(place.kind == "billing" ? "Billing" : "Service") · \(place.address)") {
+                    if let url = JobLocationPolicy.directions(for: place.id, in: customerLocations) { openURL(url) }
                 }
-            } label: {
+            }, title: "Directions to") {
                 Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond")
                     .font(Theme.font(15, weight: .medium))
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             }
-            .buttonStyle(PressStyle())
             .accessibilityHint("Choose a customer location")
         }
     }
@@ -768,14 +763,9 @@ struct JobDetailView: View {
     private var tabBar: some View {
         Group {
             if typeSize.isAccessibilitySize {
-                Menu {
-                    ForEach(tabs, id: \.self) { tab in
-                        Button { selectedTab = tab } label: {
-                            if tab == selectedTab { Label(tab, systemImage: "checkmark") }
-                            else { Text(tab) }
-                        }
-                    }
-                } label: {
+                ThorbisMenu(items: tabs.map { tab in
+                    ThorbisMenuItem(tab, isSelected: tab == selectedTab) { selectedTab = tab }
+                }, title: "Job sections", accessibilityLabel: "Job sections, \(selectedTab)") {
                     HStack(spacing: 12) {
                         Text(selectedTab).font(Theme.font(15, weight: .medium))
                             .fixedSize(horizontal: false, vertical: true)
@@ -789,7 +779,6 @@ struct JobDetailView: View {
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 }
                 .padding(.horizontal, Theme.gutter)
-                .accessibilityLabel("Job sections, \(selectedTab)")
                 .accessibilityHint("Choose a job section")
                 .accessibilityIdentifier("job-section-chooser")
             } else {

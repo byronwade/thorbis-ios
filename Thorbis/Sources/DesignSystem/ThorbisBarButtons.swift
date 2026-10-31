@@ -109,6 +109,20 @@ struct ThorbisToolbarItem<Content: View>: ToolbarContent {
     }
 }
 
+/// The keyboard's Done bar: one Thorbis pill at the trailing edge above the keyboard, in place of
+/// a stock `ToolbarItemGroup(placement: .keyboard)` button.
+struct ThorbisKeyboardDoneBar: ToolbarContent {
+    let action: () -> Void
+
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .keyboard) {
+            Spacer()
+            Button("Done", action: action)
+                .buttonStyle(ThorbisBarButtonStyle(prominent: true))
+        }
+    }
+}
+
 /// The bar's text pill: Inter medium on a bordered card capsule, or ink for the confirming
 /// action. 36pt visible, 44pt to the finger, presses like every Thorbis button (MA-07).
 struct ThorbisBarButtonStyle: ButtonStyle {
