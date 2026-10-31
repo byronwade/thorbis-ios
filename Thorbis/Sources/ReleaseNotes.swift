@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-before-you-go-in",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "house", title: "Know the place before you go in",
+                      detail: "Jobs show gate codes, pets, equipment and the last three visits there, even offline.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-calm-job",
             date: "2026-10-30",
             highlights: [

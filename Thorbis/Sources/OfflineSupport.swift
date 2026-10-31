@@ -89,5 +89,9 @@ enum JobDetailCache {
     static func save(notes: [JobNoteRecord], jobID: String) { write(notes, "\(jobID).notes.json") }
     static func job(_ id: String) -> JobRecord? { read(JobRecord.self, "\(id).job.json") }
     static func notes(_ id: String) -> [JobNoteRecord] { read([JobNoteRecord].self, "\(id).notes.json") ?? [] }
+    /// "At this address": the last complete copy, so the section still shows without signal.
+    struct SavedHistory: Codable { let savedAt: Date; let history: JobPropertyHistory }
+    static func save(history: JobPropertyHistory) { write(SavedHistory(savedAt: .now, history: history), "\(history.jobId).history.json") }
+    static func history(_ jobID: String) -> SavedHistory? { read(SavedHistory.self, "\(jobID).history.json") }
     static func clearAll() { try? FileManager.default.removeItem(at: directory) }
 }
