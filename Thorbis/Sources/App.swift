@@ -54,6 +54,8 @@ struct ThorbisApp: App {
             JobDetailCache.clearAll()
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
+            JobChecklistStore.clearAll()
+            OfficeContact.clearAll()
             Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox, weak pendingMedia, weak api] actorID, organizationID in
@@ -137,6 +139,8 @@ struct ThorbisApp: App {
                 #if DEBUG
                 if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
                     CustomerPresentationPreview(screen: PaperPreview.screen)
+                } else if PaperPreview.enabled, PaperPreview.screen.hasPrefix("tool-") {
+                    OnsiteToolsPreview(screen: PaperPreview.screen)
                 } else if PaperPreview.enabled, let screen = PaperPreview.onboardingScreen {
                     OnboardingPreview(screen: screen)
                 } else {
