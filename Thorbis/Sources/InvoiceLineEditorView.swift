@@ -305,7 +305,7 @@ struct InvoiceLineEditorView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Edit added line").font(Theme.font(15, weight: .medium))
-                            Text(line.description).font(Theme.font(15)).lineLimit(2)
+                            Text(line.description).font(Theme.font(15)).fixedSize(horizontal: false, vertical: true)
                             Text(addedLineSummary(line)).font(Theme.monoFont(15))
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -512,7 +512,7 @@ private struct EditableInvoiceLineRow: View {
             HStack(alignment: .center, spacing: 8) {
                 TextField("Line item description", text: $line.description, axis: .vertical)
                     .font(Theme.font(15, weight: .medium))
-                    .lineLimit(1...3)
+                    .lineLimit(1...)
                     .accessibilityLabel("Line item description")
                     .accessibilityIdentifier("invoice-line-description-\(line.id)")
                 LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
