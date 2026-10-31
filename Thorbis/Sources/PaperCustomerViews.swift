@@ -52,7 +52,7 @@ struct CustomersView: View {
                 if let error = error ?? store.error {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
                 }
-                if recordsLoading && records.isEmpty { SkeletonRows() }
+                if recordsLoading && records.isEmpty { SkeletonList(count: 6).paperCardMargin() }
                 // Grouped wells (redesign phase 2): a semibold header with its count over one well,
                 // each row its own lazy slice so a long book stays lazy.
                 ForEach(sections, id: \.0) { letter, customers in
@@ -64,11 +64,12 @@ struct CustomersView: View {
                 .paperCardMargin()
                 if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
-                        PaperEmptyState(symbol: "archivebox", title: "No archived customers")
+                        PaperEmptyState(symbol: "archivebox", title: "No archived customers",
+                                        message: "Customers you archive move here.", tint: Theme.markTeal)
                     } else {
                         PaperEmptyState(symbol: "person.2", title: "No customers yet",
                                         actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
-                                        action: { showNew = true })
+                                        tint: Theme.markTeal, prominent: true, action: { showNew = true })
                     }
                 }
             }

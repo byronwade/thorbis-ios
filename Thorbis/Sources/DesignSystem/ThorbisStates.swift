@@ -4,10 +4,13 @@ import UIKit
 // First-run and edge states (2026-10-31 redesign): one way to say "nothing here", "this went
 // wrong", "this is off in Settings" and "loading", used everywhere so they read the same.
 //
-// - Empty: one line that says what is empty, the one action that fills it, a neutral glyph.
-// - Error: what went wrong and the way out, in a quiet field-coloured strip. Never a toast.
+// Phase 4 (Linear style): a soft tinted glyph, a semibold one-line title, one secondary sentence
+// and one Thorbis action.
+// - Empty: what is empty, the one action that fills it, the place's soft tinted glyph.
+// - Error: what went wrong and the way out, in a calm rounded strip. Never a toast.
 // - Permission: what is off, why Thorbis needs it, and Open Settings.
-// - Loading: rows the shape of the real ones (SkeletonRows / SkeletonSection), static.
+// - Loading: rows the shape of the real ones (status-glyph circle and two bars) on a well,
+//   breathing gently; still under Reduce Motion.
 
 // MARK: - Error copy
 
@@ -77,26 +80,39 @@ extension Error {
 
 // MARK: - Empty
 
-/// MA-14 (2026-10-31): one line that says what is empty, and the one action that fills it.
-/// A neutral glyph, no illustration. `message` is an optional quieter second line for a
-/// reason the person needs ("Your role can't assign jobs"), never filler.
+/// MA-14, Linear style (phase 4): a soft tinted glyph, a semibold title that says what is empty,
+/// an optional quieter sentence for a reason the person needs ("Your role can't assign jobs"), and
+/// the one action that fills it. `tint` is the place's mark colour (as More shows it); nil is a
+/// neutral grey. `prominent` draws the action in ink, for a place's root list where it is the
+/// screen's one action; inside a record (where the bar already holds the ink commit) it stays a
+/// quiet capsule (golden rule 8).
 struct PaperEmptyState: View {
     let symbol: String
     let title: String
     var message: String? = nil
     var actionTitle: String? = nil
+    var tint: Color? = nil
+    var prominent = false
     var action: (() -> Void)? = nil
+    @ScaledMetric(relativeTo: .title3) private var mark: CGFloat = 48
+
+    init(symbol: String, title: String, message: String? = nil, actionTitle: String? = nil,
+         tint: Color? = nil, prominent: Bool = false, action: (() -> Void)? = nil) {
+        self.symbol = symbol
+        self.title = title
+        self.message = message
+        self.actionTitle = actionTitle
+        self.tint = tint
+        self.prominent = prominent
+        self.action = action
+    }
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .regular))
-                .foregroundStyle(Theme.muted)
-                .frame(width: 44, height: 44)
-                .background(Theme.fill, in: Circle())
-                .accessibilityHidden(true)
+        VStack(spacing: 0) {
+            EmptyGlyph(symbol: symbol, tint: tint, size: mark)
+                .padding(.bottom, 14)
             Text(title)
-                .font(Theme.font(16, weight: .medium))
+                .font(Theme.font(17, weight: .semibold))
                 .foregroundStyle(Theme.foreground)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -106,23 +122,65 @@ struct PaperEmptyState: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 300)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
             }
             if let actionTitle, let action {
                 Button(action: action) {
                     Text(actionTitle)
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.fill, in: Capsule())
+                        .font(Theme.font(15, weight: .semibold)).foregroundStyle(prominent ? Theme.onInk : Theme.foreground)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 18).padding(.vertical, 8).frame(minHeight: 40)
+                        .background(prominent ? Theme.ink : Theme.fill, in: Capsule())
+                        .frame(minHeight: 44)
                         .contentShape(Capsule())
                 }
                 .buttonStyle(PressStyle())
-                .padding(.top, 2)
+                .padding(.top, 16)
                 .accessibilityIdentifier("empty-state-action")
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 36).padding(.horizontal, Theme.gutter)
+        .padding(.vertical, 40).padding(.horizontal, Theme.gutter)
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// The soft glyph of an empty or calm state: the symbol in its hue on a pale rounded square of the
+/// same hue. Decorative; the words carry the meaning.
+struct EmptyGlyph: View {
+    let symbol: String
+    var tint: Color? = nil
+    var size: CGFloat = 48
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.42, weight: .medium))
+            .foregroundStyle(tint ?? Theme.muted)
+            .frame(width: size, height: size)
+            .background((tint ?? Theme.muted).opacity(tint == nil ? 0.12 : 0.13),
+                        in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+                .strokeBorder((tint ?? Theme.muted).opacity(0.12)))
+            .accessibilityHidden(true)
+    }
+}
+
+/// The calm strip behind a banner (offline, waiting to sync, a failed read): a rounded `fill`
+/// ground, the glyph in a small tinted circle, then the words. Shared by `ErrorBanner` and the
+/// saved-work `OfflineBanner` so every in-between state reads the same.
+struct BannerGlyph: View {
+    let symbol: String
+    var tint: Color = Theme.muted
+    @ScaledMetric(relativeTo: .subheadline) private var size: CGFloat = 26
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.5, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: size, height: size)
+            .background(tint.opacity(0.14), in: Circle())
+            .accessibilityHidden(true)
     }
 }
 
@@ -172,13 +230,12 @@ struct ErrorBanner: View {
     var body: some View {
         // A long message keeps the full width and puts its action underneath.
         let stacked = typeSize.isAccessibilitySize || (action != nil && message.count > 64)
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
                                                   : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
         layout {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(tint)
-                    .accessibilityHidden(true)
-                Text(message).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+            HStack(alignment: .center, spacing: 10) {
+                BannerGlyph(symbol: symbol, tint: tint)
+                Text(message).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -186,21 +243,21 @@ struct ErrorBanner: View {
                 Button {
                     Task { running = true; await action.run(); running = false }
                 } label: {
-                    Text(action.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .underline(false)
+                    Text(action.title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 12).frame(minHeight: 32)
-                        .background(Theme.card, in: Capsule())
+                        .background(Theme.selectedSegment, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Theme.border))
                         .frame(minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
                 .disabled(running)
                 .fixedSize()
+                .padding(.leading, stacked ? 36 : 0)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, action == nil ? 12 : 2)
-        .padding(.top, stacked && action != nil ? 10 : 0)
+        .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, action == nil || stacked ? 9 : 2)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .padding(.horizontal, outer).padding(.top, 8)
         .accessibilityElement(children: .contain)
     }
@@ -261,40 +318,45 @@ struct PermissionNotice: View {
 
 // MARK: - Loading
 
-/// MA-13: the shape of what is coming. Rows the size of `PaperListRow` (a time column, a 16pt
-/// title, one supporting line, a status word), static with no shimmer, so Reduce Motion needs
-/// nothing different; VoiceOver hears one "Loading" instead.
+/// MA-13, phase 4: the shape of what is coming, matching the redesigned rows: a status-glyph
+/// circle, a title bar and a supporting bar (and a short "when" bar for schedule rows). Rows only,
+/// no ground, so they drop into a card or a well; `SkeletonList` puts them on a well under a
+/// header bar. They breathe slowly; under Reduce Motion they hold still. VoiceOver hears one
+/// "Loading".
 struct SkeletonRows: View {
     var count = 6
-    /// A leading time or date column, like a schedule row.
+    /// A third, short bar for the who-and-when line of a schedule row.
     var leading = true
     /// Zero when the parent already pads to the gutter.
     var inset: CGFloat = Theme.gutter
-    @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 82
+    /// Inset hairlines between rows, as on a well.
+    var dividers = false
+    @ScaledMetric(relativeTo: .body) private var glyph: CGFloat = 16
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(0..<count, id: \.self) { index in
-                HStack(alignment: .top, spacing: 14) {
-                    if leading {
-                        Capsule().fill(Theme.fill).frame(width: 52, height: 12)
-                            .frame(width: column, alignment: .leading)
-                            .padding(.top, 3)
+        SkeletonPulse {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(0..<count, id: \.self) { index in
+                    HStack(alignment: .top, spacing: 12) {
+                        Circle().fill(Theme.fill).frame(width: glyph, height: glyph).padding(.top, 1)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Capsule().fill(Theme.fill).frame(width: Self.titleWidth(index), height: 12)
+                            Capsule().fill(Theme.fill.opacity(0.75)).frame(width: Self.lineWidth(index), height: 10)
+                            if leading {
+                                Capsule().fill(Theme.fill.opacity(0.6)).frame(width: 72, height: 9)
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
-                    VStack(alignment: .leading, spacing: 9) {
-                        Capsule().fill(Theme.fill).frame(width: Self.titleWidth(index), height: 13)
-                        Capsule().fill(Theme.fill.opacity(0.7)).frame(width: Self.lineWidth(index), height: 11)
+                    .padding(.horizontal, inset)
+                    .padding(.vertical, 13)
+                    .frame(minHeight: leading ? 70 : 56, alignment: .top)
+                    .overlay(alignment: .bottom) {
+                        if dividers && index < count - 1 { WellDivider(leading: inset + glyph + 12) }
                     }
-                    .padding(.top, 2)
-                    Spacer(minLength: 0)
-                    Capsule().fill(Theme.fill.opacity(0.7)).frame(width: 54, height: 11).padding(.top, 3)
                 }
-                .padding(.vertical, 12)
-                .frame(minHeight: 60, alignment: .top)
             }
         }
-        .padding(.horizontal, inset)
-        .padding(.top, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading")
     }
@@ -303,22 +365,51 @@ struct SkeletonRows: View {
     private static func lineWidth(_ index: Int) -> CGFloat { [120, 150, 104, 132, 158, 112][index % 6] }
 }
 
-/// A loading section: a label-sized bar above one white panel of skeleton rows, the same
-/// geometry as `PaperSection`, for screens whose content is a stack of sections.
-struct SkeletonSection: View {
-    var rows = 3
+/// A slow breath (opacity 1 → 0.55) for loading placeholders. Off under Reduce Motion.
+struct SkeletonPulse<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    var body: some View {
+        content
+            .opacity(reduceMotion ? 1 : (dim ? 0.55 : 1))
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+            }
+            .onChange(of: reduceMotion) { _, still in
+                if still { dim = false }
+            }
+    }
+}
+
+/// A loading list the way the loaded one draws: a header-sized bar over one well of skeleton rows
+/// with inset hairlines. No side margin; the caller pads it like its `WellSection`s.
+struct SkeletonList: View {
+    var count = 5
     var leading = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Capsule().fill(Theme.fill).frame(width: 84, height: 11)
-                .frame(minHeight: 28, alignment: .leading)
-                .padding(.horizontal, 4).padding(.bottom, 4)
-            PaperCard { SkeletonRows(count: rows, leading: leading, inset: PaperCardMetrics.inset) }
+            SkeletonPulse {
+                Capsule().fill(Theme.fill).frame(width: 84, height: 11)
+                    .frame(minHeight: 30, alignment: .leading)
+                    .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 4)
+            }
+            Well { SkeletonRows(count: count, leading: leading, inset: PaperCardMetrics.inset, dividers: true) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading")
     }
+}
+
+/// A loading section for screens whose content is a stack of sections: `SkeletonList` geometry.
+struct SkeletonSection: View {
+    var rows = 3
+    var leading = false
+
+    var body: some View { SkeletonList(count: rows, leading: leading) }
 }
 
 /// The wait between launch (or sign-out) and the first screen: the mark on the cream ground and

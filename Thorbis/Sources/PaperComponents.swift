@@ -160,6 +160,9 @@ struct PaperTabs: View {
     @State private var available: CGFloat = 0
     @State private var labelWidths: [String: CGFloat] = [:]
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The chosen pill glides to the new tab on a small spring (phase 4).
+    @Namespace private var pill
 
     /// One-row spacings, loosest first, each with its outer inset. The job's five tabs need the
     /// tighter ones on a 402pt phone; a cut-off "Acti" reads as a bug. The tightest is only for
@@ -298,6 +301,7 @@ struct PaperTabs: View {
                 tab(option, padding: padding, tracked: tracked)
             }
         }
+        .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: selection)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -316,6 +320,7 @@ struct PaperTabs: View {
                         if on {
                             Capsule().fill(Theme.selectedSegment).shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
                                 .padding(.vertical, 3)
+                                .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }
                     .contentShape(Capsule())
@@ -324,7 +329,7 @@ struct PaperTabs: View {
                     .foregroundStyle(on ? Theme.foreground : Theme.muted)
                     .padding(.horizontal, padding).padding(.vertical, 6)
                     .frame(minHeight: Theme.chipHeight + 4)
-                    .background(on ? Theme.fill : .clear, in: Capsule())
+                    .background { if on { Capsule().fill(Theme.fill).matchedGeometryEffect(id: "pill", in: pill) } }
                     .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
             }
         }
@@ -687,20 +692,27 @@ struct OfflineBanner: View {
         if session.isOffline { return String(localized: "Offline · saved on this phone") }
         return state.isSending ? String(localized: "Syncing saved work") : String(localized: "Saved on this phone")
     }
+    /// The calm strip (phase 4): the glyph in a small tinted circle, the state in semibold words and
+    /// the count as a quiet capsule, on the same rounded ground as `ErrorBanner`.
     private func banner(symbol: String, tint: Color, text: String, trailing: String?) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(tint).accessibilityHidden(true)
+            BannerGlyph(symbol: symbol, tint: tint)
             // At accessibility sizes the count reads under the words, which then keep the width.
-            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
                                                       : AnyLayout(HStackLayout(spacing: 10))
             layout {
-                Text(text).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
+                Text(text).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
                 if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
-                if let trailing { Text(trailing).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+                if let trailing {
+                    Text(trailing).font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Theme.selectedSegment, in: Capsule())
+                }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 9).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -944,7 +956,7 @@ extension PaperEmptyState {
     /// No-results state for a search, in Paper type instead of the system's SF Pro view.
     static func search(_ text: String) -> PaperEmptyState {
         PaperEmptyState(symbol: "magnifyingglass", title: "No results for \u{201C}\(text)\u{201D}",
-                        message: "Check the spelling or try a different word.")
+                        message: "Check the spelling or try a different word.", tint: Theme.markGrey)
     }
 }
 

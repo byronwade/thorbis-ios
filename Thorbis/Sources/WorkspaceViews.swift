@@ -36,7 +36,7 @@ struct WorkspaceNoticesView: View {
                     // Linear text tabs under the title, as on Today.
                     PaperTabs(options: ["All", "Unread"], selection: $filter, textTabs: true)
                     if let error { ErrorBanner(message: error) { await refresh() } }
-                    if loading && items.isEmpty && error == nil { SkeletonRows(count: 5) }
+                    if loading && items.isEmpty && error == nil { SkeletonList(count: 5).paperCardMargin() }
                     let notices = visible
                     let displayCalendar = calendarWithTimeZone
                     ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
@@ -90,10 +90,10 @@ struct WorkspaceNoticesView: View {
                     if visible.isEmpty && !loading && error == nil {
                         if filter == "Unread" && !items.isEmpty {
                             PaperEmptyState(symbol: "checkmark.circle", title: "No unread notices",
-                                            actionTitle: "Show all notices") { filter = "All" }
+                                            actionTitle: "Show all notices", tint: Theme.markAccent) { filter = "All" }
                         } else {
                             PaperEmptyState(symbol: "tray", title: "No notices yet",
-                                            message: "New assignments and job changes show up here.")
+                                            message: "New assignments and job changes show up here.", tint: Theme.markAccent)
                         }
                     }
                 }
@@ -412,7 +412,7 @@ struct WorkspacePriceBookView: View {
                                     .disabled(loading)
                             }.frame(minHeight: 44).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                         }
-                        if (loading || !hasCurrentOwner) && currentItems.isEmpty && error == nil { SkeletonRows(count: 6, leading: false, inset: 0) }
+                        if (loading || !hasCurrentOwner) && currentItems.isEmpty && error == nil { SkeletonList(count: 6) }
                         ForEach(categories.filter { $0 != "All" && (category == "All" || category == $0) }, id: \.self) { groupName in
                             let grouped = visibleItems.filter { $0.kind.capitalized == groupName }
                             if !grouped.isEmpty {
@@ -476,7 +476,7 @@ struct WorkspacePriceBookView: View {
                             if currentItems.isEmpty {
                                 PaperEmptyState(symbol: "book.closed", title: "No price book items yet",
                                                 message: "Services, parts and fees you add here show up when building estimates and invoices.",
-                                                actionTitle: canEdit ? "Add an item" : nil,
+                                                actionTitle: canEdit ? "Add an item" : nil, tint: Theme.markBurnt, prominent: true,
                                                 action: canEdit ? { creating = true } : nil)
                             } else {
                                 PaperEmptyState(symbol: "magnifyingglass", title: "No matching items",
