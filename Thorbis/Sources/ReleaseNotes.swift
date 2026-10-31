@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-row-swipes",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "hand.draw", title: "Swipe jobs for Call and the next step",
+                      detail: "Swipe a job right to call or get directions, left for its next step. Swipe a notice right to open its job."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-stop-cards",
             date: "2026-10-31",
             highlights: [

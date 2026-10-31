@@ -87,6 +87,8 @@ extension NextStopDay {
 @MainActor
 final class JobAddressBook: ObservableObject {
     @Published private(set) var streets: [String: String] = [:]
+    /// The full place behind each street, so a row's Directions needs no read of its own.
+    private(set) var places: [String: (address: String, coordinates: FieldCoordinates?)] = [:]
     private var loaded: Set<String> = []
     private var key = ""
 
@@ -96,9 +98,16 @@ final class JobAddressBook: ObservableObject {
         return streets["\(customerID)|\(locationID)"]
     }
 
+    /// Directions to the job's own service location (never another of the customer's addresses).
+    func directions(_ job: Job) -> URL? {
+        guard let locationID = job.locationId, let customerID = job.customerId,
+              let place = places["\(customerID)|\(locationID)"] else { return nil }
+        return Directions.url(address: place.address, coordinates: place.coordinates)
+    }
+
     /// Reads the places for `jobs`. Never more than `limit` customers per screen.
     func load(_ jobs: [Job], api: APIClient, organizationID: String?, identity: String, limit: Int = 20) async {
-        if identity != key { key = identity; streets = [:]; loaded = [] }
+        if identity != key { key = identity; streets = [:]; places = [:]; loaded = [] }
         guard let organizationID else { return }
         let customers = Array(Set(jobs.compactMap { $0.locationId == nil ? nil : $0.customerId }))
             .filter { !loaded.contains($0) }.sorted().prefix(limit)
@@ -115,6 +124,9 @@ final class JobAddressBook: ObservableObject {
             for place in places where place.customerId == customerID && place.organizationId == organizationID {
                 let line = NextStopPlace(jobID: "", organizationID: organizationID, customerID: customerID,
                                          locationID: place.id, address: place.address).firstLine
+                if !place.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.places["\(customerID)|\(place.id)"] = (place.address, place.coordinates)
+                }
                 if let line { streets["\(customerID)|\(place.id)"] = line }
             }
         }

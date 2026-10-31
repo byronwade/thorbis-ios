@@ -111,6 +111,20 @@ in light and dark, and scales with Dynamic Type.
 | Loading list / rows | `SkeletonList`, `SkeletonRows`, `SkeletonPulse` | `ThorbisStates.swift` |
 | Banner glyph (offline, sync, error strips) | `BannerGlyph` | `ThorbisStates.swift` |
 | Confirmation toast (saved, undo) | `ThorbisToast` | `ThorbisToast.swift` |
+| **Row swipe actions** (rows in a `ScrollView`, not a `List`; words always show) | **`RowSwipeContainer`**, `RowSwipeAction`, `.rowSwipeAccessibility` | `RowSwipeActions.swift` |
+
+## Row swipe actions
+
+Our list rooms are `ScrollView`s (Today mixes the Now panel, the stop-card pager and pinned
+labels), so `.swipeActions` is not available. `RowSwipeContainer` gives a row cells behind it:
+a sideways UIKit pan that never starts in the screen's leading 24pt (the drawer's edge swipe and
+Back) and that vertical scrolling waits on only until it declines. Half a cell opens a side; past
+55% of the row a full swipe runs the one action marked for it (only a forward, non-destructive
+move). One row is open per screen (`RowSwipeState`; close it when the list scrolls), and a tap on
+an open row closes it. Cells are Thorbis buttons with the word showing: `.ink`, `.panel`, or a
+status's text on its own surface. A busy cell keeps its word while its mark turns. A swipe is
+never the only path: put the same actions on the record, and on the row's own accessibility
+element with `.rowSwipeAccessibility(actions)`. Job rows use `JobSwipeRow` (`../JobRowSwipes.swift`).
 
 ## ThorbisMenu
 

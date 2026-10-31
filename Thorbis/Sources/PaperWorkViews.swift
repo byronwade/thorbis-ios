@@ -98,6 +98,8 @@ struct ScheduleView: View {
     /// The stop card showing, by job id; its next step is the one loaded for the commit.
     @State private var cardFocus: String?
     @StateObject private var cardPlaces = StopCardPlaces()
+    /// The rows' swipes: what each row has read (allowed moves, a number to call) and the moves sent.
+    @StateObject private var swipes = JobRowSwipeBook()
 
     private var range: ScheduleRange {
         switch tab {
@@ -164,6 +166,7 @@ struct ScheduleView: View {
                 .padding(.bottom, 8)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
+                if let problem = swipes.problem { ErrorBanner(message: problem) }
                 if store.loading && store.jobs.isEmpty {
                     SkeletonList(count: 4, leading: true).paperCardMargin()
                 } else if tab == "Board" && canSchedule {
@@ -183,11 +186,19 @@ struct ScheduleView: View {
             .padding(.bottom, 24)
         }
         .refreshable { await store.refresh(api) }
+        // An open row closes as soon as the list moves.
+        .onScrollPhaseChange { _, phase in if phase != .idle { swipes.rows.close() } }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showNew) { NewJobSheet() }
         .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
         .sensoryFeedback(.success, trigger: committed)
+        // A swiped move: success once the server took it; a lighter tap when it is only saved here.
+        .sensoryFeedback(.success, trigger: swipes.confirmed)
+        .sensoryFeedback(.impact(weight: .light), trigger: swipes.queued)
+        .task(id: "swipes|\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)") {
+            swipes.reset(identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
+        }
         .task(id: "roster|\(session.generation)|\(session.isOffline)") {
             guard session.can("job.view", feature: "jobs"), !session.isOffline,
                   let people = try? await api.fieldAssignees() else { return }
@@ -447,11 +458,16 @@ struct ScheduleView: View {
         ForEach(Array(list.enumerated()), id: \.element.id) { index, job in
             let period = JobFiltering.date(job.scheduledFor)?.periodMark
             let previous = index > 0 ? JobFiltering.date(list[index - 1].scheduledFor)?.periodMark : nil
-            TodayRow(job: job, customer: store.customerName(job.customerId), street: addresses.street(job),
-                     timeStyle: leading, pendingStatus: outbox.pendingStatus(for: job.id),
-                     assignee: everyone ? job.assignedToUserId.flatMap { roster[$0] } : nil,
-                     showsPeriod: index == 0 || period != previous,
-                     schedule: job.scheduledFor == nil && canSchedule ? { scheduling = job } : nil)
+            let customer = store.customerName(job.customerId)
+            // Swipe right: Call, Directions. Swipe left: the next move the server allows.
+            JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
+                TodayRow(job: job, customer: customer, street: addresses.street(job),
+                         timeStyle: leading, pendingStatus: outbox.pendingStatus(for: job.id),
+                         assignee: everyone ? job.assignedToUserId.flatMap { roster[$0] } : nil,
+                         showsPeriod: index == 0 || period != previous,
+                         schedule: job.scheduledFor == nil && canSchedule ? { scheduling = job } : nil,
+                         swipeActions: actions)
+            }
         }
     }
 
@@ -491,30 +507,12 @@ struct ScheduleView: View {
         .padding(.top, 24)
     }
 
-    /// The next field step for the Next up job, in lifecycle order.
+    /// The next field step for the Next up job, in lifecycle order (the same rule as the rows' swipe).
     private func nextStep(for job: Job) -> String? {
-        guard session.can("job.edit", feature: "jobs") else { return nil }
-        let allowed: [String]
-        let status: String
-        if let queued = outbox.pendingStatus(for: job.id) {
-            // Already queued a step: only offer what the server allowed from that status before.
-            status = queued
-            allowed = outbox.offlineSteps(from: queued)
-        } else if let hero, hero.id == job.id {
-            status = hero.status
-            allowed = hero.allowedTransitions ?? []
-        } else if session.isOffline {
-            status = job.status
-            allowed = outbox.offlineSteps(from: job.status)
-        } else {
-            return nil
-        }
-        // Only ever forward: a job already in progress never offers "Arrive" again.
-        let order = ["scheduled": 0, "dispatched": 0, "en_route": 1, "arrived": 2, "in_progress": 3, "paused": 3]
-        let current = order[status] ?? 0
-        return ["en_route", "arrived", "in_progress"].first {
-            allowed.contains($0) && (order[$0] ?? 0) > current && !(status == "paused" && $0 == "in_progress")
-        }
+        JobMoves.next(listedStatus: job.status,
+                      served: hero.flatMap { $0.id == job.id ? ($0.status, $0.allowedTransitions ?? []) : nil },
+                      queued: outbox.pendingStatus(for: job.id), isOffline: session.isOffline,
+                      learned: outbox.offlineSteps(from:), canEdit: session.can("job.edit", feature: "jobs"))
     }
 
     @ViewBuilder private func commit(for job: Job) -> some View {
@@ -638,40 +636,21 @@ struct ScheduleView: View {
 
     private func progress(_ job: Job, _ request: FieldProgressRequest) async {
         guard busyJobID == nil else { return }
-        if session.isOffline || !outbox.pending.filter({ $0.jobID == job.id }).isEmpty {
-            queue(job, request)
-            return
-        }
-        busyJobID = job.id
+        if !session.isOffline && outbox.pending.filter({ $0.jobID == job.id }).isEmpty { busyJobID = job.id }
         defer { busyJobID = nil }
-        do {
-            _ = try await api.progressFieldJob(job.id, request: request)
+        switch await JobProgressRun.run(jobID: job.id, request: request, api: api, store: store,
+                                        session: session, outbox: outbox) {
+        case .sent(let refreshed):
             committed += 1
             await loadHero(job)
+            progressError = refreshed ? nil : "Saved. The latest schedule could not be refreshed."
+        case .queued:
+            committed += 1
             progressError = nil
-            if await store.refresh(api) == .failed {
-                progressError = "Saved. The latest schedule could not be refreshed."
-            }
-        } catch is CancellationError {
-        } catch {
-            if error.isConnectivityFailure { queue(job, request) } else { progressError = error.localizedDescription }
-        }
-    }
-
-    /// No signal: save the step on the phone; it is sent in order when signal returns.
-    private func queue(_ job: Job, _ request: FieldProgressRequest) {
-        guard let payload = OutboxEntry.ProgressPayload(jobID: job.id, request: request) else {
-            progressError = "That change needs a connection."
-            return
-        }
-        outbox.enqueue(.progress(payload), policyVersion: session.policyVersion ?? 0)
-        committed += 1
-        progressError = nil
-        if !session.isOffline {
-            Task {
-                await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
-                await store.refresh(api)
-            }
+        case .refused(let message):
+            progressError = message
+        case .cancelled:
+            break
         }
     }
 }
@@ -848,6 +827,8 @@ struct TodayRow: View {
     /// Show "a.m." / "p.m." under the time (the first row, and wherever the period changes).
     var showsPeriod = true
     var schedule: (() -> Void)? = nil
+    /// The row's swipe actions, also offered to VoiceOver as custom actions on the row.
+    var swipeActions: [RowSwipeAction] = []
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .footnote) private var column: CGFloat = 50
 
@@ -873,6 +854,8 @@ struct TodayRow: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(spoken)
                 .accessibilityHint("Opens the job")
+                .accessibilityIdentifier("today-row-\(job.id)")
+                .rowSwipeAccessibility(swipeActions)
             if let schedule {
                 ScheduleRowButton(job: job, action: schedule).padding(.trailing, ListRoom.gutter)
             }
@@ -994,6 +977,7 @@ struct JobsView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @State private var tab = "Assigned"
     @State private var showDisplay = false
     @State private var scheduling: Job?
@@ -1004,6 +988,8 @@ struct JobsView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     /// Street lines for the rows (street first), read per customer like Today.
     @StateObject private var addresses = JobAddressBook()
+    /// The rows' swipes: what each row has read (allowed moves, a number to call) and the moves sent.
+    @StateObject private var swipes = JobRowSwipeBook()
     /// Who each tech is, for the rows' avatars. Never kept on the phone: offline the rows show none.
     @State private var roster: [String: String] = [:]
 
@@ -1046,6 +1032,7 @@ struct JobsView: View {
                             filterActive: filterActive, showFilter: $showDisplay) { filterPopover }
                 if filterActive { filterBar }
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
+                if let problem = swipes.problem { ErrorBanner(message: problem) }
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if store.loading && store.jobs.isEmpty {
                         ListRoomSkeleton(count: 6)
@@ -1072,6 +1059,14 @@ struct JobsView: View {
             .padding(.bottom, 24)
         }
         .refreshable { await store.refresh(api) }
+        // An open row closes as soon as the list moves.
+        .onScrollPhaseChange { _, phase in if phase != .idle { swipes.rows.close() } }
+        // A swiped move: success once the server took it; a lighter tap when it is only saved here.
+        .sensoryFeedback(.success, trigger: swipes.confirmed)
+        .sensoryFeedback(.impact(weight: .light), trigger: swipes.queued)
+        .task(id: "swipes|\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)") {
+            swipes.reset(identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
+        }
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
@@ -1210,20 +1205,26 @@ struct JobsView: View {
         let assignee = job.assignedToUserId.flatMap { roster[$0] }
         // The tech by name from the roster; "You" only where the roster can't name you, on a shared board.
         let who = assignee ?? (tab != "Assigned" && mine ? "You" : nil)
-        return HStack(spacing: 0) {
-            // iPad selects into the detail column beside the list; iPhone pushes.
-            PaperSplitLink(id: job.id, value: job) {
-                JobRoomRow(job: job, street: addresses.street(job), customer: customer, when: when(job),
-                           who: needsTime ? nil : who, late: isLate(job), showsStatus: !needsTime)
-            }
-            .buttonStyle(RowPressStyle())
-            .jobContextMenu(job, customer: customer)
-            .accessibilityHint("Opens the job")
-            .accessibilityIdentifier("job-row-\(job.id)")
-            // No time yet: book it from the row (beside the link, so each is its own target). The
-            // group's label already says Unscheduled.
-            if needsTime {
-                ScheduleRowButton(job: job) { scheduling = job }.padding(.trailing, ListRoom.gutter - 4)
+        // Swipe right: Call, Directions. Swipe left: the next move the server allows.
+        return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
+            HStack(spacing: 0) {
+                // iPad selects into the detail column beside the list; iPhone pushes.
+                PaperSplitLink(id: job.id, value: job) {
+                    JobRoomRow(job: job, street: addresses.street(job), customer: customer, when: when(job),
+                               who: needsTime ? nil : who,
+                               pendingStatus: outbox.pendingStatus(for: job.id),
+                               late: isLate(job), showsStatus: !needsTime)
+                }
+                .buttonStyle(RowPressStyle())
+                .jobContextMenu(job, customer: customer)
+                .accessibilityHint("Opens the job")
+                .accessibilityIdentifier("job-row-\(job.id)")
+                .rowSwipeAccessibility(actions)
+                // No time yet: book it from the row (beside the link, so each is its own target). The
+                // group's label already says Unscheduled.
+                if needsTime {
+                    ScheduleRowButton(job: job) { scheduling = job }.padding(.trailing, ListRoom.gutter - 4)
+                }
             }
         }
     }
