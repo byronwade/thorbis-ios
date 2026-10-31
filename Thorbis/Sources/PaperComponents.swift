@@ -37,6 +37,9 @@ struct PaperHeader: View {
     var filterActive = false
     /// Tab roots show the shell's + (New job / estimate / customer) beside the filter.
     var showsCreate = false
+    /// A screen-specific identifier for the title (e.g. `schedule-title`), so tests find this place
+    /// whatever its title reads ("Today", "This week", "Board").
+    var titleIdentifier: String? = nil
     @Environment(\.paperCreate) private var create
     @EnvironmentObject private var session: SessionController
     @Environment(\.paperShowMenu) private var openAccount
@@ -67,6 +70,7 @@ struct PaperHeader: View {
                     .font(Theme.font(34, weight: .medium)).tracking(-0.8)
                     .lineLimit(1).minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
+                    .modifier(OptionalIdentifier(identifier: titleIdentifier))
                 Spacer(minLength: 0)
                 if !showsMenuButton {
                     filterButton
@@ -513,6 +517,7 @@ struct PaperActionBar<Secondary: View>: View {
     var disabled = false
     var disabledReason: String? = nil
     var ground: Color = Theme.background
+    var identifier: String? = nil
     let action: () -> Void
     @ViewBuilder var secondary: Secondary
 
@@ -529,6 +534,7 @@ struct PaperActionBar<Secondary: View>: View {
                 .buttonStyle(PressStyle())
                 .disabled(busy || disabled)
                 .accessibilityHint(disabled ? (disabledReason ?? "") : "")
+                .modifier(OptionalIdentifier(identifier: identifier))
                 secondary
             }
             if disabled, let disabledReason {
@@ -544,9 +550,9 @@ struct PaperActionBar<Secondary: View>: View {
 
 extension PaperActionBar where Secondary == EmptyView {
     init(title: String, symbol: String? = nil, busy: Bool = false, disabled: Bool = false, disabledReason: String? = nil,
-         ground: Color = Theme.background, action: @escaping () -> Void) {
+         ground: Color = Theme.background, identifier: String? = nil, action: @escaping () -> Void) {
         self.init(title: title, symbol: symbol, busy: busy, disabled: disabled, disabledReason: disabledReason,
-                  ground: ground, action: action) { EmptyView() }
+                  ground: ground, identifier: identifier, action: action) { EmptyView() }
     }
 }
 

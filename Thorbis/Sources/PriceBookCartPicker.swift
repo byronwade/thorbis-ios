@@ -56,7 +56,7 @@ struct PriceBookCartPicker: View {
         .background(Theme.canvas)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             PaperActionBar(title: added == 0 ? "Done" : "Done · \(added) \(added == 1 ? "item" : "items")",
-                           symbol: added == 0 ? nil : "checkmark") { dismiss() }
+                           symbol: added == 0 ? nil : "checkmark", identifier: "price-book-done") { dismiss() }
         }
         .sensoryFeedback(.success, trigger: added)
         .presentationDetents([.large])

@@ -157,7 +157,7 @@ struct ScheduleView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: title, subtitle: subtitle, filterMenu: filterItems,
                             filterActive: tab == "Unscheduled" || (showsScope && scope == .everyone && WorkRole(session).schedulesOwnDay),
-                            showsCreate: true)
+                            showsCreate: true, titleIdentifier: "schedule-title")
                 OfflineBanner()
                 HStack(alignment: .center, spacing: 0) {
                     PaperTabs(options: tabOptions, selection: segment, textTabs: true)

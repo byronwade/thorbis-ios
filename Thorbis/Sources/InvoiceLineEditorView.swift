@@ -138,6 +138,7 @@ struct InvoiceLineEditorView: View {
                 Text(editor.lines.isEmpty ? "Line items" : "Line items · \(editor.lines.count)")
                     .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("invoice-line-count")
                     .padding(.horizontal, 4)
                 PaperCard {
                     VStack(alignment: .leading, spacing: 0) {
@@ -156,6 +157,7 @@ struct InvoiceLineEditorView: View {
                         .buttonStyle(.plain)
                         .disabled(linesDisabled || editor.lines.count >= 500)
                         .accessibilityHint(canUsePriceBook ? "Opens the price book" : "Adds a custom line item")
+                        .accessibilityIdentifier("invoice-add-item")
                     }
                 }
             }
@@ -198,7 +200,8 @@ struct InvoiceLineEditorView: View {
             toggle: { withAnimation(EstimateLineGroupsEditor.spring) { expandedLine = expandedLine == line.id ? nil : line.id } },
             remove: { removeLine(line.id) }, focus: $focus,
             descriptionIdentifier: "invoice-line-description-\(line.id)",
-            quantityIdentifier: "invoice-line-quantity-\(line.id)"
+            quantityIdentifier: "invoice-line-quantity-\(line.id)",
+            priceIdentifier: "invoice-line-price-\(line.id)"
         )
         .disabled(linesDisabled)
         .accessibilityAction(named: "Move up") { if canMoveUp { moveLine(line.id, offset: -1) } }

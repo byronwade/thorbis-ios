@@ -99,6 +99,9 @@ struct ThorbisMenu<Label: View>: View {
     var customerFacing = false
     /// Screenshot-only: open on appear (preview flags).
     var opensOnAppear = false
+    /// Where the popover's arrow sits. `.top` grows the menu down from its control; a control near
+    /// the bottom of the screen (the drawer's gear) passes `.bottom` so the menu grows up, on screen.
+    var arrowEdge: Edge = .top
     @ViewBuilder var label: () -> Label
 
     @State private var model = ThorbisMenuModel()
@@ -111,7 +114,7 @@ struct ThorbisMenu<Label: View>: View {
                 button
             }
         }
-        .popover(isPresented: $model.isPresented, arrowEdge: .top) {
+        .popover(isPresented: $model.isPresented, arrowEdge: arrowEdge) {
             ThorbisMenuPanel(items: items, title: title, customerFacing: customerFacing,
                              onSelect: { model.choose($0) }, onClose: { model.isPresented = false })
                 .onDisappear { model.finish() }
