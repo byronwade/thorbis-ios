@@ -106,7 +106,7 @@ struct PriceBookCartPicker: View {
                 }
                 .padding(.leading, 14)
                 .frame(minHeight: 50)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
                 if canUsePriceBook {
                     ThorbisMenu(items: PriceBookKindFilter.allCases.map { filter in

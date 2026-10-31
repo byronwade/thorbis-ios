@@ -426,5 +426,5 @@ private func customerPaymentDate(_ raw: String) -> String {
     let fractional = formatter.date(from: raw)
     formatter.formatOptions = [.withInternetDateTime]
     guard let date = fractional ?? formatter.date(from: raw) else { return "Date unavailable" }
-    return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+    return date.stampLabel()
 }

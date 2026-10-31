@@ -734,7 +734,7 @@ struct InvoiceDetailView: View {
 }
 
 /// One priced line, same type as the job's Invoice tab: 15/500 description over a 13pt
-/// "2 × $60.00", the line total in mono, and a hairline between lines.
+/// "2 × $60.00" and the line total in mono. Space, not a line, sits between lines (v2).
 struct CommercialLineView: View {
     let line: FieldLine
     var divider = false
@@ -761,9 +761,6 @@ struct CommercialLineView: View {
         .foregroundStyle(Theme.foreground)
         .padding(15)
         .frame(maxWidth: stacked ? .infinity : nil, minHeight: 56, alignment: .leading)
-        .overlay(alignment: .top) {
-            if divider { Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15) }
-        }
         .accessibilityElement(children: .combine)
     }
 }
@@ -814,7 +811,7 @@ struct DocumentHeader<Chips: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(eyebrow).font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(title).font(Theme.font(30, weight: .semibold)).tracking(-0.6)
+            Text(title).font(Theme.font(30, weight: .medium)).tracking(-0.6)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
                 .accessibilityAddTraits(.isHeader)
@@ -849,11 +846,11 @@ func documentStatusTint(_ status: String) -> Color {
 }
 
 extension View {
-    /// The white sheet a section's rows sit on: radius 14 and a faint rim, on the cream ground.
+    /// The panel a section's rows sit on: radius 14, tone only (v2: a 1px box around a section is a
+    /// costume, so there is no rim).
     func documentPanel() -> some View {
         clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border, lineWidth: 1))
     }
 }
 
@@ -1041,6 +1038,6 @@ func estimatesSummary(_ estimates: [EstimateRecord]) -> String {
 func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
     let unpaid = invoices.filter { $0.status == "issued" }
     let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
-    return unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD")) owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
+    return unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD"))\u{00A0}owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
 }
 

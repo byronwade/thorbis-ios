@@ -159,6 +159,12 @@ struct CustomerContactSheet: View {
         )
     }
 
+    private var saveBlockedReason: String? {
+        guard !canSave else { return nil }
+        if !session.can("customer.edit", feature: "core_crm") { return "Your role can't change contacts. Ask your office." }
+        return "Add the contact's name to save."
+    }
+
     private var canSave: Bool {
         guard !busy, session.can("customer.edit", feature: "core_crm") else { return false }
         return contact == nil ? draft.makeRequest() != nil : draft.makeUpdateRequest() != nil
@@ -266,6 +272,12 @@ struct CustomerContactSheet: View {
                 }
                 .buttonStyle(PressStyle())
                 .disabled(!canSave)
+                // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+                if !busy, let reason = saveBlockedReason {
+                    Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if contact == nil {
                     Text("The first contact is set as primary automatically.")
@@ -392,8 +404,6 @@ struct MoreView: View {
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject private var store: Store
     @EnvironmentObject var api: APIClient
-    @Environment(\.paperOpenPlace) private var openPlace
-    @Environment(\.paperManageBusinesses) private var manageBusinesses
     @State private var showSettings = false
     @State private var editing = false
 
@@ -403,7 +413,7 @@ struct MoreView: View {
     private func places(in group: MenuItem.Group) -> [MenuItem] {
         AppMenuContent.menu(tabs: pinned, hidden: layout.hidden, order: layout.menuOrder,
                             permitted: { $0.permitted(session) })
-            .filter { $0.group == group && ($0.route != nil || openPlace != nil) }
+            .filter { $0.group == group && $0.route != nil }
     }
 
     private var localSections: [LocalWorkspaceSection] {
@@ -476,13 +486,12 @@ struct MoreView: View {
         #endif
     }
 
-    /// A place: its route under More, or its own root for Schedule, Jobs and Customers.
+    /// A place: its route under More (iPad; the sidebar opens Schedule, Jobs and Customers itself).
     @ViewBuilder private func placeRow(_ item: MenuItem) -> some View {
-        let row = MoreRow(title: item.title, symbol: item.symbol, tint: item.tint, subtitle: item.subtitle, count: count(item))
         if let route = item.route {
-            NavigationLink(value: route) { row }
-        } else {
-            Button { openPlace?(item) } label: { row }
+            NavigationLink(value: route) {
+                MoreRow(title: item.title, symbol: item.symbol, tint: item.tint, subtitle: item.subtitle, count: count(item))
+            }
         }
     }
 
@@ -508,7 +517,7 @@ struct MoreView: View {
                 guard !current else { return }
                 Task { await session.selectOrganization(id: organization.id) }
             }
-        } + (manageBusinesses.map { manage in [ThorbisMenuItem("Add a business", icon: "plus", action: manage)] } ?? [])
+        }
     }
 
     /// The business and its switcher, like the workspace row on top of Linear's menu.
@@ -520,11 +529,11 @@ struct MoreView: View {
                     InitialsAvatar(name: businessName, size: 30)
                         .accessibilityHidden(true)
                     Text(businessName)
-                        .font(Theme.font(16, weight: .semibold))
+                        .font(Theme.font(16, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.muted)
                 }
                 .foregroundStyle(Theme.foreground)

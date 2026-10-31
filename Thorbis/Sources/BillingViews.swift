@@ -201,7 +201,7 @@ struct BillingScheduleDetailView: View {
                                         if let lineProgress {
                                             ProgressView(value: Double(lineProgress.billedToDate), total: Double(max(line.scheduledAmount.amount, 1)))
                                                 .tint(Theme.foreground)
-                                            Text("\(money(lineProgress.billedToDate, currency: "USD")) billed · \(money(lineProgress.remaining, currency: "USD")) left")
+                                            Text("\(money(lineProgress.billedToDate, currency: "USD"))\u{00A0}billed · \(money(lineProgress.remaining, currency: "USD"))\u{00A0}left")
                                                 .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
                                         }
                                     }
@@ -293,6 +293,8 @@ struct JobDepositSheet: View {
     @State private var key = UUID().uuidString
     @State private var busy = false
     @State private var error: String?
+    /// What's missing in the amount, under the field (design.thorbis.com "Help under the field").
+    @State private var amountError: String?
 
     private var cents: Int? { MoneyInput.cents(amount).flatMap { $0 > 0 ? $0 : nil } }
 
@@ -302,13 +304,17 @@ struct JobDepositSheet: View {
                 Text("Request a deposit").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                 Text("Creates a deposit invoice from the job's approved estimate. It's credited against later bills.")
                     .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                HStack(spacing: 8) {
-                    Text("$").font(Theme.monoFont(28, weight: .semibold)).foregroundStyle(Theme.muted)
-                    TextField("0.00", text: $amount).keyboardType(.decimalPad).font(Theme.monoFont(28, weight: .semibold))
-                        .onChange(of: amount) { _, _ in key = UUID().uuidString }
+                VStack(alignment: .leading, spacing: 6) {
+                    // The affix lives inside the well (design.thorbis.com "Affixes in the well").
+                    HStack(spacing: 8) {
+                        Text("$").font(Theme.monoFont(28)).foregroundStyle(Theme.muted)
+                        TextField("150.00", text: $amount).keyboardType(.decimalPad).font(Theme.monoFont(28))
+                            .onChange(of: amount) { _, _ in key = UUID().uuidString; amountError = nil }
+                            .accessibilityLabel("Deposit amount")
+                    }
+                    .fieldWell()
+                    if let amountError { FieldProblem(message: amountError) }
                 }
-                .padding(.horizontal, 14).frame(minHeight: 60)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
                 Spacer()
             }
@@ -318,8 +324,9 @@ struct JobDepositSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .safeAreaInset(edge: .bottom) {
-                PaperActionBar(title: cents.map { "Create \(money($0, currency: "USD")) deposit invoice" } ?? "Enter an amount",
-                               symbol: "banknote", busy: busy, disabled: cents == nil) { Task { await create() } }
+                // Never pre-disabled: pressing it with no amount says what's missing under the field.
+                PaperActionBar(title: cents.map { "Create \(money($0, currency: "USD")) deposit invoice" } ?? "Create deposit invoice",
+                               symbol: "banknote", busy: busy) { Task { await create() } }
             }
             .interactiveDismissDisabled(busy)
         }
@@ -327,7 +334,8 @@ struct JobDepositSheet: View {
     }
 
     private func create() async {
-        guard let cents, !busy else { return }
+        guard !busy else { return }
+        guard let cents else { amountError = "Add the deposit amount, like 150.00."; return }
         busy = true
         defer { busy = false }
         do {

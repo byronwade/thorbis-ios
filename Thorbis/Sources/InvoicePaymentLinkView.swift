@@ -116,7 +116,7 @@ struct InvoicePaymentLinkView: View {
                 }
                 .font(Theme.font(15, weight: .medium))
                 .frame(maxWidth: .infinity, minHeight: 44)
-                Text("Expires \(expiration.formatted(date: .abbreviated, time: .shortened))")
+                Text("Expires \(expiration.stampLabel())")
                     .font(Theme.font(12)).foregroundStyle(Theme.subtle)
             case .expired:
                 recovery("Payment link expired", message: "Create a new secure link before asking the customer to pay.")
@@ -132,6 +132,12 @@ struct InvoicePaymentLinkView: View {
             Text(message).font(Theme.font(15)).foregroundStyle(Theme.muted)
             PrimaryButton(title: "Create new payment link", busy: isCreating, action: onCreate)
                 .disabled(!canCreate)
+            // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+            if !canCreate && !isCreating {
+                Text(model.collectBlockedReason ?? "Your role can't create payment links. Ask your office to send one.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

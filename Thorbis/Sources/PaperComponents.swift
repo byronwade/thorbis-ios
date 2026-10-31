@@ -64,7 +64,7 @@ struct PaperHeader: View {
             }
             HStack(alignment: .center, spacing: 8) {
                 Text(title)
-                    .font(Theme.font(34, weight: .semibold)).tracking(-0.8)
+                    .font(Theme.font(34, weight: .medium)).tracking(-0.8)
                     .lineLimit(1).minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
@@ -249,7 +249,7 @@ struct PaperTabs: View {
                                 }
                             } label: {
                                 Image(systemName: moreTrailing ? "chevron.right" : "chevron.left")
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 14, weight: .medium))
                                     .frame(width: 44, height: 44)
                                     .contentShape(Rectangle())
                             }
@@ -277,7 +277,7 @@ struct PaperTabs: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .accessibilityHidden(true)
             }
             .foregroundStyle(Theme.foreground)
@@ -658,28 +658,11 @@ struct PaperCreateAction: @unchecked Sendable {
 private struct PaperCreateKey: EnvironmentKey {
     static let defaultValue: PaperCreateAction? = nil
 }
-private struct PaperOpenPlaceKey: EnvironmentKey {
-    static let defaultValue: (@Sendable (MenuItem) -> Void)? = nil
-}
-private struct PaperManageBusinessesKey: EnvironmentKey {
-    static let defaultValue: (@Sendable () -> Void)? = nil
-}
 extension EnvironmentValues {
     /// What a tab root's + starts. Nil (iPad, or nothing this person may create) hides the circle.
     var paperCreate: PaperCreateAction? {
         get { self[PaperCreateKey.self] }
         set { self[PaperCreateKey.self] = newValue }
-    }
-    /// Opens a place the way the bar would (More lists every place). Nil where the shell has its own
-    /// list of places (the iPad sidebar), so More leaves out places it could not open.
-    var paperOpenPlace: (@Sendable (MenuItem) -> Void)? {
-        get { self[PaperOpenPlaceKey.self] }
-        set { self[PaperOpenPlaceKey.self] = newValue }
-    }
-    /// Opens the business list to add or manage businesses, when the shell offers it.
-    var paperManageBusinesses: (@Sendable () -> Void)? {
-        get { self[PaperManageBusinessesKey.self] }
-        set { self[PaperManageBusinessesKey.self] = newValue }
     }
 }
 
@@ -744,7 +727,7 @@ struct OfflineBanner: View {
             let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
                                                       : AnyLayout(HStackLayout(spacing: 10))
             layout {
-                Text(text).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
+                Text(text).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
                 if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 if let trailing {
                     Text(trailing).font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
@@ -1603,16 +1586,22 @@ struct PaperChoiceWell: View {
 }
 
 extension Date {
-    /// Trade-style clock time (design 2026-10-30 copy): "7 a.m.", "10:30 a.m.", "1 p.m.".
-    /// Uses the person's 24-hour setting when they have one.
-    var tradeTime: String {
-        let uses24 = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current)?.contains("a") == false
-        if uses24 { return formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute()) }
-        let parts = Calendar.current.dateComponents([.hour, .minute], from: self)
-        let hour24 = parts.hour ?? 0, minute = parts.minute ?? 0
-        let hour = hour24 % 12 == 0 ? 12 : hour24 % 12
-        let suffix = hour24 < 12 ? "a.m." : "p.m."
-        return minute == 0 ? "\(hour) \(suffix)" : String(format: "%d:%02d %@", hour, minute, suffix)
+    /// The app's one standalone time (design.thorbis.com "Time is 7:40"): hours and minutes always,
+    /// the period once, lowercase — "7:40 a.m.", "1:00 p.m." — or "13:00" on a 24-hour clock. The
+    /// same clock as Today's column (`clockTime`), so a screen never mixes "1 p.m." with "2:30".
+    var tradeTime: String { clockTime }
+
+    /// A date and time on one line, for stamps (captured, signed, saved, expires):
+    /// "Oct 31, 2026, 10:30 a.m.". The time is `tradeTime`, never the system's "10:30 AM".
+    func stampLabel(year: Bool = true) -> String {
+        let day = year ? formatted(.dateTime.month(.abbreviated).day().year())
+                       : formatted(.dateTime.month(.abbreviated).day())
+        return "\(day), \(tradeTime)"
+    }
+
+    /// "Thu, Oct 30, 9:00 a.m.": a weekday, the date and the time, for a booked visit.
+    var weekdayStampLabel: String {
+        "\(formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(tradeTime)"
     }
 }
 
@@ -1652,7 +1641,7 @@ struct ExpandableNoteText: View {
                 Button { withMotion(.snappy) { expanded.toggle() } } label: {
                     HStack(spacing: 4) {
                         Text(expanded ? "Less" : "More")
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 11, weight: .semibold))
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 11, weight: .medium))
                     }
                     .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
                     .frame(minHeight: 44, alignment: .leading)

@@ -362,7 +362,7 @@ struct MediaCompareView: View {
                 .mask(alignment: .leading) { Rectangle().frame(width: max(0, x)) }
             Rectangle().fill(.white).frame(width: 3).offset(x: x - 1.5).shadow(radius: 2)
             Image(systemName: "arrow.left.and.right")
-                .font(.system(size: 18, weight: .semibold)).foregroundStyle(.black)
+                .font(.system(size: 18, weight: .medium)).foregroundStyle(.black)
                 .frame(width: 56, height: 56).background(.white, in: Circle()).shadow(radius: 3)
                 .offset(x: x - 28)
         }

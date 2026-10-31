@@ -146,7 +146,7 @@ struct InvoiceLineEditorView: View {
                         }
                         Button { showPriceBook = true } label: {
                             HStack(spacing: 10) {
-                                Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
+                                Image(systemName: "plus").font(.system(size: 15, weight: .medium))
                                 Text("Add item").font(Theme.font(16, weight: .medium))
                                 Spacer(minLength: 0)
                             }
@@ -240,7 +240,29 @@ struct InvoiceLineEditorView: View {
         withAnimation(EstimateLineGroupsEditor.spring) { expandedLine = id }
     }
 
+    /// Why the commits are off, in words under them (design.thorbis.com "Disabled needs a reason").
+    private var commitBlockedReason: String? {
+        guard !busy else { return nil }
+        if !canEdit { return "Your role can't change this invoice." }
+        if editor.hasUnsupportedLineSources { return "Some lines came from somewhere this phone can't edit. Change them on the web." }
+        if !canIssue && !editor.hasChanges { return "No changes to save yet." }
+        return nil
+    }
+
     private var invoiceCommitActions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            invoiceCommitButtons
+            if let reason = commitBlockedReason {
+                Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
+        .background(Theme.background)
+    }
+
+    private var invoiceCommitButtons: some View {
         let accessible = dynamicTypeSize.isAccessibilitySize
         let layout = accessible ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
         return layout {
@@ -266,9 +288,6 @@ struct InvoiceLineEditorView: View {
                     .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.background)
     }
 
     private var priceBookOverrideReasonField: some View {
@@ -279,7 +298,7 @@ struct InvoiceLineEditorView: View {
                 .lineLimit(2...4)
                 .font(Theme.font(14))
                 .padding(12)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
                 .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
                 .accessibilityLabel("Reason for Price Book change")

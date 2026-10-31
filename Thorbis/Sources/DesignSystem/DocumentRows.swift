@@ -79,7 +79,7 @@ extension WrappingPropertyChip where Leading == AnyView {
 extension Theme {
     /// A money amount in a redesigned list or section: semibold and tabular (spec "amounts").
     /// Staff screens only; `moneyFont` keeps its weights for customer mode.
-    static func amountFont(_ size: CGFloat = 16) -> Font { monoFont(size, weight: .semibold) }
+    static func amountFont(_ size: CGFloat = 16) -> Font { monoFont(size, weight: .medium) }
 }
 
 /// An estimate or invoice in a list (Estimates, Invoices, Needs attention): the status glyph, the

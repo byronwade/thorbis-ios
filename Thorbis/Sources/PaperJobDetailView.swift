@@ -571,7 +571,7 @@ struct JobDetailView: View {
                                                   : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         return layout {
             Text(displayTitle(job))
-                .font(Theme.font(20, weight: .semibold))
+                .font(Theme.font(20, weight: .medium))
                 .tracking(-0.3)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -609,7 +609,7 @@ struct JobDetailView: View {
                 // The job number shows once, here; a long press copies the full ID (also in •••).
                 .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
             Text(displayTitle(job))
-                .font(Theme.font(30, weight: .semibold))
+                .font(Theme.font(30, weight: .medium))
                 .tracking(-0.6)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
@@ -687,9 +687,9 @@ struct JobDetailView: View {
                     .accessibilityIdentifier("job-chip-member")
             }
             if let balance {
-                WrappingPropertyChip("\(jobShortMoney(balance, currency: "USD")) due", symbol: "dollarsign.circle",
+                WrappingPropertyChip("\(jobShortMoney(balance, currency: "USD"))\u{00A0}due", symbol: "dollarsign.circle",
                                      action: { withMotion(.snappy) { selectedTab = "Money" } })
-                    .accessibilityLabel("\(money(balance, currency: "USD")) due")
+                    .accessibilityLabel("\(money(balance, currency: "USD"))\u{00A0}due")
                     .accessibilityHint("Opens Money")
                     .accessibilityIdentifier("job-chip-amount")
             }
@@ -910,7 +910,7 @@ struct JobDetailView: View {
         switch tab {
         case "Money":
             guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
-            return "Money, \(money(balance, currency: "USD")) due"
+            return "Money, \(money(balance, currency: "USD"))\u{00A0}due"
         case "Activity":
             let count = activityCount(job)
             return count > 0 ? "Activity, \(count) \(count == 1 ? "entry" : "entries")" : "Activity"
@@ -930,7 +930,7 @@ struct JobDetailView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 13, weight: .medium))
                     }
                     .foregroundStyle(Theme.foreground)
                     .padding(.horizontal, 14).padding(.vertical, 8)
@@ -1007,7 +1007,7 @@ struct JobDetailView: View {
     private func notePill(wide: Bool) -> some View {
         Button { openNoteTool() } label: {
             HStack(spacing: 8) {
-                Image(systemName: "plus").font(.system(size: 15, weight: .semibold)).accessibilityHidden(true)
+                Image(systemName: "plus").font(.system(size: 15, weight: .medium)).accessibilityHidden(true)
                 Text(wide ? "Add a note" : "Note").font(Theme.font(16, weight: wide ? .regular : .medium))
                     .foregroundStyle(wide ? Theme.muted : Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1210,7 +1210,9 @@ struct JobDetailView: View {
                                    customerName: linkedCustomer(job)?.name) { await loadContacts(job) }
                 let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
-                                           loaded: placesCurrent, failed: locationsFailed) { await loadLocations(job) }
+                                           loaded: placesCurrent, failed: locationsFailed,
+                                           headerStreet: displayTitle(job),
+                                           factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
             }
             CustomerMembershipSection(customerID: job.customerId, editable: false)
             detailsGroup(job).id("job-details")
@@ -1265,7 +1267,7 @@ struct JobDetailView: View {
         HStack(spacing: 12) {
             InitialsAvatar(name: name, size: 36).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                Text(name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail = customerDetail(job) {
                     Text(detail).font(Theme.font(14)).foregroundStyle(Theme.subtle)
@@ -1274,7 +1276,7 @@ struct JobDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if opens {
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
                     .accessibilityHidden(true)
             }
         }
@@ -1864,7 +1866,7 @@ struct JobDetailView: View {
         }, title: "Show", accessibilityLabel: "Activity filter, showing \(activityFilter == "All" ? "all" : activityFilter.lowercased())") {
             HStack(spacing: 4) {
                 Text("Showing \(activityFilter == "All" ? "all" : activityFilter.lowercased())")
-                Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .medium))
             }
             .font(Theme.font(13, weight: .medium))
             .foregroundStyle(Theme.foreground)
@@ -1877,7 +1879,7 @@ struct JobDetailView: View {
     /// A day's label with the filter on the right, the way the first panel of Activity reads.
     private func activityFilterLabel(title: String, count: Int? = nil) -> some View {
         HStack(spacing: 8) {
-            (Text(title).font(Theme.font(15, weight: .semibold)) + Text(count.map { "  \($0)" } ?? "").font(Theme.font(15)))
+            (Text(title).font(Theme.font(15, weight: .medium)) + Text(count.map { "  \($0)" } ?? "").font(Theme.font(15)))
                 .monospacedDigit()
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)

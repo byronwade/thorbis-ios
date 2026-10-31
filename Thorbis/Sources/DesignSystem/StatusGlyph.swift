@@ -114,7 +114,7 @@ struct StatusGlyph: View {
                 Circle().fill(tone.hue)
                 if let mark = tone.mark {
                     Image(systemName: mark)
-                        .font(.system(size: size * 0.55, weight: .bold))
+                        .font(.system(size: size * 0.55, weight: .medium))
                         .foregroundStyle(.white)
                 }
             } else {
@@ -131,7 +131,7 @@ struct StatusGlyph: View {
         .overlay(alignment: .bottomTrailing) {
             if pending {
                 Image(systemName: "clock.fill")
-                    .font(.system(size: size * 0.5, weight: .semibold))
+                    .font(.system(size: size * 0.5, weight: .medium))
                     .foregroundStyle(Theme.warning)
                     .background(Circle().fill(Theme.background).padding(-1))
                     .offset(x: size * 0.2, y: size * 0.2)
@@ -252,7 +252,7 @@ extension PropertyChip where Leading == AnyView {
         self.init(text: text, tint: tint, textColor: textColor, action: action) {
             AnyView(Group {
                 if let symbol {
-                    Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).accessibilityHidden(true)
+                    Image(systemName: symbol).font(.system(size: 12, weight: .medium)).accessibilityHidden(true)
                         .foregroundStyle(textColor)
                 }
             })

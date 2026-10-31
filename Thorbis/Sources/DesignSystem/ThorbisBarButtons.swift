@@ -34,7 +34,7 @@ struct ThorbisCompactBackButton: View {
     var body: some View {
         Button { dismiss() } label: {
             Image(systemName: "chevron.left")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(Theme.foreground)
                 .frame(width: 36, height: 44)
                 .contentShape(Rectangle())

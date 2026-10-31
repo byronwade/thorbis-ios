@@ -19,7 +19,7 @@ enum JobShareText {
         var parts = [title, customer]
         if let date = JobFiltering.date(scheduledFor) {
             // Absolute, never "Today": the message may be read another day.
-            parts.append("\(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(date.tradeTime)")
+            parts.append("\(date.weekdayStampLabel)")
         }
         return parts.joined(separator: " · ")
     }
@@ -808,6 +808,8 @@ struct ScheduleCompactRow: View {
     var street: String? = nil
     var timeStyle: TimeStyle = .time
     var pendingStatus: String? = nil
+    /// Show "a.m." / "p.m." beside the time (the first row, and wherever the period changes).
+    var showsPeriod = true
     /// Set on a row with no time for someone who may schedule: a trailing Schedule button.
     var schedule: (() -> Void)? = nil
     @Environment(\.paperRowInset) private var inset
@@ -816,7 +818,9 @@ struct ScheduleCompactRow: View {
         if timeStyle == .age, let created = JobFiltering.date(job.createdAt) {
             return .text(Self.age(since: created), accessibility: "Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
         }
-        if let date = JobFiltering.date(job.scheduledFor) { return .text(date.tradeTime) }
+        if let date = JobFiltering.date(job.scheduledFor) {
+            return .text(showsPeriod ? date.clockTime : date.columnTime, accessibility: date.clockTime)
+        }
         return .text("No time")
     }
 

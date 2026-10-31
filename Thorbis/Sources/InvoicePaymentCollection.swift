@@ -105,6 +105,16 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             historyComplete && paymentTotalCents == invoice?.amountPaid
     }
 
+    /// Why Collect payment is off, while nothing is running; nil when it can be pressed. Every
+    /// place that offers Collect payment shows it under the commit (design.thorbis.com Controls).
+    var collectBlockedReason: String? {
+        guard !canRecordPayment, !isRecording, !isLoading else { return nil }
+        if waitingForProjection { return "The last payment is still updating on this invoice." }
+        if loadError != nil { return "Payments need a fresh copy of this invoice. Pull down to refresh." }
+        if !historyComplete { return "Checking this invoice's payments first." }
+        return "Payment history is still syncing with the invoice. Pull down to refresh."
+    }
+
     /// The server settles this attempt through its verified Stripe webhook. Neither another
     /// receipt nor a zero invoice balance proves that this particular card was recorded.
     func hasRecordedCardPresentPayment(_ intent: CardPresentIntent) -> Bool {
@@ -443,14 +453,7 @@ struct InvoiceDetailFooter: View {
         .background(Theme.background)
     }
 
-    /// Why Collect payment is off, while nothing is running; nil when it can be pressed.
-    private var collectBlockedReason: String? {
-        guard !model.canRecordPayment, !model.isRecording, !model.isLoading else { return nil }
-        if model.waitingForProjection { return "The last payment is still updating on this invoice." }
-        if model.loadError != nil { return "Payments need a fresh copy of this invoice. Pull down to refresh." }
-        if !model.historyComplete { return "Checking this invoice's payments first." }
-        return "Payment history is still syncing with the invoice. Pull down to refresh."
-    }
+    private var collectBlockedReason: String? { model.collectBlockedReason }
 }
 
 private struct InvoicePaymentDetailSheet: View {
@@ -1100,7 +1103,7 @@ struct InvoicePaymentCollectionSheet: View {
             if busy { ProgressView().controlSize(.mini).tint(selected ? Theme.onInk : Theme.foreground) }
             Text(title).font(Theme.font(14, weight: .medium)).lineLimit(1)
             if let trailingSymbol {
-                Image(systemName: trailingSymbol).font(.system(size: 10, weight: .semibold)).accessibilityHidden(true)
+                Image(systemName: trailingSymbol).font(.system(size: 10, weight: .medium)).accessibilityHidden(true)
             }
         }
         .foregroundStyle(selected ? Theme.onInk : Theme.foreground)
@@ -1317,7 +1320,7 @@ private func paymentDetail(_ label: String, _ value: String) -> some View {
 
 private func paymentDate(_ value: String) -> String {
     guard let date = JobFiltering.date(value) else { return value }
-    return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+    return date.stampLabel()
 }
 
 func paymentAmountText(_ cents: Int) -> String {

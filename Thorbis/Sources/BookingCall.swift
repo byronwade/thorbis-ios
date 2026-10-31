@@ -228,7 +228,7 @@ struct JobBookingCallSection: View {
                 .accessibilityHidden(true)
             Text(call.caller).font(Theme.font(15, weight: .medium))
             if let when = JobFiltering.date(call.startedAt) {
-                Text("· \(when.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
+                Text("· \(when.stampLabel(year: false))")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
@@ -252,7 +252,7 @@ struct JobBookingCallSection: View {
                             ProgressView().tint(Theme.background)
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.background)
+                                .font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.background)
                         }
                     }
                     .frame(width: 44, height: 44)

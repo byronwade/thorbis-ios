@@ -218,7 +218,7 @@ struct NextStopLocationNotice: View {
             .accessibilityHint("Opens Settings to turn on Location for Thorbis")
             Spacer(minLength: 0)
             Button(action: dismiss) {
-                Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                Image(systemName: "xmark").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())

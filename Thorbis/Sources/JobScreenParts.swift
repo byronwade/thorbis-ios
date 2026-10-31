@@ -76,7 +76,7 @@ struct JobPanelLabel: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let mark {
                     Image(systemName: mark)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(markTint)
                         .accessibilityHidden(true)
                 }
@@ -413,16 +413,16 @@ struct JobAccessBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Theme.warning)
                 .padding(.top, 1)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Before you go in")
-                    .font(Theme.font(13, weight: .semibold))
+                    .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(Theme.warning)
                     .accessibilityHidden(true)
-                (Text(headline.isEmpty ? "" : headline + ".").font(Theme.monoFont(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                (Text(headline.isEmpty ? "" : headline + ".").font(Theme.monoFont(15, weight: .medium)).foregroundStyle(Theme.foreground)
                  + Text(notes.map { (headline.isEmpty ? "" : " ") + $0 } ?? "").font(Theme.font(15)).foregroundStyle(Theme.subtle))
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)

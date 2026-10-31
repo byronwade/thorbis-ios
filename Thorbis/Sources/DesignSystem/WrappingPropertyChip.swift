@@ -33,7 +33,7 @@ struct WrappingPropertyChip<Leading: View>: View {
                 .fixedSize(horizontal: false, vertical: true)
             if showsChevron {
                 Image(systemName: "chevron.down")
-                    .font(Theme.font(10, weight: .semibold))
+                    .font(Theme.font(10, weight: .medium))
                     .foregroundStyle(textColor)
                     .accessibilityHidden(true)
             }
@@ -56,7 +56,7 @@ extension WrappingPropertyChip where Leading == AnyView {
         self.init(text: text, tint: tint, textColor: textColor, showsChevron: showsChevron, action: action) {
             AnyView(Group {
                 if let symbol {
-                    Image(systemName: symbol).font(Theme.font(12, weight: .semibold)).accessibilityHidden(true)
+                    Image(systemName: symbol).font(Theme.font(12, weight: .medium)).accessibilityHidden(true)
                         .foregroundStyle(textColor)
                 }
             })

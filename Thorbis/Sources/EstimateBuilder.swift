@@ -442,7 +442,7 @@ struct PriceBookResultsList: View {
         var attributed = AttributedString(text)
         for range in ranges {
             guard let attributedRange = Range(range, in: attributed) else { continue }
-            attributed[attributedRange].font = Theme.font(16, weight: .semibold)
+            attributed[attributedRange].font = Theme.font(16, weight: .medium)
         }
         return attributed
     }
@@ -733,7 +733,7 @@ struct BuilderLineRow: View {
 
     private func stepButton(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
+            Image(systemName: symbol).font(.system(size: 18, weight: .medium))
                 .foregroundStyle(enabled && isEnabled ? Theme.foreground : Theme.muted)
                 .frame(width: 52, height: 52)
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
@@ -911,7 +911,7 @@ struct EstimateBuilderSection<Header: View>: View {
                                              expandedLine: $expandedLine, removed: removed)
                     Button(action: addItem) {
                         HStack(spacing: 10) {
-                            Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
+                            Image(systemName: "plus").font(.system(size: 15, weight: .medium))
                             Text("Add item").font(Theme.font(16, weight: .medium))
                             Spacer(minLength: 0)
                         }

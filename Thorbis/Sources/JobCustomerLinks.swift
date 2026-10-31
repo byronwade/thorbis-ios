@@ -32,6 +32,10 @@ struct JobServiceAddressesSection: View {
     let places: [ServiceLocationRecord]
     let loaded: Bool
     let failed: Bool
+    /// The street the job's header already shows; a row doesn't say it again.
+    var headerStreet: String? = nil
+    /// The place whose access facts "At this address" already lists; its row doesn't repeat them.
+    var factsShownFor: String? = nil
     let retry: () async -> Void
 
     var body: some View {
@@ -62,7 +66,9 @@ struct JobServiceAddressesSection: View {
                         .padding(.horizontal, 16).padding(.top, 10)
                         .jobPanelJoinsNext()
                     ForEach(Self.ordered(places)) { place in
-                        JobServiceAddressRow(customerID: customerID, place: place)
+                        JobServiceAddressRow(customerID: customerID, place: place,
+                                             where: Self.whereLine(place, headerStreet: headerStreet),
+                                             access: place.id == factsShownFor ? nil : Self.accessSummary(place))
                             .padding(.horizontal, 16)
                     }
                 }
@@ -74,6 +80,21 @@ struct JobServiceAddressesSection: View {
     /// Service addresses before billing ones, each group in the account's own order.
     static func ordered(_ places: [ServiceLocationRecord]) -> [ServiceLocationRecord] {
         places.filter { $0.kind != "billing" } + places.filter { $0.kind == "billing" }
+    }
+
+    /// "Service · 412 Birchwood Ln, Sacramento": the kind, then the address. When the header already
+    /// leads with this street, only the rest of the address (the town) follows the kind, so the
+    /// street is said once.
+    static func whereLine(_ place: ServiceLocationRecord, headerStreet: String?) -> String {
+        let kind = place.kind == "billing" ? "Billing" : "Service"
+        var address = place.address.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let headerStreet, !headerStreet.isEmpty {
+            let parts = address.split(separator: ",", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            if parts.first?.caseInsensitiveCompare(headerStreet) == .orderedSame {
+                address = parts.count > 1 ? parts[1] : ""
+            }
+        }
+        return address.isEmpty ? kind : "\(kind) · \(address)"
     }
 
     /// "Gate code · Alarm code · Dog on site · Parking notes": what's recorded, never the codes themselves.
@@ -90,6 +111,8 @@ struct JobServiceAddressesSection: View {
 private struct JobServiceAddressRow: View {
     let customerID: String
     let place: ServiceLocationRecord
+    let `where`: String
+    let access: String?
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -98,9 +121,9 @@ private struct JobServiceAddressRow: View {
                 HStack(spacing: 6) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(place.label).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        Text("\(place.kind == "billing" ? "Billing" : "Service") · \(place.address)")
+                        Text(`where`)
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        if let access = JobServiceAddressesSection.accessSummary(place) {
+                        if let access {
                             Text(access).font(Theme.font(13)).foregroundStyle(Theme.muted)
                         }
                     }

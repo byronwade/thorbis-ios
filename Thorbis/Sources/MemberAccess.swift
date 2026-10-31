@@ -78,7 +78,7 @@ struct MemberAccessView: View {
                         Text("Role").foregroundStyle(Theme.foreground)
                         Spacer()
                         Text(member.roleLabel).foregroundStyle(Theme.muted)
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle)
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.subtle)
                     }
                 }
             } header: {

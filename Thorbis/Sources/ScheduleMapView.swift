@@ -87,7 +87,7 @@ struct ScheduleMapView: View {
     private func pin(_ stop: Stop, selected: Bool) -> some View {
         let (_, color) = statusIcon(stop.job.status)
         return Text("\(stop.number)")
-            .font(Theme.monoFont(12, weight: .semibold))
+            .font(Theme.monoFont(12, weight: .medium))
             .foregroundStyle(.white)
             .frame(width: selected ? 34 : 28, height: selected ? 34 : 28)
             .background(Circle().fill(stop.job.status == "completed" ? Theme.muted : (color == Theme.muted ? Theme.brand : color)))
