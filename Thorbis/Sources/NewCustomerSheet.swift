@@ -88,7 +88,6 @@ struct NewCustomerSheet: View {
                 .focused($focused, equals: focus)
                 .padding(.horizontal, 14).frame(minHeight: 46)
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
         }
     }
 

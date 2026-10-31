@@ -1407,3 +1407,17 @@ struct PaperChoiceWell: View {
         .contentShape(Rectangle())
     }
 }
+
+extension Date {
+    /// Trade-style clock time (design 2026-10-30 copy): "7 a.m.", "10:30 a.m.", "1 p.m.".
+    /// Uses the person's 24-hour setting when they have one.
+    var tradeTime: String {
+        let uses24 = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current)?.contains("a") == false
+        if uses24 { return formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute()) }
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: self)
+        let hour24 = parts.hour ?? 0, minute = parts.minute ?? 0
+        let hour = hour24 % 12 == 0 ? 12 : hour24 % 12
+        let suffix = hour24 < 12 ? "a.m." : "p.m."
+        return minute == 0 ? "\(hour) \(suffix)" : String(format: "%d:%02d %@", hour, minute, suffix)
+    }
+}

@@ -62,6 +62,8 @@ struct RootView: View {
     @State private var previewNewEstimate = false
     @State private var previewNewCustomer = false
     @State private var previewSignature = false
+    /// Screenshot-only sheets for the redesigned forms (job-schedule, equipment-editor).
+    @State private var previewFormSheet: String?
     #endif
 
     var body: some View {
@@ -555,6 +557,13 @@ struct RootView: View {
                 .environmentObject(api).environmentObject(session).environmentObject(store)
         }
         .sheet(isPresented: $previewNewCustomer) { NewCustomerSheet() }
+        .sheet(isPresented: Binding(get: { previewFormSheet != nil }, set: { if !$0 { previewFormSheet = nil } })) {
+            if previewFormSheet == "job-schedule" {
+                QuickScheduleSheet(jobID: PaperPreview.jobID)
+            } else {
+                EquipmentEditor(customerID: PaperPreview.customerID, locations: [], existing: nil) {}
+            }
+        }
         .sheet(isPresented: $previewSignature) {
             SignatureCaptureSheet(title: "Approve $970.00", summary: "By signing, Danielle Marlowe approves \"AC repair and compressor replacement\" as shown.",
                                   jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe") { _ in nil }
@@ -609,6 +618,7 @@ struct RootView: View {
             case "team": primaryTab = .more; morePath.append(PaperRoute.team)
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
+            case "job-schedule", "equipment-editor": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
             case "new-job": createJob = true
             case "create-menu": primaryTab = .jobs; createMenuOpen = true
             case "schedule-unscheduled": primaryTab = .schedule
@@ -814,7 +824,7 @@ struct RootView: View {
                         let local = group == .phone ? localSections : []
                         if !items.isEmpty || !local.isEmpty {
                             if group != .work {
-                                Text(group.rawValue).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                Text(group.rawValue).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                                     .padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 4)
                                     .accessibilityAddTraits(.isHeader)
                             }
@@ -860,7 +870,7 @@ struct RootView: View {
                 Image(systemName: icon).font(.system(size: 17)).frame(width: 18).foregroundStyle(Theme.muted)
                 Text(title).font(Theme.font(15, weight: tab == target ? .medium : .regular))
                 Spacer()
-                if let count { Text("\(count)").font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted) }
+                if let count { Text("\(count)").font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted) }
             }.padding(.horizontal, 8).frame(minHeight: 44).background(tab == target ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         }.accessibilityAddTraits(tab == target ? .isSelected : [])
     }

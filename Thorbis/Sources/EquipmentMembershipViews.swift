@@ -114,41 +114,62 @@ struct EquipmentEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("What it is (e.g. 50-gal gas water heater)", text: $input.name)
-                    TextField("Type", text: binding(\.kind))
-                    TextField("Brand", text: binding(\.brand))
-                    TextField("Model", text: binding(\.model))
-                    TextField("Serial number", text: binding(\.serialNumber)).textInputAutocapitalization(.characters)
-                }
-                if !locations.isEmpty {
-                    Section {
-                        ThorbisSelect(options: [(String?.none, "Not set")]
-                                        + locations.map { (Optional($0.id), $0.label.isEmpty ? $0.address : "\($0.label) · \($0.address)") },
-                                      selection: $input.locationId, label: "Location")
+            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit
+            // above the keyboard (it was the toolbar's Save), Cancel stays in the toolbar.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    PaperFormField("What it is") {
+                        TextField("e.g. 50-gal gas water heater", text: $input.name).font(Theme.font(16)).fieldWell()
+                    }
+                    PaperFormField("Type", note: "Optional") { TextField("Water heater", text: binding(\.kind)).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Brand", note: "Optional") { TextField("Brand", text: binding(\.brand)).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Model", note: "Optional") { TextField("Model", text: binding(\.model)).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Serial number", note: "Optional") {
+                        TextField("Serial number", text: binding(\.serialNumber)).textInputAutocapitalization(.characters)
+                            .font(Theme.font(16)).fieldWell()
+                    }
+                    if !locations.isEmpty {
+                        PaperFormField("Location") {
+                            ThorbisSelect(options: [(String?.none, "Not set")]
+                                            + locations.map { (Optional($0.id), $0.label.isEmpty ? $0.address : "\($0.label) · \($0.address)") },
+                                          selection: $input.locationId, label: "Location")
+                                .fieldWell()
+                        }
+                    }
+                    PaperFormField("Dates", note: "Optional") {
+                        VStack(spacing: 0) {
+                            optionalDate("Installed", $installed)
+                            optionalDate("Warranty ends", $warranty)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 2)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                    PaperFormField("Notes", note: "Optional") {
+                        TextField("Filters, access, history…", text: binding(\.notes), axis: .vertical).lineLimit(2...6)
+                            .font(Theme.font(16)).fieldWell()
+                    }
+                    if let error { ListErrorRow(message: error) }
+                    if existing != nil {
+                        Button { confirmRemove = true } label: {
+                            Text("Remove equipment").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.destructive)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(busy)
                     }
                 }
-                Section {
-                    optionalDate("Installed", $installed)
-                    optionalDate("Warranty ends", $warranty)
-                }
-                Section("Notes") { TextField("Filters, access, history…", text: binding(\.notes), axis: .vertical).lineLimit(2...6) }
-                if existing != nil {
-                    Section { Button("Remove equipment", role: .destructive) { confirmRemove = true } }
-                }
-                if let error { Section { ListErrorRow(message: error) } }
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
-            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)
             .navigationTitle(existing == nil ? "Add equipment" : "Equipment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ThorbisToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(busy || input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                PaperActionBar(title: existing == nil ? "Add equipment" : "Save equipment", busy: busy,
+                               disabled: input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await save() } }
             }
             .thorbisConfirm("Remove this equipment?", isPresented: $confirmRemove,
                             actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await remove() } }])
@@ -168,7 +189,11 @@ struct EquipmentEditor: View {
                     .buttonStyle(.plain).accessibilityLabel("Clear \(title.lowercased())")
             }
         } else {
-            Button("Add \(title.lowercased()) date") { value.wrappedValue = .now }
+            Button { value.wrappedValue = .now } label: {
+                Text("Add \(title.lowercased()) date").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
         }
     }
 

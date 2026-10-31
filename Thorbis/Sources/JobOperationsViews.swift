@@ -308,11 +308,11 @@ struct QuickScheduleSheet: View {
             }
             .padding(20)
             .frame(maxHeight: .infinity, alignment: .top)
-            .background(Theme.card)
-            .presentationDetents([.height(430), .large])
+            .background(Theme.background)
+            .presentationDetents([.height(520), .large])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(Theme.cardRadius)
-            .presentationBackground(Theme.card)
+            .presentationBackground(Theme.background)
             .task { await load() }
         }
     }
@@ -366,41 +366,52 @@ struct JobScheduleView: View {
         VStack(spacing: 0) {
             header
             ScrollView {
-                VStack(spacing: 4) {
-                    dayOptions
-                    if showsCalendar {
-                        DatePicker("Pick date", selection: calendarDateSelection, in: Date.distantPast..., displayedComponents: .date)
-                            .datePickerStyle(.graphical)
-                            .tint(Theme.brand)
-                            .accessibilityLabel("Choose schedule date")
-                    }
-                    VStack(spacing: 0) {
-                        ForEach(timeOptions, id: \.hour) { option in
-                            timeRow(hour: option.hour, minute: option.minute)
+                // design 2026-10-30: one column — the day as the one segmented selector, the
+                // arrival times as rows on one panel, the chosen one carrying the accent check.
+                VStack(alignment: .leading, spacing: 16) {
+                    PaperFormField("Day") {
+                        dayOptions
+                        if showsCalendar {
+                            DatePicker("Pick date", selection: calendarDateSelection, in: Date.distantPast..., displayedComponents: .date)
+                                .datePickerStyle(.graphical)
+                                .tint(Theme.brand)
+                                .accessibilityLabel("Choose schedule date")
                         }
                     }
-                    if showsCustomTime {
-                        HStack {
-                            Label("Other time", systemImage: "clock")
-                                .font(Theme.font(15))
-                                .foregroundStyle(Theme.muted)
-                            Spacer()
-                            DatePicker("Other time", selection: $date, displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                                .datePickerStyle(.compact)
-                                .accessibilityLabel("Choose a custom start time")
-                                .onChange(of: date) { _, _ in error = nil }
+                    PaperFormField("Arrival", note: "2 hr window") {
+                        PaperCard {
+                            VStack(spacing: 0) {
+                                ForEach(timeOptions, id: \.hour) { option in
+                                    timeRow(hour: option.hour, minute: option.minute)
+                                }
+                                if showsCustomTime {
+                                    HStack {
+                                        Text("Other time").font(Theme.font(16, weight: .medium))
+                                        Spacer()
+                                        DatePicker("Other time", selection: $date, displayedComponents: .hourAndMinute)
+                                            .labelsHidden()
+                                            .datePickerStyle(.compact)
+                                            .accessibilityLabel("Choose a custom start time")
+                                            .onChange(of: date) { _, _ in error = nil }
+                                    }
+                                    .padding(.horizontal, PaperCardMetrics.inset)
+                                    .frame(minHeight: 52)
+                                } else {
+                                    Button { showsCustomTime = true } label: {
+                                        Text("Other time…").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                            .padding(.horizontal, PaperCardMetrics.inset)
+                                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(RowPressStyle())
+                                }
+                            }
+                            .padding(.vertical, PaperCardMetrics.edge)
                         }
-                        .frame(minHeight: 44)
-                    } else {
-                        Button("Other time…") { showsCustomTime = true }
-                            .font(Theme.font(15, weight: .medium))
-                            .foregroundStyle(Theme.brandText)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                     if let error { ErrorBanner(message: error).padding(.vertical, 8) }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, PaperCardMetrics.margin)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
             }
@@ -419,15 +430,15 @@ struct JobScheduleView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
                     .padding(.bottom, 8)
-                    .background(Theme.card)
+                    .background(Theme.background)
             }
         }
-        .background(Theme.card)
+        .background(Theme.background)
         .foregroundStyle(Theme.foreground)
-        .presentationDetents([.height(430), .large])
+        .presentationDetents([.height(520), .large])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(Theme.cardRadius)
-        .presentationBackground(Theme.card)
+        .presentationBackground(Theme.background)
         .interactiveDismissDisabled(busy)
     }
 
@@ -456,32 +467,32 @@ struct JobScheduleView: View {
         .padding(.horizontal, 20)
     }
 
+    /// Today, Tomorrow or a picked date, as the one segmented selector.
     private var dayOptions: some View {
-        HStack(spacing: 8) {
-            dayButton("Today", offset: 0)
-            dayButton("Tomorrow", offset: 1)
-            Button {
-                showsCalendar.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    Text("Pick date")
-                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
-                        .rotationEffect(.degrees(showsCalendar ? 180 : 0))
+        let calendar = Calendar.current
+        let current = calendar.isDateInToday(date) && !showsCalendar ? "Today"
+            : calendar.isDateInTomorrow(date) && !showsCalendar ? "Tomorrow" : "Pick date"
+        return PaperTabs(options: ["Today", "Tomorrow", "Pick date"], selection: Binding(
+            get: { current },
+            set: { picked in
+                switch picked {
+                case "Today": showsCalendar = false; selectDay(offset: 0)
+                case "Tomorrow": showsCalendar = false; selectDay(offset: 1)
+                default: showsCalendar = true
                 }
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(showsCalendar ? Theme.brand : Theme.muted)
-                .padding(.horizontal, 12)
-                .frame(height: 28)
-                .background(showsCalendar ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityAddTraits(showsCalendar ? .isSelected : [])
-            Spacer(minLength: 0)
+            }))
+            .padding(.horizontal, -Theme.gutter)
+    }
+
+    private func selectDay(offset: Int) {
+        let calendar = Calendar.current
+        let targetDay = calendar.date(byAdding: .day, value: offset, to: Date()) ?? Date()
+        if let next = JobScheduleSelection.date(on: targetDay, preservingTimeFrom: date, calendar: calendar) {
+            date = next
+            error = nil
+        } else {
+            error = invalidLocalTimeMessage
         }
-        .padding(.top, 4)
-        .padding(.bottom, 4)
     }
 
     private var calendarDateSelection: Binding<Date> {
@@ -500,31 +511,6 @@ struct JobScheduleView: View {
         )
     }
 
-    private func dayButton(_ title: String, offset: Int) -> some View {
-        let calendar = Calendar.current
-        let targetDay = calendar.date(byAdding: .day, value: offset, to: Date()) ?? Date()
-        let selected = calendar.isDate(date, inSameDayAs: targetDay)
-        return Button {
-            if let next = JobScheduleSelection.date(on: targetDay, preservingTimeFrom: date, calendar: calendar) {
-                date = next
-                error = nil
-            } else {
-                error = invalidLocalTimeMessage
-            }
-        } label: {
-            Text(title)
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(selected ? Theme.brand : Theme.muted)
-                .padding(.horizontal, 12)
-                .frame(height: 28)
-                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
     private func timeRow(hour: Int, minute: Int) -> some View {
         let selected = JobScheduleSelection.matchesPreset(date, hour: hour, minute: minute)
         let label = presetLabel(hour: hour, minute: minute)
@@ -538,19 +524,17 @@ struct JobScheduleView: View {
             }
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(selected ? Theme.brand : Theme.subtle)
-                    .frame(width: 20, height: 20)
                 Text(label)
-                    .font(Theme.monoFont(15, weight: .medium))
-                    .foregroundStyle(selected ? Theme.brand : Theme.foreground)
+                    .font(Theme.font(16, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(Theme.foreground)
                 Spacer(minLength: 8)
-                Text("2 hr window")
-                    .font(Theme.font(13))
-                    .foregroundStyle(Theme.muted)
+                if selected {
+                    Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.brandText).accessibilityHidden(true)
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, PaperCardMetrics.inset)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
@@ -565,7 +549,7 @@ struct JobScheduleView: View {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = Locale(identifier: "en_US_POSIX")
         let time = calendar.date(from: components) ?? Date()
-        return time.formatted(date: .omitted, time: .shortened)
+        return time.tradeTime
     }
 
     private static func timeOptionsContain(_ date: Date) -> Bool {
@@ -754,29 +738,43 @@ struct FollowUpBookingSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Arrival window") {
-                    DatePicker("Day", selection: $day, in: Date()..., displayedComponents: .date)
-                    DatePicker("Arrive from", selection: $start, displayedComponents: .hourAndMinute)
-                    Stepper("Window: \(hours) hour\(hours == 1 ? "" : "s")", value: $hours, in: 1...8)
+            // design 2026-10-30: one column, labels above, answers in field wells, the one ink
+            // commit pinned above the keyboard.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    PaperFormField("Arrival window") {
+                        VStack(spacing: 0) {
+                            DatePicker("Day", selection: $day, in: Date()..., displayedComponents: .date)
+                                .font(Theme.font(16)).frame(minHeight: 44)
+                            DatePicker("Arrive from", selection: $start, displayedComponents: .hourAndMinute)
+                                .font(Theme.font(16)).frame(minHeight: 44)
+                            Stepper("Window: \(hours) hour\(hours == 1 ? "" : "s")", value: $hours, in: 1...8)
+                                .font(Theme.font(16)).frame(minHeight: 44)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 4)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        .tint(Theme.brand)
+                    }
+                    PaperFormField("What the visit is for") {
+                        TextField("Service needed", text: $need, axis: .vertical).lineLimit(2...4)
+                            .font(Theme.font(16)).fieldWell()
+                    }
+                    if let result { Label(result, systemImage: "checkmark.circle").font(Theme.font(15)).foregroundStyle(Theme.success) }
+                    if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
                 }
-                Section("What the visit is for") {
-                    TextField("Service needed", text: $need, axis: .vertical).lineLimit(2...4)
-                }
-                if let result { Section { Label(result, systemImage: "checkmark.circle").foregroundStyle(Theme.success) } }
-                if let error { Section { Text(error).foregroundStyle(Theme.destructive) } }
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
-            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)
             .navigationTitle("Book return visit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) { Button(result == nil ? "Cancel" : "Done") { if result != nil { onDone() }; dismiss() } }
-                ThorbisToolbarItem(placement: .topBarTrailing) {
-                    if result == nil {
-                        Button("Book") { Task { await book() } }
-                            .disabled(busy || need.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if result == nil {
+                    PaperActionBar(title: "Book visit", busy: busy,
+                                   disabled: need.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await book() } }
                 }
             }
             .onAppear { if need.isEmpty { need = followUp.nextAction } }

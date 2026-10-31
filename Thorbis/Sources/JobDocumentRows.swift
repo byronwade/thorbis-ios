@@ -78,30 +78,30 @@ struct JobDocumentRow: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// design 2026-10-30 (Present.dc.html): price first, then what it is, then the reference and
+    /// its state as a word at customer size. No pill, no chevron; the whole card opens it.
     private var customerRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text(reference).font(Theme.monoFont(customerFacing ? 14 : 12))
-                    .foregroundStyle(Theme.muted)
-                Spacer(minLength: 4)
-                statusIndicator
+        VStack(alignment: .leading, spacing: 6) {
+            if let amount {
+                Text(amount).font(Theme.font(28, weight: .medium)).monospacedDigit()
+                    .minimumScaleFactor(0.7).lineLimit(1)
             }
-            Text(title).font(Theme.font(customerFacing ? 20 : 17, weight: .medium))
+            Text(title).font(Theme.font(20, weight: .medium))
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    if let amount { Text(amount).moneyStyle(.row) }
-                    if let detail {
-                        Text(detail).font(Theme.font(customerFacing ? 17 : 13)).foregroundStyle(Theme.muted)
-                    }
-                    if !fresh {
-                        Label("Needs refresh", systemImage: "arrow.clockwise")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    }
-                }
-                Spacer(minLength: 8)
-                if fresh { PaperDisclosure() }
+            if let detail {
+                Text(detail).font(Theme.font(17)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(reference).font(Theme.font(17)).monospacedDigit().foregroundStyle(Theme.muted)
+                if fresh {
+                    CustomerStatusWord(status: status, type: CustomerType(nil))
+                } else {
+                    Label("Needs refresh", systemImage: "arrow.clockwise")
+                        .font(Theme.font(17)).foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.top, 2)
         }
     }
 
