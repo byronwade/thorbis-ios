@@ -18,7 +18,8 @@ enum JobShareText {
     static func text(title: String, customer: String, scheduledFor: String?) -> String {
         var parts = [title, customer]
         if let date = JobFiltering.date(scheduledFor) {
-            parts.append(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+            // Absolute, never "Today": the message may be read another day.
+            parts.append("\(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(date.tradeTime)")
         }
         return parts.joined(separator: " · ")
     }
@@ -527,7 +528,7 @@ private struct ScheduleHero<Commit: View>: View {
 
     private var when: String {
         guard let date = JobFiltering.date(job.scheduledFor) else { return "No time yet" }
-        var text = nextStop ? date.formatted(.dateTime.hour().minute()) : date.visitLabel()
+        var text = nextStop ? date.tradeTime : date.visitLabel()
         if let etaMinutes { text += " · \(etaMinutes) min drive" }
         return text
     }
@@ -542,7 +543,8 @@ private struct ScheduleHero<Commit: View>: View {
                         Text(when).font(Theme.font(15, weight: .medium)).monospacedDigit()
                             .foregroundStyle(job.scheduledFor == nil ? Theme.muted : Theme.foreground)
                             .accessibilityIdentifier(etaMinutes != nil ? "next-stop-eta" : "next-stop-time")
-                        Spacer(minLength: 0)
+                        // Only beside the time: stacked, a spacer would open a gap under it.
+                        if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                         StatusWord(jobStatus: pendingStatus ?? job.status, pending: pendingStatus != nil)
                     }
                     VStack(alignment: .leading, spacing: 3) {
@@ -553,6 +555,7 @@ private struct ScheduleHero<Commit: View>: View {
                         Text(supporting).font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .multilineTextAlignment(.leading)
                             .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: typeSize.isAccessibilitySize)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -564,20 +567,28 @@ private struct ScheduleHero<Commit: View>: View {
             .accessibilityLabel(accessibilitySummary)
             .accessibilityHint("Opens the job")
             .accessibilityIdentifier(nextStop ? "next-stop-card" : "schedule-hero")
-            HStack(spacing: 10) {
+            // At accessibility sizes the commit takes the full width and the circles sit under it,
+            // so its words are never squeezed into a column beside two 50pt circles.
+            let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                                                       : AnyLayout(HStackLayout(spacing: 10))
+            actions {
                 commit().frame(maxWidth: .infinity)
-                if nextStop, let directions = place?.directions {
-                    PaperCircleButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions", size: Theme.commitHeight,
-                                      bordered: true) { openURL(directions) }
-                        .accessibilityHint("Opens driving directions in Maps")
-                        .accessibilityIdentifier("next-stop-directions")
-                }
-                if nextStop, let call = place?.call {
-                    PaperCircleButton(symbol: "phone", label: "Call \(customer)", size: Theme.commitHeight, bordered: true) { openURL(call) }
-                        .accessibilityIdentifier("next-stop-call")
-                }
+                HStack(spacing: 10) { circles }
             }
             .padding(.top, 16)
+        }
+    }
+
+    @ViewBuilder private var circles: some View {
+        if nextStop, let directions = place?.directions {
+            PaperCircleButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions", size: Theme.commitHeight,
+                              bordered: true) { openURL(directions) }
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("next-stop-directions")
+        }
+        if nextStop, let call = place?.call {
+            PaperCircleButton(symbol: "phone", label: "Call \(customer)", size: Theme.commitHeight, bordered: true) { openURL(call) }
+                .accessibilityIdentifier("next-stop-call")
         }
     }
 
@@ -607,7 +618,7 @@ struct ScheduleCompactRow: View {
         if timeStyle == .age, let created = JobFiltering.date(job.createdAt) {
             return .text(Self.age(since: created), accessibility: "Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
         }
-        if let date = JobFiltering.date(job.scheduledFor) { return .text(date.formatted(.dateTime.hour().minute())) }
+        if let date = JobFiltering.date(job.scheduledFor) { return .text(date.tradeTime) }
         return .text("No time")
     }
 

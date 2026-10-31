@@ -136,6 +136,7 @@ struct PaperTabs: View {
     /// The width offered to the tabs, and each label's natural width, measured on the main actor.
     @State private var available: CGFloat = 0
     @State private var labelWidths: [String: CGFloat] = [:]
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     /// One-row spacings, loosest first, each with its outer inset. The job's five tabs need the
     /// tighter ones on a 402pt phone; a cut-off "Acti" reads as a bug. The tightest is only for
@@ -163,7 +164,11 @@ struct PaperTabs: View {
         // Fit one row where possible. Compact layouts can wrap; other callers keep
         // the scrolling fallback and its trailing fade.
         Group {
-            if let fit = fittingCandidate {
+            if typeSize.isAccessibilitySize {
+                // Accessibility sizes: the job screen's chooser. Three words at XXXL never fit one
+                // row, and a row of fixed-width words would widen the whole screen past its edges.
+                accessibleChooser
+            } else if let fit = fittingCandidate {
                 // design 2026-10-30: one selector style everywhere, the segmented pill. A field
                 // track, the chosen segment raised as a white pill, every segment the same width.
                 // Segments are 44 tall (golden rule 13); the white pill is inset 3 inside them.
@@ -222,6 +227,28 @@ struct PaperTabs: View {
         .sensoryFeedback(.selection, trigger: selection)
     }
 
+    /// One full-width row naming the chosen section; it opens a menu of every section.
+    private var accessibleChooser: some View {
+        ThorbisMenu(items: options.map { option in
+            ThorbisMenuItem(option, isSelected: option == selection) { selection = option }
+        }, title: "Show", accessibilityLabel: "Showing \(selection)") {
+            HStack(spacing: 12) {
+                Text(selection).font(Theme.font(15, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        }
+        .accessibilityHint("Choose what to show")
+        .padding(.horizontal, Theme.gutter)
+    }
+
     /// Each label at its natural width, unseen. Weight does not change with selection, so
     /// selecting a tab never re-measures.
     private var labelMeasurement: some View {
@@ -249,13 +276,16 @@ struct PaperTabs: View {
         let on = selection == option
         return Button { selection = option } label: {
             if tracked {
+                // Fixed width so a long word ("All customers") may use its neighbours' padding rather
+                // than truncate; accessibility sizes, where a row of these widened the whole screen,
+                // never get here (they use `accessibleChooser`).
                 Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
                     .foregroundStyle(on ? Theme.foreground : Theme.muted)
                     .padding(.horizontal, padding)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background {
                         if on {
-                            Capsule().fill(Theme.card).shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
+                            Capsule().fill(Theme.selectedSegment).shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
                                 .padding(.vertical, 3)
                         }
                     }
@@ -280,12 +310,16 @@ struct PaperTabs: View {
 struct PaperEyebrow: View {
     var reference: String? = nil
     var text: String? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 6) {
+        // At accessibility sizes the name goes under the reference instead of being cut to "Danielle…".
+        let stacked = typeSize.isAccessibilitySize && reference != nil && text != nil
+        let layout = stacked ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 6))
+        layout {
             if let reference { Text(reference).font(Theme.monoFont(12, weight: .medium)).fixedSize() }
-            if reference != nil, text != nil { Text("·").font(Theme.font(13)) }
-            if let text { Text(text).font(Theme.font(13)).lineLimit(1) }
+            if reference != nil, text != nil, !stacked { Text("·").font(Theme.font(13)) }
+            if let text { Text(text).font(Theme.font(13)).lineLimit(typeSize.isAccessibilitySize ? 2 : 1) }
         }
         .foregroundStyle(Theme.muted)
         .accessibilityElement(children: .combine)
@@ -413,6 +447,7 @@ struct PaperMenuRow<Trailing: View>: View {
     /// Inside a card the mark sits in an `IconTile` well, like every other card row.
     var filled = false
     @ViewBuilder var trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         HStack(spacing: filled ? 12 : 14) {
@@ -434,7 +469,7 @@ struct PaperMenuRow<Trailing: View>: View {
                 Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(tint)
                 if let subtitle {
                     Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .lineLimit(filled ? 2 : nil)
+                        .lineLimit(filled && !typeSize.isAccessibilitySize ? 2 : nil)
                 }
             }
             Spacer(minLength: 8)
@@ -574,6 +609,7 @@ struct OfflineBanner: View {
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var media: PendingMediaStore
     @Environment(\.savedWorkReviewReturnToRoot) private var returnToReview
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var reviewScope: SavedWorkScope?
 
     private var scope: SavedWorkScope? { .capture(session: session, api: api, media: media, outbox: outbox) }
@@ -620,9 +656,14 @@ struct OfflineBanner: View {
     private func banner(symbol: String, tint: Color, text: String, trailing: String?) -> some View {
         HStack(spacing: 10) {
             Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(tint).accessibilityHidden(true)
-            Text(text).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            if let trailing { Text(trailing).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+            // At accessibility sizes the count reads under the words, which then keep the width.
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                                      : AnyLayout(HStackLayout(spacing: 10))
+            layout {
+                Text(text).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
+                if let trailing { Text(trailing).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
@@ -1147,6 +1188,7 @@ struct StatusWord: View {
     let text: String
     /// Nil leaves the word alone with no dot.
     var tint: Color? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1155,9 +1197,11 @@ struct StatusWord: View {
             }
             Text(text).font(Theme.font(13, weight: .medium))
                 .foregroundStyle(tint == nil ? Theme.muted : Theme.foreground)
-                .lineLimit(1)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
         }
-        .fixedSize()
+        // One line at standard sizes. At accessibility sizes rows stack the word under the title, and
+        // a long word ("In progress · waiting to sync") wraps rather than widening the screen.
+        .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: true)
     }
 }
 
@@ -1213,7 +1257,8 @@ struct PaperListRow<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
-    @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 70
+    /// Wide enough for "12:15 p.m." on one line (trade-style times are longer than "12:15 PM").
+    @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 82
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
@@ -1334,7 +1379,9 @@ struct PaperLabeledCircle: View {
                     .background(Theme.fill, in: Circle())
                     .overlay(Circle().strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
                 Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2).minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, minHeight: 64)
             .contentShape(Rectangle())

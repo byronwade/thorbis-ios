@@ -108,6 +108,7 @@ struct CustomerEstimatePresentation: View {
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var flow: CustomerEstimateFlow
     @State private var confirmNotToday = false
     @State private var name: String
@@ -190,10 +191,13 @@ struct CustomerEstimatePresentation: View {
                 .padding(.bottom, 24)
                 .frame(maxWidth: type.regular ? 1000 : .infinity, alignment: .leading)
                 .frame(maxWidth: .infinity)
+                // At accessibility sizes a pinned bar would fill half the screen and hide the options,
+                // so the actions follow the content instead (as on the job screen).
+                if typeSize.isAccessibilitySize { bottomBar }
             }
             .scrollDismissesKeyboard(.interactively)
             .accessibilityIdentifier("customer-estimate-presentation-\(flow.estimate.id)")
-            bottomBar
+            if !typeSize.isAccessibilitySize { bottomBar }
         }
         .foregroundStyle(Theme.foreground)
         .task(id: api.requestGeneration) {
@@ -338,7 +342,7 @@ struct CustomerEstimatePresentation: View {
                 ZStack(alignment: .bottomLeading) {
                     SignaturePad(strokes: $strokes)
                     if !SignatureInk.hasInk(strokes) {
-                        Text("Sign here with your finger").font(Theme.font(type.small)).foregroundStyle(.black.opacity(0.45))
+                        Text("Sign here with your finger").font(Theme.font(type.small)).foregroundStyle(.black.opacity(0.62))
                             .padding(16).allowsHitTesting(false)
                     }
                 }
@@ -708,6 +712,7 @@ struct CustomerInvoicePresentation: View {
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var signing = false
     @State private var name: String
     @State private var strokes: [[CGPoint]] = []
@@ -744,8 +749,9 @@ struct CustomerInvoicePresentation: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
                 .frame(maxWidth: type.regular ? 760 : .infinity, alignment: .leading)
                 .frame(maxWidth: .infinity)
+                if typeSize.isAccessibilitySize { bottomBar }
             }
-            bottomBar
+            if !typeSize.isAccessibilitySize { bottomBar }
         }
         .foregroundStyle(Theme.foreground)
     }
@@ -796,7 +802,7 @@ struct CustomerInvoicePresentation: View {
             ZStack(alignment: .bottomLeading) {
                 SignaturePad(strokes: $strokes)
                 if !SignatureInk.hasInk(strokes) {
-                    Text("Sign here with your finger").font(Theme.font(type.small)).foregroundStyle(.black.opacity(0.45))
+                    Text("Sign here with your finger").font(Theme.font(type.small)).foregroundStyle(.black.opacity(0.62))
                         .padding(16).allowsHitTesting(false)
                 }
             }

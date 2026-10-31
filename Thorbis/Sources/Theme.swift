@@ -98,12 +98,18 @@ enum Theme {
     static let onInk = adaptive(light: 0xFDFCFA, dark: 0x191919, highLight: 0xFFFFFF, highDark: 0x000000)
     static let brand = Color(hex: 0x2F6BFF)
     /// Brand used as text or a link; plain brand is below 4.5:1 on both grounds.
-    static let brandText = adaptive(light: 0x2558E0, dark: 0x5285FF)
+    /// Dark is lifted so links hold 4.5:1 on the field well and the brand surface too.
+    static let brandText = adaptive(light: 0x2558E0, dark: 0x6090FF)
     static let brandSurface = adaptive(light: 0xE5ECFF, dark: 0x182642)
     static let success = adaptive(light: 0x18743A, dark: 0x22C55E)
     static let warning = adaptive(light: 0x895400, dark: 0xF59E0B)
     static let warningSurface = adaptive(light: 0xFFF0CB, dark: 0x2A2008)
-    static let destructive = adaptive(light: 0xB3262D, dark: 0xEF4444)
+    /// Red as a word or glyph. Dark is a lighter red so it holds 4.5:1 on card and well.
+    static let destructive = adaptive(light: 0xB3262D, dark: 0xF87171)
+    /// Red as a fill under white type or a white glyph (a badge, a destructive button): 5.6:1 or better.
+    static let destructiveFill = adaptive(light: 0xB3262D, dark: 0xC62828)
+    /// The chosen segment's raised pill. In dark it sits lighter than the well so the choice shows.
+    static let selectedSegment = adaptive(light: 0xFDFCFA, dark: 0x3A3A3A)
     /// Soft place-mark hues for menu icons (design.thorbis.com Color: olive, forest, pumpkin,
     /// burnt, or accent mixed down). Only the mark is tinted; the word stays body.
     static let markOlive = adaptive(light: 0x6E6A2E, dark: 0xB5B07A)
@@ -177,7 +183,7 @@ struct SectionHeader: View {
     var body: some View {
         HStack {
             Text(title).font(Theme.font( 13, weight: .medium)).foregroundStyle(Theme.muted)
-            if let count { Text("\(count)").font(Theme.font( 12)).foregroundStyle(Theme.muted.opacity(0.7)) }
+            if let count { Text("\(count)").font(Theme.font( 12)).foregroundStyle(Theme.muted) }
             Spacer()
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 6)
@@ -309,12 +315,12 @@ extension Date {
     /// One way to say when a visit is, used on every list and header: "Today 4:00 PM",
     /// "Tomorrow 9:00 AM", otherwise "Thu, Oct 30, 9:00 AM".
     func visitLabel(now: Date = .now, calendar: Calendar = .current) -> String {
-        let time = formatted(date: .omitted, time: .shortened)
+        let time = tradeTime
         if calendar.isDate(self, inSameDayAs: now) { return "Today \(time)" }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(self, inSameDayAs: tomorrow) {
             return "Tomorrow \(time)"
         }
-        return formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+        return "\(formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(tradeTime)"
     }
 }
 

@@ -99,7 +99,7 @@ struct ThorbisSegmented<Value: Hashable>: View {
                     .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(isOn ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .background(isOn ? Theme.selectedSegment : .clear, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(isOn ? Theme.border : .clear))
                     .shadow(color: .black.opacity(isOn ? 0.06 : 0), radius: 3, y: 1)
                     .contentShape(Rectangle())

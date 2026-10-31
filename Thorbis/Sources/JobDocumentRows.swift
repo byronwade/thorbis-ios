@@ -10,6 +10,7 @@ struct JobDocumentRow: View {
     var fresh = true
     var customerFacing = false
     var symbol = "doc.text"
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Group {
@@ -25,52 +26,34 @@ struct JobDocumentRow: View {
         .contentShape(Rectangle())
     }
 
+    /// design 2026-10-30 row: title and one supporting line (reference, options or what's due),
+    /// the amount and the status as a word on the right. No tile, no pill, no chevron; the whole
+    /// card opens the document. At accessibility sizes the right column moves under the title.
     private var technicianRow: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Theme.brandText)
-                .frame(width: 26, height: 26)
-                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 6) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        titleText
-                        Spacer(minLength: 4)
-                        if let amount { Text(amount).moneyStyle(.row).fixedSize() }
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        titleText
-                        if let amount { Text(amount).moneyStyle(.row) }
-                    }
-                }
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: 8) {
-                        statusIndicator
-                        Text(reference).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 4)
-                        if fresh { PaperDisclosure() }
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        statusIndicator
-                        HStack {
-                            Text(reference).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                            Spacer(minLength: 4)
-                            if fresh { PaperDisclosure() }
-                        }
-                    }
-                }
-                if let detail {
-                    Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return layout {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(Theme.font(16, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text([reference, detail].compactMap { $0 }.joined(separator: " · "))
+                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !fresh {
                     Label("Needs refresh", systemImage: "arrow.clockwise")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
             }
+            .frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
+            if !stacked { Spacer(minLength: 8) }
+            VStack(alignment: stacked ? .leading : .trailing, spacing: 4) {
+                if let amount { Text(amount).moneyStyle(.row).fixedSize() }
+                if fresh { StatusWord(documentStatus: status) }
+                else { Text("Status needs refresh").font(Theme.font(13)).foregroundStyle(Theme.muted) }
+            }
         }
+        .padding(.vertical, 4)
     }
 
     private var titleText: some View {
@@ -103,11 +86,6 @@ struct JobDocumentRow: View {
             }
             .padding(.top, 2)
         }
-    }
-
-    @ViewBuilder private var statusIndicator: some View {
-        if fresh { PaperStatusChip(status: status) }
-        else { Text("Status needs refresh").font(Theme.font(customerFacing ? 17 : 13)).foregroundStyle(Theme.muted) }
     }
 }
 

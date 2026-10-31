@@ -56,7 +56,7 @@ enum NextStopDay {
             ? day[(index + 1)...].first { ["scheduled", "dispatched"].contains($0.status) }
             : lead
         if let time = JobFiltering.date(next?.scheduledFor) {
-            text += " · next at \(time.formatted(.dateTime.hour().minute()))"
+            text += " · next at \(time.tradeTime)"
         }
         return text
     }
@@ -134,9 +134,10 @@ final class NextStopETA: ObservableObject {
         self.key = key
         minutes = nil
         #if DEBUG
-        if PaperPreview.enabled, PaperPreview.screen.hasPrefix("next-stop") {
-            // Fixture: the screenshot never depends on a permission prompt or the network.
-            minutes = enabled && destination != nil ? 18 : nil
+        if PaperPreview.enabled {
+            // Fixture: no screenshot ever depends on a permission prompt or the network (a fresh
+            // simulator would otherwise cover every screen with the location alert).
+            minutes = PaperPreview.screen.hasPrefix("next-stop") && enabled && destination != nil ? 18 : nil
             return
         }
         #endif

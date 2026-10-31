@@ -433,10 +433,10 @@ struct CustomerDetailView: View {
         let dialable = primaryPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
         let mail = MailDraft(recipient: primaryEmail)
         if dialable != nil || mail != nil || directionsURL != nil {
-            // At accessibility sizes the circles wrap two to a row so every word stays whole.
-            let layout = typeSize.isAccessibilitySize
-                ? AnyLayout(FlowRow(spacing: 4, lineSpacing: 8)) : AnyLayout(HStackLayout(spacing: 4))
-            layout {
+            // At accessibility sizes the circles sit two to a row (as on the job) so every word stays whole.
+            let count = (dialable != nil ? 2 : 0) + (mail != nil ? 1 : 0) + (directionsURL != nil ? 1 : 0)
+            let columns = typeSize.isAccessibilitySize ? min(2, count) : count
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4, alignment: .top), count: columns), spacing: 12) {
                 if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
                     PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
                     PaperLabeledCircle(symbol: "message", title: "Text") { openURL(text) }
@@ -873,7 +873,7 @@ struct CustomerDetailView: View {
     /// An open job: where and who, then the time.
     private func openLine(_ job: Job) -> String {
         [street(for: job.locationId), tech(job.assignedToUserId),
-         JobFiltering.date(job.scheduledFor).map { $0.formatted(.dateTime.hour().minute()) }]
+         JobFiltering.date(job.scheduledFor).map { $0.tradeTime }]
             .compactMap { $0 }.joined(separator: " · ")
     }
 

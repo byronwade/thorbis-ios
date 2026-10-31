@@ -826,6 +826,7 @@ struct InvoicePaymentCollectionSheet: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
     @FocusState private var amountFocused: Bool
     @State private var amountText: String
@@ -953,7 +954,9 @@ struct InvoicePaymentCollectionSheet: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            let balanceLayout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 2))
+                                                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+            balanceLayout {
                 Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 Text(money(model.outstandingCents ?? 0, currency: invoice.currency)).moneyStyle(.row).foregroundStyle(Theme.foreground)
             }
