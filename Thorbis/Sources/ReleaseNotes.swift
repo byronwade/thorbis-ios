@@ -17,7 +17,7 @@ enum ReleaseNotes {
             date: "2026-10-31",
             highlights: [
                 .init(symbol: "wrench.and.screwdriver", title: "A cleaner on-site screen",
-                      detail: "Tools and wrap-up line up as designed. Tool names wrap instead of shrinking with large text."),
+                      detail: "Tool names wrap instead of shrinking, and the status line and Wrap up button read cleanly at large text."),
             ]
         ),
         ReleaseNote(
