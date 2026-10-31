@@ -26,8 +26,9 @@ def ratio(a, b):
 grounds = ["background", "card", "fill"]
 checks = {
     "foreground": grounds + ["selectedSegment", "brandSurface", "warningSurface", "successSurface", "destructiveSurface"],
-    "muted": grounds + ["selectedSegment"],
-    "subtle": grounds,
+    # The job's "Before you go in" banner sets its notes and caveat on the warning surface.
+    "muted": grounds + ["selectedSegment", "warningSurface"],
+    "subtle": grounds + ["warningSurface"],
     "brandText": grounds[:2] + ["brandSurface"],
     "success": grounds[:2] + ["successSurface"],
     "warning": grounds[:2] + ["warningSurface"],
