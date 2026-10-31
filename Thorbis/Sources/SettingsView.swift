@@ -18,8 +18,10 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
+            // design 2026-10-30: one panel per section with a 13pt label above, neutral glyphs,
+            // the value as a quiet word on the right, no separators or chevrons.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
                     VStack(spacing: 8) {
                         Text(initials(session.user?.name ?? session.user?.email ?? ""))
                             .font(Theme.font(24, weight: .medium)).foregroundStyle(Theme.foreground)
@@ -30,70 +32,87 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .listRowBackground(Color.clear)
                     .accessibilityElement(children: .combine)
-                }
 
-                Section("Workspace") {
-                    Button { showWorkspaces = true } label: {
-                        row("Company", symbol: "building.2", value: session.activeOrganization?.name ?? "Choose", opens: true)
-                    }
-                    NavigationLink { CustomizeMenuView().thorbisBackButton() } label: {
-                        row("Customize menu", symbol: "slider.horizontal.3", value: nil)
-                    }
-                    // Owners reach the business screens here, now that the More screen is off the menu.
-                    if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.businessSetup) {
-                            row("Set up your business", symbol: "checklist", value: nil)
+                    PaperSection("Workspace") {
+                        VStack(spacing: 0) {
+                            Button { showWorkspaces = true } label: {
+                                row("Company", symbol: "building.2", value: session.activeOrganization?.name ?? "Choose")
+                            }
+                            .buttonStyle(RowPressStyle())
+                            NavigationLink { CustomizeMenuView().thorbisBackButton() } label: {
+                                row("Customize menu", symbol: "slider.horizontal.3", value: nil)
+                            }
+                            .buttonStyle(RowPressStyle())
+                            // Owners reach the business screens here, now that the More screen is off the menu.
+                            if session.can("organization.settings.edit") {
+                                NavigationLink(value: PaperRoute.businessSetup) {
+                                    row("Set up your business", symbol: "checklist", value: nil)
+                                }
+                                .buttonStyle(RowPressStyle())
+                                NavigationLink(value: PaperRoute.companyDetails) {
+                                    row("Company details", symbol: "building.2", value: nil)
+                                }
+                                .buttonStyle(RowPressStyle())
+                                NavigationLink(value: PaperRoute.payments) {
+                                    row("Payments", symbol: "creditcard", value: nil)
+                                }
+                                .buttonStyle(RowPressStyle())
+                            }
+                            // Who hears about booked and changed jobs; the feed itself is Inbox.
+                            if MenuItem.notices.permitted(session) {
+                                NavigationLink(value: PaperRoute.notices) {
+                                    row("Notification rules", symbol: "bell.badge", value: nil)
+                                }
+                                .buttonStyle(RowPressStyle())
+                            }
                         }
-                        NavigationLink(value: PaperRoute.companyDetails) {
-                            row("Company details", symbol: "building.2", value: nil)
-                        }
-                        NavigationLink(value: PaperRoute.payments) {
-                            row("Payments", symbol: "creditcard", value: nil)
-                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
                     }
-                    // Who hears about booked and changed jobs; the feed itself is Inbox.
-                    if MenuItem.notices.permitted(session) {
-                        NavigationLink(value: PaperRoute.notices) {
-                            row("Notification rules", symbol: "bell.badge", value: nil)
-                        }
-                    }
-                }
 
-                Section("This phone") {
-                    ThorbisMenu(items: [
-                        ThorbisMenuItem("System", isSelected: appearance == "system") { appearance = "system" },
-                        ThorbisMenuItem("Light", isSelected: appearance == "light") { appearance = "light" },
-                        ThorbisMenuItem("Dark", isSelected: appearance == "dark") { appearance = "dark" },
-                    ], title: "Appearance") {
-                        row("Appearance", symbol: "circle.lefthalf.filled",
-                            value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System", opens: true)
+                    PaperSection("This phone") {
+                        VStack(spacing: 0) {
+                            ThorbisMenu(items: [
+                                ThorbisMenuItem("System", isSelected: appearance == "system") { appearance = "system" },
+                                ThorbisMenuItem("Light", isSelected: appearance == "light") { appearance = "light" },
+                                ThorbisMenuItem("Dark", isSelected: appearance == "dark") { appearance = "dark" },
+                            ], title: "Appearance") {
+                                row("Appearance", symbol: "circle.lefthalf.filled",
+                                    value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System")
+                            }
+                            Button {
+                                Task { await notificationsTapped() }
+                            } label: {
+                                row("Notifications", symbol: "bell", value: notificationLabel)
+                            }
+                            .buttonStyle(RowPressStyle())
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
                     }
-                    Button {
-                        Task { await notificationsTapped() }
-                    } label: {
-                        row("Notifications", symbol: "bell", value: notificationLabel, opens: true)
-                    }
-                }
 
-                Section {
-                    NavigationLink { WhatsNewHistoryView().thorbisBackButton() } label: {
-                        row("What's new", symbol: "sparkles", value: nil)
+                    PaperSection("About") {
+                        NavigationLink { WhatsNewHistoryView().thorbisBackButton() } label: {
+                            row("What's new", symbol: "sparkles", value: nil)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .padding(.vertical, PaperCardMetrics.edge)
                     }
-                }
 
-                Section {
-                    Button(role: .destructive) { confirmSignOut = true } label: {
-                        Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right").foregroundStyle(Theme.destructive)
+                    VStack(spacing: 8) {
+                        Button { confirmSignOut = true } label: {
+                            Text("Sign out").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.destructive)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .background(Theme.card, in: RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous).strokeBorder(Theme.border))
+                        }
+                        .buttonStyle(PressStyle())
+                        Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
+                            .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity)
                     }
-                } footer: {
-                    Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity).padding(.top, 8)
                 }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 32)
             }
-            .scrollContentBackground(.hidden)
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Settings")
@@ -141,17 +160,9 @@ struct SettingsView: View {
         }
     }
 
-    private func row(_ title: String, symbol: String, value: String?, opens: Bool = false) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol).foregroundStyle(Theme.markAccent).frame(width: 22)
-            Text(title).foregroundStyle(Theme.foreground)
-            Spacer(minLength: 8)
-            if let value { Text(value).foregroundStyle(Theme.muted).lineLimit(1) }
-            if opens {
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            }
+    private func row(_ title: String, symbol: String, value: String?) -> some View {
+        PaperListRow(leading: .icon(symbol), title: title) {
+            if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(1) }
         }
-        .font(Theme.font(15))
     }
 }

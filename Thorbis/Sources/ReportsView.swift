@@ -87,7 +87,7 @@ struct ReportsView: View {
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
-                if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab) }
+                if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab, wrapOverflow: true) }
                 if let error { ErrorBanner(message: error) }
                 Group {
                     if tabs.isEmpty {
@@ -103,7 +103,7 @@ struct ReportsView: View {
                         if let schedule { scheduleContent(schedule) } else { loadingState }
                     }
                 }
-                .padding(.horizontal, Theme.gutter)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8)
             }
             .padding(.bottom, 24)
         }
@@ -116,127 +116,128 @@ struct ReportsView: View {
 
     private var loadingState: some View { SkeletonRows(count: 4, leading: false, inset: 0) }
 
+    // design 2026-10-30: every figure on a panel under its 13pt label; list rows are PaperListRow
+    // with the figure on the right, never loose rows on the cream ground.
     @ViewBuilder private func operationsContent(_ report: OperationsReport) -> some View {
         if report.truncated { incomplete }
         else {
-            PaperGroupHeader(title: "Estimates")
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("\(report.estimates.conversionBps / 100)%").font(Theme.monoFont(34, weight: .semibold))
-                Text("of presented estimates approved").font(Theme.font(13)).foregroundStyle(Theme.muted)
-            }
-            .padding(.bottom, 10)
-            PaperStatRow(stats: [
-                stat("Presented", report.estimates.presented),
-                stat("Approved", report.estimates.approved),
-                stat("Declined", report.estimates.declined),
-            ])
-            PaperGroupHeader(title: "Jobs").padding(.top, 18)
-            PaperStatRow(stats: [
-                stat("Booked", report.jobs.booked),
-                stat("Completed", report.jobs.completed),
-                stat("Open", report.jobs.open),
-            ])
-            if !report.months.isEmpty {
-                PaperGroupHeader(title: "Jobs by month", count: report.months.count).padding(.top, 18)
-                ForEach(report.months.suffix(6).reversed()) { month in
-                    HStack {
-                        Text(monthName(month.month)).font(Theme.font(15, weight: .medium))
-                        Spacer()
-                        Text("\(month.completed) of \(month.booked) done").font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 22) {
+                PaperSection("Estimates") {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("\(report.estimates.conversionBps / 100)%").font(Theme.font(34, weight: .medium)).monospacedDigit()
+                        Text("of presented estimates approved").font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
-                    .frame(minHeight: 44)
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 14)
+                    .accessibilityElement(children: .combine)
+                    PaperStatRow.Content(stats: [
+                        stat("Presented", report.estimates.presented),
+                        stat("Approved", report.estimates.approved),
+                        stat("Declined", report.estimates.declined),
+                    ])
                 }
+                PaperSection("Jobs") {
+                    PaperStatRow.Content(stats: [
+                        stat("Booked", report.jobs.booked),
+                        stat("Completed", report.jobs.completed),
+                        stat("Open", report.jobs.open),
+                    ])
+                }
+                if !report.months.isEmpty {
+                    PaperSection("Jobs by month", count: report.months.count) {
+                        rows(report.months.suffix(6).reversed().map { month in
+                            (month.id, monthName(month.month), "\(month.completed) of \(month.booked) done")
+                        })
+                    }
+                }
+                footer(report.reportVersion, report.generatedAt)
             }
-            footer(report.reportVersion, report.generatedAt)
         }
     }
 
     @ViewBuilder private func scheduleContent(_ report: ScheduleReport) -> some View {
         if report.truncated { incomplete }
         else {
-            PaperGroupHeader(title: "Needs attention")
-            PaperStatRow(stats: [
-                stat("Unscheduled", report.backlog.unscheduledOpenJobs, alert: report.backlog.unscheduledOpenJobs > 0),
-                stat("Past due", report.backlog.overdueScheduledJobs, alert: report.backlog.overdueScheduledJobs > 0),
-            ])
-            let recent = Array(report.days.suffix(14).reversed())
-            if !recent.isEmpty {
-                PaperGroupHeader(title: "By day", count: recent.count).padding(.top, 18)
-                ForEach(recent) { day in
-                    HStack {
-                        Text(dayName(day.day)).font(Theme.font(15, weight: .medium))
-                        Spacer()
-                        Text("\(day.completed) of \(day.scheduled) done").font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    }
-                    .frame(minHeight: 44)
+            VStack(alignment: .leading, spacing: 22) {
+                PaperSection("Needs attention") {
+                    PaperStatRow.Content(stats: [
+                        stat("Unscheduled", report.backlog.unscheduledOpenJobs, alert: report.backlog.unscheduledOpenJobs > 0),
+                        stat("Past due", report.backlog.overdueScheduledJobs, alert: report.backlog.overdueScheduledJobs > 0),
+                    ])
                 }
+                let recent = Array(report.days.suffix(14).reversed())
+                if !recent.isEmpty {
+                    PaperSection("By day", count: recent.count) {
+                        rows(recent.map { day in (day.id, dayName(day.day), "\(day.completed) of \(day.scheduled) done") })
+                    }
+                }
+                footer(report.reportVersion, report.generatedAt)
             }
-            footer(report.reportVersion, report.generatedAt)
         }
     }
 
     @ViewBuilder private func paymentsContent(_ report: PaymentActivityReport) -> some View {
         if report.truncated { incomplete }
         else {
-            PaperGroupHeader(title: "All time")
-            HStack(spacing: 10) {
-                moneyTile("Payments", report.totals.recorded, count: report.totals.recordedCount)
-                moneyTile("Refunds", report.totals.refunded, count: report.totals.refundedCount)
-            }
-            let credits = [("Discounts", report.totals.discounts, report.totals.discountCount),
-                           ("Deposits applied", report.totals.depositCredits, report.totals.depositCreditCount),
-                           ("Retainage withheld", report.totals.retainageWithheld, report.totals.retainageWithheldCount),
-                           ("Other adjustments", report.totals.otherAdjustments, report.totals.otherAdjustmentCount)]
-                .filter { $0.2 > 0 }
-            if !credits.isEmpty {
-                PaperGroupHeader(title: "Credits on invoices").padding(.top, 18)
-                ForEach(credits, id: \.0) { credit in
-                    HStack {
-                        Text(credit.0).font(Theme.font(15, weight: .medium))
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(money(credit.1, currency: "USD")).moneyStyle(.row)
-                            Text("\(credit.2)").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        }
-                    }
-                    .frame(minHeight: 44)
-                    .accessibilityElement(children: .combine)
+            VStack(alignment: .leading, spacing: 22) {
+                PaperSection("All time") {
+                    PaperStatRow.Content(stats: [
+                        .init(label: "Payments", value: money(report.totals.recorded, currency: "USD"),
+                              detail: entries(report.totals.recordedCount)),
+                        .init(label: "Refunds", value: money(report.totals.refunded, currency: "USD"),
+                              detail: entries(report.totals.refundedCount)),
+                    ])
                 }
-            }
-            if !report.months.isEmpty {
-                PaperGroupHeader(title: "By month", count: report.months.count).padding(.top, 18)
-                ForEach(report.months.suffix(6).reversed()) { month in
-                    HStack {
-                        Text(monthName(month.month)).font(Theme.font(15, weight: .medium))
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(money(month.recorded, currency: "USD")).moneyStyle(.row)
-                            if month.refunded > 0 {
-                                Text("\(money(month.refunded, currency: "USD")) refunded").font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                let credits = [("Discounts", report.totals.discounts, report.totals.discountCount),
+                               ("Deposits applied", report.totals.depositCredits, report.totals.depositCreditCount),
+                               ("Retainage withheld", report.totals.retainageWithheld, report.totals.retainageWithheldCount),
+                               ("Other adjustments", report.totals.otherAdjustments, report.totals.otherAdjustmentCount)]
+                    .filter { $0.2 > 0 }
+                if !credits.isEmpty {
+                    PaperSection("Credits on invoices") {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(credits, id: \.0) { credit in
+                                PaperListRow(title: credit.0, subtitle: entries(credit.2), amount: money(credit.1, currency: "USD"))
+                                    .accessibilityElement(children: .combine)
                             }
                         }
+                        .padding(.vertical, PaperCardMetrics.edge)
                     }
-                    .frame(minHeight: 44)
-                    .accessibilityElement(children: .combine)
+                }
+                if !report.months.isEmpty {
+                    PaperSection("By month", count: report.months.count) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(report.months.suffix(6).reversed()) { month in
+                                PaperListRow(title: monthName(month.month),
+                                             subtitle: month.refunded > 0 ? "\(money(month.refunded, currency: "USD")) refunded" : nil,
+                                             amount: money(month.recorded, currency: "USD"))
+                                    .accessibilityElement(children: .combine)
+                            }
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Refunds are shown on their own, never subtracted from payments.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    footer(report.reportVersion, report.generatedAt)
                 }
             }
-            Text("Refunds are shown on their own, never subtracted from payments.")
-                .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 12)
-            footer(report.reportVersion, report.generatedAt)
         }
     }
 
-    private func moneyTile(_ label: String, _ amount: Int, count: Int) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(money(amount, currency: "USD")).moneyStyle(.total)
-            Text(count == 1 ? "1 entry" : "\(count) entries").font(Theme.font(12)).foregroundStyle(Theme.muted)
+    private func entries(_ count: Int) -> String { count == 1 ? "1 entry" : "\(count) entries" }
+
+    /// Label on the left, the figure on the right, on one panel.
+    private func rows(_ items: [(String, String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(items, id: \.0) { item in
+                PaperListRow(title: item.1) {
+                    Text(item.2).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                }
+                .accessibilityElement(children: .combine)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-        .accessibilityElement(children: .combine)
+        .padding(.vertical, PaperCardMetrics.edge)
     }
 
     private var incomplete: some View {
@@ -249,7 +250,7 @@ struct ReportsView: View {
     }
 
     private func footer(_ version: Int, _ generatedAt: String) -> some View {
-        Text(generatedLabel(generatedAt)).font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 16)
+        Text(generatedLabel(generatedAt)).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 4)
     }
 
     private func generatedLabel(_ raw: String) -> String {

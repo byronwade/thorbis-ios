@@ -1130,22 +1130,40 @@ struct PaperStatRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        PaperCard { Content(stats: stats) }
+    }
+
+    /// The figures without their panel, for a `PaperSection` that already draws one.
+    struct Content: View {
+        let stats: [Stat]
+        @Environment(\.dynamicTypeSize) private var typeSize
+
+        var body: some View {
         let stacked = typeSize.isAccessibilitySize
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
                              : AnyLayout(HStackLayout(alignment: .top, spacing: 0))
-        PaperCard {
             layout {
                 ForEach(stats) { stat in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(stat.label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                            .lineLimit(stacked ? nil : 1)
-                        Text(stat.value).font(Theme.font(20, weight: .medium)).monospacedDigit()
-                            .foregroundStyle(stat.tint)
+                        // design 2026-10-30: colour only next to a word — a tinted stat puts a dot
+                        // beside its label and keeps the figure in ink.
+                        HStack(spacing: 6) {
+                            if stat.tint != Theme.foreground {
+                                Circle().fill(stat.tint).frame(width: 7, height: 7).accessibilityHidden(true)
+                            }
+                            Text(stat.label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                                .lineLimit(stacked ? nil : 1)
+                        }
+                        Text(stat.value).font(Theme.font(22, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(Theme.foreground)
                             .lineLimit(stacked ? nil : 1).minimumScaleFactor(stacked ? 1 : 0.8)
                         if let detail = stat.detail {
-                            Text(detail).font(Theme.font(12, weight: stat.detailTint == Theme.muted ? .regular : .medium))
-                                .foregroundStyle(stat.detailTint)
-                                .lineLimit(stacked ? nil : 2)
+                            if stat.detailTint == Theme.muted {
+                                Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                    .lineLimit(stacked ? nil : 2)
+                            } else {
+                                StatusWord(text: detail, tint: stat.detailTint)
+                            }
                         }
                     }
                     .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
@@ -1369,5 +1387,83 @@ struct PaperLabeledCircle: View {
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(accessibilityLabel ?? title)
+    }
+}
+
+// MARK: - Forms (design 2026-10-30): one column, the label above, the answer in a field well
+
+/// The field well: a quiet field-coloured surface per answer, 48 tall, no rim.
+struct FieldWell: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+    }
+}
+
+extension View {
+    /// Puts a text field or a choice in the shared field well.
+    func fieldWell() -> some View { modifier(FieldWell()) }
+}
+
+/// A persistent 13pt label above its field, with an optional quiet note ("Optional") beside it.
+struct PaperFormField<Content: View>: View {
+    let label: String
+    var note: String? = nil
+    @ViewBuilder var content: Content
+
+    init(_ label: String, note: String? = nil, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.note = note
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                if let note { Text("· \(note)").font(Theme.font(13)).foregroundStyle(Theme.muted.opacity(0.8)) }
+            }
+            .accessibilityHidden(true)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A tappable choice in a field well: a neutral glyph, the value (muted while unset).
+struct PaperChoiceWell: View {
+    let text: String
+    var symbol: String? = nil
+    var isSet = true
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                    .frame(width: 20).accessibilityHidden(true)
+            }
+            Text(text).font(Theme.font(16, weight: isSet ? .medium : .regular))
+                .foregroundStyle(isSet ? Theme.foreground : Theme.muted)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .fieldWell()
+        .contentShape(Rectangle())
+    }
+}
+
+extension Date {
+    /// Trade-style clock time (design 2026-10-30 copy): "7 a.m.", "10:30 a.m.", "1 p.m.".
+    /// Uses the person's 24-hour setting when they have one.
+    var tradeTime: String {
+        let uses24 = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current)?.contains("a") == false
+        if uses24 { return formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute()) }
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: self)
+        let hour24 = parts.hour ?? 0, minute = parts.minute ?? 0
+        let hour = hour24 % 12 == 0 ? 12 : hour24 % 12
+        let suffix = hour24 < 12 ? "a.m." : "p.m."
+        return minute == 0 ? "\(hour) \(suffix)" : String(format: "%d:%02d %@", hour, minute, suffix)
     }
 }

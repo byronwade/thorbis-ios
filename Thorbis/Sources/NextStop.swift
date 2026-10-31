@@ -56,7 +56,7 @@ enum NextStopDay {
             ? day[(index + 1)...].first { ["scheduled", "dispatched"].contains($0.status) }
             : lead
         if let time = JobFiltering.date(next?.scheduledFor) {
-            text += " · next at \(time.formatted(.dateTime.hour().minute()))"
+            text += " · next at \(time.tradeTime)"
         }
         return text
     }

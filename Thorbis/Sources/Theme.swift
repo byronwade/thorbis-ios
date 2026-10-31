@@ -315,12 +315,12 @@ extension Date {
     /// One way to say when a visit is, used on every list and header: "Today 4:00 PM",
     /// "Tomorrow 9:00 AM", otherwise "Thu, Oct 30, 9:00 AM".
     func visitLabel(now: Date = .now, calendar: Calendar = .current) -> String {
-        let time = formatted(date: .omitted, time: .shortened)
+        let time = tradeTime
         if calendar.isDate(self, inSameDayAs: now) { return "Today \(time)" }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(self, inSameDayAs: tomorrow) {
             return "Tomorrow \(time)"
         }
-        return formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+        return "\(formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(tradeTime)"
     }
 }
 

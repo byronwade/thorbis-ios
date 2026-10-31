@@ -18,7 +18,8 @@ enum JobShareText {
     static func text(title: String, customer: String, scheduledFor: String?) -> String {
         var parts = [title, customer]
         if let date = JobFiltering.date(scheduledFor) {
-            parts.append(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+            // Absolute, never "Today": the message may be read another day.
+            parts.append("\(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(date.tradeTime)")
         }
         return parts.joined(separator: " · ")
     }
@@ -527,7 +528,7 @@ private struct ScheduleHero<Commit: View>: View {
 
     private var when: String {
         guard let date = JobFiltering.date(job.scheduledFor) else { return "No time yet" }
-        var text = nextStop ? date.formatted(.dateTime.hour().minute()) : date.visitLabel()
+        var text = nextStop ? date.tradeTime : date.visitLabel()
         if let etaMinutes { text += " · \(etaMinutes) min drive" }
         return text
     }
@@ -617,7 +618,7 @@ struct ScheduleCompactRow: View {
         if timeStyle == .age, let created = JobFiltering.date(job.createdAt) {
             return .text(Self.age(since: created), accessibility: "Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
         }
-        if let date = JobFiltering.date(job.scheduledFor) { return .text(date.formatted(.dateTime.hour().minute())) }
+        if let date = JobFiltering.date(job.scheduledFor) { return .text(date.tradeTime) }
         return .text("No time")
     }
 
@@ -743,6 +744,9 @@ struct JobsView: View {
         .sheet(isPresented: $showNew) { NewJobSheet() }
         .sheet(isPresented: $showDisplay) { displaySheet }
         .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
+        #if DEBUG
+        .onAppear { if PaperPreview.enabled && PaperPreview.screen == "jobs-filters" { showDisplay = true } }
+        #endif
     }
 
     /// The active filters in one quiet line under the tabs, with a way back to the whole board.
@@ -759,7 +763,7 @@ struct JobsView: View {
             .accessibilityLabel("Filtered: \(filterSummary)")
             .accessibilityHint("Opens the filters")
             Button { withMotion { statusFilter = []; display = DisplayOptions() } } label: {
-                Text("Clear").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                Text("Clear").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
                     .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
@@ -782,10 +786,12 @@ struct JobsView: View {
 
             HStack {
                 Text("Status").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
                 if filterActive {
                     Button("Reset") { statusFilter = []; display = DisplayOptions() }
-                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .frame(minHeight: 44)
                 }
             }
             ThorbisChipGroup(data: statusChips, id: \.self,

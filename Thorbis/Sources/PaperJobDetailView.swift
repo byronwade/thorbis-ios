@@ -580,7 +580,7 @@ struct JobDetailView: View {
         return FlowRow(spacing: 6, lineSpacing: 0) {
             statusControl(job)
             if isOnSite, outbox.pendingStatus(for: job.id) == nil, let arrived = JobFiltering.date(job.arrivedAt) {
-                statusFact("· arrived \(arrived.formatted(date: .omitted, time: .shortened))")
+                statusFact("· arrived \(arrived.tradeTime)")
             } else if let date = JobFiltering.date(job.scheduledFor) {
                 Button { if canSchedule { showSchedule = true } } label: { statusFact("· \(date.visitLabel())") }
                     .buttonStyle(PressStyle())
@@ -1350,7 +1350,7 @@ struct JobDetailView: View {
             }
             DisclosureGroup("More job details") {
                 if let date = JobFiltering.date(job.scheduledFor) {
-                    PaperDetailRow("Scheduled", value: date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
+                    PaperDetailRow("Scheduled", value: date.visitLabel())
                 }
                 if let created = JobFiltering.date(job.createdAt) {
                     PaperDetailRow("Booked", value: created.formatted(.dateTime.month(.abbreviated).day().year()))
@@ -1613,7 +1613,7 @@ struct JobDetailView: View {
 
     private func timeLabel(_ date: Date, showsDay: Bool) -> String {
         let calendar = Calendar.current
-        guard showsDay, !calendar.isDateInToday(date) else { return date.formatted(date: .omitted, time: .shortened) }
+        guard showsDay, !calendar.isDateInToday(date) else { return date.tradeTime }
         if calendar.isDateInYesterday(date) { return "Yesterday" }
         return date.formatted(.dateTime.month(.abbreviated).day())
     }

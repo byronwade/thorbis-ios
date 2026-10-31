@@ -26,23 +26,35 @@ struct CustomerEquipmentSection: View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(width: 0, height: 0)
             if available && (!shown.isEmpty || canEdit) {
-                VStack(alignment: .leading, spacing: 0) {
-                    PaperGroupHeader(title: onlyLocationID == nil ? "Equipment" : "Equipment here", count: shown.count) {
-                        if canEdit {
-                            Button { editing = EquipmentEditorItem(record: nil) } label: {
-                                Image(systemName: "plus").frame(width: 44, height: 44).contentShape(Rectangle())
-                            }
-                            .accessibilityLabel("Add equipment")
-                        }
-                    }
-                    if let error { ListErrorRow(message: error) }
+                // design 2026-10-30: one panel, rows with the warranty as a status word, no chevrons.
+                PaperSection(title: onlyLocationID == nil ? "Equipment" : "Equipment here", count: shown.isEmpty ? nil : shown.count) {
+                    if let error { ListErrorRow(message: error).padding(.horizontal, PaperCardMetrics.inset) }
                     if shown.isEmpty {
                         Text("Add the units you service here so the next visit starts with model and serial.")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6)
+                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(shown) { unit in
+                                if canEdit {
+                                    Button { editing = EquipmentEditorItem(record: unit) } label: { row(unit) }
+                                        .buttonStyle(RowPressStyle())
+                                        .accessibilityHint("Opens the unit to edit")
+                                } else {
+                                    row(unit)
+                                }
+                            }
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
                     }
-                    ForEach(shown) { unit in
-                        Button { if canEdit { editing = EquipmentEditorItem(record: unit) } } label: { row(unit) }
-                            .buttonStyle(.plain)
+                } accessory: {
+                    if canEdit {
+                        Button { editing = EquipmentEditorItem(record: nil) } label: {
+                            Image(systemName: "plus").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("Add equipment")
                     }
                 }
             }
@@ -54,23 +66,16 @@ struct CustomerEquipmentSection: View {
     }
 
     private func row(_ unit: EquipmentRecord) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "shippingbox").font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 24).padding(.top, 2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(unit.name).font(Theme.font(15, weight: .medium))
-                if !unit.detail.isEmpty { Text(unit.detail).font(Theme.monoFont(12)).foregroundStyle(Theme.muted) }
-                if let end = unit.warrantyEnd {
-                    let expired = end < Calendar.current.startOfDay(for: .now)
-                    Text("\(expired ? "Warranty ended" : "Warranty until") \(end.formatted(date: .abbreviated, time: .omitted))")
-                        .font(Theme.font(12, weight: .medium)).foregroundStyle(expired ? Theme.muted : Theme.success)
-                }
-            }
-            Spacer(minLength: 0)
-            if canEdit { Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle).padding(.top, 4) }
+        let warranty = unit.warrantyEnd.map { end -> (String, Bool) in
+            let expired = end < Calendar.current.startOfDay(for: .now)
+            return ("\(expired ? "Warranty ended" : "Warranty until") \(end.formatted(date: .abbreviated, time: .omitted))", expired)
         }
-        .padding(.vertical, 8)
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
+        return PaperListRow(title: unit.name, subtitle: unit.detail.isEmpty ? nil : unit.detail,
+                            meta: warranty?.0, subtitleLines: 2) {
+            if let warranty {
+                StatusWord(text: warranty.1 ? "Out of warranty" : "In warranty", tint: warranty.1 ? nil : Theme.success)
+            }
+        }
     }
 
     private func load() async {
@@ -109,41 +114,62 @@ struct EquipmentEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("What it is (e.g. 50-gal gas water heater)", text: $input.name)
-                    TextField("Type", text: binding(\.kind))
-                    TextField("Brand", text: binding(\.brand))
-                    TextField("Model", text: binding(\.model))
-                    TextField("Serial number", text: binding(\.serialNumber)).textInputAutocapitalization(.characters)
-                }
-                if !locations.isEmpty {
-                    Section {
-                        ThorbisSelect(options: [(String?.none, "Not set")]
-                                        + locations.map { (Optional($0.id), $0.label.isEmpty ? $0.address : "\($0.label) · \($0.address)") },
-                                      selection: $input.locationId, label: "Location")
+            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit
+            // above the keyboard (it was the toolbar's Save), Cancel stays in the toolbar.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    PaperFormField("What it is") {
+                        TextField("e.g. 50-gal gas water heater", text: $input.name).font(Theme.font(16)).fieldWell()
+                    }
+                    PaperFormField("Type", note: "Optional") { TextField("Water heater", text: binding(\.kind)).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Brand", note: "Optional") { TextField("Brand", text: binding(\.brand)).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Model", note: "Optional") { TextField("Model", text: binding(\.model)).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Serial number", note: "Optional") {
+                        TextField("Serial number", text: binding(\.serialNumber)).textInputAutocapitalization(.characters)
+                            .font(Theme.font(16)).fieldWell()
+                    }
+                    if !locations.isEmpty {
+                        PaperFormField("Location") {
+                            ThorbisSelect(options: [(String?.none, "Not set")]
+                                            + locations.map { (Optional($0.id), $0.label.isEmpty ? $0.address : "\($0.label) · \($0.address)") },
+                                          selection: $input.locationId, label: "Location")
+                                .fieldWell()
+                        }
+                    }
+                    PaperFormField("Dates", note: "Optional") {
+                        VStack(spacing: 0) {
+                            optionalDate("Installed", $installed)
+                            optionalDate("Warranty ends", $warranty)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 2)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                    PaperFormField("Notes", note: "Optional") {
+                        TextField("Filters, access, history…", text: binding(\.notes), axis: .vertical).lineLimit(2...6)
+                            .font(Theme.font(16)).fieldWell()
+                    }
+                    if let error { ListErrorRow(message: error) }
+                    if existing != nil {
+                        Button { confirmRemove = true } label: {
+                            Text("Remove equipment").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.destructive)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(busy)
                     }
                 }
-                Section {
-                    optionalDate("Installed", $installed)
-                    optionalDate("Warranty ends", $warranty)
-                }
-                Section("Notes") { TextField("Filters, access, history…", text: binding(\.notes), axis: .vertical).lineLimit(2...6) }
-                if existing != nil {
-                    Section { Button("Remove equipment", role: .destructive) { confirmRemove = true } }
-                }
-                if let error { Section { ListErrorRow(message: error) } }
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
-            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)
             .navigationTitle(existing == nil ? "Add equipment" : "Equipment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ThorbisToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(busy || input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                PaperActionBar(title: existing == nil ? "Add equipment" : "Save equipment", busy: busy,
+                               disabled: input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await save() } }
             }
             .thorbisConfirm("Remove this equipment?", isPresented: $confirmRemove,
                             actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await remove() } }])
@@ -163,7 +189,11 @@ struct EquipmentEditor: View {
                     .buttonStyle(.plain).accessibilityLabel("Clear \(title.lowercased())")
             }
         } else {
-            Button("Add \(title.lowercased()) date") { value.wrappedValue = .now }
+            Button { value.wrappedValue = .now } label: {
+                Text("Add \(title.lowercased()) date").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
         }
     }
 
@@ -229,32 +259,35 @@ struct CustomerMembershipSection: View {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.frame(width: 0, height: 0)
             if available && (!active.isEmpty || (canEdit && !plans.isEmpty)) {
-                VStack(alignment: .leading, spacing: 0) {
-                    PaperGroupHeader(title: "Membership", count: active.isEmpty ? nil : active.count)
-                    if let error { ListErrorRow(message: error) }
-                    ForEach(active) { membership in
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: "star.circle").font(.system(size: 18)).foregroundStyle(Theme.brandText).frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(membership.name).font(Theme.font(15, weight: .medium))
-                                Text(membershipDetail(membership)).font(Theme.font(12)).foregroundStyle(Theme.muted)
-                            }
-                            Spacer(minLength: 0)
-                            if canEdit {
-                                ThorbisMenu(items: [
-                                    ThorbisMenuItem("Cancel membership", icon: "xmark.circle", role: .destructive) { cancelling = membership },
-                                ], accessibilityLabel: "Membership actions") {
-                                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                // design 2026-10-30: the plan as a row on one panel, "Active" as its word; cancel stays in •••.
+                PaperSection("Membership", count: active.count > 1 ? active.count : nil) {
+                    if let error { ListErrorRow(message: error).padding(.horizontal, PaperCardMetrics.inset) }
+                    if active.isEmpty && canEdit {
+                        Button { choosing = true } label: {
+                            PaperListRow(leading: .icon("plus"), title: "Add a membership",
+                                         subtitle: "Member pricing and tune-up visits")
+                        }
+                        .buttonStyle(RowPressStyle())
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(active) { membership in
+                                HStack(spacing: 0) {
+                                    PaperListRow(title: membership.name, subtitle: membershipDetail(membership), subtitleLines: 2) {
+                                        StatusWord(text: "Active", tint: Theme.success)
+                                    }
+                                    if canEdit {
+                                        ThorbisMenu(items: [
+                                            ThorbisMenuItem("Cancel membership", icon: "xmark.circle", role: .destructive) { cancelling = membership },
+                                        ], accessibilityLabel: "Membership actions") {
+                                            Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                                                .frame(width: 44, height: 44).contentShape(Rectangle())
+                                        }
+                                        .padding(.trailing, 4)
+                                    }
                                 }
                             }
                         }
-                        .padding(.vertical, 6)
-                    }
-                    if active.isEmpty && canEdit {
-                        Button { choosing = true } label: {
-                            Label("Add a membership", systemImage: "plus.circle").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                                .frame(minHeight: 44)
-                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
                     }
                 }
             }
@@ -279,24 +312,28 @@ struct CustomerMembershipSection: View {
 
     private var planPicker: some View {
         NavigationStack {
-            List(plans) { plan in
-                Button { Task { await enroll(plan) } } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text(plan.name).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                            Spacer()
-                            if let price = plan.price {
-                                Text("\(money(price, currency: "USD"))\(plan.billingFrequency.map { " / \($0.replacingOccurrences(of: "_", with: " "))" } ?? "")")
-                                    .moneyStyle(.row).foregroundStyle(Theme.foreground)
+            ScrollView {
+                PaperSection("Plans", count: plans.count) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(plans) { plan in
+                            Button { Task { await enroll(plan) } } label: {
+                                PaperListRow(title: plan.name,
+                                             subtitle: [plan.discountPercent > 0 ? "\(plan.discountPercent)% off work" : nil,
+                                                        plan.visitsPerYear.map { "\($0) visit\($0 == 1 ? "" : "s") a year" }, plan.description]
+                                                 .compactMap { $0 }.joined(separator: " · "),
+                                             subtitleLines: 3) {
+                                    if let price = plan.price {
+                                        Text("\(money(price, currency: "USD"))\(plan.billingFrequency.map { " / \($0.replacingOccurrences(of: "_", with: " "))" } ?? "")")
+                                            .moneyStyle(.row).foregroundStyle(Theme.foreground)
+                                    }
+                                }
                             }
+                            .buttonStyle(RowPressStyle())
                         }
-                        Text([plan.discountPercent > 0 ? "\(plan.discountPercent)% off work" : nil,
-                              plan.visitsPerYear.map { "\($0) visit\($0 == 1 ? "" : "s") a year" }, plan.description]
-                            .compactMap { $0 }.joined(separator: " · "))
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, PaperCardMetrics.edge)
                 }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollContentBackground(.hidden)
             .background(Theme.background)

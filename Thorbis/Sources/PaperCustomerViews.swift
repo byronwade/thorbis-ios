@@ -873,7 +873,7 @@ struct CustomerDetailView: View {
     /// An open job: where and who, then the time.
     private func openLine(_ job: Job) -> String {
         [street(for: job.locationId), tech(job.assignedToUserId),
-         JobFiltering.date(job.scheduledFor).map { $0.formatted(.dateTime.hour().minute()) }]
+         JobFiltering.date(job.scheduledFor).map { $0.tradeTime }]
             .compactMap { $0 }.joined(separator: " · ")
     }
 
