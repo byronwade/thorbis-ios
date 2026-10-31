@@ -51,14 +51,7 @@ struct WorkspaceNoticesView: View {
                         // Each notice opens the job it is about.
                         NavigationLink(value: PaperRoute.job(notice.jobId)) {
                         HStack(alignment: .top, spacing: 12) {
-                            IconTile(symbol: notice.read ? "bell" : "bell.badge.fill",
-                                     tint: notice.read ? Theme.muted : Theme.brandText,
-                                     fill: notice.read ? Theme.fill : Theme.brandSurface)
                             VStack(alignment: .leading, spacing: 4) {
-                                if !notice.read {
-                                    Text("Unread").font(Theme.font(14, weight: .semibold))
-                                        .foregroundStyle(Theme.brandText)
-                                }
                                 Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .medium))
                                     .foregroundStyle(notice.read ? Theme.muted : Theme.foreground)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -67,7 +60,8 @@ struct WorkspaceNoticesView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: 0)
-                            PaperDisclosure().padding(.top, 4)
+                            // Unread as a word with the accent dot; read notices need no word.
+                            if !notice.read { StatusWord(text: "Unread", tint: Theme.brandText).padding(.top, 2) }
                         }
                         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
                         .frame(minHeight: 60)

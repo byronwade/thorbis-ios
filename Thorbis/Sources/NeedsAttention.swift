@@ -54,15 +54,14 @@ struct NeedsAttentionView: View {
                 .foregroundStyle(Theme.foreground)
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 if let error { ErrorBanner(message: error) }
-                // Each row names its state in words ("Unpaid", "Waiting", "No time"); the tile reinforces it.
+                // Each row names its state in words ("Unpaid", "Sent 9 days ago", "No time").
                 if !unpaid.isEmpty {
                     PaperGroupHeader(title: "Unpaid invoices", count: unpaid.count).padding(.horizontal, Theme.gutter).padding(.top, 8)
                     VStack(spacing: 0) {
                         PaperCardList(data: unpaid.map { AttentionInvoice(invoice: $0.0, balance: $0.1) }) { item in
                             NavigationLink(value: PaperRoute.invoice(item.invoice.id)) {
-                                row(tile: DocumentTile(symbol: "doc.plaintext", status: "issued"),
-                                    title: store.customerName(item.invoice.customerId), detail: "Unpaid · \(since("Issued", item.invoice.issuedAt))",
-                                    trailing: money(item.balance, currency: item.invoice.currency), tint: Theme.foreground)
+                                PaperListRow(title: store.customerName(item.invoice.customerId), subtitle: "Unpaid · \(since("Issued", item.invoice.issuedAt))",
+                                             amount: money(item.balance, currency: item.invoice.currency))
                             }.buttonStyle(RowPressStyle())
                         }
                     }.paperCardMargin()
@@ -72,9 +71,8 @@ struct NeedsAttentionView: View {
                     VStack(spacing: 0) {
                         PaperCardList(data: waiting) { estimate in
                             NavigationLink(value: PaperRoute.estimate(estimate.id)) {
-                                row(tile: DocumentTile(symbol: "doc.text", status: estimate.status),
-                                    title: estimate.title, detail: "\(since("Sent", estimate.sentAt)) · \(store.customerName(estimate.customerId))",
-                                    trailing: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? "", tint: Theme.foreground)
+                                PaperListRow(title: estimate.title, subtitle: "\(since("Sent", estimate.sentAt)) · \(store.customerName(estimate.customerId))",
+                                             amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? "")
                             }.buttonStyle(RowPressStyle())
                         }
                     }.paperCardMargin()
@@ -84,8 +82,8 @@ struct NeedsAttentionView: View {
                     VStack(spacing: 0) {
                         PaperCardList(data: unscheduled) { job in
                             NavigationLink(value: job) {
-                                row(tile: StatusTile(status: job.status),
-                                    title: job.title, detail: "\(job.status.statusLabel) · \(store.customerName(job.customerId)) · \(job.shortRef)", trailing: "", tint: Theme.muted)
+                                PaperListRow(title: job.title, subtitle: "\(store.customerName(job.customerId)) · \(job.shortRef)",
+                                             status: StatusWord(text: "No time", tint: Theme.warning))
                             }.buttonStyle(RowPressStyle())
                         }
                     }.paperCardMargin()
@@ -116,22 +114,6 @@ struct NeedsAttentionView: View {
         case 14..<60: return ago(days / 7, "week")
         default: return ago(days / 30, "month")
         }
-    }
-
-    private func row<Tile: View>(tile: Tile, title: String, detail: String, trailing: String, tint: Color) -> some View {
-        HStack(spacing: 12) {
-            tile
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(15, weight: .medium)).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-            }
-            Spacer(minLength: 8)
-            if !trailing.isEmpty { Text(trailing).moneyStyle(.row).foregroundStyle(tint).fixedSize() }
-            PaperDisclosure()
-        }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-        .frame(minHeight: 60)
-        .contentShape(Rectangle())
     }
 
     private func load() async {

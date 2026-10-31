@@ -26,14 +26,16 @@ struct EstimatesView: View {
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(estimates: records).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 10)
+                    PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 14)
                         .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                     PaperCardList(data: group) { record in
                         NavigationLink { EstimateDetailView(id: record.id).thorbisBackButton() } label: {
                             // The status is a word on every row; the tile's colour only reinforces it.
                             PaperDocumentRow(kind: .estimate, reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
                                              subtitle: store.customerName(record.customerId), status: record.status,
-                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
+                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") },
+                                             // The group's label already names the status.
+                                             showsStatus: false)
                         }.buttonStyle(RowPressStyle())
                     }
                 }
@@ -338,7 +340,7 @@ struct InvoicesView: View {
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(invoices: records).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 10)
+                    PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 14)
                         .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                     // The subtitle carries the status as a word ("Balance due", "Paid").
                     PaperCardList(data: group) { record in
@@ -895,72 +897,17 @@ struct PaperDocumentRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
 
+    /// design 2026-10-30: the list row, no tile. Title, then who and the reference; on the right
+    /// the amount over the status word (or only the amount when the subtitle already says it).
     var body: some View {
-        HStack(alignment: typeSize.isAccessibilitySize ? .top : .center, spacing: 12) {
-            DocumentTile(symbol: kind.symbol, status: status)
-            if typeSize.isAccessibilitySize {
-                stackedContent
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: 8) {
-                        documentIdentity.frame(minWidth: 170, alignment: .leading)
-                        Spacer(minLength: 0)
-                        amountAndStatus(alignment: .trailing)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                    stackedContent
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+        PaperListRow(title: title, subtitle: "\(subtitle) · \(reference)") {
+            VStack(alignment: .trailing, spacing: 4) {
+                if let amount { Text(amount).font(Theme.moneyFont(.line)).foregroundStyle(Theme.foreground) }
+                if showsStatus { StatusWord(documentStatus: status) }
             }
+            .fixedSize()
         }
-        .frame(minHeight: 64)
-        .padding(.vertical, 6)
-        .padding(.horizontal, inset)
-        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-    }
-
-    private var documentIdentity: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-            if typeSize.isAccessibilitySize {
-                stackedMetadata
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) {
-                        Text(subtitle).font(Theme.font(13))
-                        Text("·").font(Theme.font(13))
-                        Text(reference).font(Theme.monoFont(12, weight: .medium))
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                    stackedMetadata
-                }
-            }
-        }
-        .foregroundStyle(Theme.muted)
-    }
-
-    private var stackedContent: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            documentIdentity
-            amountAndStatus(alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var stackedMetadata: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(subtitle).font(Theme.font(13)).fixedSize(horizontal: false, vertical: true)
-            Text(reference).font(Theme.monoFont(12, weight: .medium))
-        }
-    }
-
-    private func amountAndStatus(alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 6) {
-            if let amount { Text(amount).moneyStyle(.row).foregroundStyle(Theme.foreground) }
-            if showsStatus { PaperStatusChip(status: status) }
-        }
     }
 }
 
@@ -994,19 +941,16 @@ func money(_ cents: Int, currency: String) -> String {
     let waiting = estimates.filter { $0.status == "sent" }
     let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
     // MF-03: the amount is a figure, the words label it.
-    if waiting.isEmpty {
-        Text("Nothing waiting on customers").font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 6)
-    } else {
-        MoneyFigure(label: "\(waiting.count) waiting on customers", cents: total, currency: "USD").padding(.bottom, 6)
-    }
+    // One line, said once: the rows carry each amount, so no hero figure repeats them.
+    Text(waiting.isEmpty ? "Nothing waiting on customers"
+         : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))")
+        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted).padding(.bottom, 6)
 }
 
 @MainActor @ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
     let unpaid = invoices.filter { $0.status == "issued" }
     let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
-    if unpaid.isEmpty {
-        Text("Everything is paid").font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.bottom, 6)
-    } else {
-        MoneyFigure(label: "Owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")", cents: owed, currency: "USD").padding(.bottom, 6)
-    }
+    Text(unpaid.isEmpty ? "Everything is paid"
+         : "\(money(owed, currency: "USD")) owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")")
+        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted).padding(.bottom, 6)
 }
