@@ -351,7 +351,9 @@ struct AppDrawer: View {
         HStack(alignment: .center, spacing: 12) {
             if let create { createCapsule(create) }
             Spacer(minLength: 0)
-            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Settings and businesses") {
+            // The gear sits at the bottom edge: its menu grows up so every row (saved work, Settings,
+            // Edit menu) stays on screen and clear of the home indicator.
+            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Settings and businesses", arrowEdge: .bottom) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 19, weight: .regular))
                     .foregroundStyle(Theme.foreground)

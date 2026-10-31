@@ -559,6 +559,7 @@ struct BuilderLineRow: View {
     var dragPayload: String? = nil
     var descriptionIdentifier: String? = nil
     var quantityIdentifier: String? = nil
+    var priceIdentifier: String? = nil
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -670,6 +671,7 @@ struct BuilderLineRow: View {
                         .multilineTextAlignment(.trailing)
                         .focused(focus, equals: .price(lineID))
                         .accessibilityLabel(unitLabel.flatMap { $0.isEmpty ? nil : "Price per \($0) in dollars" } ?? "Price each in dollars")
+                        .modifier(OptionalIdentifier(identifier: priceIdentifier))
                 }
                 .padding(.horizontal, 12)
                 .frame(maxWidth: .infinity, minHeight: 52)
@@ -745,7 +747,7 @@ struct BuilderLineRow: View {
     }
 }
 
-private struct OptionalIdentifier: ViewModifier {
+struct OptionalIdentifier: ViewModifier {
     let identifier: String?
     func body(content: Content) -> some View {
         if let identifier { content.accessibilityIdentifier(identifier) } else { content }
