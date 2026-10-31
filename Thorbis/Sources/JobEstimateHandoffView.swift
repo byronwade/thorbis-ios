@@ -102,7 +102,7 @@ struct JobEstimateHandoffView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text(option.title).font(Theme.font(type.body, weight: .medium))
                                     if !option.description.isEmpty { Text(option.description).font(Theme.font(type.small)) }
-                                    Text(money(option.totalAmount, currency: option.currency)).font(Theme.monoFont(type.body, weight: .medium))
+                                    Text(money(option.totalAmount, currency: option.currency)).font(Theme.font(type.body, weight: .medium)).monospacedDigit()
                                 }
                             }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
@@ -140,19 +140,19 @@ struct JobEstimateHandoffView: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(record.title).font(Theme.font(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
-                PaperStatusChip(status: record.status)
+                CustomerStatusWord(status: record.status, type: type)
             }
             Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.monoFont(type.small)).foregroundStyle(Theme.muted)
             if let context = model.context(for: record.id), context.outcome?.isApproved == true,
                let action = context.acceptedAction, let accepted = action.acceptance,
                let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
                 Text(option.title).font(Theme.font(type.small)).foregroundStyle(Theme.muted)
-                Text(money(amount, currency: option.currency)).font(Theme.monoFont(type.regular ? 34 : 28, weight: .medium))
+                Text(money(amount, currency: option.currency)).font(Theme.font(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
-                Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.monoFont(type.regular ? 34 : 28, weight: .medium))
+                Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.font(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
-                Text(money(amounts.total, currency: currency)).font(Theme.monoFont(type.regular ? 34 : 28, weight: .medium))
+                Text(money(amounts.total, currency: currency)).font(Theme.font(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty {
                 Text("Price needs current terms").font(Theme.font(type.small)).foregroundStyle(Theme.muted)
             } else if record.status == "approved" {
@@ -177,8 +177,8 @@ struct JobEstimateHandoffView: View {
                 if let option { Text(option.title).font(Theme.font(type.body, weight: .medium)) }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
                 if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
-                    CustomerLinesCard(lines: lines, currency: currency, type: type,
-                        rows: customerAmountRows(amounts, currency: currency, invoice: false))
+                    CustomerIncludedLabel(type: type)
+                    CustomerIncludedLines(lines: lines, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false))
                 }
             }
             ForEach(selectedTotals, id: \.currency) { value in

@@ -433,18 +433,18 @@ private struct CustomerJobReadOnlyPaper: View {
                 VStack(alignment: .leading, spacing: 20) {
                     if let estimate {
                         Text(estimate.title).font(Theme.font(type.heading, weight: .medium))
-                        PaperStatusChip(status: estimate.status)
+                        CustomerStatusWord(status: estimate.status, type: type)
                         if let options = estimate.options, !options.isEmpty, estimate.status != "approved" {
                             ForEach(options) { option in
                                 Text(option.title).font(Theme.font(type.heading, weight: .medium))
                                 if !option.description.isEmpty { Text(option.description).font(Theme.font(type.body)) }
-                                CustomerLinesCard(lines: option.lines, currency: option.currency, type: type,
-                                    rows: [CustomerAmountRow(label: "Option total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
+                                CustomerIncludedLabel(type: type)
+                    CustomerIncludedLines(lines: option.lines, type: type, rows: [CustomerAmountRow(label: "Option total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
                             }
                         } else { lines(estimate.lines, currency: estimate.lines.first?.unitPrice.currency ?? "USD", type: type) }
                     } else if let invoice {
                         Text("Invoice").font(Theme.font(type.heading, weight: .medium))
-                        PaperStatusChip(status: invoice.status)
+                        CustomerStatusWord(status: invoice.status, type: type)
                         lines(invoice.lines, currency: invoice.currency, type: type)
                     }
                 }
@@ -455,8 +455,8 @@ private struct CustomerJobReadOnlyPaper: View {
         }
     }
 
-    private func lines(_ lines: [FieldLine], currency: String, type: CustomerType) -> some View {
-        CustomerLinesCard(lines: lines, currency: currency, type: type,
-            rows: paperLinesTotal(lines).map { [CustomerAmountRow(label: "Total", amount: money($0, currency: currency), emphasis: true)] } ?? [])
+    @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, type: CustomerType) -> some View {
+        CustomerIncludedLabel(type: type)
+                    CustomerIncludedLines(lines: lines, type: type, rows: paperLinesTotal(lines).map { [CustomerAmountRow(label: "Total", amount: money($0, currency: currency), emphasis: true)] } ?? [])
     }
 }
