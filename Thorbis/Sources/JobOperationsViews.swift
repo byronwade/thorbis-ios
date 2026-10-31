@@ -42,6 +42,8 @@ enum CloseoutChecklist {
 
 struct JobCloseoutView: View {
     let jobID: String
+    /// The job's street when the opener already knows it (street first, the ID after it).
+    var place: String? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
@@ -76,7 +78,12 @@ struct JobCloseoutView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())", text: job.map { store.customerName($0.customerId) })
+                    if let place {
+                        PaperEyebrow(text: [place, job.map { store.customerName($0.customerId) }, "JOB-\(jobID.suffix(4).uppercased())"]
+                            .compactMap { $0 }.joined(separator: " · "))
+                    } else {
+                        PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())", text: job.map { store.customerName($0.customerId) })
+                    }
                     Text(job?.status == "completed" ? "Job complete" : "Wrap up this job")
                         .font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
                 }
@@ -88,20 +95,22 @@ struct JobCloseoutView: View {
                     PaperGroupHeader(title: "Before you close") {
                         Text("\(progress.done) of \(progress.total)").font(Theme.monoFont(12))
                     }
+                    // One white sheet for the checklist, as on the job's On site list.
+                    if !closeout.requirements.isEmpty || !checks.isEmpty {
+                    PaperCard { VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
                         let step = CloseoutNextStep(requirement)
                         HStack(spacing: 12) {
                             checklistRow(done: requirement.outcome != "blocked", title: requirement.detail, detail: step?.detail)
                             if let step, let title = step.buttonTitle, step.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) {
                                 Button(title) { Task { await recover(step) } }
-                                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
-                                    .background(Theme.fill, in: Capsule())
-                                    .frame(minHeight: 44)
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .frame(minHeight: 44).contentShape(Rectangle())
                                     .buttonStyle(PressStyle())
                                     .disabled(busy)
                             }
                         }
+                        .padding(.horizontal, PaperCardMetrics.inset)
                     }
                     ForEach(checks, id: \.key) { check in
                         let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key)
@@ -109,14 +118,15 @@ struct JobCloseoutView: View {
                             checklistRow(done: acknowledged, title: check.label, detail: nil)
                             if !acknowledged && session.can("job.edit", feature: "jobs") {
                                 Button("Confirm") { Task { await acknowledge(check.key) } }
-                                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .padding(.horizontal, 12).frame(height: Theme.chipHeight + 4)
-                                    .background(Theme.fill, in: Capsule())
-                                    .frame(minHeight: 44)
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .frame(minHeight: 44).contentShape(Rectangle())
                                     .buttonStyle(PressStyle())
                                     .disabled(busy)
                             }
                         }
+                        .padding(.horizontal, PaperCardMetrics.inset)
+                    }
+                    }.padding(.vertical, 6) }
                     }
                     if closeout.requirements.isEmpty && checks.isEmpty {
                         Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
