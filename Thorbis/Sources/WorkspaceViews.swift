@@ -30,70 +30,49 @@ struct WorkspaceNoticesView: View {
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 if !available {
-                    PaperEmptyState(symbol: "bell.slash", title: "Inbox is off for your role",
-                                    message: "Ask your office for access to notices.")
+                    // Permission names what is missing (design.thorbis.com States).
+                    ListRoomEmpty(title: "Your role can\u{2019}t see notices.", message: "Ask your office for access to the Inbox.")
                 } else {
-                    // Linear text tabs under the title, as on Today.
-                    PaperTabs(options: ["All", "Unread"], selection: $filter, textTabs: true)
+                    // v2 List room: All / Unread as text tabs on the view bar.
+                    ListViewBar(options: ["All", "Unread"], selection: $filter)
                     if let error { ErrorBanner(message: error) { await refresh() } }
-                    if loading && items.isEmpty && error == nil { SkeletonList(count: 5).paperCardMargin() }
+                    if loading && items.isEmpty && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
                     let notices = visible
                     let displayCalendar = calendarWithTimeZone
                     ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
                         let heading = InboxNoticeDay.header(notice.at, after: index > 0 ? notices[index - 1].at : nil,
                                                             hasPrevious: index > 0, calendar: displayCalendar, locale: locale)
-                        // One card per day: a run ends where the next notice starts a new day.
-                        let endsRun = index == notices.count - 1 || InboxNoticeDay.header(notices[index + 1].at, after: notice.at,
-                                                                                         hasPrevious: true, calendar: displayCalendar, locale: locale) != nil
+                        // Day groups on the canvas: a 13 Medium label, space above it, no lines.
                         if let heading {
-                            SectionHeader(title: heading)
-                                .padding(.top, 12).padding(.bottom, 2)
-                                .paperCardMargin()
+                            ListGroupLabel(title: dayLabel(heading, raw: notice.at, calendar: displayCalendar), first: index == 0)
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityIdentifier("inbox-day-heading")
                         }
                         // Each notice opens the job it is about.
                         NavigationLink(value: PaperRoute.job(notice.jobId)) {
-                        // At accessibility sizes "Unread" goes under the notice so the words keep the width.
-                        let rowLayout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                                                                     : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-                        rowLayout {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(notice.title).font(Theme.font(16, weight: notice.read ? .regular : .semibold))
-                                    .foregroundStyle(notice.read ? Theme.muted : Theme.foreground)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Text([notice.meta, timeLabel(notice.at)].filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                            // Unread as a word with the accent dot; read notices need no word.
-                            if !notice.read { StatusWord(text: "Unread", tint: Theme.brandText).padding(.top, 2) }
-                        }
-                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-                        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-                        .contentShape(Rectangle())
+                            // What happened, then the job; the time trails. Unread is Medium and the dot.
+                            InboxRoomRow(title: notice.title, detail: notice.meta, time: timeLabel(notice.at), unread: !notice.read)
                         }
                         .buttonStyle(RowPressStyle())
                         .accessibilityElement(children: .combine)
-                        .accessibilityLabel([notice.title, notice.meta, timeLabel(notice.at), notice.read ? "Read" : "Unread"]
+                        .accessibilityLabel([notice.title, notice.meta, spokenTime(notice.at), notice.read ? "Read" : "Unread"]
                             .filter { !$0.isEmpty }.joined(separator: ", "))
                         .accessibilityHint("Opens the job")
-                        .wellSlice(first: heading != nil || index == 0, last: endsRun)
-                        .paperCardMargin()
                     }
                     if nextCursor != nil {
-                        Button("Load older notices") { Task { await loadMore() } }
-                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
-                            .frame(maxWidth: .infinity, minHeight: 44).disabled(loading)
+                        Button { Task { await loadMore() } } label: {
+                            Text(loading ? "Loading…" : "Load older notices").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(loading)
+                        .padding(.top, 12)
                     }
                     if visible.isEmpty && !loading && error == nil {
                         if filter == "Unread" && !items.isEmpty {
-                            PaperEmptyState(symbol: "checkmark.circle", title: "No unread notices",
-                                            actionTitle: "Show all notices", tint: Theme.markAccent) { filter = "All" }
+                            ListRoomEmpty(title: "No unread notices.", message: "All shows every notice.")
                         } else {
-                            PaperEmptyState(symbol: "tray", title: "No notices yet",
-                                            message: "New assignments and job changes show up here.", tint: Theme.markAccent)
+                            ListRoomEmpty(title: "No notices yet.", message: "New assignments and job changes land here.")
                         }
                     }
                 }
@@ -132,9 +111,24 @@ struct WorkspaceNoticesView: View {
         return result
     }
 
+    /// The time of day ("7:40 a.m."), tabular at the row's end; the day is the group's label.
     private func timeLabel(_ raw: String?) -> String {
         guard let raw, let date = JobFiltering.date(raw) else { return "" }
+        return date.tradeTime
+    }
+
+    /// How long ago, for VoiceOver ("5 min. ago"), so the day is not lost when a row is read alone.
+    private func spokenTime(_ raw: String?) -> String {
+        guard let raw, let date = JobFiltering.date(raw) else { return "" }
         return date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
+    }
+
+    /// "Today" and "Yesterday" read faster than a date for the newest groups; older days keep theirs.
+    private func dayLabel(_ heading: String, raw: String?, calendar: Calendar) -> String {
+        guard let date = JobFiltering.date(raw) else { return heading }
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        return heading
     }
 
     private func refresh() async {
