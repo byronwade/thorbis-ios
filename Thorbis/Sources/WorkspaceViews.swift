@@ -30,7 +30,7 @@ struct WorkspaceNoticesView: View {
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 if !available {
                     PaperEmptyState(symbol: "bell.slash", title: "Inbox is off for your role",
-                                    message: "The Inbox needs the notices permission. An owner can turn it on in Team.")
+                                    message: "Ask your office for access to notices.")
                 } else {
                     PaperTabs(options: ["All", "Unread"], selection: $filter)
                     if let error { ErrorBanner(message: error) { await refresh() } }
@@ -86,11 +86,11 @@ struct WorkspaceNoticesView: View {
                     }
                     if visible.isEmpty && !loading && error == nil {
                         if filter == "Unread" && !items.isEmpty {
-                            PaperEmptyState(symbol: "checkmark.circle", title: "All caught up",
-                                            message: "You have read every notice.", actionTitle: "Show all notices") { filter = "All" }
+                            PaperEmptyState(symbol: "checkmark.circle", title: "No unread notices",
+                                            actionTitle: "Show all notices") { filter = "All" }
                         } else {
                             PaperEmptyState(symbol: "tray", title: "No notices yet",
-                                            message: "Assignments and job changes for you land here.")
+                                            message: "New assignments and job changes show up here.")
                         }
                     }
                 }
@@ -218,13 +218,13 @@ struct WorkspaceRevenueView: View {
     @ViewBuilder private var sections: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !available {
-                PaperEmptyState(symbol: "chart.bar.xaxis", title: "Money unavailable", message: "This account cannot view invoice and payment reports.")
+                PaperEmptyState(symbol: "chart.bar.xaxis", title: "Money reports are off for your role", message: "Ask your office for access to invoices and payments.")
             } else if let error {
                 ErrorBanner(message: error).padding(.horizontal, -Theme.gutter)
             } else if let report {
                 if report.truncated {
-                    PaperEmptyState(symbol: "exclamationmark.triangle", title: "Report incomplete",
-                                    message: "The server reached its scan limit, so these totals would understate the ledger. Open the full report on the web.")
+                    PaperEmptyState(symbol: "exclamationmark.triangle", title: "This report is too big for the phone",
+                                    message: "These totals would come up short. Open the full report on the web.")
                 } else {
                     content(report)
                 }

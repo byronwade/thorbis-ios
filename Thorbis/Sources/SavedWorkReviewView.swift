@@ -119,7 +119,6 @@ struct SavedWorkReviewView: View {
                     Section {
                         ForEach(group.rows) { row in
                             workRow(row)
-                            if row.id != group.rows.last?.id { Divider().padding(.leading, 36) }
                         }
                         if group.rows.contains(where: \.isMedia) {
                             Text("For previews, tags and file retries, open this job's Photos tab.")

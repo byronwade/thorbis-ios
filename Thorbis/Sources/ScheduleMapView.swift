@@ -101,7 +101,7 @@ struct ScheduleMapView: View {
     private func card(_ stop: Stop) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(JobFiltering.date(stop.job.scheduledFor)?.formatted(.dateTime.hour().minute()) ?? "Stop \(stop.number)")
+                Text(JobFiltering.date(stop.job.scheduledFor)?.tradeTime ?? "Stop \(stop.number)")
                     .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.brandText)
                 Text(stop.job.status.statusLabel).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
                 Spacer()
@@ -139,7 +139,7 @@ struct ScheduleMapView: View {
                 Text(stop.place.address).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
             }
             Spacer(minLength: 8)
-            Text(JobFiltering.date(stop.job.scheduledFor)?.formatted(.dateTime.hour().minute()) ?? "")
+            Text(JobFiltering.date(stop.job.scheduledFor)?.tradeTime ?? "")
                 .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
         }
         .padding(.horizontal, Theme.gutter).padding(.vertical, 10)

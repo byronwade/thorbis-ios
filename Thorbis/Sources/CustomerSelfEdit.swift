@@ -461,6 +461,8 @@ final class CustomerSelfEditModel: ObservableObject {
 
     func load(api: APIClient) async {
         guard draft == nil else { return }
+        // A retry starts clean, so "Try again" shows the skeleton instead of the old failure.
+        loadError = nil
         do {
             let record = try await api.fieldCustomer(customerID)
             let contacts = try await api.fieldContacts(customerID)
@@ -471,7 +473,7 @@ final class CustomerSelfEditModel: ObservableObject {
             draft = CustomerSelfEditDraft(record: record, contacts: contacts, locations: locations, smsConsent: consent)
         } catch is CancellationError {
         } catch {
-            loadError = error.isConnectivityFailure ? "This needs a connection." : "Something went wrong."
+            loadError = error.customerSentence(.openDetails)
         }
     }
 
@@ -625,10 +627,20 @@ struct CustomerSelfEditForm: View {
                 .background(Theme.background)
             }
         } else if let loadError = model.loadError {
-            ContentUnavailableView("Couldn't open your details", systemImage: "person.crop.circle.badge.exclamationmark",
-                                   description: Text(loadError + " Hand the device back to your technician."))
+            ScrollView {
+                CustomerStateMessage(symbol: "person.crop.circle.badge.exclamationmark", title: "We couldn’t open your details",
+                                     message: loadError, actionTitle: "Try again") { Task { await model.load(api: api) } }
+                    .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter)
+                    .frame(maxWidth: .infinity)
+            }
         } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            ScrollView {
+                CustomerSkeleton(caption: "Opening your details…", lines: 4, heading: false, amounts: false)
+                    .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                    .frame(maxWidth: .infinity)
+            }
         }
         }
         .task { await model.load(api: api) }
@@ -710,7 +722,6 @@ struct CustomerSelfEditReview: View {
                     ForEach(Array(changes.enumerated()), id: \.offset) { index, line in
                         Text(line).font(Theme.font(15)).padding(.vertical, 10)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        if index < changes.count - 1 { Divider().overlay(Theme.border) }
                     }
                 }
                 .padding(.horizontal, 14)

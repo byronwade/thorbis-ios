@@ -265,7 +265,7 @@ struct JobMediaView: View {
                                 .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(photo.title).font(Theme.font(15, weight: .medium))
-                                Text(pendingMedia.errors[photo.id].map { "Needs attention · \($0)" } ?? (pendingMedia.uploadingID == photo.id ? "Uploading…" : pendingMedia.unverifiedIDs.contains(photo.id) ? "Saved copy not yet verified" : "Saved on this phone · \(photo.capturedAt.formatted(date: .omitted, time: .shortened))"))
+                                Text(pendingMedia.errors[photo.id].map { "Needs attention · \($0)" } ?? (pendingMedia.uploadingID == photo.id ? "Uploading…" : pendingMedia.unverifiedIDs.contains(photo.id) ? "Saved copy not yet verified" : "Saved on this phone · \(photo.capturedAt.tradeTime)"))
                                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
                             }
                             Spacer()

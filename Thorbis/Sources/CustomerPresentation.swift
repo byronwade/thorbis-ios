@@ -160,7 +160,8 @@ struct CustomerEstimatePresentation: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if let handoff, !handoff.current() {
-                        Text("Return the device to your technician to reopen this job.").font(Theme.font(type.body))
+                        CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
+                                             message: "Return the device to your technician to reopen this job.")
                     } else if handoff?.outcome == .unknown {
                         unknownScreen
                     } else if case .retryable(let reason)? = handoff?.outcome {
@@ -179,13 +180,11 @@ struct CustomerEstimatePresentation: View {
                         case .done: doneScreen
                         }
                     } else if let openingError {
-                        header(eyebrow: "Your estimate", title: "Couldn't open your estimate")
-                        Text(openingError).font(Theme.font(type.body))
-                            .fixedSize(horizontal: false, vertical: true)
+                        // The bottom bar carries the one action (Try again), so the state is words only.
+                        CustomerStateMessage(symbol: "doc.text.magnifyingglass", title: "We couldn’t open your estimate",
+                                             message: openingError)
                     } else {
-                        ProgressView("Opening your estimate…")
-                            .font(Theme.font(type.body))
-                            .frame(maxWidth: .infinity, minHeight: 220)
+                        CustomerSkeleton(caption: "Opening your estimate…")
                             .accessibilityIdentifier("customer-estimate-opening")
                     }
                 }
@@ -388,7 +387,7 @@ struct CustomerEstimatePresentation: View {
             return "\(what) is approved."
         }
         if let signedAt {
-            return "\(what), signed by \(signedName) at \(signedAt.formatted(date: .omitted, time: .shortened))."
+            return "\(what), signed by \(signedName) at \(signedAt.tradeTime)."
         }
         if let signature = flow.estimate.approvalSignature {
             return "\(what), signed by \(signature.signerName)."
@@ -548,9 +547,7 @@ struct CustomerEstimatePresentation: View {
         } catch is CancellationError {
         } catch {
             guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
-            openingError = error.isConnectivityFailure
-                ? "Opening this estimate needs a connection. Try again when you have signal."
-                : error.localizedDescription
+            openingError = error.customerSentence(.openEstimate)
         }
     }
 
@@ -577,7 +574,7 @@ struct CustomerEstimatePresentation: View {
             flow.step = .sign
         } catch is CancellationError {
         } catch {
-            self.error = error.isConnectivityFailure ? "Approving needs a connection. Try again when you have signal." : error.localizedDescription
+            self.error = error.customerSentence(.approve)
         }
     }
 
@@ -645,9 +642,9 @@ struct CustomerEstimatePresentation: View {
                 handoff.report(handoff.submissionStarted ? .unknown :
                     customerEstimatePreparationCanRetry(error)
                     ? .retryable("Preparing this approval was interrupted. Try again when connected.")
-                    : .needsReview(error.localizedDescription))
+                    : .needsReview(error.customerSentence(.approve)))
             }
-            self.error = error.isConnectivityFailure ? "Approving needs a connection. Try again when you have signal." : error.localizedDescription
+            self.error = error.customerSentence(.approve)
         }
     }
 
@@ -694,7 +691,7 @@ struct CustomerEstimatePresentation: View {
             onDone()
         } catch is CancellationError {
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.customerSentence(.decline)
         }
     }
 }
@@ -850,7 +847,6 @@ struct CustomerInvoicePresentation: View {
         .frame(maxWidth: type.regular ? 640 : .infinity)
         .frame(maxWidth: .infinity)
         .background(Theme.background)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
         .disabled(busy)
     }
 
@@ -874,7 +870,7 @@ struct CustomerInvoicePresentation: View {
             signing = false
         } catch is CancellationError {
         } catch {
-            self.error = error.isConnectivityFailure ? "Signing needs a connection. Try again when you have signal." : error.localizedDescription
+            self.error = error.customerSentence(.sign)
         }
     }
 }
@@ -916,7 +912,6 @@ struct CustomerLinesCard: View {
                 }
                 .padding(.vertical, 14)
                 .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
-                Rectangle().fill(Theme.border).frame(height: 1)
             }
             if lines.isEmpty {
                 Text("Nothing listed yet.").font(Theme.font(type.body)).foregroundStyle(Theme.muted).padding(.vertical, 14)
@@ -1174,6 +1169,189 @@ struct CustomerSecondaryButton: View {
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Customer states
+
+/// What the customer was doing when something failed, so the sentence can name it.
+enum CustomerTask {
+    case openEstimate, openDocument, openInvoice, openDetails, openPayments, approve, decline, sign
+
+    /// "Opening your estimate", the start of a sentence a homeowner reads.
+    var doing: String {
+        switch self {
+        case .openEstimate: "Opening your estimate"
+        case .openDocument: "Opening this document"
+        case .openInvoice: "Opening your invoice"
+        case .openDetails: "Opening your details"
+        case .openPayments: "Loading your payments"
+        case .approve: "Approving"
+        case .decline: "Declining"
+        case .sign: "Signing"
+        }
+    }
+}
+
+extension Error {
+    /// One sentence for the person holding the device who is not staff: what happened and the way
+    /// out. Never the server's or the system's own words (those are written for staff and
+    /// support), so a homeowner never reads "HTTP 409" or a decoding failure.
+    /// `handBack` is true inside customer mode (a technician is beside them); false on a public
+    /// link, where the way out is the company that sent it.
+    func customerSentence(_ task: CustomerTask, handBack: Bool = true) -> String {
+        let status = (self as? Problem)?.status
+        switch ProblemKind(self) {
+        case .offline:
+            return "\(task.doing) needs an internet connection. Try again when you have signal."
+        case .server:
+            return "We couldn’t reach the office just now. Try again in a minute."
+        case .expired, .forbidden:
+            return handBack ? "Please hand the device back to your technician so they can reopen this."
+                            : "This link can’t be used any more. Ask the company for a new one."
+        case .other:
+            if status == 409 {
+                return handBack ? "This was just updated. Hand the device back to your technician to reopen it."
+                                : "This estimate was just updated. Try again to see the latest version."
+            }
+            if status == 404 {
+                return handBack ? "This isn’t available any more. Hand the device back to your technician."
+                                : "This estimate isn’t available any more. Ask the company for a new link."
+            }
+            return handBack ? "\(task.doing) didn’t work. Try again, or hand the device back to your technician."
+                            : "\(task.doing) didn’t work. Try again in a moment."
+        }
+    }
+}
+
+/// A whole-screen state at customer size: a neutral glyph, what happened in 24pt, one sentence
+/// in 20pt, and at most one action. Used instead of the system's "unavailable" view, whose small
+/// grey type is written for staff.
+struct CustomerStateMessage: View {
+    let symbol: String
+    let title: String
+    var message: String? = nil
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let type = CustomerType(sizeClass)
+        VStack(alignment: .leading, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 24, weight: .regular)).foregroundStyle(Theme.muted)
+                .frame(width: 56, height: 56)
+                .background(Theme.fill, in: Circle())
+                .accessibilityHidden(true)
+            Text(title).font(Theme.font(type.heading, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            if let message, !message.isEmpty {
+                Text(message).font(Theme.font(type.body)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let actionTitle, let action {
+                CustomerSecondaryButton(title: actionTitle, type: type, action: action).padding(.top, 6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 24)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A problem inside a customer screen that still shows its document: 17pt words on the field
+/// well, the glyph tinted, and one action. ErrorBanner's 15pt is staff size.
+struct CustomerProblemBanner: View {
+    let message: String
+    var symbol = "exclamationmark.triangle"
+    var actionTitle: String? = nil
+    var action: (() async -> Void)? = nil
+    @State private var running = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let type = CustomerType(sizeClass)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Image(systemName: symbol).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.warning)
+                    .accessibilityHidden(true)
+                Text(message).font(Theme.font(type.small)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let actionTitle, let action {
+                Button {
+                    Task { running = true; await action(); running = false }
+                } label: {
+                    Text(actionTitle).font(Theme.font(type.small, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 20).frame(minHeight: 48)
+                        .background(Theme.card, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .disabled(running)
+                .padding(.leading, 29)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Loading at customer size: what is opening, in words, over the shape of the document that is
+/// coming (a title, lines with their amounts, the total). Static; VoiceOver hears the words.
+struct CustomerSkeleton: View {
+    let caption: String
+    var lines = 3
+    /// The document's title and status bars above the lines.
+    var heading = true
+    /// An amount beside each line and a total row; off for forms such as the customer's details.
+    var amounts = true
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let type = CustomerType(sizeClass)
+        VStack(alignment: .leading, spacing: 18) {
+            Text(caption).font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 18) {
+                if heading {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Capsule().fill(Theme.fill).frame(width: 230, height: 24)
+                        Capsule().fill(Theme.fill.opacity(0.7)).frame(width: 110, height: 16)
+                    }
+                }
+                VStack(spacing: 0) {
+                    ForEach(0..<lines, id: \.self) { index in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Capsule().fill(Theme.fill).frame(width: [190, 150, 170][index % 3], height: 17)
+                                Capsule().fill(Theme.fill.opacity(0.7)).frame(width: [90, 120, 100][index % 3], height: 13)
+                            }
+                            Spacer(minLength: 12)
+                            if amounts { Capsule().fill(Theme.fill).frame(width: 74, height: 17) }
+                        }
+                        .padding(.horizontal, 18).padding(.vertical, 18)
+                    }
+                    if amounts {
+                    HStack {
+                        Capsule().fill(Theme.fill).frame(width: 80, height: 20)
+                        Spacer(minLength: 12)
+                        Capsule().fill(Theme.fill).frame(width: 120, height: 28)
+                    }
+                    .padding(18)
+                    .background(Theme.background.opacity(0.6))
+                    }
+                }
+                .documentPanel()
+            }
+            .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(caption)
     }
 }
 

@@ -88,6 +88,8 @@ struct ScheduleView: View {
     @StateObject private var addresses = JobAddressBook()
     /// "Done today" opens in place to list the finished visits.
     @State private var showDone = false
+    /// The Next stop card's "Turn on location" line, once dismissed, stays away this launch.
+    @State private var locationNoticeDismissed = NextStopLocationNotice.dismissedThisLaunch
 
     private var range: ScheduleRange {
         switch tab {
@@ -240,7 +242,10 @@ struct ScheduleView: View {
                     .padding(.horizontal, 4).padding(.bottom, -14)
                 ScheduleHero(job: first, customer: store.customerName(first.customerId), pendingStatus: outbox.pendingStatus(for: first.id),
                              nextStop: isToday, place: place, street: addresses.street(first),
-                             etaMinutes: place != nil && driving ? eta.minutes : nil) { commit(for: first) }
+                             etaMinutes: place != nil && driving ? eta.minutes : nil,
+                             locationNotice: place?.coordinates != nil && driving && !session.isOffline && eta.locationOff && !locationNoticeDismissed
+                                ? { NextStopLocationNotice.dismissedThisLaunch = true
+                                    withMotion(.easeOut(duration: 0.2)) { locationNoticeDismissed = true } } : nil) { commit(for: first) }
                     .task(id: "\(first.id)|\(first.status)|\(first.updatedAt ?? "")") { await loadHero(first) }
                     .task(id: "stop|\(first.id)|\(first.customerId ?? "")|\(first.locationId ?? "")|\(session.generation)|\(session.isOffline)") {
                         guard isToday else { return }
@@ -529,6 +534,9 @@ private struct ScheduleHero<Commit: View>: View {
     /// The job's street from the list's address book, when the stop itself is not loaded.
     var street: String? = nil
     var etaMinutes: Int? = nil
+    /// Set when Location is off and the drive time is missing because of it: shows the quiet
+    /// "Turn on location" line, and is called when the person dismisses it.
+    var locationNotice: (() -> Void)? = nil
     @ViewBuilder var commit: () -> Commit
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.openURL) private var openURL
@@ -579,6 +587,10 @@ private struct ScheduleHero<Commit: View>: View {
             .accessibilityLabel(accessibilitySummary)
             .accessibilityHint("Opens the job")
             .accessibilityIdentifier(nextStop ? "next-stop-card" : "schedule-hero")
+            // Outside the link, so Open Settings and dismiss never open the job.
+            if nextStop, let locationNotice {
+                NextStopLocationNotice(dismiss: locationNotice).padding(.top, 12)
+            }
             // At accessibility sizes the commit takes the full width and the circles sit under it,
             // so its words are never squeezed into a column beside two 50pt circles.
             let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))

@@ -31,7 +31,7 @@ enum PaperPreview {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
               ["state-login", "state-login-error", "state-session-expired", "state-restore-failed", "state-opening",
-               "state-signing-out", "state-workspaces", "state-empty", "state-errors", "state-loading"].contains(args[index + 1]) else { return nil }
+               "state-signing-out", "state-workspaces", "state-empty", "state-errors", "state-loading", "state-customer"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
     /// `--paper-preview-empty`: the workspace has no jobs, customers, estimates or invoices yet,

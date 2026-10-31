@@ -1108,8 +1108,8 @@ struct PaperGlobalSearch: View {
                             ForEach(Array(rest), id: \.0) { item, destination in recentRow(item, destination) }
                         }
                         if recent.isEmpty && opened.isEmpty {
-                            PaperEmptyState(symbol: "magnifyingglass", title: "Search your workspace",
-                                            message: "Jobs, customers, estimates and invoices across the company.")
+                            PaperEmptyState(symbol: "magnifyingglass", title: "No recent searches",
+                                            message: "Find any job, customer, estimate or invoice.")
                         } else if focus != .jobs && !openJobs.isEmpty {
                             PaperGroupHeader(title: "Open jobs").padding(.top, opened.isEmpty ? 8 : 16)
                             ForEach(Array(openJobs)) { job in openJobRow(job) }
