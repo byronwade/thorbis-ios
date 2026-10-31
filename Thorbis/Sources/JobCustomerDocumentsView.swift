@@ -179,7 +179,7 @@ struct JobCustomerDocumentsView: View {
 
     private var estimateRows: some View {
         VStack(alignment: .leading, spacing: 12) {
-            PaperGroupHeader(title: "Estimates", count: (estimates?.records.count ?? 0) + (estimates?.unavailableIDs.count ?? 0))
+            customerSectionLabel("Estimates", count: (estimates?.records.count ?? 0) + (estimates?.unavailableIDs.count ?? 0))
             approveEstimates
             if let estimates {
                 if estimates.records.isEmpty && estimates.isComplete { empty("No estimates for this job yet.") }
@@ -212,7 +212,7 @@ struct JobCustomerDocumentsView: View {
 
     private var detailsRow: some View {
         VStack(alignment: .leading, spacing: 12) {
-            PaperGroupHeader(title: "Your details", count: nil)
+            customerSectionLabel("Your details")
             Button { editingDetails = true } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "person.crop.circle").font(.system(size: 22)).foregroundStyle(Theme.brandText)
@@ -242,7 +242,7 @@ struct JobCustomerDocumentsView: View {
 
     private var invoiceRows: some View {
         VStack(alignment: .leading, spacing: 12) {
-            PaperGroupHeader(title: "Invoices", count: invoices?.records.count ?? 0)
+            customerSectionLabel("Invoices", count: invoices?.records.count ?? 0)
             if let invoices {
                 if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
                 ForEach(invoices.records) { invoice in
@@ -453,6 +453,14 @@ private struct CustomerJobReadOnlyPaper: View {
             CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: false, action: handBack)
                 .padding(Theme.gutter)
         }
+    }
+
+    /// A section label at customer size (17pt): the customer reads this screen, not the tech.
+    private func customerSectionLabel(_ title: String, count: Int? = nil) -> some View {
+        Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
+            .font(Theme.font(17, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+            .accessibilityAddTraits(.isHeader)
+            .frame(minHeight: 32, alignment: .leading)
     }
 
     @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, type: CustomerType) -> some View {
