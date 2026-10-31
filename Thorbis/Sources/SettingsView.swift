@@ -12,6 +12,7 @@ struct SettingsView: View {
     @EnvironmentObject private var pendingMedia: PendingMediaStore
     @State private var confirmSignOut = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var showWorkspaces = false
     @State private var notifications: UNAuthorizationStatus?
     @Environment(\.openURL) private var openURL
@@ -162,7 +163,7 @@ struct SettingsView: View {
 
     private func row(_ title: String, symbol: String, value: String?) -> some View {
         PaperListRow(leading: .icon(symbol), title: title) {
-            if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(1) }
+            if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 3 : 1) }
         }
     }
 }

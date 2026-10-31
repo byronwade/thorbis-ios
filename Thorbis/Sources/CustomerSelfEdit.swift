@@ -354,6 +354,21 @@ struct CustomerModeOwnerUnlockButton: View {
     }
 }
 
+#if DEBUG
+/// DEBUG fixture controls for customer mode, laid out above the protected navigation stack so
+/// they push it down instead of covering its toolbar.
+private struct CustomerModePreviewControlsStack: ViewModifier {
+    func body(content: Content) -> some View {
+        VStack(spacing: 0) {
+            if PaperPreview.isJobEstimateHandoff && !ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-hide-controls") { JobEstimateHandoffPreviewControls() }
+            else if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
+            else if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-documents-status-change") { PaperPreviewConnectionMenu() }
+            content
+        }
+    }
+}
+#endif
+
 struct CustomerModeContainer<Content: View>: View {
     let onUnlocked: () -> Void
     @ViewBuilder let content: (_ handBack: @escaping () -> Void) -> Content
@@ -386,11 +401,10 @@ struct CustomerModeContainer<Content: View>: View {
                 JobEstimateHandoffReceiptMetadata().frame(width: 0, height: 0).allowsHitTesting(false)
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if PaperPreview.isJobEstimateHandoff && !ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-hide-controls") { JobEstimateHandoffPreviewControls() }
-            else if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
-            else if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-documents-status-change") { PaperPreviewConnectionMenu() }
-        }
+        // Stacked above the navigation stack, not a `safeAreaInset`: once the session changed under
+        // the cover, the inset stopped moving the navigation bar down, so the DEBUG disclosure sat on
+        // top of the Hand back pill and VoiceOver / XCTest could not reach the pill's hit point.
+        .modifier(CustomerModePreviewControlsStack())
         #endif
         .interactiveDismissDisabled()
         .persistentSystemOverlays(.hidden)

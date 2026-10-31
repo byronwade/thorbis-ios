@@ -88,9 +88,8 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [expected], timeout: 10), .completed, "Fixture actions must appear or fully disappear before continuing")
     }
     private func ownerExit(_ app: XCUIApplication) -> XCUIElement {
-        // The expanded DEBUG sample controls now lie over the Hand back pill (#162 pill sizing);
-        // fold them first so the real exit is the one tapped.
-        if app.buttons["Change sample workspace shortly"].exists { toggleSampleControls(app) }
+        // The DEBUG sample controls are stacked above the protected navigation stack, so they no
+        // longer cover the Hand back pill when expanded; the real exit is tapped as it is.
         return thorbisStableButton(app, "customer-mode-owner-exit")
     }
     private func draw(_ app: XCUIApplication) {
