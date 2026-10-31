@@ -2322,17 +2322,11 @@ struct JobDetailView: View {
         }
     }
 
+    /// The status popover's moves; the same source as Today's Now panel and the rows' swipe.
     private func availableTransitions(_ job: JobRecord) -> [String] {
-        let allowed: [String]
-        if let queued = outbox.pendingStatus(for: job.id) {
-            allowed = outbox.offlineSteps(from: queued).filter { ["en_route", "arrived", "in_progress"].contains($0) }
-        } else {
-            allowed = job.allowedTransitions ?? []
-        }
-        return allowed.filter {
-            ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused"].contains($0)
-                && session.can(["scheduled", "dispatched"].contains($0) ? "job.assign" : "job.edit", feature: "jobs")
-        }
+        JobMoves.available(served: job.allowedTransitions, queued: outbox.pendingStatus(for: job.id),
+                           learned: outbox.offlineSteps(from:), canEdit: session.can("job.edit", feature: "jobs"),
+                           canAssign: session.can("job.assign", feature: "jobs"))
     }
 
     private func transitionTitle(_ target: String) -> String {

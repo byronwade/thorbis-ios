@@ -12,6 +12,10 @@ struct WorkspaceNoticesView: View {
     @State private var error: String?
 
     @State private var filter = "All"
+    /// The job a row's swipe opened.
+    @State private var openingJob: String?
+    /// One open row at a time; scrolling closes it.
+    @StateObject private var swipes = RowSwipeState()
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
@@ -48,16 +52,26 @@ struct WorkspaceNoticesView: View {
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityIdentifier("inbox-day-heading")
                         }
-                        // Each notice opens the job it is about.
-                        NavigationLink(value: PaperRoute.job(notice.jobId)) {
-                            // What happened, then the job; the time trails. Unread is Medium and the dot.
-                            InboxRoomRow(title: notice.title, detail: notice.meta, time: timeLabel(notice.at), unread: !notice.read)
+                        // Each notice opens the job it is about. Swipe right offers the same, as a
+                        // shortcut. Read/Unread is not a swipe: the notices API only marks the whole
+                        // inbox read (POST /v1/staff/notices/read), not one notice.
+                        let open = RowSwipeAction(id: "row-swipe-open-\(notice.id)", title: "Open job",
+                                                  symbol: "arrow.up.right", tone: .ink, spokenName: "Open job") {
+                            openingJob = notice.jobId
                         }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel([notice.title, notice.meta, spokenTime(notice.at), notice.read ? "Read" : "Unread"]
-                            .filter { !$0.isEmpty }.joined(separator: ", "))
-                        .accessibilityHint("Opens the job")
+                        RowSwipeContainer(id: notice.id, leading: [open], state: swipes) {
+                            NavigationLink(value: PaperRoute.job(notice.jobId)) {
+                                // What happened, then the job; the time trails. Unread is Medium and the dot.
+                                InboxRoomRow(title: notice.title, detail: notice.meta, time: timeLabel(notice.at), unread: !notice.read)
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel([notice.title, notice.meta, spokenTime(notice.at), notice.read ? "Read" : "Unread"]
+                                .filter { !$0.isEmpty }.joined(separator: ", "))
+                            .accessibilityHint("Opens the job")
+                            .accessibilityIdentifier("inbox-row-\(notice.id)")
+                            .rowSwipeAccessibility([open])
+                        }
                     }
                     if nextCursor != nil {
                         Button { Task { await loadMore() } } label: {
@@ -93,6 +107,8 @@ struct WorkspaceNoticesView: View {
             }
         }
         .refreshable { await refresh() }
+        .onScrollPhaseChange { _, phase in if phase != .idle { swipes.close() } }
+        .thorbisDestination(item: $openingJob) { JobDetailView(jobId: $0).tabletReadable() }
         .task { await refresh() }
     }
 
