@@ -480,6 +480,7 @@ struct JobScheduleView: View {
     @State private var error: String?
     @State private var showsCalendar = false
     @State private var showsCustomTime = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private let invalidLocalTimeMessage = "That local time does not exist on this date. Choose another date or time."
     private let timeOptions: [(hour: Int, minute: Int)] = [
@@ -576,7 +577,7 @@ struct JobScheduleView: View {
         }
         .background(Theme.surface)
         .foregroundStyle(Theme.foreground)
-        .thorbisSheetPresentation([.height(560), .large])
+        .thorbisSheetPresentation(typeSize.isAccessibilitySize ? [.large] : [.height(560), .large])
         .interactiveDismissDisabled(busy)
     }
 

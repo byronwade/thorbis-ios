@@ -85,6 +85,7 @@ struct ThorbisModalSheet<Content: View>: View {
     var commitIdentifier: String? = nil
     var commit: () -> Void = {}
     @ViewBuilder var content: () -> Content
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -128,7 +129,8 @@ struct ThorbisModalSheet<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(Theme.foreground)
         .background(Theme.surface)
-        .thorbisSheetPresentation(detents)
+        // At accessibility sizes the task opens full height so the fields and the commit both show.
+        .thorbisSheetPresentation(typeSize.isAccessibilitySize ? [.large] : detents)
     }
 }
 
