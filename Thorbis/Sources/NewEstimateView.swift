@@ -23,6 +23,10 @@ struct NewEstimateView: View {
     /// Set once the server created the estimate, so a retry only links it and never creates a duplicate.
     @State private var created: EstimateRecord?
     @State private var memberPricing: MemberPricing?
+    /// Shown after Save is pressed (validate on commit): what is missing, under its place.
+    @State private var titleProblem: String?
+    @State private var customerProblem: String?
+    @State private var linesProblem: String?
     private let jobID: String?
     private let onCreated: (EstimateRecord) -> Void
 
@@ -80,8 +84,12 @@ struct NewEstimateView: View {
                     if !keyboardUp {
                         EstimateBuilderTotal(total: total, detail: memberLine)
                     }
+                    // Not pre-disabled: pressed with something missing, it says what under that place.
                     PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
-                                   disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
+                                   disabled: !session.can("estimate.create", feature: "estimates"),
+                                   disabledReason: session.can("estimate.create", feature: "estimates") ? nil : "Your role can't create estimates. Ask your office.") {
+                        if showProblems() { Task { await save() } }
+                    }
                 }
             }
             .sheet(item: $picker) { target in
@@ -98,6 +106,8 @@ struct NewEstimateView: View {
             }
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
+            .onChange(of: customerID) { _, _ in customerProblem = nil }
+            .onChange(of: lines.count) { _, _ in linesProblem = nil }
             .task(id: customerID) {
                 memberPricing = nil
                 guard !customerID.isEmpty else { return }
@@ -125,15 +135,16 @@ struct NewEstimateView: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 PaperEyebrow(reference: jobID.map { "JOB-\($0.suffix(4).uppercased())" }, text: "New estimate")
-                TextField("Estimate title", text: $title, axis: .vertical)
-                    .font(Theme.font(24, weight: .medium)).tracking(-0.36)
+                // The label stays above the field; the placeholder is only an example.
+                Text("Title").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .padding(.top, 6).accessibilityHidden(true)
+                TextField("", text: $title, prompt: Text("Furnace replacement").foregroundStyle(Theme.subtle), axis: .vertical)
+                    .font(Theme.font(24, weight: .medium)).tracking(-0.3)
                     .accessibilityLabel("Estimate title")
+                    .onChange(of: title) { _, _ in titleProblem = nil }
+                if let titleProblem { FieldProblem(message: titleProblem) }
                 HStack(spacing: 10) {
-                    HStack(spacing: 6) {
-                        Circle().fill(Theme.warning).frame(width: 7, height: 7)
-                        Text("Draft").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                    }
-                    .accessibilityElement(children: .combine)
+                    StatusLabel(tone: .unscheduled, word: "Draft", emphasis: .quiet)
                     ThorbisMenu(items: store.customers.filter { $0.archived != true }.map { customer in
                         ThorbisMenuItem(customer.name, isSelected: customer.id == customerID) { customerID = customer.id }
                     }, title: "Customer") {
@@ -143,6 +154,7 @@ struct NewEstimateView: View {
                     }
                     .disabled(jobID != nil && !customerID.isEmpty)
                 }
+                if let customerProblem { FieldProblem(message: customerProblem) }
             }
 
             EstimateBuilderSection(
@@ -152,10 +164,12 @@ struct NewEstimateView: View {
                 addItem: { picker = EstimateBuilderTarget() },
                 removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
             )
-            if lines.isEmpty {
-                Text(canUsePriceBook ? "Add from the price book, or type any custom item."
-                                     : "Add a custom item: this account can't use the price book.")
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+            if let linesProblem {
+                FieldProblem(message: linesProblem)
+            } else if lines.isEmpty {
+                Text(canUsePriceBook ? "No items yet. Add one from the price book, or type a custom item."
+                                     : "No items yet. Add a custom item: your role can't use the price book.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
             }
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
         }
@@ -200,6 +214,17 @@ struct NewEstimateView: View {
             lines.restoreLine(removed.line, at: removed.index)
             self.removed = nil
         }
+    }
+
+    /// Fills each problem slot; true when the estimate can be saved.
+    private func showProblems() -> Bool {
+        guard created == nil else { return true }
+        titleProblem = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Name the work, like \u{201C}Furnace replacement.\u{201D}" : nil
+        customerProblem = customerID.isEmpty ? "Choose the customer this estimate is for." : nil
+        linesProblem = lines.isEmpty ? "Add at least one item."
+            : valid || titleProblem != nil || customerProblem != nil ? nil
+            : "Each item needs a description, a quantity from 1 to 100,000 and a price like 145.00."
+        return valid
     }
 
     private func save() async {

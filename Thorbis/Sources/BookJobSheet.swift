@@ -138,6 +138,12 @@ struct NewJobSheet: View {
     @State private var timeSaved = false
     @State private var techSaved = false
 
+    /// Problems shown under their fields after Book job is pressed (design.thorbis.com Forms:
+    /// validate on commit, the error takes help's place). Cleared as soon as the field changes.
+    @State private var callerProblem: String?
+    @State private var titleProblem: String?
+    @State private var timeProblem: String?
+
     @FocusState private var focus: Focus?
     private enum Focus: Hashable { case caller, newName, newPhone, newAddress, title, notes }
 
@@ -160,10 +166,10 @@ struct NewJobSheet: View {
                 ScrollViewReader { reader in
                 ScrollView {
                     // In the order a call gives it: who, what, where, when, who goes.
-                    VStack(alignment: .leading, spacing: 22) {
-                        // Redesign phase 3: the form's title at 30 semibold, like a detail screen.
+                    VStack(alignment: .leading, spacing: 24) {
+                        // v2: the form's title on the compact ramp, Medium.
                         Text("New job")
-                            .font(Theme.font(30, weight: .semibold)).tracking(-0.6)
+                            .font(Theme.font(24, weight: .medium)).tracking(-0.3)
                             .accessibilityAddTraits(.isHeader)
                             .padding(.top, 4)
                         callerSection
@@ -206,6 +212,11 @@ struct NewJobSheet: View {
             .safeAreaInset(edge: .bottom) { commit }
             .toolbar(.hidden, for: .navigationBar)
             .onAppear(perform: start)
+            .onChange(of: draft.customerID) { _, _ in callerProblem = nil }
+            .onChange(of: newName) { _, _ in callerProblem = nil }
+            .onChange(of: draft.title) { _, _ in titleProblem = nil }
+            .onChange(of: dayChoice) { _, _ in timeProblem = nil }
+            .onChange(of: preset) { _, _ in timeProblem = nil }
             .task(id: session.generation) { await loadLists() }
             .task(id: draft.customerID) { await loadLocations() }
             .task(id: CustomerPhoneLookup.digits(query)) { phoneMatch = await lookup(query) }
@@ -306,8 +317,8 @@ struct NewJobSheet: View {
                     HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
                             .accessibilityHidden(true)
-                        TextField("", text: $query, prompt: Text("Name, phone or address").foregroundStyle(Theme.subtle))
-                            .font(Theme.font(17, weight: .medium))
+                        TextField("", text: $query, prompt: Text("Mike Reyes or (916) 555-0142").foregroundStyle(Theme.subtle))
+                            .font(Theme.font(16))
                             .textContentType(.name)
                             .autocorrectionDisabled()
                             .submitLabel(.search)
@@ -323,6 +334,8 @@ struct NewJobSheet: View {
                         }
                     }
                     .fieldWell()
+                    if let callerProblem { FieldProblem(message: callerProblem) }
+                    else { Text("Search by name, phone or street.").font(Theme.font(13)).foregroundStyle(Theme.muted) }
                 }
                 callerResults
             }
@@ -428,7 +441,7 @@ struct NewJobSheet: View {
                     .disabled(busy)
             }
             .padding(.horizontal, 4).padding(.bottom, -6)
-            inlineField("Name", text: $newName, prompt: "Danielle Marlowe", focus: .newName)
+            inlineField("Name", text: $newName, prompt: "Danielle Marlowe", focus: .newName, problem: callerProblem)
                 .textContentType(.name).submitLabel(.next).onSubmit { focus = .newPhone }
             inlineField("Phone", text: $newPhone, prompt: "(555) 014-2276", focus: .newPhone)
                 .textContentType(.telephoneNumber).keyboardType(.phonePad)
@@ -442,13 +455,13 @@ struct NewJobSheet: View {
             }
             .disabled(busy)
             if newName.trimmingCharacters(in: .whitespaces).count > 200 {
-                Text("Names can be up to 200 characters.").font(Theme.font(12)).foregroundStyle(Theme.destructive)
+                FieldProblem(message: "Keep the name to 200 characters.")
             }
         }
         .disabled(locked)
     }
 
-    private func inlineField(_ label: String, text: Binding<String>, prompt: String, focus field: Focus) -> some View {
+    private func inlineField(_ label: String, text: Binding<String>, prompt: String, focus field: Focus, problem: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).accessibilityHidden(true)
             TextField("", text: text, prompt: Text(prompt).foregroundStyle(Theme.subtle))
@@ -456,6 +469,7 @@ struct NewJobSheet: View {
                 .focused($focus, equals: field)
                 .accessibilityLabel(label)
                 .fieldWell()
+            if let problem { FieldProblem(message: problem) }
         }
     }
 
@@ -484,8 +498,8 @@ struct NewJobSheet: View {
     private var problemSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             PaperFormField("What's wrong?") {
-                TextField("", text: $draft.title, prompt: Text("e.g. AC not cooling").foregroundStyle(Theme.subtle), axis: .vertical)
-                    .font(Theme.font(17, weight: .medium))
+                TextField("", text: $draft.title, prompt: Text("AC not cooling").foregroundStyle(Theme.subtle), axis: .vertical)
+                    .font(Theme.font(16))
                     .lineLimit(1...3)
                     .focused($focus, equals: .title)
                     .accessibilityLabel("Job title")
@@ -512,11 +526,13 @@ struct NewJobSheet: View {
                     .accessibilityLabel("Recent job titles")
                 }
                 if draft.titleIsTooLong {
-                    Text("Job titles can be up to 200 characters.").font(Theme.font(12)).foregroundStyle(Theme.destructive)
+                    FieldProblem(message: "Keep the job title to 200 characters.")
+                } else if let titleProblem {
+                    FieldProblem(message: titleProblem)
                 }
             }
             PaperFormField("Notes for the tech", note: "Optional") {
-                TextField(text: $draft.notes, prompt: Text("Gate code, what the customer said, anything useful…").foregroundStyle(Theme.subtle),
+                TextField(text: $draft.notes, prompt: Text("Gate code 4412. Dog in the back yard.").foregroundStyle(Theme.subtle),
                           axis: .vertical) { Text("Job description") }
                     .font(Theme.font(15))
                     .lineLimit(2...6)
@@ -525,7 +541,9 @@ struct NewJobSheet: View {
                     .disabled(locked)
                     .fieldWell()
                 if draft.notesAreTooLong {
-                    Text("Descriptions can be up to 10,000 characters.").font(Theme.font(12)).foregroundStyle(Theme.destructive)
+                    FieldProblem(message: "Keep notes to 10,000 characters.")
+                } else {
+                    Text("The tech reads this before they arrive.").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
             }
         }
@@ -601,6 +619,7 @@ struct NewJobSheet: View {
             ThorbisSegmented(options: [(DayChoice.notYet, "Not yet"), (.today, "Today"), (.tomorrow, "Tomorrow"), (.pick, "Pick day")],
                              selection: Binding(get: { dayChoice }, set: { dayChoice = $0; timeSaved = false; dropPastPreset() }))
                 .disabled(busy || timeSaved)
+            if let timeProblem { FieldProblem(message: timeProblem) }
             if dayChoice == .pick {
                 DatePicker("Day", selection: $pickedDay, in: Calendar.current.startOfDay(for: .now)..., displayedComponents: .date)
                     .datePickerStyle(.graphical)
@@ -752,20 +771,51 @@ struct NewJobSheet: View {
             && session.can("job.create", feature: "jobs")
     }
 
+    /// The one commit is never pre-disabled (design.thorbis.com "Don't lock the commit"): pressed
+    /// with something missing, it says what under the field. While saving, the word stays and the
+    /// mark turns.
     private var commit: some View {
-        Button { Task { await book() } } label: {
-            Group {
+        Button {
+            if savedJob == nil && !canBook { showProblems(); return }
+            Task { await book() }
+        } label: {
+            HStack(spacing: 8) {
                 if busy { ProgressView().tint(Theme.onInk) }
-                else { Text(savedJob == nil ? "Book job" : "Try again") }
+                Text(savedJob == nil ? "Book job" : "Try again")
             }
-            .inkCommit(enabled: canBook || savedJob != nil)
+            .inkCommit(enabled: session.can("job.create", feature: "jobs"))
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(savedJob == nil ? "Book job" : "Try saving again")
         .accessibilityIdentifier("book-job-commit")
-        .disabled(busy || !(canBook || savedJob != nil))
+        .disabled(busy || !session.can("job.create", feature: "jobs"))
         .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
         .background(Theme.background)
+    }
+
+    /// Says what's missing under each field, and moves to the first one.
+    private func showProblems() {
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if draft.customerID.isEmpty {
+            if addingCustomer {
+                callerProblem = !canCreateCustomer ? "Your role can't add customers. Search for one instead."
+                    : newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add the caller's name, like Danielle Marlowe." : nil
+            } else {
+                callerProblem = "Pick who's calling, or add them as a new customer."
+            }
+        } else { callerProblem = nil }
+        titleProblem = title.isEmpty ? "Say what's wrong, like \u{201C}AC not cooling.\u{201D}" : nil
+        timeProblem = canAssign && dayChoice != .notYet && when == nil ? "Pick an arrival time, or choose Not yet." : nil
+        if callerProblem == nil, draft.customerID.isEmpty, addingCustomer {
+            if newPhone.count > 30 { callerProblem = "Keep the phone number to 30 characters." }
+            else if newAddress.count > 500 { callerProblem = "Keep the address to 500 characters." }
+        }
+        if callerProblem == nil, titleProblem == nil, timeProblem == nil, !draft.titleIsTooLong, !draft.notesAreTooLong {
+            // Nothing in a field explains it: say so where the page's problems go.
+            error = session.can("job.create", feature: "jobs") ? "This job can't be booked yet. Check each field above." : "Your role can't book jobs."
+        }
+        if callerProblem != nil { focus = addingCustomer ? .newName : .caller }
+        else if titleProblem != nil { focus = .title }
     }
 
     // MARK: Actions
@@ -774,6 +824,12 @@ struct NewJobSheet: View {
         if draft.customerID.isEmpty { focus = .caller } else if draft.title.isEmpty { focus = .title }
         #if DEBUG
         if PaperPreview.enabled && PaperPreview.screen == "book-job" { query = "Mar" }
+        // `--paper-preview-form-errors`: Book job pressed with the form blank, so the field errors show.
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-form-errors") {
+            query = ""
+            showProblems()
+            focus = nil
+        }
         if PaperPreview.enabled && PaperPreview.screen == "book-job-filled" {
             select(PaperPreview.customerID)
             draft.title = "AC not cooling"

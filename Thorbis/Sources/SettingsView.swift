@@ -22,17 +22,23 @@ struct SettingsView: View {
             // design 2026-10-30: one panel per section with a 13pt label above, neutral glyphs,
             // the value as a quiet word on the right, no separators or chevrons.
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    VStack(spacing: 8) {
-                        // Redesign phase 3: the person's tinted initials, as on every other screen.
-                        InitialsAvatar(name: session.user?.name ?? session.user?.email ?? "?", size: 72)
+                VStack(alignment: .leading, spacing: 24) {
+                    // v2 Settings room: a column. The person, then each section on its own; every
+                    // row opens a page that saves itself, and danger sits apart at the end.
+                    HStack(spacing: 12) {
+                        InitialsAvatar(name: session.user?.name ?? session.user?.email ?? "?", size: 44)
                             .accessibilityHidden(true)
-                        Text(session.user?.name ?? "Account").font(Theme.font(24, weight: .semibold)).tracking(-0.4)
-                            .multilineTextAlignment(.center)
-                        if let email = session.user?.email { Text(email).font(Theme.font(15)).foregroundStyle(Theme.muted) }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.user?.name ?? "Account").font(Theme.font(17, weight: .medium))
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let email = session.user?.email {
+                                Text(email).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 4)
                     .accessibilityElement(children: .combine)
 
                     PaperSection("Workspace") {
@@ -96,6 +102,11 @@ struct SettingsView: View {
                         }
                         .padding(.vertical, PaperCardMetrics.edge)
                     }
+                    // Immediate settings say they are immediate (design.thorbis.com Customize).
+                    Text("Appearance changes right away, on this phone only.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.top, -14)
 
                     PaperSection("About") {
                         NavigationLink { WhatsNewHistoryView().thorbisBackButton() } label: {
@@ -105,22 +116,32 @@ struct SettingsView: View {
                         .padding(.vertical, PaperCardMetrics.edge)
                     }
 
-                    VStack(spacing: 8) {
+                    // Danger sits apart: its own group after a wider pause, the word in the danger tone.
+                    VStack(alignment: .leading, spacing: 8) {
                         Button { confirmSignOut = true } label: {
-                            Text("Sign out").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
-                                .frame(maxWidth: .infinity, minHeight: 48)
-                                .background(Theme.well, in: RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous))
+                            HStack(spacing: 12) {
+                                PlaceMark(symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive)
+                                Text("Sign out").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, PaperCardMetrics.inset)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(PressStyle())
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityHint("Asks before signing you out of this phone")
                         Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
                             .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 4)
                     }
+                    .padding(.top, 24)
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 32)
                 // Redesign phase 3: semibold section headers over grouped wells.
                 .environment(\.paperGroupedWells, true)
             }
+            .modifier(PaperPreviewScrollAnchor())
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Settings")
@@ -173,7 +194,7 @@ struct SettingsView: View {
         HStack(alignment: .center, spacing: 12) {
             PlaceMark(symbol: symbol, tint: Self.markTint(symbol))
             PaperListRow(title: title) {
-                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 3 : 1) }
+                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.subtle).lineLimit(typeSize.isAccessibilitySize ? 3 : 1) }
             }
             .environment(\.paperRowInset, 0)
         }
@@ -187,12 +208,12 @@ struct SettingsView: View {
     /// One hue per kind of setting, from the place-mark palette (decorative; the word carries it).
     private static func markTint(_ symbol: String) -> Color {
         switch symbol {
-        case "building.2": Theme.markBlue
+        case "building.2": Theme.markOlive
         case "slider.horizontal.3": Theme.markAccent
         case "checklist": Theme.markForest
-        case "creditcard": Theme.markTeal
-        case "bell.badge", "bell": Theme.markRed
-        case "circle.lefthalf.filled": Theme.markGrey
+        case "creditcard": Theme.markPumpkin
+        case "bell.badge", "bell": Theme.markBurnt
+        case "circle.lefthalf.filled": Theme.markAccent
         case "sparkles": Theme.markPumpkin
         default: Theme.markGrey
         }
