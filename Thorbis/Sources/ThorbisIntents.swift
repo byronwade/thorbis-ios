@@ -45,7 +45,7 @@ struct OpenScheduleIntent: AppIntent {
 /// Results come from the signed-in workspace only, the same as typing in the app.
 struct SearchThorbisIntent: AppIntent {
     static let title: LocalizedStringResource = "Search Thorbis"
-    static let description = IntentDescription("Searches your jobs and customers in Thorbis.")
+    static let description = IntentDescription("Finds jobs, customers, estimates and invoices in Thorbis by name, street, phone or number.")
     static let openAppWhenRun = true
 
     @Parameter(title: "Search for", requestValueDialog: "What do you want to find?")

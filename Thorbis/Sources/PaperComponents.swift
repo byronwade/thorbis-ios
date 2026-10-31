@@ -1223,6 +1223,8 @@ struct PaperListRow<Trailing: View>: View {
     var subtitleLines = 1
     /// Finished work reads quieter.
     var dimmed = false
+    /// Search: the typed words, marked where they appear in the title and supporting line.
+    var highlight: [String] = []
     @ViewBuilder var trailing: Trailing
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
@@ -1236,12 +1238,12 @@ struct PaperListRow<Trailing: View>: View {
         layout {
             leadingView
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(16, weight: .medium))
+                PaperHighlight.text(title, words: highlight).font(Theme.font(16, weight: .medium))
                     .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    PaperHighlight.text(subtitle, words: highlight).font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .lineLimit(stacked ? nil : subtitleLines)
                 }
                 if let meta, !meta.isEmpty {
@@ -1271,6 +1273,29 @@ struct PaperListRow<Trailing: View>: View {
             Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Theme.muted)
                 .frame(width: 24).accessibilityHidden(true)
         }
+    }
+}
+
+/// The matched part of a search row: a quiet fill behind it and full ink, never a second accent.
+/// Inter carries only 400 and 500 here, so weight cannot mark it.
+enum PaperHighlight {
+    static func text(_ string: String, words: [String]) -> Text {
+        guard !words.isEmpty else { return Text(verbatim: string) }
+        var attributed = AttributedString(string)
+        for word in words where !word.isEmpty {
+            var start = attributed.startIndex
+            while start < attributed.endIndex,
+                  let range = attributed[start...].range(of: word, options: [.caseInsensitive, .diacriticInsensitive]) {
+                // Short words are only marked where they start a word, like the match itself.
+                let startsWord = range.lowerBound == attributed.startIndex
+                    || !(attributed.characters[attributed.characters.index(before: range.lowerBound)].isLetter)
+                guard word.count > 2 || startsWord else { start = range.upperBound; continue }
+                attributed[range].backgroundColor = Theme.muted.opacity(0.22)
+                attributed[range].foregroundColor = Theme.foreground
+                start = range.upperBound
+            }
+        }
+        return Text(attributed)
     }
 }
 

@@ -126,6 +126,8 @@ struct TabletRoot: View {
 
     @State private var search = false
     @State private var searchSeed = ""
+    /// What a search action starts once the search sheet has closed (a sheet can't open over one leaving).
+    @State private var afterSearch: (() -> Void)?
     @State private var settings = false
     @State private var workspace = false
     @State private var createJob = false
@@ -174,7 +176,12 @@ struct TabletRoot: View {
         .environment(\.paperMenuButton, false)
         .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
         .background { keyboardShortcuts }
-        .sheet(isPresented: $search, onDismiss: { searchSeed = "" }) { PaperGlobalSearch(initialQuery: searchSeed) }
+        .sheet(isPresented: $search, onDismiss: {
+            searchSeed = ""
+            let run = afterSearch
+            afterSearch = nil
+            run?()
+        }) { PaperGlobalSearch(initialQuery: searchSeed, actions: searchActions) }
         .sheet(isPresented: $settings) { SettingsView() }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
@@ -453,6 +460,14 @@ struct TabletRoot: View {
             items.append(ThorbisMenuItem("New customer", icon: "person.badge.plus") { newCustomer = true })
         }
         return items
+    }
+
+    /// What typing in search can start: the same creates, Settings and places as the sidebar.
+    private var searchActions: [SearchAction] {
+        let later: (@escaping () -> Void) -> () -> Void = { run in { afterSearch = run; search = false } }
+        let creates = createChoices.map { item in (item.title, item.icon ?? "plus", later(item.action)) }
+        return SearchAction.standard(creates: creates, settings: later { settings = true }, places: menuPlaces,
+                                     openPlace: { place in afterSearch = nil; search = false; show(section(for: place)) })
     }
 
     // MARK: Keyboard
