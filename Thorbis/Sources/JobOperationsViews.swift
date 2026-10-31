@@ -312,8 +312,8 @@ struct QuickScheduleSheet: View {
                         .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 } else {
-                    ProgressView("Opening the schedule…").font(Theme.font(15)).tint(Theme.muted)
-                        .frame(maxWidth: .infinity, minHeight: 120)
+                    SkeletonRows(count: 3, inset: 0)
+                        .accessibilityLabel("Opening the schedule")
                 }
             }
             .padding(20)
@@ -672,7 +672,7 @@ struct JobFollowUpsView: View {
                         .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                 }
                 if !loading && records.isEmpty && !session.can("job.edit", feature: "jobs") {
-                    PaperEmptyState(symbol: "list.bullet", title: "No follow-ups", message: "Follow-ups recorded on this job appear here.")
+                    PaperEmptyState(symbol: "list.bullet", title: "No follow-ups on this job")
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)

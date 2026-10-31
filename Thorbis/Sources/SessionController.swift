@@ -529,7 +529,8 @@ final class SessionController: ObservableObject {
     /// waiting screen without a server. Not reachable outside `--paper-preview`.
     func previewForce(_ next: Phase, error message: String? = nil, signingOut out: Bool = false) {
         guard PaperPreview.enabled else { return }
-        if next != .ready { invalidate(next: next) }
+        // The picker keeps the account and its companies; every other state starts clean.
+        if next == .choosingWorkspace { phase = next } else if next != .ready { invalidate(next: next) }
         error = message
         signingOut = out
     }

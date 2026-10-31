@@ -34,7 +34,10 @@ struct LoginView: View {
     @State private var emailError: String?
     @State private var passwordError: String?
     /// Set once this screen has tried to log in, so the session's error belongs to that try.
-    @State private var attempted = false
+    @State private var attempted: Bool
+
+    /// `attempted` starts true only for screenshot fixtures of a refused try.
+    init(attempted: Bool = false) { _attempted = State(initialValue: attempted) }
     @State private var showingReset = false
     @State private var showingSignUp = false
     @State private var showPassword = false
@@ -88,7 +91,7 @@ struct LoginView: View {
                 }
 
                 PaperFormField("Email") {
-                    TextField("you@company.com", text: $email)
+                    TextField("Email", text: $email, prompt: Text(verbatim: "you@company.com").foregroundStyle(Theme.muted))
                         .textContentType(.username)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
@@ -265,7 +268,7 @@ private struct PasswordResetRequestView: View {
                         .font(Theme.font(13, weight: .medium))
                         .foregroundStyle(Theme.muted)
                         .padding(.top, 32)
-                    TextField("you@company.com", text: $email)
+                    TextField("Email", text: $email, prompt: Text(verbatim: "you@company.com").foregroundStyle(Theme.muted))
                         .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)

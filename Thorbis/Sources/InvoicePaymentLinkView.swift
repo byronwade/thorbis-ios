@@ -26,7 +26,7 @@ struct InvoicePaymentLinkView: View {
                     if let loadError = model.loadError {
                         ErrorBanner(message: loadError) { await model.load() }
                     } else if model.isLoading || !model.historyComplete {
-                        ProgressView("Checking invoice…").frame(maxWidth: .infinity, minHeight: 100)
+                        SkeletonRows(count: 2, leading: false, inset: 0).accessibilityLabel("Checking invoice")
                     } else if model.paymentTotalCents != model.invoice?.amountPaid {
                         Text("The invoice is updating. Check payment status before sharing a link.")
                             .font(Theme.font(15)).foregroundStyle(Theme.muted)

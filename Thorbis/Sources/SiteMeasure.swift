@@ -172,11 +172,8 @@ struct SiteMeasureView: View {
         ZStack {
             if cameraDenied {
                 VStack(spacing: 12) {
-                    Image(systemName: "camera").font(.largeTitle).foregroundStyle(Theme.muted)
-                    Text("Camera access is off. Turn on Camera for Thorbis in Settings to measure on site.")
-                        .font(Theme.font(15)).multilineTextAlignment(.center).foregroundStyle(Theme.foreground)
+                    PermissionNotice(permission: .camera, purpose: "measure on site")
                 }
-                .padding(Theme.gutter)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.background)
             } else {

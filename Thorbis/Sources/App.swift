@@ -158,6 +158,8 @@ struct ThorbisApp: App {
                     OnsiteToolsPreview(screen: PaperPreview.screen)
                 } else if PaperPreview.enabled, let screen = PaperPreview.onboardingScreen {
                     OnboardingPreview(screen: screen)
+                } else if PaperPreview.enabled, let screen = PaperPreview.statesScreen {
+                    StatesPreview(screen: screen)
                 } else {
                     appContent
                 }

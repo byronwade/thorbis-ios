@@ -67,9 +67,9 @@ struct CustomersView: View {
                 }
                 if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
-                        PaperEmptyState(symbol: "archivebox", title: "No archived customers", message: "Archived customers will appear here.")
+                        PaperEmptyState(symbol: "archivebox", title: "No archived customers")
                     } else {
-                        PaperEmptyState(symbol: "person.2", title: "No customers yet", message: "Customers you add appear here, A to Z.",
+                        PaperEmptyState(symbol: "person.2", title: "No customers yet",
                                         actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
                                         action: { showNew = true })
                     }

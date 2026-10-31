@@ -325,11 +325,11 @@ struct ScheduleView: View {
         let mine = showsScope && scope == .mine
         PaperEmptyState(
             symbol: "calendar",
-            title: boardEmpty ? "Nothing on the board yet" : range == .unscheduled ? "Everything has a time" : "No jobs \(mine ? "for you " : "")\(range == .today ? "left today" : "this week")",
-            message: boardEmpty ? "Your workspace is live. New jobs will land here."
-                : range == .unscheduled ? "Jobs without a scheduled time appear here."
+            title: boardEmpty ? "No jobs yet" : range == .unscheduled ? "Every job has a time" : "No jobs \(mine ? "for you " : "")\(range == .today ? "left today" : "this week")",
+            message: boardEmpty ? nil
+                : range == .unscheduled ? nil
                 : mine ? "Choose Everyone in the filter to see the whole team's jobs." : "Try another range, or check Jobs for everything open.",
-            actionTitle: boardEmpty && session.can("job.create", feature: "jobs") ? "Create your first job" : nil,
+            actionTitle: boardEmpty && session.can("job.create", feature: "jobs") ? "Book a job" : nil,
             action: { showNew = true }
         )
         .padding(.top, 24)
@@ -734,9 +734,9 @@ struct JobsView: View {
                     if MyDayRules.shouldShowEmptyState(isEmpty: jobs.isEmpty, isLoading: store.loading, hasError: store.error != nil) {
                         PaperEmptyState(
                             symbol: "briefcase",
-                            title: filterActive ? "No jobs match these filters" : tab == "Assigned" ? "Nothing assigned to you" : "No jobs yet",
-                            message: filterActive ? "Clear the filters to see the whole board." : tab == "Assigned" ? "Jobs dispatched to you appear here. All jobs shows the whole board." : "New jobs appear here as soon as they are created.",
-                            actionTitle: session.can("job.create", feature: "jobs") && !filterActive ? "New job" : nil,
+                            title: filterActive ? "No jobs match these filters" : tab == "Assigned" ? "Nothing assigned to you" : "No open jobs",
+                            message: filterActive ? "Clear the filters to see the whole board." : tab == "Assigned" ? "All jobs shows the whole board." : nil,
+                            actionTitle: session.can("job.create", feature: "jobs") && !filterActive ? "Book a job" : nil,
                             action: { showNew = true }
                         )
                     }

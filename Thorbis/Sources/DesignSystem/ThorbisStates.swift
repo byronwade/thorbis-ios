@@ -141,15 +141,18 @@ struct ErrorBanner: View {
     var symbol: String = "exclamationmark.triangle"
     var tint: Color = Theme.warning
     var action: Action? = nil
+    /// Side margin; zero when the parent already pads its content.
+    var outer: CGFloat = Theme.gutter
     @State private var running = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     init(message: String, symbol: String = "exclamationmark.triangle", tint: Color = Theme.warning,
-         action: Action? = nil) {
+         action: Action? = nil, outer: CGFloat = Theme.gutter) {
         self.message = message
         self.symbol = symbol
         self.tint = tint
         self.action = action
+        self.outer = outer
     }
 
     /// The common case: a read failed and the screen can try it again.
@@ -167,7 +170,9 @@ struct ErrorBanner: View {
     }
 
     var body: some View {
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+        // A long message keeps the full width and puts its action underneath.
+        let stacked = typeSize.isAccessibilitySize || (action != nil && message.count > 64)
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
                                                   : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
         layout {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -193,11 +198,15 @@ struct ErrorBanner: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, action == nil ? 12 : 2)
+        .padding(.top, stacked && action != nil ? 10 : 0)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-        .padding(.horizontal, Theme.gutter).padding(.top, 8)
+        .padding(.horizontal, outer).padding(.top, 8)
         .accessibilityElement(children: .contain)
     }
+
+    /// The same strip without its own side margin, for parents that already pad.
+    func flush() -> ErrorBanner { var copy = self; copy.outer = 0; return copy }
 }
 
 /// What a person turned off in iOS Settings, and why Thorbis asks for it.
@@ -235,14 +244,17 @@ struct PermissionNotice: View {
     let purpose: String
     /// Overrides the generated sentence when two permissions are involved (dictation).
     var message: String? = nil
+    var outer: CGFloat = Theme.gutter
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        ErrorBanner(message: message ?? String(localized: "\(permission.name) is off for Thorbis. Turn it on in Settings to \(purpose)."),
+        ErrorBanner(message: message ?? (permission == .notifications
+                        ? String(localized: "Notifications are off for Thorbis. Turn them on in Settings to \(purpose).")
+                        : String(localized: "\(permission.name) is off for Thorbis. Turn it on in Settings to \(purpose).")),
                     symbol: permission.symbol, tint: Theme.muted,
                     action: permission.settingsURL.map { url in
                         ErrorBanner.Action(title: String(localized: "Open Settings")) { openURL(url) }
-                    })
+                    }, outer: outer)
         .accessibilityIdentifier("permission-notice")
     }
 }

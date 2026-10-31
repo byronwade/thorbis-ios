@@ -105,7 +105,7 @@ struct SignUpView: View {
                     if let error, errorField == .name { InlineProblem(message: error).padding(.top, 6) }
 
                     fieldLabel("Work email").padding(.top, 16)
-                    TextField("you@company.com", text: $email)
+                    TextField("Email", text: $email, prompt: Text(verbatim: "you@company.com").foregroundStyle(Theme.muted))
                         .textContentType(.username)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
