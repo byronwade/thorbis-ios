@@ -9,10 +9,11 @@ final class TodayBoardTests: XCTestCase {
 
     func testBoardColumnsAreOpenEnRouteOnSiteDoneWithTheQueueUnderOpen() {
         let today = [job("a", "scheduled"), job("b", "dispatched"), job("c", "en_route"), job("d", "arrived"),
-                     job("e", "in_progress"), job("f", "paused"), job("g", "completed")]
+                     job("e", "in_progress"), job("f", "paused"), job("g", "completed"), job("h", "draft")]
         let columns = DispatchBoardView.columns(today: today, unscheduled: [job("q", "scheduled")])
         XCTAssertEqual(columns.map(\.title), ["Open", "En route", "On site", "Done"])
-        XCTAssertEqual(columns[0].jobs.map(\.id), ["a", "b"])
+        // A status the board doesn't name still lands in Open (its card names it).
+        XCTAssertEqual(columns[0].jobs.map(\.id), ["a", "b", "h"])
         XCTAssertEqual(columns[0].waiting.map(\.id), ["q"])
         XCTAssertEqual(columns[1].jobs.map(\.id), ["c"])
         XCTAssertEqual(columns[2].jobs.map(\.id), ["d", "e", "f"])
@@ -28,6 +29,7 @@ final class TodayBoardTests: XCTestCase {
         let uses24 = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current)?.contains("a") == false
         XCTAssertEqual(date.columnTime, uses24 ? "13:00" : "1:00")
         XCTAssertEqual(date.periodMark, uses24 ? nil : "p.m.")
+        XCTAssertEqual(date.clockTime, uses24 ? "13:00" : "1:00 p.m.")
     }
 
     func testJobMoneyAlwaysHasTwoDecimals() {

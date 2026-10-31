@@ -159,6 +159,9 @@ struct JobContactsSection: View {
     let failed: Bool
     /// When known, each real contact opens its own record; the account fallback never does.
     var customerID: String? = nil
+    /// The account's name as the job already shows it: a contact with the same name leads with
+    /// its role instead of repeating the name (each fact once).
+    var customerName: String? = nil
     let retry: () async -> Void
 
     var body: some View {
@@ -190,6 +193,7 @@ struct JobContactsSection: View {
                     }
                     ForEach(people) { person in
                         JobContactRow(person: person,
+                                      hidesName: customerName.map { $0.localizedCaseInsensitiveCompare(person.name) == .orderedSame } ?? false,
                                       route: customerID.flatMap { id in
                                           person.id.hasPrefix("customer-") ? nil : PaperRoute.contact(customerID: id, contactID: person.id)
                                       })
@@ -203,6 +207,8 @@ struct JobContactsSection: View {
 
 private struct JobContactRow: View {
     let person: JobContacts.Person
+    /// The customer row above already says this name; lead with the role ("Homeowner · Primary").
+    var hidesName = false
     var route: PaperRoute? = nil
     @Environment(\.openURL) private var openURL
 
@@ -236,10 +242,15 @@ private struct JobContactRow: View {
 
     private var info: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(person.name).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-            if let detail = person.detail {
-                Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            if hidesName, let detail = person.detail {
+                Text(detail).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(person.name).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let detail = person.detail {
+                    Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
             }
             if let phone = person.phone, !phone.isEmpty {
                 Text(phone).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
@@ -248,6 +259,9 @@ private struct JobContactRow: View {
             }
         }
         .accessibilityElement(children: .combine)
+        // One spoken line, the name included even where the screen leaves it out.
+        .accessibilityLabel([person.name, person.detail, person.phone?.isEmpty == false ? person.phone : person.email]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 
     private func glyph(_ symbol: String, label: String, perform: @escaping () -> Void) -> some View {

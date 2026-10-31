@@ -599,7 +599,7 @@ private struct ScheduleHero<Commit: View>: View {
 
     private var when: String {
         guard let date = JobFiltering.date(job.scheduledFor) else { return "No time yet" }
-        var text = nextStop ? date.tradeTime : date.visitLabel()
+        var text = nextStop ? date.clockTime : date.visitLabel()
         if let etaMinutes { text += " · \(etaMinutes) min drive" }
         return text
     }
@@ -701,6 +701,9 @@ extension Date {
         if uses24 { return String(format: "%02d:%02d", hour24, minute) }
         return String(format: "%d:%02d", hour24 % 12 == 0 ? 12 : hour24 % 12, minute)
     }
+    /// "1:00 p.m.": the column's clock with its period, for a time shown on its own (the Now panel,
+    /// board cards, the map card), so a screen never mixes "1 p.m." with "2:30".
+    var clockTime: String { [columnTime, periodMark].compactMap { $0 }.joined(separator: " ") }
     /// "a.m." / "p.m.", or nil on a 24-hour clock.
     var periodMark: String? {
         let uses24 = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current)?.contains("a") == false

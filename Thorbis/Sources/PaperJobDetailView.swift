@@ -1204,7 +1204,8 @@ struct JobDetailView: View {
                 JobContactsSection(people: JobContacts.people(contacts: current ? contacts : [], customer: current ? customerRecord : nil),
                                    preference: JobContacts.preference(current ? customerRecord : nil),
                                    loaded: current && contactsLoaded, failed: current && contactsFailed,
-                                   customerID: job.customerId) { await loadContacts(job) }
+                                   customerID: job.customerId,
+                                   customerName: linkedCustomer(job)?.name) { await loadContacts(job) }
                 let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
                                            loaded: placesCurrent, failed: locationsFailed) { await loadLocations(job) }

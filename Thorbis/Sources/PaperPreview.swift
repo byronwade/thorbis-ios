@@ -1579,7 +1579,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             listed[index]["locationId"] = PaperPreview.homeLocationID
             // A dispatched job's moves as the live server lists them (build 125's status sheet), so
             // the job screen's status popover and ••• show every allowed move.
-            if listed[index]["status"] as? String == "dispatched" {
+            if PaperPreview.isJobScreenPreview, listed[index]["status"] as? String == "dispatched" {
                 listed[index]["allowedTransitions"] = ["en_route", "arrived", "in_progress", "paused", "scheduled"]
             }
             if PaperPreview.screen == "job-activity" { listed[index]["dispatchedAt"] = today(hour: 8, minute: 2) }

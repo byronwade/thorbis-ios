@@ -111,7 +111,7 @@ struct ScheduleMapView: View {
                 .font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(2)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 StatusLabel(jobStatus: stop.job.status, hasTime: stop.job.scheduledFor != nil)
-                Text(JobFiltering.date(stop.job.scheduledFor)?.tradeTime ?? "Stop \(stop.number)")
+                Text(JobFiltering.date(stop.job.scheduledFor)?.clockTime ?? "Stop \(stop.number)")
                     .font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
             }
             .padding(.top, 4)

@@ -39,7 +39,7 @@ struct JobStatusMenu<Label: View>: View {
 }
 
 /// The grouped panel: a caption, then each group's rows with a small gap (space, never a line)
-/// between groups. Scrolls only when it would outgrow the screen.
+/// between groups. Scrolls only when it would outgrow the room it is given.
 struct JobStatusMenuPanel: View {
     let groups: [[ThorbisMenuItem]]
     var title: String? = nil
@@ -54,11 +54,6 @@ struct JobStatusMenuPanel: View {
         return typeSize >= .xxLarge ? 300 : 264
     }
 
-    private var estimatedHeight: CGFloat {
-        let rows = groups.joined().reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? 46 : 62) }
-        return (rows + (title == nil ? 12 : 44) + CGFloat(max(0, groups.count - 1)) * 8 + 16) * typeSize.sheetHeightScale
-    }
-
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(groups.enumerated()), id: \.offset) { index, rows in
@@ -71,12 +66,11 @@ struct JobStatusMenuPanel: View {
     }
 
     var body: some View {
-        Group {
-            if estimatedHeight > 520 {
-                ScrollView { content }.frame(height: 520)
-            } else {
-                content
-            }
+        // Whole when it fits the room the popover is given; otherwise the rows scroll from the top,
+        // caption first (large text, many moves).
+        ViewThatFits(in: .vertical) {
+            content
+            ScrollView { content }.scrollBounceBehavior(.basedOnSize)
         }
         .frame(width: width)
         // design.thorbis.com Motion: a menu fades in at 120ms ease-out; it does not fly.

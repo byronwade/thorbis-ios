@@ -55,8 +55,11 @@ struct DispatchBoardView: View {
     }
 
     static func columns(today: [Job], unscheduled: [Job]) -> [Column] {
-        [Column(id: "open", title: "Open", tone: .scheduled,
-                jobs: today.filter { ["scheduled", "dispatched"].contains($0.status) }, waiting: unscheduled, usual: ["scheduled"]),
+        // Open takes everything not yet moving (any status the board doesn't name too), so no job
+        // booked today falls between columns; its card names the odd status.
+        let moving: Set<String> = ["en_route", "arrived", "in_progress", "paused", "completed"]
+        return [Column(id: "open", title: "Open", tone: .scheduled,
+                jobs: today.filter { !moving.contains($0.status) }, waiting: unscheduled, usual: ["scheduled"]),
          Column(id: "en-route", title: "En route", tone: .dispatched, jobs: today.filter { $0.status == "en_route" }, usual: ["en_route"]),
          Column(id: "on-site", title: "On site", tone: .inProgress,
                 jobs: today.filter { ["arrived", "in_progress", "paused"].contains($0.status) }, usual: ["arrived", "in_progress"]),
@@ -164,7 +167,7 @@ struct DispatchBoardView: View {
             if age, let created = JobFiltering.date(job.createdAt) {
                 return ("Waiting \(ScheduleCompactRow.age(since: created))", "Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
             }
-            if let date = JobFiltering.date(job.scheduledFor) { return (date.tradeTime, date.tradeTime) }
+            if let date = JobFiltering.date(job.scheduledFor) { return (date.clockTime, date.tradeTime) }
             return ("No time", "No time")
         }()
         let showsStatus = !usual.contains(job.status)
@@ -177,8 +180,10 @@ struct DispatchBoardView: View {
                         ProgressView().controlSize(.small)
                     } else if let tech {
                         InitialsAvatar(name: tech, size: 20)
-                    } else if job.assignedToUserId == nil {
-                        Text("No tech").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                    } else {
+                        // Unassigned, or someone outside the roster this person can assign to.
+                        Text(job.assignedToUserId == nil ? "No tech" : "Other tech")
+                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
                     }
                 }
                 Text(street ?? job.title).font(Theme.font(16, weight: .medium))
@@ -204,7 +209,7 @@ struct DispatchBoardView: View {
         .disabled(movingJobID != nil)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([street ?? job.title, street != nil ? job.title : nil, customer, when.spoken,
-                             job.status.statusLabel, tech.map { "Assigned to \($0)" } ?? (job.assignedToUserId == nil ? "No tech" : nil)]
+                             job.status.statusLabel, tech.map { "Assigned to \($0)" } ?? (job.assignedToUserId == nil ? "No tech" : "Assigned outside your roster")]
             .compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Assign, reschedule or open this job")
