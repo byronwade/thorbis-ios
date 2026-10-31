@@ -95,6 +95,8 @@ struct EquipmentEditor: View {
     let customerID: String
     let locations: [ServiceLocationRecord]
     let existing: EquipmentRecord?
+    /// New equipment only: values read elsewhere (the data-plate scan) to start the form with.
+    var prefill: EquipmentInput? = nil
     let onSaved: () async -> Void
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
@@ -172,8 +174,9 @@ struct EquipmentEditor: View {
                                    model: existing.model, serialNumber: existing.serialNumber, notes: existing.notes)
             installed = existing.installedOn.flatMap(EquipmentRecord.day)
             warranty = existing.warrantyEnd
-        } else if locations.count == 1 {
-            input.locationId = locations.first?.id
+        } else {
+            if let prefill { input = prefill }
+            if input.locationId == nil, locations.count == 1 { input.locationId = locations.first?.id }
         }
     }
 
