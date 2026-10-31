@@ -384,43 +384,78 @@ extension LocalWorkspaceSection {
     }
 }
 
-/// Paper 29 and 65 together: every destination that is not a tab, then account settings.
+/// More (redesign 2026-10-31, after Linear's sidebar): the business on top with its switcher, then
+/// every place that is not in the bar as a row with a coloured place mark and a count where the phone
+/// already knows one, then Settings and the bar editor. It is the bar's More tab, not a hidden menu.
 struct MoreView: View {
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
+    @EnvironmentObject private var store: Store
     @EnvironmentObject var api: APIClient
+    @Environment(\.paperOpenPlace) private var openPlace
+    @Environment(\.paperManageBusinesses) private var manageBusinesses
     @State private var showSettings = false
+    @State private var editing = false
 
-    /// More holds places only. Account, company, payments, menu, appearance, What's new and
-    /// sign-out all live in the one Settings.
+    private var pinned: [MenuItem] { layout.visibleTabs(session) }
+
+    /// Every place below the bar's, in the person's menu order, grouped.
+    private func places(in group: MenuItem.Group) -> [MenuItem] {
+        AppMenuContent.menu(tabs: pinned, hidden: layout.hidden, order: layout.menuOrder,
+                            permitted: { $0.permitted(session) })
+            .filter { $0.group == group }
+    }
+
+    private var localSections: [LocalWorkspaceSection] {
+        guard session.user?.id != nil, session.activeOrganization?.id != nil else { return [] }
+        return LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                workspaceHeader
-                // Items placed in the tab bar or hidden in Customize menu are left out here.
-                ForEach(MenuItem.Group.allCases, id: \.self) { section in
-                    let items = layout.moreItems(in: section, session: session)
-                    let local = section == .phone && session.user?.id != nil && session.activeOrganization?.id != nil
-                        ? LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) } : []
-                    if !items.isEmpty || !local.isEmpty {
-                        group(section.rawValue) {
-                            ForEach(items) { item in
-                                if let route = item.route {
-                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint, filled: true) }
+                PaperHeader(title: "More", subtitle: "Every place in Thorbis")
+                VStack(alignment: .leading, spacing: 20) {
+                    businessWell
+                    ForEach(MenuItem.Group.allCases, id: \.self) { group in
+                        let items = places(in: group)
+                        let local = group == .phone ? localSections : []
+                        if !items.isEmpty || !local.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                SectionHeader(title: group.rawValue, count: items.count + local.count)
+                                Well {
+                                    ForEach(Array(items.enumerated()), id: \.element) { index, item in
+                                        placeRow(item)
+                                        if index < items.count - 1 || !local.isEmpty { WellDivider(leading: 54) }
+                                    }
+                                    ForEach(Array(local.enumerated()), id: \.element) { index, section in
+                                        NavigationLink(value: PaperRoute.local(section)) {
+                                            MoreRow(title: section.title, symbol: section.moreSymbol, tint: Theme.markGrey,
+                                                    subtitle: section.moreSubtitle)
+                                        }
+                                        if index < local.count - 1 { WellDivider(leading: 54) }
+                                    }
                                 }
-                            }
-                            ForEach(local, id: \.self) { section in
-                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt, filled: true) }
                             }
                         }
                     }
-                }
-                group("Account") {
-                    Button { showSettings = true } label: {
-                        PaperMenuRow("Settings", symbol: "gearshape",
-                                     subtitle: "Account, company, payments, menu and appearance", tile: Theme.markAccent, filled: true)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SectionHeader(title: "Account")
+                        Well {
+                            Button { showSettings = true } label: {
+                                MoreRow(title: "Settings", symbol: "gearshape", tint: Theme.markGrey,
+                                        subtitle: "Account, company, payments, menu and appearance")
+                            }
+                            WellDivider(leading: 54)
+                            Button { editing = true } label: {
+                                MoreRow(title: "Edit bar and menu", symbol: "slider.horizontal.3", tint: Theme.markGrey,
+                                        subtitle: "Choose the places in the bar and their order")
+                            }
+                            .accessibilityIdentifier("more-edit-menu")
+                        }
                     }
                 }
+                .paperCardMargin()
                 Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
                     .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity).padding(.top, 28).padding(.bottom, 32)
@@ -430,23 +465,106 @@ struct MoreView: View {
         .background(Theme.background)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $editing) {
+            AppMenuEditor { editing = false }
+                .padding(.top, 8)
+                .presentationDetents([.large])
+                .presentationBackground(Theme.background)
+        }
+        #if DEBUG
+        .task { if PaperPreview.enabled, PaperPreview.screen == "app-menu-edit" { editing = true } }
+        #endif
     }
 
-    /// MA-05: the same header as every tab root (30/500 title). Switching business lives in the
-    /// bottom bar's menu and New job on the bar's round button, so they are not repeated here.
-    private var workspaceHeader: some View {
-        PaperHeader(title: "More", subtitle: session.activeOrganization?.name ?? "Workspace")
+    /// A place: its route under More, or its own root for Schedule, Jobs and Customers.
+    @ViewBuilder private func placeRow(_ item: MenuItem) -> some View {
+        let row = MoreRow(title: item.title, symbol: item.symbol, tint: item.tint, subtitle: item.subtitle, count: count(item))
+        if let route = item.route {
+            NavigationLink(value: route) { row }
+        } else {
+            Button { openPlace(item) } label: { row }
+        }
     }
 
-    /// A titled group of places on one planar card; rows are separated by space, not rules.
-    private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: title).padding(.top, 14).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-            PaperCard {
-                VStack(alignment: .leading, spacing: 0) { content() }
-                    .padding(.vertical, PaperCardMetrics.edge)
+    /// Counts the phone already holds; places whose count needs another read show none.
+    private func count(_ item: MenuItem) -> Int? {
+        switch item {
+        case .schedule:
+            let today = store.jobs.filter { $0.status != "canceled" && (JobFiltering.date($0.scheduledFor).map { Calendar.current.isDateInToday($0) } ?? false) }
+            return today.count
+        case .jobs: return store.jobs.filter { !["completed", "canceled"].contains($0.status) }.count
+        case .customers: return store.customers.isEmpty ? nil : store.customers.count
+        default: return nil
+        }
+    }
+
+    private var businessName: String { session.activeOrganization?.name ?? "Business" }
+
+    /// Every business this person belongs to, the current one checked, then Add a business.
+    private var businessItems: [ThorbisMenuItem] {
+        session.organizations.map { organization in
+            let current = organization.id == session.activeOrganization?.id
+            return ThorbisMenuItem(organization.name, isSelected: current) {
+                guard !current else { return }
+                Task { await session.selectOrganization(id: organization.id) }
+            }
+        } + (manageBusinesses.map { manage in [ThorbisMenuItem("Add a business", icon: "plus", action: manage)] } ?? [])
+    }
+
+    /// The business and its switcher, like the workspace row on top of Linear's menu.
+    private var businessWell: some View {
+        Well {
+            ThorbisMenu(items: businessItems, title: "Switch business",
+                        accessibilityLabel: "\(businessName). Switch business") {
+                HStack(spacing: 12) {
+                    InitialsAvatar(name: businessName, size: 30)
+                        .accessibilityHidden(true)
+                    Text(businessName)
+                        .font(Theme.font(16, weight: .semibold))
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                }
+                .foregroundStyle(Theme.foreground)
+                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                .frame(minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("more-business-switcher")
+        }
+    }
+}
+
+/// One place in More: a coloured place mark, the name (and what it holds), a count on the right.
+struct MoreRow: View {
+    let title: String
+    let symbol: String
+    var tint: Color = Theme.markGrey
+    var subtitle: String? = nil
+    var count: Int? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        HStack(spacing: 14) {
+            PlaceMark(symbol: symbol, tint: tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let subtitle {
+                    Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                }
+            }
+            Spacer(minLength: 8)
+            if let count {
+                Text("\(count)").font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
             }
         }
-        .paperCardMargin()
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }

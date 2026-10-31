@@ -728,7 +728,7 @@ struct JobsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Jobs", subtitle: subtitle, filter: { showDisplay = true }, filterActive: filterActive)
+                PaperHeader(title: "Jobs", subtitle: subtitle, filter: { showDisplay = true }, filterActive: filterActive, showsCreate: true)
                 OfflineBanner()
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
                     .padding(.bottom, filterActive ? 0 : 8)

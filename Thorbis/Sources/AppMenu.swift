@@ -113,12 +113,6 @@ enum AppMenuContent {
         }
     }
 
-    /// The bar's last slot: the place showing now when it is not pinned, else the last one opened from the menu.
-    static func switcher(current: MenuItem?, last: MenuItem?, pinned: [MenuItem]) -> MenuItem? {
-        if let current, !pinned.contains(current) { return current }
-        if let last, !pinned.contains(last) { return last }
-        return nil
-    }
 }
 
 /// Shared look for the floating bar, its action button and the menu: a frosted card with a hairline rim.
@@ -136,10 +130,12 @@ struct FloatingSurface<S: InsettableShape>: ViewModifier {
     }
 }
 
-/// The phone's only navigation, laid out like Linear: a floating capsule of pinned places that ends in
-/// a switcher slot, then round Search and Create (+) buttons on the same line. There is no side
-/// menu and no system tab bar. Tapping the switcher slot goes to its place; tapping it again (or when
-/// it is empty) opens `AppMenu`. The bar sits low, partly over the home indicator's margin.
+/// The phone's only navigation (redesign 2026-10-31): a floating labeled tab bar, like Linear and
+/// Jobber. The person's pinned places (Today · Jobs · Customers by default; owners and office staff
+/// get their role's bar, and anyone can rearrange it) then a fixed More, each an icon over an 11pt
+/// label. The tab showing sits on a brand-tinted pill with icon and label in brand. Search stays a
+/// separate round button to the right. New moved to the screen headers' + circle. More is a real
+/// screen listing every other place, so nothing hides behind a switcher.
 struct AppBottomBar: View {
     /// One entry in a round button's long-press menu.
     struct QuickAction: Identifiable {
@@ -159,21 +155,16 @@ struct AppBottomBar: View {
     }
 
     let pinned: [MenuItem]
-    let switcher: MenuItem?
     /// The place showing right now (a MenuItem id or "more").
     let current: String
-    let menuOpen: Bool
     let select: (MenuItem) -> Void
-    let openMenu: () -> Void
+    /// Opens More (also where any place not pinned lives).
+    let openMore: () -> Void
     let search: () -> Void
-    /// The + after Search: always the same small create menu (New job, New estimate, New customer),
-    /// whatever the screen. With only one thing this person may create, it starts that directly.
-    var create: (label: String, run: () -> Void)?
     var sync: Sync?
-    /// Long-press menus, in sections: recent records on Search; on +, the same creates as a shortcut.
+    /// Long-press Search: recent records, and the outbox when it holds anything.
     var searchActions: [[QuickAction]] = []
-    var newActions: [[QuickAction]] = []
-    /// Search lives in the bar: when active the places and + give way to a field and a close button.
+    /// Search lives in the bar: when active the tabs give way to a field and a close button.
     var searchActive = false
     var searchQuery: Binding<String> = .constant("")
     var closeSearch: () -> Void = {}
@@ -185,14 +176,16 @@ struct AppBottomBar: View {
     /// Bumped per place on each tap, so only the tapped icon bounces.
     @State private var taps: [String: Int] = [:]
 
+    static let moreID = "more"
+
     var body: some View {
         Group {
-            if searchActive { searchRow } else { placesRow }
+            if searchActive { searchRow } else { tabsRow }
         }
         .padding(.horizontal, 16)
     }
 
-    /// The Search circle widens into this field; + becomes the close button.
+    /// The Search circle widens into this field; the close button takes the circle's place.
     private var searchRow: some View {
         HStack(alignment: .center, spacing: AppBottomBar.gap) {
             HStack(spacing: 10) {
@@ -224,7 +217,6 @@ struct AppBottomBar: View {
             .frame(height: AppBottomBar.circle)
             .frame(maxWidth: .infinity)
             .modifier(FloatingSurface(shape: Capsule()))
-            .matchedGeometryEffect(id: "search", in: pill)
             .onAppear { fieldFocused = true }
             Button(action: closeSearch) {
                 Image(systemName: "xmark")
@@ -235,50 +227,52 @@ struct AppBottomBar: View {
                     .contentShape(Circle())
             }
             .buttonStyle(PressStyle())
-            .matchedGeometryEffect(id: "trailing", in: pill)
+            .matchedGeometryEffect(id: "search", in: pill)
             .accessibilityLabel("Close search")
         }
     }
 
-    private var placesRow: some View {
+    private var tabsRow: some View {
         HStack(alignment: .center, spacing: AppBottomBar.gap) {
-            HStack(spacing: 2) {
-                ForEach(pinned) { item in slot(item) }
-                switcherSlot
+            HStack(spacing: 0) {
+                ForEach(pinned) { item in
+                    tab(id: item.rawValue, title: item.tabTitle, symbol: item.symbol) { tap(item) }
+                }
+                tab(id: Self.moreID, title: "More", symbol: "ellipsis.circle", here: moreHere) {
+                    if !moreHere { UISelectionFeedbackGenerator().selectionChanged() }
+                    if !reduceMotion { taps[Self.moreID, default: 0] += 1 }
+                    openMore()
+                }
+                .accessibilityIdentifier("bottom-bar-more")
             }
             .padding(4)
-            // The selection pill glides to the new place instead of jumping.
+            // The selection pill glides to the new tab instead of jumping.
             .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.82), value: current)
             .frame(maxWidth: .infinity)
             .modifier(FloatingSurface(shape: Capsule()))
-            // The menu grows out of the capsule and covers it while open.
-            .opacity(menuOpen ? 0 : 1)
-            .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
-            circle("magnifyingglass", label: searchLabel, actions: searchActions, action: search)
+            searchCircle
                 .accessibilityIdentifier("bottom-bar-search")
                 .overlay { syncRing }
                 .overlay(alignment: .topTrailing) { syncBadge }
                 .matchedGeometryEffect(id: "search", in: pill)
-            if let create {
-                circle("plus", label: create.label, actions: newActions, action: create.run)
-                    .accessibilityIdentifier("bottom-bar-create")
-                    .matchedGeometryEffect(id: "trailing", in: pill)
-            }
         }
+        // The bar's words stay one size so five tabs fit; the large content viewer shows them big.
+        .dynamicTypeSize(...DynamicTypeSize.large)
     }
 
-    /// The round buttons' size; the capsule (4 + 42 + 4) is the same height so every edge lines up.
-    static let circle: CGFloat = 50
+    /// More is selected on its own list and on any place that is not pinned.
+    private var moreHere: Bool { !pinned.contains { $0.rawValue == current } }
+
+    /// The bar's height: the capsule (4 + 48 + 4) and the Search circle line up.
+    static let circle: CGFloat = 56
     static let gap: CGFloat = 8
     /// How far the bar sits above the screen's bottom edge, into the home indicator's margin.
     static let bottomGap: CGFloat = 20
 
-    /// A round button. Tap runs `action`; a long press opens `actions` as a menu.
-    private func circle(_ symbol: String, label: String, actions: [[QuickAction]],
-                        action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .medium))
+    private var searchCircle: some View {
+        Button(action: search) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(Theme.foreground)
                 .frame(width: AppBottomBar.circle, height: AppBottomBar.circle)
                 .modifier(FloatingSurface(shape: Circle()))
@@ -287,16 +281,17 @@ struct AppBottomBar: View {
         }
         .buttonStyle(PressStyle())
         .contextMenu {
-            ForEach(actions.indices, id: \.self) { index in
+            ForEach(searchActions.indices, id: \.self) { index in
                 Section {
-                    ForEach(actions[index]) { item in
+                    ForEach(searchActions[index]) { item in
                         Button(action: item.run) { Label(item.title, systemImage: item.symbol) }
                             .disabled(!item.enabled)
                     }
                 }
             }
         }
-        .accessibilityLabel(label)
+        .accessibilityLabel(searchLabel)
+        .accessibilityShowsLargeContentViewer { Label("Search", systemImage: "magnifyingglass") }
     }
 
     private var searchLabel: String {
@@ -324,14 +319,12 @@ struct AppBottomBar: View {
         case .waiting(let count), .needsReview(let count):
             let refused = { if case .needsReview = sync { true } else { false } }()
             Text("\(count)")
-                .font(Theme.monoFont(12, weight: .medium))
+                .font(Theme.monoFont(12, weight: .semibold))
                 .foregroundStyle(refused ? Color.white : Theme.foreground)
                 .frame(minWidth: 20, minHeight: 20)
                 .padding(.horizontal, count > 9 ? 4 : 0)
                 .background(refused ? Theme.destructiveFill : Theme.warningSurface, in: Capsule())
                 .overlay(Capsule().strokeBorder(Theme.background, lineWidth: 2))
-                // The bar's glyphs stay one size; a badge that grew would cover the Search glyph.
-                .dynamicTypeSize(...DynamicTypeSize.large)
                 .offset(x: 4, y: -4)
                 .transition(.scale.combined(with: .opacity))
                 .allowsHitTesting(false)
@@ -360,53 +353,39 @@ struct AppBottomBar: View {
         select(item)
     }
 
-    private func slot(_ item: MenuItem) -> some View {
-        let here = current == item.rawValue
-        return Button { tap(item) } label: {
-            Image(systemName: item.symbol)
-                .symbolVariant(here ? .fill : .none)
-                .font(.system(size: 18, weight: .medium))
-                .symbolEffect(.bounce.down, value: taps[item.rawValue] ?? 0)
-                .foregroundStyle(Theme.foreground)
-                .frame(maxWidth: .infinity).frame(height: AppBottomBar.circle - 8)
-                .background { if here { selectionPill } }
-                .contentShape(Capsule())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel(item.tabTitle)
-        .accessibilityAddTraits(here ? .isSelected : [])
-    }
-
-    /// One pill shared by every slot, so selection slides between them.
-    private var selectionPill: some View {
-        Capsule().fill(Theme.fill).matchedGeometryEffect(id: "selection", in: pill)
-    }
-
-    private var switcherSlot: some View {
-        let here = switcher.map { current == $0.rawValue } ?? false
-        return Button {
-            if let switcher, !here { tap(switcher) } else { openMenu() }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: switcher?.symbol ?? "square.grid.2x2")
+    /// One labeled tab: icon over word. The showing tab sits on the brand-tinted pill in brand.
+    private func tab(id: String, title: String, symbol: String, here explicit: Bool? = nil,
+                     action: @escaping () -> Void) -> some View {
+        let here = explicit ?? (current == id)
+        return Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol)
                     .symbolVariant(here ? .fill : .none)
                     .font(.system(size: 18, weight: .medium))
-                    .symbolEffect(.bounce.down, value: switcher.flatMap { taps[$0.rawValue] } ?? 0)
-                    // A new place in the slot crossfades its icon rather than popping.
-                    .contentTransition(.symbolEffect(.replace))
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.muted)
+                    .symbolEffect(.bounce.down, value: taps[id] ?? 0)
+                    .frame(height: 22)
+                Text(title)
+                    .font(Theme.font(12, weight: here ? .semibold : .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            .foregroundStyle(Theme.foreground)
+            .foregroundStyle(here ? Theme.brandText : Theme.muted)
+            .padding(.horizontal, 2)
             .frame(maxWidth: .infinity).frame(height: AppBottomBar.circle - 8)
             .background { if here { selectionPill } }
             .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
-        .accessibilityLabel(switcher.map { here ? "\($0.title), open menu" : $0.title } ?? "Menu")
-        .accessibilityAddTraits(here ? .isSelected : [])
-        .accessibilityAction(named: "Open menu", openMenu)
+        // One element per tab: the word is the label, so tests and VoiceOver see one "Jobs", not two.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(here ? [.isButton, .isSelected] : .isButton)
+        .accessibilityShowsLargeContentViewer { Label(title, systemImage: symbol) }
+    }
+
+    /// One pill shared by every tab, so selection slides between them.
+    private var selectionPill: some View {
+        Capsule().fill(Theme.brandSurface).matchedGeometryEffect(id: "selection", in: pill)
     }
 }
 
@@ -498,164 +477,6 @@ struct BarGround: View {
         .padding(.bottom, -(AppBottomBar.bottomGap + 40))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-}
-
-/// The pop-up menu over the bar (Linear's): the business on top with its switcher and an edit
-/// button, then every place, then Settings. Edit turns the menu into `AppMenuEditor`.
-struct AppMenu: View {
-    /// The screen width; the menu matches the bar's capsule, and editing widens it to the gutters.
-    let width: CGFloat
-    /// Round buttons beside the capsule (Search, and + when there is something to create).
-    var circles: CGFloat = 2
-    let places: [MenuItem]
-    let local: [LocalWorkspaceSection]
-    /// The place showing right now (a MenuItem id or "more").
-    let current: String
-    let open: (MenuItem) -> Void
-    let openLocal: (LocalWorkspaceSection) -> Void
-    let manageBusinesses: () -> Void
-    let settings: () -> Void
-    let close: () -> Void
-    @EnvironmentObject private var session: SessionController
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var editing = false
-    @State private var rowsHeight: CGFloat = 0
-    @State private var moreBelow = false
-
-    /// As wide as the bar's capsule, so the menu reads as the capsule opening up.
-    private var capsuleWidth: CGFloat {
-        width - 32 - circles * (AppBottomBar.circle + AppBottomBar.gap)
-    }
-
-    private var businessName: String { session.activeOrganization?.name ?? "Business" }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if editing {
-                AppMenuEditor { withAnimation(animation) { editing = false } }
-            } else {
-                header
-                Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 12)
-                // Sized to its rows, so a short menu sits at its own height and a long one scrolls inside
-                // the room it has. The lower edge fades only while there is more below.
-                ScrollView {
-                    rows.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
-                }
-                .frame(maxHeight: rowsHeight > 0 ? rowsHeight : nil)
-                .scrollBounceBehavior(.basedOnSize)
-                .scrollIndicators(.hidden)
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentOffset.y + geometry.containerSize.height < geometry.contentSize.height - 1
-                } action: { _, more in moreBelow = more }
-                .mask {
-                    VStack(spacing: 0) {
-                        Color.black
-                        LinearGradient(colors: [.black, .black.opacity(moreBelow ? 0 : 1)], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 28)
-                    }
-                }
-            }
-        }
-        // The editor takes all the room it is given, so long lists can be dragged end to end.
-        .frame(width: max(editing ? width - 32 : capsuleWidth, 0))
-        .frame(maxHeight: editing ? .infinity : nil, alignment: .top)
-        .foregroundStyle(Theme.foreground)
-        // Nothing inside, scrolled or not, draws outside the card's rounded edge.
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .modifier(FloatingSurface(shape: RoundedRectangle(cornerRadius: 30, style: .continuous)))
-        .accessibilityAddTraits(.isModal)
-        .accessibilityAction(.escape, close)
-        #if DEBUG
-        .task { if PaperPreview.enabled, PaperPreview.screen == "app-menu-edit" { editing = true } }
-        #endif
-    }
-
-    private var animation: Animation { reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.3, dampingFraction: 0.9) }
-
-    private var rows: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(places) { item in
-                row(item.title, symbol: item.symbol, here: current == item.rawValue) { open(item) }
-            }
-            ForEach(local, id: \.self) { section in
-                row(section.title, symbol: section.moreSymbol, here: false) { openLocal(section) }
-            }
-            // Search is the round button beside the bar, so it is not repeated here.
-            row("Settings", symbol: "gearshape", here: false, action: settings)
-        }
-        .padding(8)
-    }
-
-    /// Every business this person belongs to, the current one checked, then Add a business.
-    private var businessItems: [ThorbisMenuItem] {
-        session.organizations.map { organization in
-            let current = organization.id == session.activeOrganization?.id
-            return ThorbisMenuItem(organization.name, isSelected: current) {
-                close()
-                guard !current else { return }
-                Task { await session.selectOrganization(id: organization.id) }
-            }
-        } + [ThorbisMenuItem("Add a business", icon: "plus", action: manageBusinesses)]
-    }
-
-    /// The business and its switcher. Every business this person belongs to is one tap away.
-    private var header: some View {
-        HStack(spacing: 8) {
-            ThorbisMenu(items: businessItems, title: "Switch business",
-                        accessibilityLabel: "\(businessName). Switch business") {
-                HStack(spacing: 10) {
-                    Avatar(name: businessName, size: 28, fill: Theme.fill)
-                    Text(businessName)
-                        .font(Theme.font(17, weight: .medium))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                }
-                .foregroundStyle(Theme.foreground)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            Spacer(minLength: 0)
-            Button { withAnimation(animation) { editing = true } } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Theme.foreground)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityLabel("Edit menu")
-        }
-        .padding(.leading, 20)
-        .padding(.trailing, 10)
-        .padding(.vertical, 8)
-    }
-
-    /// One icon and a label; the place showing now sits on a soft pill.
-    private func row(_ title: String, symbol: String, here: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: symbol)
-                    .symbolVariant(here ? .fill : .none)
-                    .font(.system(size: 18, weight: .medium))
-                    .frame(width: 26)
-                Text(title)
-                    .font(Theme.font(17, weight: here ? .medium : .regular))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(Theme.foreground)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .background {
-                if here { RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.fill) }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-        .accessibilityAddTraits(here ? .isSelected : [])
     }
 }
 

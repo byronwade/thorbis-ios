@@ -22,10 +22,6 @@ struct RootView: View {
     @State private var selectedTab = PrimaryTab.initial.rawValue
     /// Paths for tabs an owner added (Inbox, Estimates, ...), keyed by MenuItem id.
     @State private var customPaths: [String: NavigationPath] = [:]
-    /// The pop-up menu over the bottom bar.
-    @State private var menuOpen = false
-    /// The last place opened from the menu that is not pinned; the bar's switcher slot shows it.
-    @State private var lastPlace: MenuItem?
     /// Set once the launch place is settled, so a later capability refresh never moves the person.
     @State private var settledLaunchPlace = false
     /// iPhone search: the bar turns into a field and results rise in a drawer above it.
@@ -37,13 +33,11 @@ struct RootView: View {
     @StateObject private var searchModel = SearchModel()
     @State private var newCustomer = false
     @State private var newEstimate = false
-    /// The bar's create menu, and the choice that runs once it has closed.
+    /// The header +'s create menu, and the choice that runs once it has closed.
     @State private var createMenuOpen = false
     @State private var pendingCreate: (() -> Void)?
     @State private var reviewScope: SavedWorkScope?
     @ObservedObject private var recents = RecentItems.shared
-    /// The phone's width, which sizes the pop-up menu against the bar.
-    @State private var phoneWidth: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
     @State private var schedulePath = NavigationPath()
@@ -137,9 +131,10 @@ struct RootView: View {
         return UIDevice.current.userInterfaceIdiom == .pad && sizeClass == .regular && width >= 700
     }
 
-    /// Linear-style phone navigation: no side menu and no system tab bar. A floating bar holds the
-    /// pinned places and a switcher slot; the switcher opens a menu of every place, with the business
-    /// switcher on top. The bar shows on a place's first screen and steps aside for pushed screens.
+    /// Linear-style phone navigation: no side menu and no system tab bar. A floating labeled tab bar
+    /// holds the pinned places and More; More is a screen listing every other place, with the
+    /// business switcher on top. The bar shows on a place's first screen and steps aside for pushed
+    /// screens. New lives in the tab roots' header + circle.
     @ViewBuilder private func phoneNavigation() -> some View {
         phoneShell()
     }
@@ -147,7 +142,7 @@ struct RootView: View {
     private func phoneShell() -> some View {
         GeometryReader { geometry in
             phonePlaces()
-                .accessibilityHidden(menuOpen || barSearching)
+                .accessibilityHidden(barSearching)
                 .overlay {
                     if barSearching {
                         // Frost the screen behind so only the drawer and field read; a tap closes search.
@@ -161,12 +156,12 @@ struct RootView: View {
                 }
                 .overlay(alignment: .bottom) {
                     // Pulled down into the home indicator's margin, like Linear, so it sits low and small.
-                    if atTabRoot || menuOpen || barSearching {
+                    if atTabRoot || barSearching {
                         VStack(spacing: 10) {
                             if barSearching {
                                 searchDrawer(height: max(geometry.size.height - 92, 240))
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                            } else if let job = currentJob, !menuOpen {
+                            } else if let job = currentJob {
                                 CurrentJobChip(job: job, customer: store.customerName(job.customerId)) {
                                     store.requestedJobID = job.id
                                 }
@@ -176,11 +171,11 @@ struct RootView: View {
                         }
                         // Measured only for the chip and bar; search and the menu cover the place anyway.
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                            guard !barSearching, !menuOpen else { return }
+                            guard !barSearching else { return }
                             barReserve = max(0, height + AppBottomBar.bottomGap - geometry.safeAreaInsets.bottom)
                         }
                         // The bar (and the chip, when up) sit on one ground, so rows never show between the circles.
-                        .background { if !barSearching && !menuOpen { BarGround() } }
+                        .background { if !barSearching { BarGround() } }
                         .padding(.bottom, AppBottomBar.bottomGap)
                         .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85), value: currentJob?.id)
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: barSync)
@@ -189,31 +184,6 @@ struct RootView: View {
                 // The bar measures from the screen's edge, not the home indicator. It floats over the
                 // place; each root reserves `barReserve` itself, so nothing hides behind it.
                 .ignoresSafeArea(.container, edges: .bottom)
-                .overlay {
-                    if menuOpen {
-                        // A light veil; a tap anywhere outside the menu closes it.
-                        Color.black.opacity(0.08)
-                            .ignoresSafeArea()
-                            .onTapGesture { closeMenu() }
-                            .accessibilityHidden(true)
-                            .transition(.opacity)
-                    }
-                }
-                .overlay(alignment: .bottomLeading) {
-                    if menuOpen {
-                        appMenu
-                            // As wide as the bar's capsule, so it reads as the capsule opening up.
-                            .frame(maxHeight: geometry.size.height - 24, alignment: .bottom)
-                            .padding(.leading, 16)
-                            .padding(.bottom, barDrop(geometry))
-                            .transition(reduceMotion
-                                ? .opacity
-                                : .scale(scale: 0.6, anchor: .bottomLeading).combined(with: .opacity))
-                    }
-                }
-                // Rotation or a new window size closes the menu instead of leaving it misplaced.
-                .onChange(of: geometry.size.width, initial: true) { phoneWidth = geometry.size.width }
-                .onChange(of: geometry.size.width) { if menuOpen { closeMenu() } }
         }
         .sheet(isPresented: $createMenuOpen, onDismiss: {
             let run = pendingCreate
@@ -245,7 +215,6 @@ struct RootView: View {
     }
 
     private func openBarSearch() {
-        closeMenu()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         searchModel.opened()
         withAnimation(searchAnimation) { barSearching = true }
@@ -296,11 +265,6 @@ struct RootView: View {
                               permitted: { $0.permitted(session) })
     }
 
-    private var localSections: [LocalWorkspaceSection] {
-        guard session.user?.id != nil, session.activeOrganization?.id != nil else { return [] }
-        return LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) }
-    }
-
     /// The job this person is on now. Schedule and Jobs already lead with it (Jobs' first group is
     /// In progress, directly above where the chip would float), so it stays off there. It only rides
     /// a place's root, never the job's own screen, and it sits in the bar's bottom inset so the
@@ -341,7 +305,7 @@ struct RootView: View {
         return [Array(recent), sync].filter { !$0.isEmpty }
     }
 
-    /// What this person may start from the bar, in a fixed order so + means the same on every screen.
+    /// What this person may start from a header +, in a fixed order so + means the same on every screen.
     private var createChoices: [AppBottomBar.QuickAction] {
         var create: [AppBottomBar.QuickAction] = []
         if session.can("job.create", feature: "jobs") {
@@ -356,18 +320,13 @@ struct RootView: View {
         return create
     }
 
-    /// The bar's +: a small create menu. With one choice it starts that directly; with none it hides.
-    private var barCreate: (label: String, run: () -> Void)? {
+    /// The header +: a small create menu. With one choice it starts that directly; with none it hides.
+    /// A long press offers the same creates straight from the press.
+    private var headerCreate: PaperCreateAction? {
         let choices = createChoices
-        if choices.count == 1, let only = choices.first { return (only.title, { closeMenu(); only.run() }) }
+        if choices.count == 1, let only = choices.first { return PaperCreateAction(label: only.title, run: only.run, choices: []) }
         guard !choices.isEmpty else { return nil }
-        return ("Create", { closeMenu(); createMenuOpen = true })
-    }
-
-    /// Long-press +: the same creates, straight from the press (a shortcut, never the only way).
-    private var newActions: [[AppBottomBar.QuickAction]] {
-        let choices = createChoices
-        return choices.count > 1 ? [choices] : []
+        return PaperCreateAction(label: "Create", run: { createMenuOpen = true }, choices: choices)
     }
 
     /// The create menu's card. The picked sheet opens once this one has closed; presenting both in
@@ -388,25 +347,15 @@ struct RootView: View {
         }
     }
 
-    /// Negative bottom padding that lowers the bar from the safe area to `AppBottomBar.bottomGap` off the
-    /// screen edge. Phones without a home indicator keep the gap above the edge.
-    private func barDrop(_ geometry: GeometryProxy) -> CGFloat {
-        AppBottomBar.bottomGap - geometry.safeAreaInsets.bottom
-    }
-
     private var bottomBar: some View {
         AppBottomBar(
             pinned: pinnedPlaces,
-            switcher: AppMenuContent.switcher(current: MenuItem(rawValue: selectedTab), last: lastPlace, pinned: pinnedPlaces),
             current: selectedTab,
-            menuOpen: menuOpen,
             select: { open($0) },
-            openMenu: { setMenu(open: true) },
+            openMore: { openMore() },
             search: { openBarSearch() },
-            create: barCreate,
             sync: barSync,
             searchActions: searchActions,
-            newActions: newActions,
             searchActive: barSearching,
             searchQuery: $searchModel.query,
             closeSearch: { closeBarSearch() },
@@ -414,35 +363,11 @@ struct RootView: View {
         )
     }
 
-    private var appMenu: some View {
-        AppMenu(
-            width: phoneWidth,
-            circles: barCreate == nil ? 1 : 2,
-            places: menuPlaces,
-            local: localSections,
-            current: selectedTab,
-            open: { item in closeMenu(); open(item) },
-            openLocal: { section in
-                closeMenu()
-                primaryTab = .more
-                morePath = NavigationPath()
-                morePath.append(PaperRoute.local(section))
-            },
-            manageBusinesses: { closeMenu(); workspace = true },
-            settings: { closeMenu(); showSettings = true },
-            close: closeMenu
-        )
+    /// More's own list; tapping More while on it returns to the top of the list.
+    private func openMore() {
+        if selectedTab == PrimaryTab.more.rawValue { morePath = NavigationPath() }
+        selectedTab = PrimaryTab.more.rawValue
     }
-
-    private func setMenu(open: Bool) {
-        guard open != menuOpen else { return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.86)) {
-            menuOpen = open
-        }
-    }
-
-    private func closeMenu() { setMenu(open: false) }
 
     /// Only the selected place is mounted. Each place's stack lives in RootView state, so its
     /// pushed screens survive a switch. Hidden-but-mounted places leaked into VoiceOver: a
@@ -456,9 +381,13 @@ struct RootView: View {
     /// The selected place, with the sheets and request handlers every place shares.
     private func phonePlaces() -> some View {
         placeStack()
-        // The bottom bar is the way around; screens drop their top-left menu button.
-        .environment(\.paperShowMenu, { Task { @MainActor in setMenu(open: true) } })
+        // The bottom bar is the way around; screens drop their top-left menu button. Anything that
+        // asked for "the menu" now opens More, the list of every place.
+        .environment(\.paperShowMenu, { Task { @MainActor in openMore() } })
         .environment(\.paperMenuButton, false)
+        .environment(\.paperCreate, headerCreate)
+        .environment(\.paperOpenPlace, { item in Task { @MainActor in open(item) } })
+        .environment(\.paperManageBusinesses, { Task { @MainActor in workspace = true } })
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $search) { PaperGlobalSearch() }
         .sheet(isPresented: $newCustomer) { NewCustomerSheet() }
@@ -612,7 +541,7 @@ struct RootView: View {
             case "create-menu": primaryTab = .jobs; createMenuOpen = true
             case "schedule-unscheduled": primaryTab = .schedule
             case "settings": showSettings = true
-            case "app-menu", "app-menu-edit": menuOpen = true
+            case "app-menu", "app-menu-edit": primaryTab = .more
             case "bar-live", "bar-syncing":
                 // A tech mid-job on Jobs, with two changes saved on the phone.
                 RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
@@ -678,10 +607,17 @@ struct RootView: View {
         }
     }
 
-    /// Every place is its own root; one that is not pinned takes the bar's switcher slot.
+    /// A pinned place is its own tab. Any other place opens under More, so More shows as selected and
+    /// Back returns to the list; Schedule, Jobs and Customers keep their own roots when not pinned.
     private func open(_ item: MenuItem) {
-        if !pinnedPlaces.contains(item) { lastPlace = item }
-        selectedTab = item.rawValue
+        if pinnedPlaces.contains(item) || item.route == nil {
+            selectedTab = item.rawValue
+        } else if let route = item.route {
+            var path = NavigationPath()
+            path.append(route)
+            morePath = path
+            selectedTab = PrimaryTab.more.rawValue
+        }
     }
 
     /// Proxy so tab switches can still be written as `primaryTab = .jobs`.

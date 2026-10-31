@@ -30,6 +30,8 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     /// The tab bar has little room; long names get a short label there.
     var tabTitle: String {
         switch self {
+        // The bar says what the place is for: the day's work (redesign 2026-10-31).
+        case .schedule: "Today"
         case .billing: "Billing"
         case .attention: "Attention"
         case .team: "Team"
@@ -59,14 +61,19 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// Quiet mark hue in menus: a few soft families, not a rainbow (design.thorbis.com Color).
+    /// The place mark's hue in More and the iPad sidebar (redesign 2026-10-31: Linear-style tinted
+    /// squares). Related places share a family: work in blue/indigo, money in green, people in teal.
     var tint: Color {
         switch self {
-        case .home, .schedule, .jobs, .attention: Theme.markAccent
-        case .customers, .team, .notices, .inbox: Theme.markOlive
-        case .estimates, .invoices, .billing, .money: Theme.markForest
-        case .priceBook, .reports: Theme.markPumpkin
-        case .drafts: Theme.markBurnt
+        case .home, .jobs: Theme.markBlue
+        case .schedule, .inbox: Theme.markAccent
+        case .customers: Theme.markTeal
+        case .attention: Theme.markRed
+        case .estimates: Theme.markPumpkin
+        case .invoices, .billing, .money: Theme.markForest
+        case .priceBook: Theme.markBurnt
+        case .reports: Theme.markOlive
+        case .team, .notices, .drafts: Theme.markGrey
         }
     }
 
