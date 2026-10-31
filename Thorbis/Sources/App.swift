@@ -199,6 +199,8 @@ struct ThorbisApp: App {
             }
             // Takes its own room at the top so it never covers a screen's back button or title.
             .safeAreaInset(edge: .top, spacing: 0) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
+            // `--paper-preview-scroll center|bottom`: opens scroll views part-way so lower sections can be captured.
+            .modifier(PaperPreviewScrollAnchor())
             #endif
             .task {
                 connectivity.onReconnect = { Task { await resync() } }

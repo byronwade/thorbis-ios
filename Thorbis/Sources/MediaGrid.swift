@@ -224,6 +224,23 @@ struct MediaShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
+/// Text handed to the share sheet (a job's summary from its ••• menu).
+struct SharedText: Identifiable {
+    let id = UUID()
+    let text: String
+    init(_ text: String) { self.text = text }
+}
+
+struct TextShareSheet: UIViewControllerRepresentable {
+    let text: String
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [text], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
 /// Files handed to the share sheet; Identifiable so one `.sheet(item:)` presents them.
 struct MediaShareFiles: Identifiable {
     let id = UUID()

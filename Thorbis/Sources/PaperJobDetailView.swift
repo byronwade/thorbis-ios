@@ -107,6 +107,7 @@ struct JobDetailView: View {
     @State private var followUpKind: FieldFollowUpRequest.Kind = .notifyOffice
     /// The draft invoice opened in the line editor by Add part.
     @State private var partsInvoice: InvoiceRecord?
+    @State private var shareJob: SharedText?
     @FocusState private var noteFocused: Bool
     #if DEBUG
     @State private var previewOpenedCustomerView = false
@@ -224,6 +225,7 @@ struct JobDetailView: View {
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .deviceHandoffs($handoff)
+        .sheet(item: $shareJob) { TextShareSheet(text: $0.text).presentationDetents([.medium, .large]) }
         .sensoryFeedback(.success, trigger: committed)
         .thorbisConfirm("Complete this job?", message: "Everything before wrap up is done.", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await completeHere() } }])
@@ -436,19 +438,14 @@ struct JobDetailView: View {
     @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
         if let job {
             ThorbisToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 0) {
-                    ShareLink(item: JobShareText.text(title: job.title, customer: store.customerName(job.customerId), scheduledFor: job.scheduledFor)) {
-                        PaperCircleLabel(symbol: "square.and.arrow.up", fill: Theme.card, bordered: true)
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Share job")
-                    let groups = menuGroups(job)
-                    if !groups.isEmpty {
-                        ThorbisMenu(items: groups.flatMap { $0 }.map { menuActionItem($0, job: job) },
-                                    title: "Job actions", accessibilityLabel: "Job actions") {
-                            PaperCircleLabel(symbol: "ellipsis", fill: Theme.card, bordered: true)
-                        }
-                    }
+                // One quiet circle (Job.dc.html): Share job sits in the menu with the rest, so it is always there.
+                ThorbisMenu(items: menuGroups(job).flatMap { $0 }.map { menuActionItem($0, job: job) } + [
+                                ThorbisMenuItem("Share job", icon: "square.and.arrow.up") {
+                                    shareJob = SharedText(JobShareText.text(title: job.title, customer: store.customerName(job.customerId),
+                                                                            scheduledFor: job.scheduledFor))
+                                }],
+                            title: "Job actions", accessibilityLabel: "Job actions") {
+                    PaperCircleLabel(symbol: "ellipsis", fill: Theme.card, bordered: true)
                 }
             }
         }
@@ -1017,9 +1014,13 @@ struct JobDetailView: View {
                 .id("job-property-history")
             photosStrip(job)
             latestActivity(job)
-            JobPropertyHistorySection(job: job, part: .visits, locations: customerLocations,
-                                      locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
-                                      visits: visits, visitsLoaded: visitsLoaded)
+            // Left out once the visits answer with none here, so an empty section adds no gap above Money.
+            if !visitsLoaded || !JobPropertyHistory.make(job: job, locations: [], equipment: [], visits: visits, listedJobs: store.jobs,
+                                                         currentUserID: session.user?.id).visits.isEmpty {
+                JobPropertyHistorySection(job: job, part: .visits, locations: customerLocations,
+                                          locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
+                                          visits: visits, visitsLoaded: visitsLoaded)
+            }
             moneyPanel(job)
             followUpsPanel
             // JS-05: only when the platform recorded the call that booked this job.
@@ -1201,7 +1202,7 @@ struct JobDetailView: View {
                 ForEach(estimates) { estimate in
                     let options = estimate.options ?? []
                     let (word, tint) = estimateWord(estimate.status)
-                    moneyLine(options.isEmpty ? "Estimate EST-\(estimate.id.suffix(4).uppercased())" : "Estimate · \(options.count) options",
+                    moneyLine(options.isEmpty ? "Estimate EST-\(estimate.id.suffix(4).uppercased())" : "Estimate · \(options.count) \(options.count == 1 ? "option" : "options")",
                               amount: options.isEmpty ? paperLinesTotal(estimate.lines).map { jobShortMoney($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } : nil,
                               word: word, tint: tint)
                 }

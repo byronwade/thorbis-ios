@@ -441,6 +441,17 @@ enum PaperPreview {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: configuration)
     }
+    /// `--paper-preview-scroll center|bottom`: where scroll views open, for capturing a long screen's lower sections.
+    static var scrollAnchor: UnitPoint? {
+        let args = ProcessInfo.processInfo.arguments
+        guard enabled, let index = args.firstIndex(of: "--paper-preview-scroll"), args.indices.contains(index + 1) else { return nil }
+        switch args[index + 1] {
+        case "center": return .center
+        case "bottom": return .bottom
+        default: return nil
+        }
+    }
+
     @MainActor static var banner: some View {
         Text(isJobEstimateHandoff ? "LOCAL TEST · SAMPLE APPROVALS ONLY" : "DESIGN PREVIEW · SAMPLE DATA · READ ONLY")
             .font(.system(size: 9, weight: .semibold)).tracking(0.4)
@@ -456,6 +467,13 @@ enum PaperPreview {
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(Color.black)
             .buttonStyle(.plain)
+    }
+}
+
+/// Applies `PaperPreview.scrollAnchor` only when asked, so every other preview keeps each screen's own anchor.
+struct PaperPreviewScrollAnchor: ViewModifier {
+    func body(content: Content) -> some View {
+        if let anchor = PaperPreview.scrollAnchor { content.defaultScrollAnchor(anchor) } else { content }
     }
 }
 

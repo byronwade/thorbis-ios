@@ -1228,8 +1228,8 @@ struct PaperListRow<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
-    /// Wide enough for "12:15 p.m." on one line (trade-style times are longer than "12:15 PM").
-    @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 82
+    /// Wide enough for "12:15 p.m." on one line at 14pt (trade-style times are longer than "12:15 PM").
+    @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 80
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
@@ -1243,7 +1243,7 @@ struct PaperListRow<Trailing: View>: View {
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle, !subtitle.isEmpty {
-                    PaperHighlight.text(subtitle, words: highlight).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    PaperHighlight.text(subtitle, words: highlight).font(Theme.font(14)).foregroundStyle(Theme.subtle)
                         .lineLimit(stacked ? nil : subtitleLines)
                 }
                 if let meta, !meta.isEmpty {
@@ -1264,7 +1264,7 @@ struct PaperListRow<Trailing: View>: View {
         switch leading {
         case .none: EmptyView()
         case .text(let text, let spoken):
-            Text(text).font(Theme.font(15, weight: .medium)).monospacedDigit()
+            Text(text).font(Theme.font(14, weight: .medium)).monospacedDigit()
                 .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
                 .lineLimit(2)
                 .frame(width: typeSize.isAccessibilitySize ? nil : column, alignment: .leading)

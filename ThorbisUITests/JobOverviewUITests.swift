@@ -30,7 +30,8 @@ final class JobOverviewUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(back.frame.height, 43.5)
             let actions = app.buttons["Job actions"]
             XCTAssertTrue(actions.exists)
-            XCTAssertTrue(app.buttons["Share job"].exists)
+            // Share job lives in the Job actions menu, so the header carries one circle.
+            XCTAssertFalse(app.navigationBars.firstMatch.buttons["Share job"].exists)
             if useSwipe {
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
                 start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
