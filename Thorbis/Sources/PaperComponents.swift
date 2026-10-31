@@ -166,8 +166,9 @@ struct PaperTabs: View {
             if let fit = fittingCandidate {
                 // design 2026-10-30: one selector style everywhere, the segmented pill. A field
                 // track, the chosen segment raised as a white pill, every segment the same width.
+                // Segments are 44 tall (golden rule 13); the white pill is inset 3 inside them.
                 row(padding: fit.padding, tracked: true)
-                    .padding(3)
+                    .padding(.horizontal, 3)
                     .background(Theme.fill, in: Capsule())
                     .padding(.horizontal, fit.inset)
             } else if wrapOverflow {
@@ -251,10 +252,11 @@ struct PaperTabs: View {
                 Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
                     .foregroundStyle(on ? Theme.foreground : Theme.muted)
                     .padding(.horizontal, padding)
-                    .frame(maxWidth: .infinity, minHeight: 38)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .background {
                         if on {
                             Capsule().fill(Theme.card).shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
+                                .padding(.vertical, 3)
                         }
                     }
                     .contentShape(Capsule())

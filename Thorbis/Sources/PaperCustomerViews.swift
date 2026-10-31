@@ -433,7 +433,10 @@ struct CustomerDetailView: View {
         let dialable = primaryPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
         let mail = MailDraft(recipient: primaryEmail)
         if dialable != nil || mail != nil || directionsURL != nil {
-            HStack(spacing: 4) {
+            // At accessibility sizes the circles wrap two to a row so every word stays whole.
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(FlowRow(spacing: 4, lineSpacing: 8)) : AnyLayout(HStackLayout(spacing: 4))
+            layout {
                 if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
                     PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
                     PaperLabeledCircle(symbol: "message", title: "Text") { openURL(text) }
@@ -518,7 +521,7 @@ struct CustomerDetailView: View {
                     PaperListRow(title: job.title,
                                  subtitle: [JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
                                             street(for: job.locationId), tech(job.assignedToUserId)].compactMap { $0 }.joined(separator: " · "),
-                                 status: late ? StatusWord(text: "Late · \(job.status.statusLabel)", tint: Theme.warning)
+                                 status: late ? StatusWord(text: "Late", tint: Theme.warning)
                                               : StatusWord(jobStatus: job.status))
                         .padding(.vertical, PaperCardMetrics.edge)
                 }
