@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-voice-notes",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "mic", title: "Talk or tap to write job notes",
+                      detail: "Dictate a note with the mic, or tap a common phrase like Photos added, then edit before saving.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-calm-job",
             date: "2026-10-30",
             highlights: [
