@@ -765,12 +765,8 @@ private struct KeyboardDoneButton: ViewModifier {
                 Color.clear.frame(height: keyboardShown ? 52 : 0).allowsHitTesting(false)
             }
             .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") {
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    }
-                    .frame(minWidth: 44, minHeight: 44)
+                ThorbisKeyboardDoneBar {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardShown = true }

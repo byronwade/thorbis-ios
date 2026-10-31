@@ -90,6 +90,7 @@ place of `.confirmationDialog(presenting:)` (it clears the item on dismiss, so s
 
 ## CI guard
 
-`scripts/lint-stock-controls.sh` flags stock controls outside this folder (allowlist shrinks as
-screens migrate; non-blocking in CI until the allowlist is empty). Add new controls here, not in
-screens.
+`scripts/lint-stock-controls.sh` flags stock controls outside this folder. The allowlist is now
+empty, so any stock `Menu {}`, `Picker(`, `confirmationDialog`, bordered button style or bare
+`ToolbarItem` in a screen fails the guard. Add new controls here, not in screens; the keyboard's
+Done bar is `ThorbisKeyboardDoneBar`.

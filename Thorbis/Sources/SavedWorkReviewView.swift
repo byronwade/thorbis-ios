@@ -84,13 +84,12 @@ struct SavedWorkReviewView: View {
                         .font(Theme.font(17)).foregroundStyle(Theme.muted)
                     Button { startSync() } label: {
                         ZStack {
-                            Text("Sync now").font(Theme.font(17, weight: .medium))
-                            if busy { HStack { ProgressView().tint(Theme.background); Spacer() }.padding(.horizontal, 12) }
+                            Text("Sync now")
+                            if busy { HStack { ProgressView().tint(Theme.onInk); Spacer() } }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .inkCommit(height: 44)
                     }
-                    .buttonStyle(.borderedProminent).tint(Theme.foreground)
-                    .foregroundStyle(Theme.background)
+                    .buttonStyle(PressStyle())
                     .disabled(!editable || session.isOffline || busy)
                     .accessibilityIdentifier("saved-work-sync")
                     if session.isOffline {

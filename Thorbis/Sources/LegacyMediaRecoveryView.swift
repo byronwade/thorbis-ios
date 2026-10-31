@@ -61,16 +61,14 @@ struct LegacyMediaRecoveryView: View {
             .navigationTitle("Recover older photos").navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.disabled(busy) } }
             .task { await load() }
-            .confirmationDialog("Recover this photo?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), titleVisibility: .visible) {
-                if let candidate = selected {
-                    Button("Recover to this job") { Task { await recover(candidate) } }
-                }
-                Button("Cancel", role: .cancel) { selected = nil }
-            } message: {
-                if let destination {
-                    Text("Add this older photo to \(destination.job.title) in \(workspaceName). Its original account is unknown. The photo will be saved to this job for upload using your current account.")
-                }
-            }
+            .thorbisConfirm(item: $selected,
+                            title: { _ in "Recover this photo?" },
+                            message: destination.map { destination in { _ in
+                                "Add this older photo to \(destination.job.title) in \(workspaceName). Its original account is unknown. The photo will be saved to this job for upload using your current account."
+                            } },
+                            actions: { candidate in
+                [ThorbisConfirmAction("Recover to this job") { Task { await recover(candidate) } }]
+            })
         }
     }
     private func load() async {

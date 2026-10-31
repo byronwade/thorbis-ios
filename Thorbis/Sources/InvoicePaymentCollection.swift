@@ -898,10 +898,7 @@ struct InvoicePaymentCollectionSheet: View {
                 ThorbisToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }.frame(minWidth: 44, minHeight: 44)
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { amountFocused = false }.frame(minWidth: 44, minHeight: 44)
-                }
+                ThorbisKeyboardDoneBar { amountFocused = false }
             }
             .thorbisDestination(isPresented: $showPayLinkShare) {
                 InvoicePaymentLinkView(
