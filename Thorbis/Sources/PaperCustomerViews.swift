@@ -488,7 +488,7 @@ struct CustomerDetailView: View {
                 FlowRow(spacing: 14, lineSpacing: 6) {
                     ForEach(properties, id: \.text) { property in
                         HStack(spacing: 5) {
-                            Image(systemName: property.symbol).font(.system(size: 12, weight: .medium))
+                            Image(systemName: property.symbol).font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(property.tint).accessibilityHidden(true)
                             Text(property.text).font(Theme.font(13, weight: .medium)).monospacedDigit()
                                 .foregroundStyle(Theme.subtle)
@@ -1158,7 +1158,7 @@ struct CustomerDetailView: View {
     /// surface or rail; the mark and the word carry it (design.thorbis.com: words first, colour second).
     private func hazardRow(_ title: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12, weight: .medium))
+            Image(systemName: "exclamationmark.triangle.fill").font(Theme.font(12, weight: .medium))
                 .foregroundStyle(Theme.warning)
                 .accessibilityHidden(true)
             (Text(title).font(Theme.font(14, weight: .medium)).foregroundColor(Theme.foreground)
