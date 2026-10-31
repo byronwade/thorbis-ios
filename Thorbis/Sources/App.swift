@@ -154,6 +154,8 @@ struct ThorbisApp: App {
                 #if DEBUG
                 if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
                     CustomerPresentationPreview(screen: PaperPreview.screen)
+                } else if PaperPreview.enabled, PaperPreview.screen.hasPrefix("glance-") {
+                    GlanceGallery(screen: PaperPreview.screen)
                 } else if PaperPreview.enabled, PaperPreview.screen.hasPrefix("tool-") {
                     OnsiteToolsPreview(screen: PaperPreview.screen)
                 } else if PaperPreview.enabled, let screen = PaperPreview.onboardingScreen {
