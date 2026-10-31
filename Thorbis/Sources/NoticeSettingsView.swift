@@ -65,7 +65,7 @@ struct NoticeSettingsView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }

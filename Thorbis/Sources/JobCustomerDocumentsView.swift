@@ -79,7 +79,7 @@ struct JobCustomerDocumentsView: View {
         .navigationTitle("Customer view")
         .safeAreaInset(edge: .bottom) {
             CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: handBack)
-                .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.background)
+                .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
         }
         .thorbisDestination(item: $book) { initial in
             if currentWorkspace {
@@ -226,7 +226,7 @@ struct JobCustomerDocumentsView: View {
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+                .panelBackground(cornerRadius: 14)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())

@@ -170,7 +170,7 @@ struct InboxLocalDraftView: View {
             }
             .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             PaperActionBar(title: "New draft", symbol: "square.and.pencil", disabled: !bound) { present(InboxComposer()) }
@@ -181,7 +181,7 @@ struct InboxLocalDraftView: View {
             actionError = nil
             inbox.bind(actorID: actorID, organizationID: organizationID)
         }
-        .sheet(item: $composer) { editing in
+        .sheet(item: $composer) { editing in SheetSurface {
             if composerOwner == identityKey && inbox.actorID == actorID && inbox.organizationID == organizationID {
                 InboxLocalComposerView(composer: editing) { saved, mode in
                     guard composerOwner == identityKey && inbox.actorID == actorID && inbox.organizationID == organizationID else {
@@ -196,7 +196,7 @@ struct InboxLocalDraftView: View {
             } else {
                 Text("Session changed").foregroundStyle(.secondary)
             }
-        }
+        } }
     }
 }
 
@@ -249,7 +249,7 @@ private struct InboxLocalComposerView: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationTitle("Compose")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -265,7 +265,7 @@ private struct InboxLocalComposerView: View {
                     }
                     .buttonStyle(PressStyle())
                     .disabled(composer.channel == .sms && !composer.scheduleText)
-                    .background(Theme.background)
+                    .background(Theme.canvas)
                 }
             }
         }

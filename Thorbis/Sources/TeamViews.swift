@@ -253,7 +253,7 @@ struct TeamView: View {
             .padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if canInvite {
@@ -262,17 +262,17 @@ struct TeamView: View {
                 }
             }
         }
-        .sheet(isPresented: $inviting) {
+        .sheet(isPresented: $inviting) { SheetSurface {
             InviteMemberSheet { sent in
                 notice = sent.delivery == "sent" ? "Invite sent to \(sent.email)." : "Invite created for \(sent.email). Email isn't set up yet, so share the link from the web."
                 await load()
             }
-        }
+        } }
         .safeAreaInset(edge: .top) {
             if let notice {
                 Text(notice).font(Theme.font(13)).foregroundStyle(Theme.foreground)
                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .panelBackground(cornerRadius: Theme.controlRadius)
                     .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).strokeBorder(Theme.border))
                     .padding(.horizontal, Theme.gutter)
                     .onTapGesture { self.notice = nil }
@@ -280,9 +280,9 @@ struct TeamView: View {
         }
         .refreshable { await load() }
         .task { await load() }
-        .sheet(item: $changing) { member in
+        .sheet(item: $changing) { member in SheetSurface {
             MemberRoleSheet(member: member) { await load() }
-        }
+        } }
         .thorbisDestination(item: $opening) { member in
             MemberAccessView(member: member) { await load() }
         }
@@ -376,8 +376,8 @@ struct MemberRoleSheet: View {
                 if let error { Section { ListErrorRow(message: error) } }
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
-            .overlay(alignment: .top) { if !loaded { SkeletonRows(count: 4, leading: false).background(Theme.background) } }
+            .background(Theme.canvas)
+            .overlay(alignment: .top) { if !loaded { SkeletonRows(count: 4, leading: false).background(Theme.canvas) } }
             .navigationTitle("Change role")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) } }

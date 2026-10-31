@@ -88,7 +88,7 @@ struct CustomerJobDocumentBook: View {
             if !Task.isCancelled { previewDocumentChanged = true }
         }
         #endif
-        .background(Theme.background)
+        .background(Theme.canvas)
     }
 
     private var pagingControls: some View {

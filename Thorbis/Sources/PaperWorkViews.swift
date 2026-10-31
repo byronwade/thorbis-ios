@@ -97,6 +97,9 @@ struct ScheduleView: View {
     @AppStorage(TodayLayoutMode.storageKey) private var storedTodayLayout = ""
     /// The stop card showing, by job id; its next step is the one loaded for the commit.
     @State private var cardFocus: String?
+    /// The card the pager opened on from the phone's saved copy, until the person moves it. The
+    /// server's first answer can finish or reorder stops, so that opening is placed again.
+    @State private var provisionalCardFocus: String?
     @StateObject private var cardPlaces = StopCardPlaces()
     /// The rows' swipes: what each row has read (allowed moves, a number to call) and the moves sent.
     @StateObject private var swipes = JobRowSwipeBook()
@@ -188,10 +191,10 @@ struct ScheduleView: View {
         .refreshable { await store.refresh(api) }
         // An open row closes as soon as the list moves.
         .onScrollPhaseChange { _, phase in if phase != .idle { swipes.rows.close() } }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showNew) { NewJobSheet() }
-        .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
+        .sheet(isPresented: $showNew) { SheetSurface { NewJobSheet() } }
+        .sheet(item: $scheduling) { value in SheetSurface { QuickScheduleSheet(jobID: value.id) } }
         .sensoryFeedback(.success, trigger: committed)
         // A swiped move: success once the server took it; a lighter tap when it is only saved here.
         .sensoryFeedback(.success, trigger: swipes.confirmed)
@@ -372,6 +375,7 @@ struct ScheduleView: View {
         .padding(.top, 4)
         .onAppear { placeCards(stops) }
         .onChange(of: stops.map(\.id)) { _, _ in placeCards(stops) }
+        .onChange(of: store.cachedAt == nil) { _, _ in placeCards(cardStops) }
         .task(id: "card|\(shown?.id ?? "")|\(shown?.status ?? "")|\(shown?.updatedAt ?? "")") {
             if let shown { await loadHero(shown) }
         }
@@ -394,13 +398,16 @@ struct ScheduleView: View {
 
     /// Opens the pager on the stop under way, else the next booked one; only on first show or when
     /// the day's stops change, so a refresh or a step never moves the card under the person's thumb.
+    /// An opening placed from the saved copy is placed again once the server answers (the saved copy
+    /// can be hours old: a stop it shows under way may be done), unless the person has swiped since.
     private func placeCards(_ stops: [Job]) {
-        if let cardFocus, stops.contains(where: { $0.id == cardFocus }) { return }
+        if let cardFocus, stops.contains(where: { $0.id == cardFocus }), cardFocus != provisionalCardFocus { return }
         var start = TodayStopOrder.startIndex(stops) { outbox.pendingStatus(for: $0.id) ?? $0.status }
         #if DEBUG
         if let forced = TodayStopCardsPreview.startIndex, stops.indices.contains(forced) { start = forced }
         #endif
         cardFocus = start.map { stops[$0].id }
+        provisionalCardFocus = store.cachedAt == nil ? nil : cardFocus
     }
 
     /// When the tech reached the lead job, from the server's own arrival (or start) time. Nil when the
@@ -753,7 +760,7 @@ private struct ScheduleHero<Commit: View>: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         // v2: no coloured side rail; "you are here" is the status word and its mark (D-018).
-        .background(Theme.well, in: shape)
+        .background(ThorbisPanelStyle(), in: shape)
     }
 
     private var hasCircles: Bool { nextStop && (place?.directions != nil || place?.call != nil) }
@@ -1067,15 +1074,15 @@ struct JobsView: View {
         .task(id: "swipes|\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)") {
             swipes.reset(identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
             if session.can("job.create", feature: "jobs") && !jobs.isEmpty {
                 FloatingCreateButton(title: "New job") { showNew = true }
             }
         }
-        .sheet(isPresented: $showNew) { NewJobSheet() }
-        .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
+        .sheet(isPresented: $showNew) { SheetSurface { NewJobSheet() } }
+        .sheet(item: $scheduling) { value in SheetSurface { QuickScheduleSheet(jobID: value.id) } }
         .task(id: "roster|\(session.generation)|\(session.isOffline)") {
             guard session.can("job.view", feature: "jobs"), !session.isOffline,
                   let people = try? await api.fieldAssignees() else { return }

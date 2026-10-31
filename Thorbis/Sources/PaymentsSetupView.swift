@@ -165,7 +165,7 @@ struct PaymentsSetupView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         // MA-08: the one commit sits in a bottom bar within thumb reach, not at the end of the scroll.
         .safeAreaInset(edge: .bottom) {
@@ -176,7 +176,7 @@ struct PaymentsSetupView: View {
                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-                .background(Theme.background)
+                .background(Theme.canvas)
             }
         }
         .refreshable { await load() }

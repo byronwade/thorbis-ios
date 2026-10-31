@@ -559,7 +559,7 @@ struct PaperSquareButton: View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Theme.foreground)
                 .frame(width: Theme.commitHeight, height: Theme.commitHeight)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .panelBackground(cornerRadius: Theme.controlRadius)
                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
         }
         .buttonStyle(PressStyle())
@@ -706,7 +706,7 @@ struct OfflineBanner: View {
             }
         }
         .padding(.horizontal, Theme.gutter).padding(.bottom, 10)
-        .sheet(item: $reviewScope) { SavedWorkReviewView(scope: $0) }
+        .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
         .onChange(of: reviewIsCurrent) { _, valid in if !valid { reviewScope = nil } }
         #if DEBUG
         .task { await PaperPreview.activateSavedWorkScenario(session: session) }
@@ -1040,7 +1040,7 @@ struct PaperCard<Content: View>: View {
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             // v2 Record room: no panel; the rows sit on the page, their words under the label.
-            .background(recordRoom ? Color.clear : Theme.card, in: shape)
+            .background(recordRoom ? AnyShapeStyle(Color.clear) : AnyShapeStyle(ThorbisPanelStyle()), in: shape)
             .padding(.horizontal, recordRoom ? RecordRoom.outset(rowInset: padding > 0 ? padding : PaperCardMetrics.inset) : 0)
             // v2: no 1px box around a section; the panel's tone does the work.
             .environment(\.paperRowInset, PaperCardMetrics.inset)
@@ -1074,7 +1074,7 @@ private struct PaperCardSlot: ViewModifier {
             .padding(.top, first ? PaperCardMetrics.edge : 0)
             .padding(.bottom, last ? PaperCardMetrics.edge : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
+            .background(ThorbisPanelStyle(), in: UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
                                                                bottomTrailingRadius: last ? r : 0, topTrailingRadius: first ? r : 0,
                                                                style: .circular))
     }

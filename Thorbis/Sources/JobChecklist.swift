@@ -114,7 +114,7 @@ struct JobChecklistSheet: View {
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationTitle(template?.title ?? "Checklist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

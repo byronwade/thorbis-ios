@@ -246,7 +246,7 @@ struct DataPlateScannerSheet: View {
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationTitle("Scan data plate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -273,9 +273,9 @@ struct DataPlateScannerSheet: View {
                     await read(image)
                 }
             }
-            .sheet(item: $equipment) { item in
+            .sheet(item: $equipment) { item in SheetSurface {
                 EquipmentEditor(customerID: customerID, locations: locations, existing: nil, prefill: equipmentPrefill) {}
-            }
+            } }
             .onAppear {
                 if let previewLines, seenLines.isEmpty { absorb(lines: previewLines, barcodes: []) }
             }

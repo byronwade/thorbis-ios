@@ -130,7 +130,7 @@ struct SavedWorkReviewView: View {
             .padding(.horizontal, Theme.gutter).padding(.vertical, 20)
             .frame(maxWidth: 720, alignment: .leading).frame(maxWidth: .infinity)
         }
-        .background(Theme.background).foregroundStyle(Theme.foreground)
+        .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .accessibilityIdentifier("saved-work-review")
         .accessibilityValue("\(state.totalCount) items listed")
     }

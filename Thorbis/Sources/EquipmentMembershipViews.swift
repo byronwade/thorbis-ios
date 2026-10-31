@@ -60,9 +60,9 @@ struct CustomerEquipmentSection: View {
             }
         }
         .task(id: customerID) { await load() }
-        .sheet(item: $editing) { item in
+        .sheet(item: $editing) { item in SheetSurface {
             EquipmentEditor(customerID: customerID, locations: locations, existing: item.record) { await load() }
-        }
+        } }
     }
 
     private func row(_ unit: EquipmentRecord) -> some View {
@@ -161,7 +161,7 @@ struct EquipmentEditor: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationTitle(existing == nil ? "Add equipment" : "Equipment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -294,7 +294,7 @@ struct CustomerMembershipSection: View {
             }
         }
         .task(id: customerID) { await load() }
-        .sheet(isPresented: $choosing) { planPicker }
+        .sheet(isPresented: $choosing) { SheetSurface { planPicker } }
         .thorbisConfirm(item: $cancelling,
                         title: { _ in "Cancel this membership?" },
                         message: { _ in "Member pricing ends for this customer." },
@@ -337,7 +337,7 @@ struct CustomerMembershipSection: View {
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationTitle("Choose a plan")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { choosing = false } } }

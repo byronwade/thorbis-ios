@@ -175,7 +175,7 @@ struct OwnerHomeView: View {
         }
         #endif
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: session.generation) { await load() }
@@ -189,7 +189,7 @@ struct OwnerHomeView: View {
                                  organizationID: session.activeOrganization?.id,
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }
-        .sheet(item: $reviewScope) { SavedWorkReviewView(scope: $0) }
+        .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
     }
 
     // MARK: Header
@@ -608,7 +608,7 @@ struct OwnerHomeListView: View {
             }
             .padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
         .task { if !isJobList { await load() } }
@@ -620,7 +620,7 @@ struct OwnerHomeListView: View {
             await addresses.load(rows, api: api, organizationID: session.activeOrganization?.id,
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }
-        .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
+        .sheet(item: $scheduling) { value in SheetSurface { QuickScheduleSheet(jobID: value.id) } }
     }
 
     private func subtitle(_ jobCount: Int) -> String {

@@ -227,9 +227,9 @@ struct JobPropertyHistorySection: View {
             guard ready, part == .place else { return }
             JobDetailCache.save(history: live)
         }
-        .sheet(item: $editing) { item in
+        .sheet(item: $editing) { item in SheetSurface {
             EquipmentEditor(customerID: job.customerId, locations: locations, existing: item.record) { await loadEquipment() }
-        }
+        } }
     }
 
     private func savedLine(_ savedAt: Date?) -> some View {

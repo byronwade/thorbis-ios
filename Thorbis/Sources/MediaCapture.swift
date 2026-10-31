@@ -151,7 +151,7 @@ struct MediaCaptureFlow: View {
             }
             .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
     }
 
@@ -162,7 +162,7 @@ struct MediaCaptureFlow: View {
                 .submitLabel(.done)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 52)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .panelBackground(cornerRadius: Theme.controlRadius)
                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.border))
                 .accessibilityIdentifier("media-tag-caption")
             Button {

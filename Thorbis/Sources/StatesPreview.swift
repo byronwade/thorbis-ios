@@ -59,7 +59,7 @@ private struct EmptyStatesGallery: View {
             }
             .paperCardMargin().padding(.vertical, 12)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Empty states")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -94,7 +94,7 @@ private struct ErrorStatesGallery: View {
             }
             .padding(.vertical, 12)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Errors")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -136,7 +136,7 @@ private struct CustomerStatesGallery: View {
             }
             .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Customer states")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -160,7 +160,7 @@ private struct SheetStatesGallery: View {
         }
         .padding(Theme.gutter).padding(.top, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
     }
 }
 
@@ -172,7 +172,7 @@ private struct ToastStatesGallery: View {
             LineRemovedToast(removed: StatesPreviewFixtures.removedLine, undo: {}, expire: {})
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Confirmations")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -201,7 +201,7 @@ private struct LoadingStatesGallery: View {
             }
             .paperCardMargin().padding(.vertical, 12)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Loading")
         .navigationBarTitleDisplayMode(.inline)
     }

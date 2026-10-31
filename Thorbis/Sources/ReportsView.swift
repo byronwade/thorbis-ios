@@ -66,7 +66,15 @@ struct ReportsView: View {
 
     init(includesRevenue: Bool = false, initialTab: String? = nil) {
         self.includesRevenue = includesRevenue
-        _tab = State(initialValue: initialTab ?? (includesRevenue ? "Revenue" : "Operations"))
+        var start = initialTab ?? (includesRevenue ? "Revenue" : "Operations")
+        #if DEBUG
+        // Screenshot-only: `--paper-preview-money-tab Payments` opens Money on that tab.
+        let args = ProcessInfo.processInfo.arguments
+        if PaperPreview.enabled, let at = args.firstIndex(of: "--paper-preview-money-tab"), args.indices.contains(at + 1) {
+            start = args[at + 1]
+        }
+        #endif
+        _tab = State(initialValue: start)
     }
 
     private var tabs: [String] {
@@ -108,7 +116,7 @@ struct ReportsView: View {
             .padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { refreshes += 1; await load() }
         .task { await load() }
@@ -283,7 +291,9 @@ struct ReportsView: View {
 
     private func generatedLabel(_ raw: String) -> String {
         guard let date = JobFiltering.date(raw) else { return "Months follow UTC" }
-        return "Updated \(date.formatted(.relative(presentation: .named))) · months follow UTC"
+        // Under a minute reads "just now", not "1 second ago" on one tab and "now" on the next.
+        let when = Date().timeIntervalSince(date) < 60 ? "just now" : date.formatted(.relative(presentation: .named))
+        return "Updated \(when) · months follow UTC"
     }
 
     private func monthName(_ raw: String) -> String {

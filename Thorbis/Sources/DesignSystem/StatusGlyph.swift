@@ -325,7 +325,7 @@ struct Well<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.cardRadius)
             .environment(\.paperRowInset, PaperCardMetrics.inset)
     }
 }

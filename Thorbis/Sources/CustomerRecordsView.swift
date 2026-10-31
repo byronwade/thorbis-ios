@@ -133,7 +133,7 @@ struct CustomerRecordsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .panelBackground(cornerRadius: Theme.cardRadius)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 
@@ -296,7 +296,7 @@ private struct LegacyCustomerPhotoDetail: View {
                 .frame(maxWidth: .infinity, minHeight: 320)
                 .padding(Theme.gutter)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Photo")
         .navigationBarTitleDisplayMode(.inline)
     }

@@ -760,7 +760,7 @@ private struct OptionalDraggable: ViewModifier {
             content.draggable(payload) {
                 Text(title.isEmpty ? "Line" : title)
                     .font(Theme.font(15, weight: .medium)).padding(10)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .panelBackground(cornerRadius: Theme.controlRadius)
             }
         } else {
             content
@@ -1050,7 +1050,7 @@ struct EstimateBuilderTotal: View {
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 10)
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .accessibilityElement(children: .combine)
     }
 }

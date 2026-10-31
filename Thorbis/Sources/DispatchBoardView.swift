@@ -104,13 +104,13 @@ struct DispatchBoardView: View {
             await addresses.load(unscheduled + today, api: api, organizationID: session.activeOrganization?.id,
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)", limit: 30)
         }
-        .sheet(item: $menuJob, onDismiss: runPending) { job in
+        .sheet(item: $menuJob, onDismiss: runPending) { job in SheetSurface {
             ThorbisMenuCard(items: choices(for: job, roster: roster), title: menuTitle(job)) { item in
                 item.action()
                 menuJob = nil
             }
-        }
-        .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
+        } }
+        .sheet(item: $scheduling) { value in SheetSurface { QuickScheduleSheet(jobID: value.id) } }
         .thorbisDestination(item: $assigning) { JobAssignmentView(jobID: $0.id) }
         .thorbisDestination(item: $opening) { JobDetailView(jobId: $0.id) }
     }
@@ -202,7 +202,7 @@ struct DispatchBoardView: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.controlRadius)
             .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         }
         .buttonStyle(PressStyle())

@@ -152,7 +152,7 @@ struct SignUpView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             // MA-16: the commit sits in a bottom bar, under the thumb, above the keyboard.
             .safeAreaInset(edge: .bottom) {
@@ -168,7 +168,7 @@ struct SignUpView: View {
                 .padding(.horizontal, 20).padding(.vertical, 10)
                 .frame(maxWidth: 470)
                 .frame(maxWidth: .infinity)
-                .background(Theme.background)
+                .background(Theme.canvas)
                 .accessibilityIdentifier("signup-submit")
             }
             .navigationTitle("New account")
@@ -291,7 +291,7 @@ struct WorkspaceGateView: View {
                     .frame(maxWidth: 560)
                     .frame(maxWidth: .infinity)
                 }
-                .background(Theme.background.ignoresSafeArea())
+                .background(Theme.canvas)
                 .navigationTitle("Choose company")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -370,7 +370,7 @@ struct CreateCompanyForm: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .safeAreaInset(edge: .bottom) {
             Button { Task { await create() } } label: {
@@ -385,7 +385,7 @@ struct CreateCompanyForm: View {
             .padding(.horizontal, 20).padding(.vertical, 10)
             .frame(maxWidth: 470)
             .frame(maxWidth: .infinity)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .accessibilityIdentifier("create-company-submit")
         }
         .toolbar(firstCompany ? .hidden : .automatic, for: .navigationBar)
@@ -644,7 +644,7 @@ struct CompanyDetailsView: View {
                 .accessibilityLabel("Loading company details")
             }
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .navigationTitle("Company details")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -671,7 +671,7 @@ struct CompanyDetailsView: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
                 .frame(maxWidth: 600)
                 .frame(maxWidth: .infinity)
-                .background(Theme.background)
+                .background(Theme.canvas)
             }
         }
         .sensoryFeedback(.success, trigger: saved)
@@ -829,7 +829,7 @@ struct CompanyFeaturesView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Plan and features")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -1025,7 +1025,7 @@ struct BusinessSetupView: View {
             .frame(maxWidth: 560, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Group {
@@ -1041,7 +1041,7 @@ struct BusinessSetupView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
             .frame(maxWidth: 600)
             .frame(maxWidth: .infinity)
-            .background(Theme.background)
+            .background(Theme.canvas)
         }
         .navigationTitle(presented ? "" : "Setup")
         .navigationBarTitleDisplayMode(.inline)
@@ -1060,9 +1060,9 @@ struct BusinessSetupView: View {
             case .team: EmptyView()
             }
         }
-        .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
+        .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) { SheetSurface {
             InviteMemberSheet { _ in }
-        }
+        } }
         .onChange(of: opened) { old, new in
             // Back from a step: read it again, so its word changes to Done.
             if old != nil, new == nil { Task { await model.refresh(api: api, session: session) } }
@@ -1105,9 +1105,9 @@ private struct BusinessSetupPrompt: ViewModifier {
                 guard !Task.isCancelled, session.can("organization.settings.edit") else { return }
                 showing = true
             }
-            .sheet(isPresented: $showing) {
+            .sheet(isPresented: $showing) { SheetSurface {
                 NavigationStack { BusinessSetupView(presented: true) }
-            }
+            } }
     }
 }
 

@@ -144,7 +144,7 @@ struct PhotoMarkupView: View {
                 .font(Theme.font(12)).foregroundStyle(Theme.muted)
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .thorbisConfirm("Discard your markup?", message: "The original photo stays on the job.",
                         isPresented: $confirmDiscard,
                         actions: [ThorbisConfirmAction("Discard markup", role: .destructive) { onCancel() }])

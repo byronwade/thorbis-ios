@@ -57,7 +57,7 @@ struct LegacyMediaRecoveryView: View {
                     }
                 }
             }
-            .scrollContentBackground(.hidden).background(Theme.background).foregroundStyle(Theme.foreground)
+            .scrollContentBackground(.hidden).background(Theme.canvas).foregroundStyle(Theme.foreground)
             .navigationTitle("Recover older photos").navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.disabled(busy) } }
             .task { await load() }

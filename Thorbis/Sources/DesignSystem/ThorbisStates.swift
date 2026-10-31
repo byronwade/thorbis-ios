@@ -432,7 +432,7 @@ struct SessionLoadingView: View {
         }
         .padding(Theme.gutter)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("session-loading")
     }

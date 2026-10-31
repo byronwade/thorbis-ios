@@ -358,7 +358,7 @@ struct InvoicePaymentsSection: View {
         .onChange(of: model.invoice?.amountPaid) { _, _ in
             if let updated = model.invoice { onInvoiceUpdated(updated) }
         }
-        .sheet(item: $selectedPayment) { payment in
+        .sheet(item: $selectedPayment) { payment in SheetSurface {
             InvoicePaymentDetailSheet(
                 payment: payment,
                 api: api,
@@ -369,7 +369,7 @@ struct InvoicePaymentsSection: View {
             )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-        }
+        } }
 #if DEBUG
         .task(id: model.historyComplete) {
             guard PaperPreview.enabled, PaperPreview.isPaymentRefundPreview,
@@ -450,7 +450,7 @@ struct InvoiceDetailFooter: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 8)
-        .background(Theme.background)
+        .background(Theme.canvas)
     }
 
     private var collectBlockedReason: String? { model.collectBlockedReason }
@@ -512,7 +512,7 @@ private struct InvoicePaymentDetailSheet: View {
                         }
                     }
                     .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 4)
-                    .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .panelBackground(cornerRadius: Theme.cardRadius)
 
                     if refundModel.didComplete {
                         StateNote(tone: .done, word: "Refunded", message: "Thorbis confirmed the refund.")
@@ -545,7 +545,7 @@ private struct InvoicePaymentDetailSheet: View {
                 }
                 .padding(20)
             }
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Payment details")
             .navigationBarTitleDisplayMode(.inline)
@@ -595,7 +595,7 @@ private struct InvoicePaymentDetailSheet: View {
             }
             .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
             .frame(minHeight: 56)
-            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .panelBackground(cornerRadius: Theme.cardRadius)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
@@ -649,7 +649,7 @@ private struct InvoicePaymentRefundForm: View {
             }
             .padding(20)
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom) {
@@ -671,7 +671,7 @@ private struct InvoicePaymentRefundForm: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
-                .background(Theme.background)
+                .background(Theme.canvas)
             }
         }
         .navigationTitle("Refund payment")

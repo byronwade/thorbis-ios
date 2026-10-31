@@ -136,13 +136,13 @@ struct WhatsNewSheet: View {
         .safeAreaInset(edge: .bottom) {
             PrimaryButton(title: "Got it", action: onContinue)
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 8)
-                .background(Theme.background)
+                .background(Theme.canvas)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(Theme.cardRadius)
-        .presentationBackground(Theme.background)
+        .thorbisSheetSurface()
         .onAppear {
             // MA-22: large type and long notes start at the large detent, so nothing hides below.
             if typeSize.isAccessibilitySize || content.highlights.count > 3 { detent = .large }
@@ -200,7 +200,7 @@ struct WhatsNewHistoryView: View {
             .paperCardMargin()
             .padding(.top, 8).padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("What's new")
         .navigationBarTitleDisplayMode(.inline)
     }

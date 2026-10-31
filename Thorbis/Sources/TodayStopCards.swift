@@ -171,30 +171,37 @@ struct TodayStopCards<Commit: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: Self.spacing) {
-                    ForEach(Array(stops.enumerated()), id: \.element.id) { offset, job in
-                        card(job, index: offset)
-                            .containerRelativeFrame(.horizontal)
-                            .frame(maxHeight: .infinity, alignment: .top)
-                            .id(job.id)
-                            // Only the card showing is read; the adjustable card moves between stops.
-                            .accessibilityHidden(job.id != stops[index].id)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: Self.spacing) {
+                        ForEach(Array(stops.enumerated()), id: \.element.id) { offset, job in
+                            card(job, index: offset)
+                                .containerRelativeFrame(.horizontal)
+                                .frame(maxHeight: .infinity, alignment: .top)
+                                .id(job.id)
+                                // Only the card showing is read; the adjustable card moves between stops.
+                                .accessibilityHidden(job.id != stops[index].id)
+                        }
                     }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
+                .scrollIndicators(.hidden)
+                .scrollTargetBehavior(.viewAligned)
+                .scrollPosition(id: $focus)
+                // The next card's sliver: the card is the pager's width less the gap and the sliver.
+                .contentMargins(.trailing, Self.spacing + Self.sliver, for: .scrollContent)
+                // Cards outside the pager's frame still draw (the sliver, the previous card's edge), but
+                // touches start only inside it, clear of the drawer's edge strip.
+                .scrollClipDisabled()
+                .padding(.leading, Self.leading)
+                .mask(edgeFade)
+                .accessibilityIdentifier("today-stop-cards")
+                // The scroll view keeps its offset when the stops reorder (a refresh finishes one), so the
+                // page showing could drift from `focus` (the card the commit and the dots are for). Line
+                // the page up with `focus` on first show and whenever the order changes.
+                .onAppear { align(proxy) }
+                .onChange(of: stops.map(\.id)) { _, _ in align(proxy) }
             }
-            .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned)
-            .scrollPosition(id: $focus)
-            // The next card's sliver: the card is the pager's width less the gap and the sliver.
-            .contentMargins(.trailing, Self.spacing + Self.sliver, for: .scrollContent)
-            // Cards outside the pager's frame still draw (the sliver, the previous card's edge), but
-            // touches start only inside it, clear of the drawer's edge strip.
-            .scrollClipDisabled()
-            .padding(.leading, Self.leading)
-            .mask(edgeFade)
-            .accessibilityIdentifier("today-stop-cards")
             indicator
                 .padding(.horizontal, Self.leading)
         }
@@ -233,6 +240,14 @@ struct TodayStopCards<Commit: View>: View {
             }
             .accessibilityHidden(true)
             .accessibilityIdentifier("today-stop-cards-position")
+        }
+    }
+
+    /// After this layout pass, so the scroll view already holds the new order.
+    private func align(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            guard let focus, stops.contains(where: { $0.id == focus }) else { return }
+            proxy.scrollTo(focus, anchor: .leading)
         }
     }
 
@@ -324,7 +339,7 @@ private struct TodayStopCard<Commit: View>: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // A panel at rest: tone does the work. No shadow, no rim, no side rail.
-        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .panelBackground(cornerRadius: Theme.cardRadius)
     }
 
     private var summary: some View {

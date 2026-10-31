@@ -646,7 +646,7 @@ private struct SearchScreen: View {
             NavigationStack(path: $path) {
                 content
                     .foregroundStyle(Theme.foreground)
-                    .background(Theme.background)
+                    .background(Theme.canvas)
                     .safeAreaInset(edge: .top, spacing: 0) { sheetField }
                     .navigationTitle("Search")
                     .navigationBarTitleDisplayMode(.inline)
@@ -684,7 +684,7 @@ private struct SearchScreen: View {
         .padding(.vertical, -10)
         .fieldWell()
         .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
-        .background(Theme.background)
+        .background(Theme.canvas)
     }
 
     // MARK: Opening

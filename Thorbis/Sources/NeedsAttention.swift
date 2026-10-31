@@ -105,7 +105,7 @@ struct NeedsAttentionView: View {
         #if DEBUG
         .modifier(PaperPreviewScrollAnchor())
         #endif
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .task { await load() }
         .refreshable { await load() }

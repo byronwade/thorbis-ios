@@ -66,7 +66,7 @@ struct NewEstimateView: View {
             }
             .keyboardDoneButton()
             .trackKeyboard($keyboardUp)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -92,7 +92,7 @@ struct NewEstimateView: View {
                     }
                 }
             }
-            .sheet(item: $picker) { target in
+            .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "this estimate" : title,
                     canUsePriceBook: canUsePriceBook,
@@ -103,7 +103,7 @@ struct NewEstimateView: View {
                     refresh: { await refreshCatalog(force: $0) }
                 )
                 .environmentObject(session).environmentObject(api)
-            }
+            } }
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .onChange(of: customerID) { _, _ in customerProblem = nil }

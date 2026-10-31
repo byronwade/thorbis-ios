@@ -53,7 +53,7 @@ struct PriceBookCartPicker: View {
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await refresh(true) }
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             PaperActionBar(title: added == 0 ? "Done" : "Done · \(added) \(added == 1 ? "item" : "items")",
                            symbol: added == 0 ? nil : "checkmark") { dismiss() }

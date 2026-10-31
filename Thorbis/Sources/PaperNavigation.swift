@@ -69,7 +69,7 @@ struct RootView: View {
     var body: some View {
         GeometryReader { geometry in
             navigation(wide: usesTabletLayout(width: geometry.size.width))
-                .background(Theme.background)
+                .background(Theme.canvas)
         }
         #if DEBUG
         .modifier(PreviewLandscape())
@@ -99,9 +99,9 @@ struct RootView: View {
             if store.openedForRecord { whatsNew.skipThisLaunch = true }
             whatsNew.presentIfNeeded()
         }
-        .sheet(item: $whatsNew.showing, onDismiss: { whatsNew.dismissed() }) { content in
+        .sheet(item: $whatsNew.showing, onDismiss: { whatsNew.dismissed() }) { content in SheetSurface {
             WhatsNewSheet(content: content) { whatsNew.dismissed() }
-        }
+        } }
     }
 
     private func applyRoleDefaults() {
@@ -175,12 +175,12 @@ struct RootView: View {
             let run = pendingCreate
             pendingCreate = nil
             run?()
-        }) { createMenu }
+        }) { SheetSurface { createMenu } }
         .sheet(isPresented: $editingMenu) {
             AppMenuEditor { editingMenu = false }
                 .padding(.top, 8)
                 .presentationDetents([.large])
-                .presentationBackground(Theme.background)
+                .thorbisSheetSurface()
         }
     }
 
@@ -547,15 +547,15 @@ struct RootView: View {
         .environment(\.paperShowMenu, { Task { @MainActor in openDrawer() } })
         .environment(\.paperMenuButton, false)
         .environment(\.paperCreate, headerCreate)
-        .sheet(isPresented: $showSettings) { SettingsView() }
-        .sheet(isPresented: $search) { PaperGlobalSearch() }
-        .sheet(isPresented: $newCustomer) { NewCustomerSheet() }
-        .sheet(isPresented: $newEstimate) { NewEstimateView() }
-        .sheet(item: $reviewScope) { SavedWorkReviewView(scope: $0) }
+        .sheet(isPresented: $showSettings) { SheetSurface { SettingsView() } }
+        .sheet(isPresented: $search) { SheetSurface { PaperGlobalSearch() } }
+        .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet() } }
+        .sheet(isPresented: $newEstimate) { SheetSurface { NewEstimateView() } }
+        .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
         .onChange(of: reviewScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
             if !valid { reviewScope = nil }
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
         .onChange(of: store.requestedSchedule) {
@@ -564,8 +564,8 @@ struct RootView: View {
             primaryTab = .schedule
         }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord(phone: true) }
-        .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
-        .sheet(isPresented: $createJob) { NewJobSheet() }
+        .sheet(isPresented: $workspace) { SheetSurface { WorkspaceSelectionView() } }
+        .sheet(isPresented: $createJob) { SheetSurface { NewJobSheet() } }
         #if DEBUG
         .modifier(PreviewSheets(invoiceEditor: $previewInvoiceEditor, invoiceDetail: $previewInvoiceDetail,
                                 estimateRevision: $previewEstimateRevision, newCustomer: $previewNewCustomer,
@@ -936,7 +936,7 @@ struct RootView: View {
                                 message: primaryAccess.unavailableMessage(for: destination))
                 Spacer()
             }
-            .background(Theme.background)
+            .background(Theme.canvas)
             .toolbar(.hidden, for: .navigationBar)
         }
     }
@@ -979,11 +979,11 @@ private struct PreviewSheets: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .sheet(isPresented: $invoiceEditor) {
+            .sheet(isPresented: $invoiceEditor) { SheetSurface {
                 NavigationStack { InvoiceLineEditorView(invoice: PaperPreview.invoice) { _ in } }
                     .presentationDetents([.large])
-            }
-            .sheet(isPresented: $invoiceDetail) {
+            } }
+            .sheet(isPresented: $invoiceDetail) { SheetSurface {
                 NavigationStack {
                     InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations()
                         // `--paper-preview-sheet-pushed`: a screen pushed inside this sheet, which keeps
@@ -992,21 +992,21 @@ private struct PreviewSheets: ViewModifier {
                             EstimateDetailView(id: PaperPreview.estimate.id)
                         }
                 }
-            }
-            .sheet(isPresented: $estimateRevision) {
+            } }
+            .sheet(isPresented: $estimateRevision) { SheetSurface {
                 EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate
                                            : PaperPreview.screen.hasPrefix("builder-") ? PaperPreview.optionsEstimate : PaperPreview.estimate) { _ in }
                     .environmentObject(api).environmentObject(session).environmentObject(store)
-            }
-            .sheet(isPresented: $newCustomer) { NewCustomerSheet() }
+            } }
+            .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet() } }
             .modifier(PreviewFormSheet(screen: $formSheet))
-            .sheet(isPresented: $signature) {
+            .sheet(isPresented: $signature) { SheetSurface {
                 SignatureCaptureSheet(title: "Approve $970.00", summary: "By signing, Danielle Marlowe approves \"AC repair and compressor replacement\" as shown.",
                                       jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe") { _ in nil }
-            }
-            .sheet(isPresented: $newEstimate) {
+            } }
+            .sheet(isPresented: $newEstimate) { SheetSurface {
                 NewEstimateView(customerID: PaperPreview.customerID, jobID: PaperPreview.jobID, title: "AC not cooling")
-            }
+            } }
     }
 }
 #endif
@@ -1117,7 +1117,7 @@ private struct PreviewFormSheet: ViewModifier {
     private var shown: Binding<Bool> { Binding(get: { screen != nil }, set: { if !$0 { screen = nil } }) }
 
     func body(content: Content) -> some View {
-        content.sheet(isPresented: shown) {
+        content.sheet(isPresented: shown) { SheetSurface {
             if screen == "job-schedule" {
                 QuickScheduleSheet(jobID: PaperPreview.jobID)
             } else if screen == "equipment-sections" {
@@ -1128,11 +1128,11 @@ private struct PreviewFormSheet: ViewModifier {
                     }
                     .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 24)
                 }
-                .background(Theme.background)
+                .background(Theme.canvas)
             } else {
                 EquipmentEditor(customerID: PaperPreview.customerID, locations: [], existing: nil) {}
             }
-        }
+        } }
     }
 }
 #endif

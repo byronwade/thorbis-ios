@@ -60,7 +60,7 @@ struct InvoiceLineEditorView: View {
                     withAnimation { proxy.scrollTo(id, anchor: .center) }
                 }
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Edit invoice")
         .navigationBarTitleDisplayMode(.inline)
@@ -78,7 +78,7 @@ struct InvoiceLineEditorView: View {
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
                         actions: [ThorbisConfirmAction("Issue invoice", role: .destructive) { Task { await issue() } }])
-        .sheet(isPresented: $showPriceBook, onDismiss: openAddedLine) {
+        .sheet(isPresented: $showPriceBook, onDismiss: openAddedLine) { SheetSurface {
             PriceBookCartPicker(
                 destination: "INV-\(invoice.id.suffix(4).uppercased())",
                 canUsePriceBook: canUsePriceBook,
@@ -91,7 +91,7 @@ struct InvoiceLineEditorView: View {
                 refresh: { await refreshCatalog(force: $0) }
             )
             .environmentObject(session).environmentObject(api)
-        }
+        } }
         .task(id: "\(catalogContext.organizationID ?? "")|\(catalogContext.sessionGeneration)|\(invoice.customerId)") {
             memberPricing = nil
             guard canUsePriceBook else { return }
@@ -259,7 +259,7 @@ struct InvoiceLineEditorView: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.background)
+        .background(Theme.canvas)
     }
 
     private var invoiceCommitButtons: some View {

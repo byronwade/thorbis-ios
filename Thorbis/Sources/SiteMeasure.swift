@@ -232,7 +232,7 @@ struct SiteMeasureView: View {
                     PermissionNotice(permission: .camera, purpose: "measure on site")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.background)
+                .background(Theme.canvas)
             } else if sampleMeters != nil {
                 Color(white: 0.35).ignoresSafeArea()
                     .overlay { Text("SAMPLE camera view").font(Theme.font(15, weight: .medium)).foregroundStyle(.white.opacity(0.7)) }

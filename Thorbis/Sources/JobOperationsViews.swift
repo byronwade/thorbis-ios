@@ -294,7 +294,7 @@ struct JobCloseoutView: View {
         }
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .environment(\.paperRecordRoom, true)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
@@ -794,11 +794,11 @@ struct JobFollowUpsView: View {
         }
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $booking) { record in
+        .sheet(item: $booking) { record in SheetSurface {
             FollowUpBookingSheet(jobID: jobID, followUp: record) { Task { await load() } }
-        }
+        } }
         .safeAreaInset(edge: .bottom) {
             if session.can("job.edit", feature: "jobs") {
                 PaperActionBar(title: "Send follow-up", symbol: "paperplane", busy: busy,
@@ -936,7 +936,7 @@ struct FollowUpBookingSheet: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationTitle("Book return visit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

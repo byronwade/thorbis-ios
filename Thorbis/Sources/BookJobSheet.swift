@@ -207,7 +207,7 @@ struct NewJobSheet: View {
                 #endif
                 }
             }
-            .foregroundStyle(Theme.foreground).background(Theme.background).buttonStyle(.plain)
+            .foregroundStyle(Theme.foreground).background(Theme.canvas).buttonStyle(.plain)
             // The one commit rides above the keyboard, so typing never hides it.
             .safeAreaInset(edge: .bottom) { commit }
             .toolbar(.hidden, for: .navigationBar)
@@ -224,17 +224,17 @@ struct NewJobSheet: View {
                 let found = await lookup(newPhone)
                 newLookup = found.map(CustomerPhoneLookup.found) ?? .notApplicable
             }
-            .sheet(isPresented: $browsing) {
+            .sheet(isPresented: $browsing) { SheetSurface {
                 CustomerPickerSheet(selectedID: draft.customerID, canCreate: false, onNew: { _ in }) { id in
                     select(id); browsing = false
                 }
-            }
-            .sheet(isPresented: $showFullCustomer) {
+            } }
+            .sheet(isPresented: $showFullCustomer) { SheetSurface {
                 NewCustomerSheet(initialName: newName, initialPhone: newPhone, initialAddress: newAddress) { customer in
                     knownNames[customer.id] = customer.name
                     select(customer.id)
                 }
-            }
+            } }
             .thorbisDestination(isPresented: createdJobRoute) {
                 if let createdJobID { JobDetailView(jobId: createdJobID) }
             }
@@ -790,7 +790,7 @@ struct NewJobSheet: View {
         .accessibilityIdentifier("book-job-commit")
         .disabled(busy || !session.can("job.create", feature: "jobs"))
         .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
-        .background(Theme.background)
+        .background(Theme.canvas)
     }
 
     /// Says what's missing under each field, and moves to the first one.

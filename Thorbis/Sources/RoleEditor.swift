@@ -107,8 +107,8 @@ struct RoleEditorView: View {
         }
         .searchable(text: $search, prompt: "Find a permission")
         .scrollContentBackground(.hidden)
-        .background(Theme.background)
-        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.background) } }
+        .background(Theme.canvas)
+        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.canvas) } }
         .navigationTitle(name.isEmpty ? "Role" : name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)

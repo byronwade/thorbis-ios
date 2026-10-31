@@ -17,7 +17,7 @@ private struct WellSlice: ViewModifier {
         content
             .environment(\.paperRowInset, PaperCardMetrics.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.well, in: UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
+            .background(ThorbisPanelStyle(), in: UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
                                                                bottomTrailingRadius: last ? r : 0, topTrailingRadius: first ? r : 0,
                                                                style: .continuous))
     }

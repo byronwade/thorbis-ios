@@ -290,12 +290,12 @@ struct CustomerContactSheet: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
         .foregroundStyle(Theme.foreground)
-        .background(Theme.card)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
         .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(Theme.cardRadius)
-        .presentationBackground(Theme.card)
+        .thorbisSheetSurface()
         .interactiveDismissDisabled(busy)
     }
 
@@ -319,7 +319,7 @@ struct CustomerContactSheet: View {
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: 48)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                         .stroke(focusedField == field ? Theme.foreground : Theme.border,
@@ -472,14 +472,14 @@ struct MoreView: View {
             }
             .foregroundStyle(Theme.foreground).buttonStyle(RowPressStyle())
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $showSettings) { SheetSurface { SettingsView() } }
         .sheet(isPresented: $editing) {
             AppMenuEditor { editing = false }
                 .padding(.top, 8)
                 .presentationDetents([.large])
-                .presentationBackground(Theme.background)
+                .thorbisSheetSurface()
         }
         #if DEBUG
         .task { if PaperPreview.enabled, PaperPreview.screen == "app-menu-edit" { editing = true } }

@@ -48,7 +48,7 @@ struct PaperTabletSchedule: View {
                             }
                         }
                             .padding(4)
-                            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                            .panelBackground(cornerRadius: Theme.cardRadius)
                             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
                     }
                     if jobs.isEmpty && !store.loading {
@@ -63,7 +63,7 @@ struct PaperTabletSchedule: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: jobs.map(\.id), initial: true) { _, ids in
             if selectedID.map({ ids.contains($0) }) != true, let first = ids.first { selectedID = first }
