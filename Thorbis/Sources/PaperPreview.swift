@@ -1582,6 +1582,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.isJobScreenPreview || PaperPreview.screen == "customer-jobs",
            let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
             listed[index]["locationId"] = PaperPreview.homeLocationID
+            // A dispatched job's moves as the live server lists them (build 125's status sheet), so
+            // the job screen's status popover and ••• show every allowed move.
+            if PaperPreview.isJobScreenPreview, listed[index]["status"] as? String == "dispatched" {
+                listed[index]["allowedTransitions"] = ["en_route", "arrived", "in_progress", "paused", "scheduled"]
+            }
             if PaperPreview.screen == "job-activity" { listed[index]["dispatchedAt"] = today(hour: 8, minute: 2) }
             if PaperPreview.screen == "job-onsite" {
                 // Arrived 42 minutes ago, working since: the on-site clock reads from these taps.

@@ -1049,13 +1049,16 @@ struct PaperCard<Content: View>: View {
     @ViewBuilder var content: Content
 
     @Environment(\.paperGroupedWells) private var wells
+    @Environment(\.paperRecordRoom) private var recordRoom
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: wells ? .continuous : .circular)
         VStack(alignment: .leading, spacing: 0) { content }
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: shape)
+            // v2 Record room: no panel; the rows sit on the page, their words under the label.
+            .background(recordRoom ? Color.clear : Theme.card, in: shape)
+            .padding(.horizontal, recordRoom ? RecordRoom.outset(rowInset: padding > 0 ? padding : PaperCardMetrics.inset) : 0)
             // v2: no 1px box around a section; the panel's tone does the work.
             .environment(\.paperRowInset, PaperCardMetrics.inset)
     }

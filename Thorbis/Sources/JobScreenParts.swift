@@ -1,9 +1,10 @@
 import SwiftUI
 import UIKit
 
-// The job screen's pieces (redesign 2026-10-31, after Linear's issue detail): each section is a
-// grouped well under a semibold header with its count, rows separated by inset hairlines; status as
-// a glyph and a word; quiet circles; the technician's on-site toolkit; and the activity timeline.
+// The job screen's pieces (v2, Linear's issue detail on design.thorbis.com tokens): each section is
+// a grouped well under a 13 Medium label with its count, rows separated by space (no lines); status
+// as a word with its mark; quiet circles; the on-site toolkit; invoice lines with two-decimal money;
+// and a quiet activity timeline (no rail).
 
 extension ContainerValues {
     /// Set on a row inside a `JobPanel` to leave out the hairline under it (a caption that belongs
@@ -16,14 +17,26 @@ extension View {
     func jobPanelJoinsNext() -> some View { containerValue(\.jobPanelJoinsNext, true) }
 }
 
-/// A section's grouped well (radius 14, `Theme.well`), with an inset hairline between rows. Pass
-/// `dividers: false` for content that draws its own structure (the activity timeline).
+/// A section's rows. On the job (a Record room, `paperRecordRoom`) they sit on the page with no
+/// panel; elsewhere on a grouped well (radius 14, `Theme.well`). Space, never a line, between rows.
 struct JobPanel<Content: View>: View {
     var dividers = true
     @ViewBuilder var content: Content
+    @Environment(\.paperRecordRoom) private var recordRoom
 
     var body: some View {
-        Well {
+        if recordRoom {
+            // v2 Record room: no panel; rows sit on the page, their words under the section label.
+            VStack(alignment: .leading, spacing: 0) { rows }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, RecordRoom.outset(rowInset: 16))
+        } else {
+            Well { rows }
+        }
+    }
+
+    @ViewBuilder private var rows: some View {
+        Group {
             if dividers {
                 Group(subviews: content) { rows in
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
@@ -67,8 +80,9 @@ struct JobPanelLabel: View {
                         .foregroundStyle(markTint)
                         .accessibilityHidden(true)
                 }
-                (Text(title).font(Theme.font(15, weight: .semibold))
-                 + Text(count.map { "  \($0)" } ?? "").font(Theme.font(15)))
+                // v2: section labels are 13 Medium in the marker grey, the count in the same voice.
+                (Text(title).font(Theme.font(13, weight: .medium))
+                 + Text(count.map { "  \($0)" } ?? "").font(Theme.font(13)))
                     .monospacedDigit()
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -376,24 +390,6 @@ struct JobToolTile: View {
     }
 }
 
-/// A closeout row's tick: green with a check when done, an empty ring when not.
-struct JobTick: View {
-    let done: Bool
-
-    var body: some View {
-        ZStack {
-            if done {
-                Circle().fill(Theme.statusDone)
-                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-            } else {
-                Circle().strokeBorder(Theme.statusUnscheduled, style: StrokeStyle(lineWidth: 1.5, dash: [2.5, 2.5]))
-            }
-        }
-        .frame(width: 22, height: 22)
-        .accessibilityHidden(true)
-    }
-}
-
 /// OnSite.dc.html: what to know before touching anything, at the top while on site. Facts in
 /// bold, site notes after; codes copy on a long press.
 struct JobAccessBanner: View {
@@ -463,10 +459,48 @@ enum JobOnSiteClock {
     }
 }
 
-/// Whole dollars without cents, cents when there are some: "$340", "$340.50".
+/// v2 (design.thorbis.com "Money is $186.00. Always two decimals"): the job screens' money, never
+/// mixed with whole dollars. The name is kept so the job's call sites follow.
 func jobShortMoney(_ cents: Int, currency: String) -> String {
-    let text = money(cents, currency: currency)
-    return cents % 100 == 0 && text.hasSuffix(".00") ? String(text.dropLast(3)) : text
+    money(cents, currency: currency)
+}
+
+/// An invoice's lines as design.thorbis.com draws them: the line, its quantity and its amount in
+/// tabular columns, two decimals always ("Service call   1   $186.00"). One VoiceOver item per line.
+struct JobInvoiceLineRows: View {
+    let lines: [FieldLine]
+    let currency: String
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    static func amount(_ line: FieldLine) -> Int? {
+        let (total, overflow) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
+        return overflow ? nil : total
+    }
+
+    var body: some View {
+        ForEach(lines) { line in
+            let amount = Self.amount(line).map { money($0, currency: line.unitPrice.currency) }
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                                      : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            layout {
+                Text(line.description).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("\(line.quantity)").font(Theme.monoFont(14)).foregroundStyle(Theme.muted)
+                        .frame(minWidth: 20, alignment: .trailing)
+                    Text(amount ?? "—").font(Theme.monoFont(15)).foregroundStyle(Theme.foreground)
+                        .frame(minWidth: 72, alignment: .trailing)
+                }
+                .fixedSize()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(line.description), quantity \(line.quantity)\(amount.map { ", \($0)" } ?? "")")
+        }
+    }
 }
 
 // MARK: Activity timeline (Linear's issue activity: a thin line through small glyphs)
@@ -491,37 +525,36 @@ struct JobActivityGlyph: View {
         }
     }
 
+    /// v2: a quiet mark, not a coloured disc: the kind's small glyph in the marker grey; a status
+    /// change keeps its small status mark (colour beside the word, never alone).
     private var mark: (symbol: String, tint: Color) {
-        if pending { return ("clock", Theme.statusInProgress) }
+        if pending { return ("clock", Theme.warning) }
         switch kind {
-        case "note": return ("text.alignleft", Theme.markAccent)
-        case "media": return ("camera.fill", Theme.markPumpkin)
-        case "estimate": return ("doc.text.fill", Theme.markTeal)
-        case "call": return ("phone.fill", Theme.markForest)
-        default: return ("circle.fill", Theme.markGrey)
+        case "note": return ("text.alignleft", Theme.muted)
+        case "media": return ("camera", Theme.muted)
+        case "estimate": return ("doc.text", Theme.muted)
+        case "call": return ("phone", Theme.muted)
+        default: return ("circle.fill", Theme.muted)
         }
     }
 
     var body: some View {
         Group {
             if kind == "status" {
-                StatusGlyph(tone: Self.tone(forStatusEvent: title), label: title)
-                    .frame(width: size, height: size)
-                    .background(Theme.background, in: Circle())
+                StatusGlyph(tone: Self.tone(forStatusEvent: title), label: title, size: 12)
             } else {
                 Image(systemName: mark.symbol)
-                    .font(.system(size: size * 0.48, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: size, height: size)
-                    .background(mark.tint, in: Circle())
+                    .font(.system(size: size * 0.6, weight: .regular))
+                    .foregroundStyle(mark.tint)
             }
         }
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 }
 
-/// One timeline row: the glyph on a thin vertical line, then the entry. The line runs into the
-/// row above unless this is the first, and on to the row below unless this is the last.
+/// One timeline row: a quiet mark, then the entry. v2: no rail line; space separates the entries.
+/// `isFirst` and `isLast` are kept so call sites compile.
 struct JobTimelineItem<Content: View>: View {
     let kind: String
     let title: String
@@ -540,14 +573,5 @@ struct JobTimelineItem<Content: View>: View {
             content
         }
         .padding(.vertical, verticalPadding)
-        .background(alignment: .topLeading) {
-            VStack(spacing: 0) {
-                Rectangle().fill(isFirst ? Color.clear : Theme.fill).frame(width: 1.5, height: verticalPadding + 1)
-                Color.clear.frame(height: glyph)
-                Rectangle().fill(isLast ? Color.clear : Theme.fill).frame(width: 1.5).frame(maxHeight: .infinity)
-            }
-            .frame(width: glyph)
-            .accessibilityHidden(true)
-        }
     }
 }

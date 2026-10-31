@@ -295,6 +295,7 @@ struct JobCloseoutView: View {
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
+        .environment(\.paperRecordRoom, true)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if job?.status != "completed", session.can("job.complete", feature: "jobs"), job?.allowedTransitions?.contains("completed") == true {
@@ -313,18 +314,23 @@ struct JobCloseoutView: View {
                         actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancel() } }])
     }
     private func checklistRow(done: Bool, title: String, detail: String?) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            JobTick(done: done)
+        // v2: the state is a word with its mark ("Done" / "To do"), not a tick's colour.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(15, weight: done ? .regular : .medium))
                     .foregroundStyle(done ? Theme.muted : Theme.foreground)
-                if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted) }
+                    .fixedSize(horizontal: false, vertical: true)
+                if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            StatusLabel(tone: done ? .done : .unscheduled, word: done ? "Done" : "To do", emphasis: done ? .quiet : .strong)
+                .fixedSize()
         }
+        .padding(.vertical, 8)
         .frame(minHeight: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(done ? "Done" : "Not done")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([title, detail].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue(done ? "Done" : "To do")
     }
 
     private func wellField(_ prompt: String, text: Binding<String>) -> some View {

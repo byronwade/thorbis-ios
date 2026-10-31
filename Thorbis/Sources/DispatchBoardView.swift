@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The dispatcher's board (Schedule › Board, roles with `job.assign`): the Unscheduled queue on
-/// top, then each technician's day in a time column. Tapping a job offers Assign, Reschedule,
-/// Open, or a one-tap move to another technician. Live data only: the roster is the server's
+/// The dispatcher's board (Schedule › Board, roles with `job.assign`): today's jobs as compact cards
+/// in columns by where they stand (Open, En route, On site, Done), each card naming its tech, with
+/// the Unscheduled queue at the foot of Open. Tapping a job offers Assign, Reschedule, Open, or a
+/// one-tap move to another technician. Live data only: the roster is the server's
 /// assignee list and the jobs are the ones this person can see.
 struct DispatchBoardView: View {
     @EnvironmentObject private var api: APIClient
@@ -40,45 +41,67 @@ struct DispatchBoardView: View {
         .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
     }
 
+    /// design.thorbis.com Rooms, "Board: Open, en route, on site. Compact cards." Today's work in
+    /// columns by where it stands, plus Done; the Unscheduled queue sits at the foot of Open.
+    struct Column: Identifiable {
+        let id: String
+        let title: String
+        let tone: StatusTone
+        let jobs: [Job]
+        /// Open's second part: jobs that still need a time, oldest first.
+        var waiting: [Job] = []
+        /// The status this column already says; a card only names a status that differs.
+        let usual: Set<String>
+    }
+
+    static func columns(today: [Job], unscheduled: [Job]) -> [Column] {
+        // Open takes everything not yet moving (any status the board doesn't name too), so no job
+        // booked today falls between columns; its card names the odd status.
+        let moving: Set<String> = ["en_route", "arrived", "in_progress", "paused", "completed"]
+        return [Column(id: "open", title: "Open", tone: .scheduled,
+                jobs: today.filter { !moving.contains($0.status) }, waiting: unscheduled, usual: ["scheduled"]),
+         Column(id: "en-route", title: "En route", tone: .dispatched, jobs: today.filter { $0.status == "en_route" }, usual: ["en_route"]),
+         Column(id: "on-site", title: "On site", tone: .inProgress,
+                jobs: today.filter { ["arrived", "in_progress", "paused"].contains($0.status) }, usual: ["arrived", "in_progress"]),
+         Column(id: "done", title: "Done", tone: .done, jobs: today.filter { $0.status == "completed" }, usual: ["completed"])]
+    }
+
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var columnWidth: CGFloat = 248
+
     var body: some View {
-        let todays = today
         let roster = people.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-        let rosterIDs = Set(roster.map(\.userId))
-        let noTech = todays.filter { $0.assignedToUserId == nil }
-        let outside = todays.filter { $0.assignedToUserId.map { !rosterIDs.contains($0) } ?? false }
-        VStack(alignment: .leading, spacing: 18) {
-            if let error { ErrorBanner(message: error) }
-            PaperSection("Unscheduled", count: unscheduled.count) {
-                if unscheduled.isEmpty {
-                    emptyRow("Everything has a time.")
-                } else {
-                    rows(unscheduled, age: true)
+        let names = Dictionary(people.map { ($0.userId, $0.displayName) }, uniquingKeysWith: { first, _ in first })
+        let columns = Self.columns(today: today, unscheduled: unscheduled)
+        VStack(alignment: .leading, spacing: 12) {
+            if let error { ErrorBanner(message: error).paperCardMargin() }
+            if typeSize.isAccessibilitySize {
+                // At accessibility sizes the columns stack, so no card is squeezed or scrolled sideways.
+                VStack(alignment: .leading, spacing: 28) {
+                    ForEach(columns) { column($0, names: names, roster: roster) }
                 }
-            }
-            ForEach(roster) { person in
-                let theirs = todays.filter { $0.assignedToUserId == person.userId }
-                PaperSection(person.displayName, count: theirs.count) {
-                    if theirs.isEmpty { emptyRow("Nothing booked today.") } else { rows(theirs, age: false) }
+                .paperCardMargin()
+            } else {
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(columns) { column($0, names: names, roster: roster).frame(width: min(columnWidth, 320)) }
+                    }
+                    .padding(.horizontal, PaperCardMetrics.margin)
                 }
-            }
-            if !noTech.isEmpty {
-                PaperSection("No tech yet", count: noTech.count) { rows(noTech, age: false) }
-            }
-            if !outside.isEmpty {
-                PaperSection("Outside your roster", count: outside.count) { rows(outside, age: false) }
+                .scrollIndicators(.hidden)
             }
             if !rosterLoaded {
-                SkeletonRows(count: 2, inset: 0)
-            } else if roster.isEmpty {
-                Text("No one can be assigned right now.").font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.horizontal, 4)
+                SkeletonRows(count: 2, inset: 0).paperCardMargin()
+            } else if canAssign && roster.isEmpty {
+                Text("No one can be assigned right now.").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4).paperCardMargin()
             }
         }
-        .paperCardMargin()
         .sensoryFeedback(.success, trigger: moved)
         .task(id: session.generation) { await loadRoster() }
-        .task(id: "addr|\((unscheduled + todays).map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)") {
+        .task(id: "addr|\((unscheduled + today).map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)") {
             guard session.can("customer.view", feature: "core_crm") else { return }
-            await addresses.load(unscheduled + todays, api: api, organizationID: session.activeOrganization?.id,
+            await addresses.load(unscheduled + today, api: api, organizationID: session.activeOrganization?.id,
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)", limit: 30)
         }
         .sheet(item: $menuJob, onDismiss: runPending) { job in
@@ -92,45 +115,105 @@ struct DispatchBoardView: View {
         .thorbisDestination(item: $opening) { JobDetailView(jobId: $0.id) }
     }
 
-    @ViewBuilder private func rows(_ jobs: [Job], age: Bool) -> some View {
-        VStack(spacing: 0) {
-            ForEach(jobs) { job in row(job, age: age) }
-        }
-        .padding(.vertical, PaperCardMetrics.edge)
-    }
-
-    private func row(_ job: Job, age: Bool) -> some View {
-        let customer = store.customerName(job.customerId)
-        let street = addresses.street(job)
-        let leading: PaperRowLeading
-        if age, let created = JobFiltering.date(job.createdAt) {
-            leading = .text(ScheduleCompactRow.age(since: created),
-                            accessibility: "Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
-        } else if let when = JobFiltering.date(job.scheduledFor) {
-            leading = .text(when.tradeTime)
-        } else {
-            leading = .text("No time")
-        }
-        return Button { menuJob = job } label: {
-            PaperListRow(leading: leading, title: street ?? job.title,
-                         subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
-                         dimmed: job.status == "completed") {
-                if movingJobID == job.id {
-                    ProgressView().controlSize(.small)
-                } else {
-                    StatusWord(jobStatus: job.status)
+    /// A column: its status as a word with its mark and the count, then compact cards. Space, not lines.
+    private func column(_ column: Column, names: [String: String], roster: [FieldAssignee]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                StatusLabel(tone: column.tone, word: column.title)
+                Text("\(column.jobs.count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 4)
+            .frame(minHeight: 32)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(column.title), \(column.jobs.count)")
+            .accessibilityAddTraits(.isHeader)
+            if column.jobs.isEmpty && column.waiting.isEmpty {
+                Text(column.id == "open" ? "Nothing booked." : "None right now.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4).frame(minHeight: 32, alignment: .leading)
+            }
+            ForEach(column.jobs) { card($0, usual: column.usual, age: false, names: names) }
+            if column.id == "open" {
+                // The queue: everyone's jobs that still need a time, worked from the oldest.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Needs a time").font(Theme.font(13, weight: .medium))
+                    Text("\(column.waiting.count)").font(Theme.font(13)).monospacedDigit()
+                    Spacer(minLength: 0)
                 }
+                .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4).padding(.top, column.jobs.isEmpty ? 0 : 12)
+                .frame(minHeight: 32)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Unscheduled, \(column.waiting.count)")
+                .accessibilityAddTraits(.isHeader)
+                if column.waiting.isEmpty {
+                    Text("Everything has a time.").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4).frame(minHeight: 32, alignment: .leading)
+                }
+                ForEach(column.waiting) { card($0, usual: ["scheduled", "draft"], age: true, names: names) }
             }
         }
-        .buttonStyle(RowPressStyle())
-        .disabled(movingJobID != nil)
-        .accessibilityHint("Assign, reschedule or open this job")
-        .accessibilityIdentifier("board-row-\(job.id)")
+        .accessibilityElement(children: .contain)
     }
 
-    private func emptyRow(_ text: String) -> some View {
-        Text(text).font(Theme.font(15)).foregroundStyle(Theme.muted)
-            .padding(.horizontal, PaperCardMetrics.inset).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+    /// A compact card: when (or how long it has waited) and the tech, the street, then the problem
+    /// and who. A status shows only where it differs from the column (Dispatched, Paused).
+    private func card(_ job: Job, usual: Set<String>, age: Bool, names: [String: String]) -> some View {
+        let customer = store.customerName(job.customerId)
+        let street = addresses.street(job)
+        let tech = job.assignedToUserId.flatMap { names[$0] ?? (job.assignedToUserId == session.user?.id ? session.user?.name : nil) }
+        let when: (text: String, spoken: String) = {
+            if age, let created = JobFiltering.date(job.createdAt) {
+                return ("Waiting \(ScheduleCompactRow.age(since: created))", "Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
+            }
+            if let date = JobFiltering.date(job.scheduledFor) { return (date.clockTime, date.tradeTime) }
+            return ("No time", "No time")
+        }()
+        let showsStatus = !usual.contains(job.status)
+        return Button { menuJob = job } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: 8) {
+                    Text(when.text).font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Spacer(minLength: 4)
+                    if movingJobID == job.id {
+                        ProgressView().controlSize(.small)
+                    } else if let tech {
+                        InitialsAvatar(name: tech, size: 20)
+                    } else {
+                        // Unassigned, or someone outside the roster this person can assign to.
+                        Text(job.assignedToUserId == nil ? "No tech" : "Other tech")
+                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                    }
+                }
+                Text(street ?? job.title).font(Theme.font(16, weight: .medium))
+                    .foregroundStyle(job.status == "completed" ? Theme.muted : Theme.foreground)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(street != nil ? "\(job.title) · \(customer)" : customer)
+                    .font(Theme.font(13)).foregroundStyle(Theme.subtle)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                if showsStatus {
+                    StatusLabel(jobStatus: job.status, hasTime: job.scheduledFor != nil, emphasis: .quiet, size: 12).padding(.top, 2)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        }
+        .buttonStyle(PressStyle())
+        .disabled(movingJobID != nil)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([street ?? job.title, street != nil ? job.title : nil, customer, when.spoken,
+                             job.status.statusLabel, tech.map { "Assigned to \($0)" } ?? (job.assignedToUserId == nil ? "No tech" : "Assigned outside your roster")]
+            .compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Assign, reschedule or open this job")
+        .accessibilityIdentifier("board-row-\(job.id)")
     }
 
     private func menuTitle(_ job: Job) -> String {

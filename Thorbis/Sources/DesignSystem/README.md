@@ -95,7 +95,8 @@ in light and dark, and scales with Dynamic Type.
 | Old `PaperSection`/`PaperCard` drawn as header + well | `.environment(\.paperGroupedWells, true)` | `PaperComponents.swift` |
 | Section header with count | `SectionHeader` | `../Theme.swift` |
 | Linear text tabs (plain words, well pill) | `PaperTabs(textTabs: true)` | `../PaperComponents.swift` |
-| Activity timeline row (glyph on a thin line) | `JobTimelineItem`, `JobActivityGlyph` | `../JobScreenParts.swift` |
+| Activity timeline row (a quiet mark, space between entries, no rail) | `JobTimelineItem`, `JobActivityGlyph` | `../JobScreenParts.swift` |
+| Job status popover (moves grouped by space: forward, then pause / back) | `JobStatusMenu` | `../JobStatusMenu.swift` |
 | **Anchored popover menu** (replaces `Menu {}`) | **`ThorbisMenu`** | `ThorbisMenu.swift` |
 | **A menu shown as a sheet** (Create) | `ThorbisMenuCard` | `ThorbisMenu.swift` |
 | **Modal sheet** (one task, one ink commit) | **`ThorbisModalSheet`**, `ThorbisSheetField`, `ThorbisSheetHeader` | `ThorbisSheet.swift` |
