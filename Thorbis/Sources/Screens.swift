@@ -521,7 +521,7 @@ struct MoreView: View {
                         .accessibilityHidden(true)
                     Text(businessName)
                         .font(Theme.font(16, weight: .semibold))
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 12, weight: .semibold))
