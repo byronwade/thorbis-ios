@@ -85,7 +85,8 @@ struct DrawerPlaces: Equatable {
     ///   - tabs: the layout's pinned places (company or this phone).
     ///   - explicitPins: true when the person or company chose pins (not the role's defaults), so
     ///     only real choices add rows.
-    static func make(role: WorkRole, tabs: [MenuItem], explicitPins: Bool, hidden: Set<MenuItem>,
+    ///   - roleDefaults: the role's default pinned places, which never count as a choice.
+    static func make(role: WorkRole, tabs: [MenuItem], explicitPins: Bool, roleDefaults: [MenuItem] = [], hidden: Set<MenuItem>,
                      order: [MenuItem], access: PrimaryTabAccess, permitted: (MenuItem) -> Bool) -> DrawerPlaces {
         func opens(_ item: MenuItem) -> Bool {
             switch item {
@@ -98,7 +99,9 @@ struct DrawerPlaces: Equatable {
         var primary = roleRows(role).filter(opens)
         var pinned: [MenuItem] = []
         if explicitPins {
-            for item in tabs where opens(item) && !primary.contains(item) {
+            // A pin that merely repeats the role's defaults (a company layout started from them keeps
+            // Schedule beside an owner's Home) adds nothing.
+            for item in tabs where opens(item) && !primary.contains(item) && !roleDefaults.contains(item) {
                 if primary.count < maxPrimary { primary.append(item) } else { pinned.append(item) }
             }
         }
@@ -141,6 +144,8 @@ struct AppDrawer: View {
     /// Row icons grow with the words beside them.
     @ScaledMetric(relativeTo: .body) private var iconSize: CGFloat = 20
     @ScaledMetric(relativeTo: .body) private var iconColumn: CGFloat = 26
+    /// Room under the last row for the capsule and gear, which grow with the text.
+    @ScaledMetric(relativeTo: .body) private var bottomClearance: CGFloat = 110
 
     /// Words line up under the primary rows' labels: row padding, icon column, gap.
     private var textInset: CGFloat { 12 + iconColumn + 14 }
@@ -176,7 +181,7 @@ struct AppDrawer: View {
                 }
                 .padding(.horizontal, 12)
                 // Room for the capsule and gear so the last rows scroll clear of them.
-                .padding(.bottom, 110)
+                .padding(.bottom, bottomClearance)
             }
             .scrollIndicators(.hidden)
             #if DEBUG

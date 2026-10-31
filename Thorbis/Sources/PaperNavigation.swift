@@ -340,6 +340,7 @@ struct RootView: View {
     private var drawerPlaces: DrawerPlaces {
         DrawerPlaces.make(role: WorkRole(session), tabs: pinnedPlaces,
                           explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
+                          roleDefaults: layout.roleDefaultTabs,
                           hidden: layout.hidden, order: layout.menuOrder, access: primaryAccess,
                           permitted: { $0.permitted(session) })
     }
@@ -1011,7 +1012,14 @@ private struct PreviewSheets: ViewModifier {
                     .presentationDetents([.large])
             }
             .sheet(isPresented: $invoiceDetail) {
-                NavigationStack { InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations() }
+                NavigationStack {
+                    InvoiceDetailView(id: PaperPreview.invoiceDetailPreviewID).paperDestinations()
+                        // `--paper-preview-sheet-pushed`: a screen pushed inside this sheet, which keeps
+                        // the round Back alone (no drawer circle in sheets).
+                        .thorbisDestination(isPresented: .constant(ProcessInfo.processInfo.arguments.contains("--paper-preview-sheet-pushed"))) {
+                            EstimateDetailView(id: PaperPreview.estimate.id)
+                        }
+                }
             }
             .sheet(isPresented: $estimateRevision) {
                 EstimateRevisionEditorView(estimate: PaperPreview.screen == "estimate-draft" ? PaperPreview.draftEstimate

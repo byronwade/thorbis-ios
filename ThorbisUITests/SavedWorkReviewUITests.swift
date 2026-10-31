@@ -73,7 +73,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         reveal(uncached, in: app); uncached.tap()
         XCTAssertTrue(app.staticTexts["Uncached drain visit"].waitForExistence(timeout: 10))
         capture(app, "Uncached job opened inside review")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons["Back"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Saved on this phone"].waitForExistence(timeout: 5))
         let cached = app.buttons["saved-work-open-00000000-0000-4000-8000-000000002214"]
         app.scrollViews["saved-work-review"].swipeDown()

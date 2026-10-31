@@ -89,6 +89,11 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(office.primary.count, 5)
         XCTAssertEqual(office.pinned, [.estimates, .invoices])
         XCTAssertFalse(office.more.contains(.estimates))
+        let company = DrawerPlaces.make(role: .owner, tabs: [.schedule, .money, .customers], explicitPins: true,
+                                        roleDefaults: MenuLayout.defaultTabs(for: .owner, permitted: { _ in true }),
+                                        hidden: [], order: [], access: everyone, permitted: { _ in true })
+        XCTAssertTrue(company.pinned.isEmpty, "A company layout made from the owner's defaults adds no Pinned Schedule")
+        XCTAssertTrue(company.more.contains(.schedule))
         let defaults = places(.owner, tabs: [.home, .schedule, .money, .customers], explicit: false)
         XCTAssertTrue(defaults.pinned.isEmpty)
         XCTAssertFalse(defaults.primary.contains(.schedule))
