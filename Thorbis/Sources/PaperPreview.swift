@@ -682,6 +682,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
         // Left unanswered on purpose: the screen keeps showing what it draws while it waits.
         if PaperPreview.enabled, let held = PaperPreview.heldPath, url.path == held { return }
+        // `--paper-preview-payment-timeout`: recording a payment times out, so Collect payment shows its pending state.
+        if PaperPreview.enabled, request.httpMethod == "POST", url.path.hasSuffix("/payments"),
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-timeout") {
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut)); return
+        }
         if PaperPreview.holdsLists, PaperPreview.heldListPaths.contains(url.path) {
             let firstRead = PaperPreview.holdsAfterFirst && Self.scenario.lock.withLock { Self.scenario.answeredListPaths.insert(url.path).inserted }
             if !firstRead { return }

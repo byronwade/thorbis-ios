@@ -47,14 +47,15 @@ struct NeedsAttentionView: View {
                 // Pushed screen: system Back only, so no second menu button under it (MA-05).
                 // Redesign phase 3: the 30pt semibold title, then one grouped well per kind with its
                 // count; rows lead with their status glyph and amounts are semibold tabular.
+                // v2: the detail title on the ramp (24), one quiet line, then a group per kind.
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Needs attention").font(Theme.font(30, weight: .semibold)).tracking(-0.6)
+                    Text("Needs attention").font(Theme.font(30, weight: .medium)).tracking(-0.4)
                         .accessibilityAddTraits(.isHeader)
                     Text(loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking…")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .foregroundStyle(Theme.foreground)
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 4)
+                .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
                 if let error { ErrorBanner(message: error) }
                 // Each row names its state in words ("Unpaid", "Sent 9 days ago", "No time").
                 VStack(alignment: .leading, spacing: 0) {
@@ -62,18 +63,20 @@ struct NeedsAttentionView: View {
                                 data: unpaid.map { AttentionInvoice(invoice: $0.0, balance: $0.1) },
                                 dividerInset: DocumentListRowContent.dividerInset) { item in
                         NavigationLink(value: PaperRoute.invoice(item.invoice.id)) {
-                            DocumentListRowContent(status: DocumentStatus(invoice: item.invoice),
-                                                   title: store.customerName(item.invoice.customerId),
-                                                   subtitle: "Unpaid · \(since("Issued", item.invoice.issuedAt))",
-                                                   amount: money(item.balance, currency: item.invoice.currency))
+                            MoneyListRow(title: store.customerName(item.invoice.customerId),
+                                         subtitle: "INV-\(item.invoice.id.suffix(4).uppercased()) · \(since("Issued", item.invoice.issuedAt))",
+                                         status: DocumentStatus(invoice: item.invoice),
+                                         amount: money(item.balance, currency: item.invoice.currency))
                         }.buttonStyle(RowPressStyle())
                     }
                     WellSection(title: "Estimates waiting on the customer", count: waiting.count, data: waiting,
                                 dividerInset: DocumentListRowContent.dividerInset) { estimate in
                         NavigationLink(value: PaperRoute.estimate(estimate.id)) {
-                            DocumentListRowContent(status: DocumentStatus(estimateStatus: estimate.status), title: estimate.title,
-                                                   subtitle: "\(since("Sent", estimate.sentAt)) · \(store.customerName(estimate.customerId))",
-                                                   amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") })
+                            MoneyListRow(title: store.customerName(estimate.customerId),
+                                         subtitle: "\(estimate.title) · \(since("Sent", estimate.sentAt))",
+                                         status: DocumentStatus(estimateStatus: estimate.status),
+                                         statusWord: "Waiting",
+                                         amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") })
                         }.buttonStyle(RowPressStyle())
                     }
                     WellSection(title: "Jobs without a time", count: unscheduled.count, data: unscheduled,
@@ -87,11 +90,12 @@ struct NeedsAttentionView: View {
                 .paperCardMargin()
                 if loaded && unpaid.isEmpty && waiting.isEmpty && unscheduled.isEmpty {
                     PaperEmptyState(symbol: "checkmark.circle", title: "Nothing needs attention",
-                                    message: "Unpaid invoices, estimates waiting over a week and jobs with no time show up here.")
+                                    message: "Unpaid invoices, estimates waiting over a week and jobs with no time land here. Pull down to check again.")
                 }
             }
             .padding(.bottom, 24)
         }
+        .modifier(PaperPreviewScrollAnchor())
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .task { await load() }

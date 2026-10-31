@@ -35,9 +35,12 @@ struct EstimatesView: View {
                         PaperSplitDestinationLink(id: record.id, value: PaperRoute.estimate(record.id)) {
                             EstimateDetailView(id: record.id).thorbisBackButton()
                         } label: {
-                            DocumentListRowContent(status: DocumentStatus(estimateStatus: record.status), title: record.title,
-                                                   subtitle: "\(store.customerName(record.customerId)) · EST-\(record.id.suffix(4).uppercased())",
-                                                   amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
+                            // v2 list room: the name first, the work and reference under it, then the
+                            // tabular amount over the status word on the trailing edge.
+                            MoneyListRow(title: store.customerName(record.customerId),
+                                         subtitle: "\(record.title) · EST-\(record.id.suffix(4).uppercased())",
+                                         status: DocumentStatus(estimateStatus: record.status),
+                                         amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
                         }.buttonStyle(RowPressStyle())
                     }
                 }
@@ -45,8 +48,9 @@ struct EstimatesView: View {
                     PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
                 }
                 if !loading && records.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
-                                    actionTitle: session.can("estimate.create", feature: "estimates") ? "New estimate" : nil,
+                    PaperEmptyState(symbol: "doc.text", title: "No estimates",
+                                    message: session.can("estimate.create", feature: "estimates") ? "Price the work before you start. Create an estimate." : "Estimates your shop sends show up here.",
+                                    actionTitle: session.can("estimate.create", feature: "estimates") ? "Create an estimate" : nil,
                                     tint: Theme.markPumpkin, prominent: true, action: { showCreate = true })
                 }
             }
@@ -98,7 +102,7 @@ struct EstimateDetailView: View {
     @State private var openCustomer: Customer?
     private var scrollContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 OfflineBanner().padding(.horizontal, -Theme.gutter)
                 SavedCopyNote(savedAt: api.savedCopyDate("/v1/estimates/\(id)")).padding(.horizontal, -Theme.gutter)
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
@@ -126,42 +130,37 @@ struct EstimateDetailView: View {
             .padding(.top, 12)
             .padding(.bottom, 28)
         }
+        .modifier(PaperPreviewScrollAnchor())
     }
 
-    /// Kind and reference, the title, then the chips: status, customer (opens them), the job it was
-    /// opened from, when it was sent or answered, the total (or how many options) and the revision.
-    private func estimateHeader(_ record: EstimateRecord, currency: String) -> some View {
+    /// v2 Evidence: "Estimate 4F2A" and its status word, the estimate's own name under it, then the
+    /// total at 30pt (or how many options), then the quiet properties: customer (opens them), the
+    /// job it was opened from, when it was sent or answered, and the revision.
+    @ViewBuilder private func estimateHeader(_ record: EstimateRecord, currency: String) -> some View {
         let status = DocumentStatus(estimateStatus: record.status)
         let customerName = store.customerName(record.customerId)
         let customer = session.can("customer.view", feature: "core_crm") ? store.customers.first(where: { $0.id == record.customerId }) : nil
         let job = jobID.flatMap { id in store.jobs.first(where: { $0.id == id }) }
         let options = record.options ?? []
         let total = options.isEmpty ? paperLinesTotal(record.lines) : nil
-        return DocumentHeader(eyebrow: "Estimate · EST-\(record.id.suffix(4).uppercased())", title: record.title) {
-            WrappingPropertyChip(document: status)
-                .accessibilityLabel("Status, \(status.word)")
-                .accessibilityIdentifier("estimate-chip-status")
-            WrappingPropertyChip(text: customerName, action: customer.map { found in { openCustomer = found } }) {
-                InitialsAvatar(name: customerName, size: 18).accessibilityHidden(true)
+        let reference = "EST-\(record.id.suffix(4).uppercased())"
+        EvidenceHeader(title: "Estimate \(record.id.suffix(4).uppercased())", status: status, subtitle: record.title,
+                       figureLabel: total == nil && !options.isEmpty ? "Highest option" : "Total",
+                       cents: total ?? options.map(\.totalAmount).max() ?? 0, currency: currency,
+                       statusIdentifier: "estimate-chip-status")
+        EvidenceProperties {
+            EvidenceProperty(label: "Customer", value: customerName, action: customer.map { found in { openCustomer = found } })
+            if let job { EvidenceProperty(label: "Job", value: job.title) }
+            if let date = JobFiltering.date(estimateStatusDate(record)) {
+                EvidenceProperty(label: estimateDateVerb(record.status), value: documentDate(date))
             }
-            .accessibilityLabel("Customer, \(customerName)")
-            .accessibilityHint(customer == nil ? "" : "Opens the customer")
-            if let job {
-                WrappingPropertyChip(job.title, symbol: "wrench.and.screwdriver")
-                    .accessibilityLabel("Job, \(job.title)")
-            }
-            if let date = documentDateChipText(estimateDateVerb(record.status), estimateStatusDate(record)) {
-                WrappingPropertyChip(date, symbol: "calendar")
-            }
-            if let total {
-                WrappingPropertyChip(money(total, currency: currency), symbol: "dollarsign.circle")
-                    .accessibilityLabel("Total, \(money(total, currency: currency))")
-            } else if !options.isEmpty {
-                WrappingPropertyChip("\(options.count) option\(options.count == 1 ? "" : "s")", symbol: "square.stack")
+            if !options.isEmpty {
+                EvidenceProperty(label: "Options", value: "\(options.count) for the customer to choose")
             }
             if let revision = record.currentRevisionNumber {
-                WrappingPropertyChip("Revision \(revision)", textColor: Theme.muted)
+                EvidenceProperty(label: "Revision", value: "\(revision)")
             }
+            EvidenceProperty(label: "Reference", value: reference)
         }
     }
 
@@ -397,12 +396,11 @@ struct InvoicesView: View {
                         } label: {
                             let total = paperLinesTotal(record.lines)
                             let due = total.map { max(0, $0 - record.amountPaid) }
-                            let state = DocumentStatus(invoice: record)
-                            DocumentListRowContent(status: state, title: store.customerName(record.customerId),
-                                                   subtitle: "INV-\(record.id.suffix(4).uppercased())",
-                                                   // MF-04: an unpaid invoice's row shows what's owed now.
-                                                   amount: (record.status == "issued" ? due : total).map { money($0, currency: record.currency) },
-                                                   amountNote: record.status == "issued" ? (record.amountPaid > 0 ? "Balance due · part paid" : "Balance due") : state.word)
+                            // MF-04: an unpaid invoice's row shows what's owed now, and says so.
+                            MoneyListRow(title: store.customerName(record.customerId),
+                                         subtitle: "INV-\(record.id.suffix(4).uppercased())" + (record.status == "issued" ? " · balance due" : ""),
+                                         status: DocumentStatus(invoice: record),
+                                         amount: (record.status == "issued" ? due : total).map { money($0, currency: record.currency) })
                         }.buttonStyle(RowPressStyle())
                     }
                 }
@@ -410,7 +408,7 @@ struct InvoicesView: View {
                     PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
                 }
                 if !loading && records.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices are made from a job.",
+                    PaperEmptyState(symbol: "doc.plaintext", title: "No invoices", message: "Invoices are made from a job. Open a finished job to invoice it.",
                                     tint: Theme.markForest)
                 }
             }
@@ -475,18 +473,20 @@ struct InvoiceDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 24) {
                 OfflineBanner().padding(.horizontal, -Theme.gutter)
                 SavedCopyNote(savedAt: api.savedCopyDate("/v1/invoices/\(id)")).padding(.horizontal, -Theme.gutter)
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
-                    // Who it's for and what's owed come first; the line revision is bookkeeping, not for people.
-                    invoiceHeader(record)
+                    // v2 Evidence: the question ("Invoice 2209") and its status word, then what's owed
+                    // now at 30pt; the quiet properties; the lines with their totals; then payments.
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                     let due = max(total - record.amountPaid, 0)
-                    // MF-04: what's owed now is the largest thing on the invoice; Total and Paid sit in the lines.
-                    MoneyFigure(label: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
-                                cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency, strong: true)
+                    EvidenceHeader(title: "Invoice \(record.id.suffix(4).uppercased())", status: DocumentStatus(invoice: record),
+                                   figureLabel: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
+                                   cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency,
+                                   statusIdentifier: "invoice-chip-status")
+                    invoiceProperties(record)
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
                     } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
@@ -494,7 +494,7 @@ struct InvoiceDetailView: View {
                             Label("Get customer signature", systemImage: "signature")
                                 .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, 4).contentShape(Rectangle())
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
                     }
@@ -516,6 +516,7 @@ struct InvoiceDetailView: View {
             .padding(.top, 12)
             .padding(.bottom, 28)
         }
+        .modifier(PaperPreviewScrollAnchor())
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
@@ -627,28 +628,21 @@ struct InvoiceDetailView: View {
         }
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
     }
-    /// Kind and reference, who it's for, then the chips: status (Unpaid, Part paid, Paid…), the job it
-    /// bills, when it was issued or paid, and the total. There is no due date on an invoice record, so
-    /// no due chip and no "overdue" is worked out here.
-    private func invoiceHeader(_ record: InvoiceRecord) -> some View {
-        let status = DocumentStatus(invoice: record)
+    /// The quiet properties under the figure: who it's for (opens them), the job it bills, when it
+    /// was issued or paid, and the total once something is paid. No coloured chips (v2 Evidence).
+    /// There is no due date on an invoice record, so no "overdue" is worked out here.
+    private func invoiceProperties(_ record: InvoiceRecord) -> some View {
         let job = record.jobId.flatMap { id in store.jobs.first(where: { $0.id == id }) }
-        let date: String? = record.status == "paid" ? documentDateChipText("Paid", record.paidAt)
-            : record.status == "void" ? documentDateChipText("Voided", record.voidedAt)
-            : documentDateChipText(record.issuedAt == nil ? "Created" : "Issued", record.issuedAt ?? record.createdAt)
-        let total = paperLinesTotal(record.lines)
-        return DocumentHeader(eyebrow: "Invoice · INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId)) {
-            WrappingPropertyChip(document: status)
-                .accessibilityLabel("Status, \(status.word)")
-                .accessibilityIdentifier("invoice-chip-status")
-            if let job {
-                WrappingPropertyChip(job.title, symbol: "wrench.and.screwdriver")
-                    .accessibilityLabel("Job, \(job.title)")
-            }
-            if let date { WrappingPropertyChip(date, symbol: "calendar") }
-            if let total, record.status != "draft" {
-                WrappingPropertyChip("Total \(money(total, currency: record.currency))", symbol: "dollarsign.circle")
-            }
+        let date: (String, String)? = record.status == "paid" ? JobFiltering.date(record.paidAt).map { ("Paid", documentDate($0)) }
+            : record.status == "void" ? JobFiltering.date(record.voidedAt).map { ("Voided", documentDate($0)) }
+            : JobFiltering.date(record.issuedAt ?? record.createdAt).map { (record.issuedAt == nil ? "Created" : "Issued", documentDate($0)) }
+        let customer = session.can("customer.view", feature: "core_crm") ? store.customers.first(where: { $0.id == record.customerId }) : nil
+        return EvidenceProperties {
+            EvidenceProperty(label: "Customer", value: store.customerName(record.customerId),
+                             action: customer.map { found in { openCustomer = found } })
+            if let job { EvidenceProperty(label: "Job", value: job.title) }
+            if let date { EvidenceProperty(label: date.0, value: date.1) }
+            EvidenceProperty(label: "Reference", value: "INV-\(record.id.suffix(4).uppercased())")
         }
     }
 
@@ -855,8 +849,10 @@ extension View {
     }
 }
 
-/// A section label, the lines on one sheet with every description in full, then the total row
-/// and an optional supporting line (a member's price) under the sheet.
+/// A section label, the lines on one panel with every description in full, then the totals in
+/// the amount column and an optional supporting line (a member's price) under the panel.
+/// v2 Evidence: name, quantity, then the two-decimal amount right-aligned and tabular. Space, not a
+/// rule, sets the totals apart.
 struct DocumentLinesSection: View {
     let label: String
     var note: String = ""
@@ -866,14 +862,18 @@ struct DocumentLinesSection: View {
     let currency: String
     var extraRows: [(String, String)] = []
     var memberLine: String? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
 
-    /// Redesign phase 3: the label as a semibold section header with the line count, the lines on
-    /// one well with inset hairlines, then the totals on the same well, the last one in semibold.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 2)
+            SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
+                if !lines.isEmpty && !typeSize.isAccessibilitySize {
+                    Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .accessibilityHidden(true)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, 2)
             Well {
                 if !note.isEmpty {
                     Text(note).font(Theme.font(15)).foregroundStyle(Theme.subtle)
@@ -881,23 +881,23 @@ struct DocumentLinesSection: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 14).padding(.bottom, 4)
-                    if !lines.isEmpty { WellDivider() }
                 }
-                ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
-                    DocumentLineRow(line: line)
-                    if index < lines.count - 1 { WellDivider() }
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(lines) { line in EvidenceLineRow(line: line) }
                 }
+                .padding(.vertical, 6)
                 if lines.isEmpty {
                     Text("No line items yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(PaperCardMetrics.inset)
                 }
                 if let total, !lines.isEmpty {
-                    Rectangle().fill(Theme.hairline).frame(height: 1).accessibilityHidden(true)
-                    WellAmountRow(label: totalLabel, value: money(total, currency: currency), strong: extraRows.isEmpty)
-                    ForEach(Array(extraRows.enumerated()), id: \.offset) { index, row in
-                        WellDivider()
-                        WellAmountRow(label: row.0, value: row.1, strong: index == extraRows.count - 1)
+                    VStack(spacing: 0) {
+                        EvidenceTotalRow(label: totalLabel, value: money(total, currency: currency), strong: extraRows.isEmpty)
+                        ForEach(Array(extraRows.enumerated()), id: \.offset) { index, row in
+                            EvidenceTotalRow(label: row.0, value: row.1, strong: index == extraRows.count - 1)
+                        }
                     }
+                    .padding(.top, 10).padding(.bottom, 12)
                 }
             }
             if let memberLine {
@@ -906,44 +906,6 @@ struct DocumentLinesSection: View {
                     .padding(.horizontal, 4).padding(.top, 8)
             }
         }
-    }
-}
-
-/// One priced line: the description in full (it wraps, never truncates), the line total, then
-/// "2 × $60.00". The data has one text per line, so the whole of it is shown.
-struct DocumentLineRow: View {
-    let line: FieldLine
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // At accessibility sizes the amount goes under the description; beside it, the
-            // description is squeezed into a column and breaks mid-word.
-            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                                      : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-            let text = LineText(line.description)
-            layout {
-                Text(text.name).font(Theme.font(15, weight: .medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let total = paperLinesTotal([line]) {
-                    Text(money(total, currency: line.unitPrice.currency))
-                        .font(Theme.amountFont(15))
-                        .lineLimit(1).fixedSize()
-                }
-            }
-            if let detail = LineText(line.description).detail {
-                Text(detail).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
-                .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-        }
-        .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 13)
-        .accessibilityElement(children: .combine)
     }
 }
 
