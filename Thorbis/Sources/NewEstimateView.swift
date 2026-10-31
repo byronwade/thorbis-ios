@@ -14,10 +14,9 @@ struct NewEstimateView: View {
     @State private var lines: [EstimateRevisionLineDraft] = []
     @State private var busy = false
     @State private var error: String?
-    @State private var query = ""
-    @State private var kind = PriceBookKindFilter.all
-    @State private var addGroup: EstimateLineGroup?
-    @State private var added = 0
+    @State private var picker: EstimateBuilderTarget?
+    @State private var expandedLine: UUID?
+    @State private var keyboardUp = false
     @State private var removed: RemovedLine?
     @State private var confirmDiscard = false
     @FocusState private var focus: EstimateBuilderFocus?
@@ -35,7 +34,6 @@ struct NewEstimateView: View {
     }
 
     private var canUsePriceBook: Bool { session.can("pricebook.view", feature: "price_book") }
-    private var searching: Bool { focus == .search || !query.isEmpty }
     private var total: Int? { lines.isEmpty ? nil : lines.subtotal() }
 
     var valid: Bool {
@@ -49,22 +47,21 @@ struct NewEstimateView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                if searching {
-                    PriceBookResultsList(
-                        catalog: catalog, context: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation),
-                            query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                        quantityInCurrentDraft: { id in
-                            (addGroup.map { lines.lines(in: $0) } ?? lines).quantity(ofPriceBookItem: id)
-                        },
-                        secondaryPriceText: { memberPricing?.secondaryPriceText($0) }, addItem: add, addCustomLine: addCustom, retry: { Task { await refreshCatalog(force: true) } }
-                    )
-                } else {
-                    builder
-                }
+            ScrollViewReader { proxy in
+                ScrollView { builder }
+                    .scrollDismissesKeyboard(.interactively)
+                    .onChange(of: focus) { _, value in
+                        guard let id = value?.lineID else { return }
+                        expandedLine = id
+                        withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    }
+                    .onChange(of: expandedLine) { _, id in
+                        guard let id else { return }
+                        withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    }
             }
-            .scrollDismissesKeyboard(.interactively)
             .keyboardDoneButton()
+            .trackKeyboard($keyboardUp)
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
@@ -74,37 +71,32 @@ struct NewEstimateView: View {
                 }
             }
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 0) {
-                    EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
-                                      prompt: addGroup.map { "Add to \($0.title)" } ?? "Search price book or type a line",
-                                      finish: finishSearch)
-                        .disabled(busy)
-                    if searching {
-                        PaperActionBar(title: reviewTitle, symbol: "list.bullet", busy: busy) { finishSearch() }
-                    }
-                }
-            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if let removed {
                         LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
                     }
-                    if !searching {
-                        EstimateBuilderTotal(total: total)
-                        if let memberLine {
-                            Text(memberLine).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.subtle)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .padding(.horizontal, Theme.gutter).padding(.top, 2)
-                                .background(Theme.background)
-                        }
-                        PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
-                                       disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
+                    // While typing, only the commit stays: the total would sit on the field being edited.
+                    if !keyboardUp {
+                        EstimateBuilderTotal(total: total, detail: memberLine)
                     }
+                    PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
+                                   disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
                 }
             }
-            .sensoryFeedback(.success, trigger: added)
-            .animation(EstimateLineGroupsEditor.spring, value: searching)
+            .sheet(item: $picker) { target in
+                PriceBookCartPicker(
+                    destination: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "this estimate" : title,
+                    canUsePriceBook: canUsePriceBook,
+                    quantityInDraft: { lines.quantity(ofPriceBookItem: $0) },
+                    secondaryPriceText: { memberPricing?.secondaryPriceText($0) },
+                    addItem: { add($0, group: target.group) },
+                    addCustomLine: { addCustom($0, group: target.group) },
+                    refresh: { await refreshCatalog(force: $0) }
+                )
+                .environmentObject(session).environmentObject(api)
+            }
+            .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .task(id: customerID) {
                 memberPricing = nil
@@ -114,23 +106,12 @@ struct NewEstimateView: View {
                 guard !Task.isCancelled, customerID == expected else { return }
                 memberPricing = pricing
             }
-            .task {
-                guard lines.isEmpty else { return }
-                try? await Task.sleep(for: .milliseconds(450))
-                if lines.isEmpty, !customerID.isEmpty { focus = .search }
-            }
         }
     }
 
     /// MF-05: what a member would pay, under the total. The saved prices stay the price book's.
     private var memberLine: String? {
-        guard let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0, !lines.isEmpty else { return nil }
-        var sum = 0
-        for line in lines {
-            guard let cents = EstimateRevisionEditorState.parsePrice(line.unitPrice),
-                  let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
-            sum += quantity * memberPricing.memberPrice(cents)
-        }
+        guard let memberPricing, let sum = lines.memberTotal(memberPricing) else { return nil }
         return "Member price \(money(sum, currency: "USD")) · \(memberPricing.discountPercent)% off"
     }
 
@@ -140,19 +121,19 @@ struct NewEstimateView: View {
         return "Save estimate · \(money(total, currency: "USD"))"
     }
 
-    private var reviewTitle: String {
-        "Review estimate · \(lines.count) \(lines.count == 1 ? "item" : "items")"
-    }
-
     private var builder: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 PaperEyebrow(reference: jobID.map { "JOB-\($0.suffix(4).uppercased())" }, text: "New estimate")
                 TextField("Estimate title", text: $title, axis: .vertical)
                     .font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityLabel("Estimate title")
-                HStack(spacing: 6) {
-                    Chip(text: "Draft", icon: "circle.dashed")
+                HStack(spacing: 10) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Theme.warning).frame(width: 7, height: 7)
+                        Text("Draft").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                    }
+                    .accessibilityElement(children: .combine)
                     ThorbisMenu(items: store.customers.filter { $0.archived != true }.map { customer in
                         ThorbisMenuItem(customer.name, isSelected: customer.id == customerID) { customerID = customer.id }
                     }, title: "Customer") {
@@ -163,17 +144,20 @@ struct NewEstimateView: View {
                     .disabled(jobID != nil && !customerID.isEmpty)
                 }
             }
-            .padding(.bottom, 14)
 
-            EstimateLineGroupsEditor(lines: $lines, disabled: busy, focus: $focus, addTo: startAdding) { line, index in
-                withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) }
-            }
+            EstimateBuilderSection(
+                label: lines.isEmpty ? "Items" : "Items · \(lines.count)",
+                lines: $lines, disabled: busy, focus: $focus, expandedLine: $expandedLine,
+                showTotal: false,
+                addItem: { picker = EstimateBuilderTarget() },
+                removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
+            )
             if lines.isEmpty {
-                Text(canUsePriceBook ? "Search above to add from the price book, or type any line."
-                                     : "Type a line above and add it.")
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.top, 12)
+                Text(canUsePriceBook ? "Add from the price book, or type any custom item."
+                                     : "Add a custom item: this account can't use the price book.")
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
-            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter).padding(.top, 8) }
+            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 28)
     }
@@ -188,43 +172,26 @@ struct NewEstimateView: View {
         guard !Task.isCancelled, session.generation == generation, session.activeOrganization?.id == org else { return }
     }
 
-    private func add(_ item: PriceBookListItem) {
-        guard !busy else { return }
-        withAnimation(EstimateLineGroupsEditor.spring) {
-            guard lines.addPriceBookItem(item, to: addGroup) != nil else {
-                error = "An estimate can contain up to 500 line items."
-                return
-            }
-        }
-        catalog.recordUse(item.id)
-        added += 1
+    /// One more of a price book item; returns why it couldn't be added, or nil.
+    private func add(_ item: PriceBookListItem, group: EstimateLineGroup?) -> String? {
+        guard !busy else { return "Saving. Try again in a moment." }
+        var addedLine = false
+        withAnimation(EstimateLineGroupsEditor.spring) { addedLine = lines.addPriceBookItem(item, to: group) != nil }
+        guard addedLine else { return "An estimate can contain up to 500 line items." }
+        return nil
     }
 
-    private func addCustom(_ text: String) {
+    private func addCustom(_ text: String, group: EstimateLineGroup?) {
         guard !busy else { return }
-        let group = addGroup ?? (kind == .material ? .material : .work)
-        guard let id = lines.addCustomLine(text, to: group) else {
+        guard let id = lines.addCustomLine(text, to: group ?? .work) else {
             error = "An estimate can contain up to 500 line items."
             return
         }
-        added += 1
-        query = ""
-        kind = .all
-        addGroup = nil
-        focus = .price(id)
-    }
-
-    private func startAdding(_ group: EstimateLineGroup) {
-        addGroup = group
-        kind = group == .material ? .material : .all
-        focus = .search
-    }
-
-    private func finishSearch() {
-        query = ""
-        kind = .all
-        addGroup = nil
-        focus = nil
+        expandedLine = id
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            focus = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .description(id) : .price(id)
+        }
     }
 
     private func undoRemove() {
