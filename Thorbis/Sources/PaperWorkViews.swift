@@ -824,7 +824,8 @@ struct JobsView: View {
                     let needsTime = canSchedule && job.scheduledFor == nil && !["completed", "canceled"].contains(job.status)
                         && !ScheduleLead.activeStatuses.contains(job.status)
                     HStack(spacing: 0) {
-                        NavigationLink(value: job) {
+                        // iPad selects into the detail column beside the list; iPhone pushes.
+                        PaperSplitLink(id: job.id, value: job) {
                             // MA-11: what, then who and when, the status as a word.
                             PaperListRow(title: job.title, subtitle: detail(job, customer: customer),
                                          dimmed: job.status == "completed") {
