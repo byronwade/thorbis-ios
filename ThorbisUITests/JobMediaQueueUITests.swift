@@ -258,7 +258,8 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Add a document"].exists)
         XCTAssertTrue(app.buttons["Choose from library"].exists)
         app.buttons["Overview"].tap()
-        app.buttons["Photos"].tap()
+        // Photos live under Activity; the Photos filter is remembered.
+        app.buttons["Activity"].tap()
         XCTAssertTrue(scan.waitForExistence(timeout: 10))
         XCTAssertEqual(scan.value as? String, expectedCapture)
         app.terminate()

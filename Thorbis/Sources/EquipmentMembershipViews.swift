@@ -333,6 +333,37 @@ struct CustomerMembershipSection: View {
 }
 
 /// "Member · 10% off" — shown wherever a customer's price matters.
+/// Membership as a plain fact beside the customer's name ("★ Member · 15% off"), not a pill: it
+/// isn't tappable and isn't a status. Nothing shows for non-members or while it loads.
+struct MemberFact: View {
+    let customerID: String
+    @EnvironmentObject private var api: APIClient
+    @State private var pricing: MemberPricing?
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 0, height: 0)
+            if let pricing, pricing.isMember {
+                Label(pricing.discountPercent > 0 ? "Member · \(pricing.discountPercent)% off" : "Member", systemImage: "star.fill")
+                    .labelStyle(MemberFactLabelStyle())
+                    .font(Theme.font(13, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .frame(minHeight: 44)
+            }
+        }
+        .task(id: customerID) { pricing = try? await api.memberPricing(customerID) }
+    }
+}
+
+private struct MemberFactLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.brandText)
+            configuration.title
+        }
+    }
+}
+
 struct MemberChip: View {
     let customerID: String
     @EnvironmentObject private var api: APIClient

@@ -9,8 +9,11 @@ struct JobDetailView: View {
         self.jobId = jobId
         self.showsBack = showsBack
         #if DEBUG
-        let previewTabs = ["job-invoice": "Invoice", "job-estimates": "Estimates", "job-activity": "Activity", "job-media": "Photos", "job-invoice-empty": "Invoice"]
+        // The old five sections' links land on the three that hold them now: estimates and
+        // invoices on Money, photos as Activity's Photos filter.
+        let previewTabs = ["job-invoice": "Money", "job-estimates": "Money", "job-activity": "Activity", "job-media": "Activity", "job-invoice-empty": "Money"]
         _selectedTab = State(initialValue: PaperPreview.enabled ? previewTabs[PaperPreview.screen] ?? "Overview" : "Overview")
+        if PaperPreview.enabled, PaperPreview.screen == "job-media" { _activityFilter = State(initialValue: "Photos") }
         #endif
     }
     @EnvironmentObject var api: APIClient
@@ -85,7 +88,10 @@ struct JobDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    private let tabs = ["Overview", "Estimates", "Invoice", "Photos", "Activity"]
+    /// Overview for the visit, Money for its estimates and invoices, Activity for notes, status and photos.
+    private let tabs = ["Overview", "Money", "Activity"]
+    private let activityFilters = ["All", "Notes", "Status", "Photos"]
+    private var showsPhotos: Bool { selectedTab == "Activity" && activityFilter == "Photos" }
 
     private var liveActivityKey: String {
         guard let job else { return "" }
@@ -111,11 +117,12 @@ struct JobDetailView: View {
                 ErrorBanner(message: issue) { await retry() }.padding(.top, 4)
             }
             if let job {
-                if selectedTab == "Photos" {
-                    // At larger text sizes the full fixed header can crowd the media viewport.
-                    // Job details and actions remain available on Overview.
-                    if !typeSize.isAccessibilitySize { header(job, compact: true, showActions: false) }
+                if showsPhotos {
+                    // Photos keep their own scrolling grid and capture bar (camera, scan, measure),
+                    // so the one-line header, sections and filters stay fixed above them.
+                    if !typeSize.isAccessibilitySize { header(job, compact: true) }
                     tabBar
+                    activityFilterRow.padding(.horizontal, Theme.gutter)
                     JobMediaView(jobID: jobId)
                 } else {
                     // At accessibility sizes, the full job header can be taller than the
@@ -132,14 +139,13 @@ struct JobDetailView: View {
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedTab {
-                            case "Estimates": estimatesContent(job)
-                            case "Invoice": invoiceContent(job)
+                            case "Money": moneyContent(job)
                             case "Activity": activityContent(job)
                             default: overviewContent(job)
                             }
                         }
                         .padding(.horizontal, Theme.gutter)
-                        .padding(.top, selectedTab == "Invoice" ? 4 : selectedTab == "Estimates" ? 8 : 22)
+                        .padding(.top, selectedTab == "Overview" ? 22 : 8)
                         .padding(.bottom, 28)
                     } header: {
                         if !typeSize.isAccessibilitySize { tabBar.background(Theme.background) }
@@ -283,8 +289,11 @@ struct JobDetailView: View {
             contactsFailed = false
         }
         .onChange(of: selectedTab) { previous, tab in
-            if tab == "Invoice" { Task { await loadInvoices() } }
-            // Photos added on the Photos tab show in the Overview count straight away (JS-09).
+            if tab == "Money" { Task { await loadInvoices() } }
+            // Photos added under Activity show in the Overview count straight away (JS-09).
+            if previous == "Activity", activityFilter == "Photos" { Task { await loadMediaCount() } }
+        }
+        .onChange(of: activityFilter) { previous, _ in
             if previous == "Photos" { Task { await loadMediaCount() } }
         }
         .onChange(of: selectedInvoiceID) { _, selectedID in
@@ -413,45 +422,66 @@ struct JobDetailView: View {
         }
     }
 
-    private func header(_ job: JobRecord, compact: Bool = false, showActions: Bool = true) -> some View {
+    /// Overview carries the whole header: who, what, status, when, who's on it, what's owed and how to
+    /// reach them. Money and Activity only need to say which job this is, so their header is one
+    /// line, title and status word, and the actions stay one tap away on Overview or in •••.
+    @ViewBuilder
+    private func header(_ job: JobRecord, compact: Bool = false) -> some View {
+        if compact {
+            compactHeader(job)
+        } else {
+            fullHeader(job)
+        }
+    }
+
+    private func compactHeader(_ job: JobRecord) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(job.title)
+                .font(Theme.font(20, weight: .semibold))
+                .tracking(-0.2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+            statusWord(job)
+        }
+        .padding(.horizontal, Theme.gutter)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Status as a word, the hue on its glyph; changing it lives on Overview and in •••.
+    private func statusWord(_ job: JobRecord) -> some View {
+        let queued = outbox.pendingStatus(for: job.id)
+        return HStack(spacing: 5) {
+            Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(queued == nil ? statusTint(job.status) : Theme.warning)
+                .accessibilityHidden(true)
+            Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
+                .font(Theme.font(13, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .fixedSize()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Job status, \((queued ?? job.status).statusLabel)")
+    }
+
+    private func fullHeader(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let customer = linkedCustomer(job) {
-                NavigationLink(value: customer) {
-                    HStack(alignment: .center, spacing: 6) {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.brandText)
-                            .frame(width: 28, height: 28)
-                            .background(Theme.brandSurface, in: Circle())
-                            .accessibilityHidden(true)
-                        Text(customer.name)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .accessibilityHidden(true)
-                    }
-                    .font(Theme.font(15, weight: .medium))
-                    .foregroundStyle(Theme.muted)
-                    .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("job-customer-link")
-                .accessibilityHint("Opens the customer")
-            } else {
-                Text(store.customerName(job.customerId))
-                    .font(Theme.font(15, weight: .medium))
-                    .foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+            // F17: membership is a fact about the customer, so it reads in their line, not as a pill.
+            FlowRow(spacing: 8, lineSpacing: 0) {
+                customerLine(job)
+                MemberFact(customerID: job.customerId)
             }
             Text(job.title)
                 .font(Theme.font(26, weight: .semibold))
                 .tracking(-0.39)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            // One wrapping row of chips instead of two fixed rows (chips are pills).
+            // One wrapping row: status is the only pill; time and technician read as plain facts.
             FlowRow(spacing: 6, lineSpacing: 6) {
                     statusControl(job)
-                    // Only status is a pill; time and technician read as plain facts beside it.
                     if let date = JobFiltering.date(job.scheduledFor) {
                         Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
                             Label(date.visitLabel(), systemImage: "clock")
@@ -472,57 +502,89 @@ struct JobDetailView: View {
                             .frame(height: Theme.chipHeight)
                             .padding(.vertical, 8)
                     }
-                    MemberChip(customerID: job.customerId)
             }
-            if let balance = invoiceBalanceCents, selectedTab != "Estimates" {
-                // MF-01/MF-03: what's owed on the job is a labelled figure, not a chip. It jumps to
-                // the Invoice tab, where it can be collected.
-                Button { withMotion(.snappy) { selectedTab = "Invoice" } } label: {
-                    Group {
-                        if typeSize.isAccessibilitySize {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
-                                    Spacer(minLength: 8)
-                                    Image(systemName: "arrow.up.right")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(Theme.brandText)
-                                        .accessibilityHidden(true)
-                                }
-                                Text(money(balance, currency: "USD"))
-                                    .moneyStyle(.total).foregroundStyle(Theme.foreground)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        } else {
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
-                                Spacer(minLength: 8)
-                                Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(Theme.brandText)
-                                    .accessibilityHidden(true)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .padding(.top, 8)
-                .accessibilityElement(children: .combine)
-                .accessibilityHint("Opens the invoice")
+            if let balance = invoiceBalanceCents {
+                balanceDue(balance)
             }
-            if showActions {
-                quickActions
-            }
+            quickActions
         }
         .padding(.horizontal, Theme.gutter)
         .padding(.top, 4)
         .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private func customerLine(_ job: JobRecord) -> some View {
+        if let customer = linkedCustomer(job) {
+            NavigationLink(value: customer) {
+                HStack(alignment: .center, spacing: 6) {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.brandText)
+                        .frame(width: 28, height: 28)
+                        .background(Theme.brandSurface, in: Circle())
+                        .accessibilityHidden(true)
+                    Text(customer.name)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .accessibilityHidden(true)
+                }
+                .font(Theme.font(15, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("job-customer-link")
+            .accessibilityHint("Opens the customer")
+        } else {
+            Text(store.customerName(job.customerId))
+                .font(Theme.font(15, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: 44, alignment: .leading)
+        }
+    }
+
+    /// MF-01/MF-03: what's owed on the job, once, on Overview. It opens Money, where it's collected.
+    private func balanceDue(_ balance: Int) -> some View {
+        Button { withMotion(.snappy) { selectedTab = "Money" } } label: {
+            Group {
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+                            Spacer(minLength: 8)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.brandText)
+                                .accessibilityHidden(true)
+                        }
+                        Text(money(balance, currency: "USD"))
+                            .moneyStyle(.total).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 8)
+                        Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.brandText)
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens Money, where it can be collected")
     }
 
     private var customerAuthorityToken: String {
@@ -554,22 +616,28 @@ struct JobDetailView: View {
     }
 
     /// Directions always require choosing an account location; no job site is inferred.
+    /// Customer view, then Call, Text and Directions in one row while they fit.
     private var quickActions: some View {
         VStack(alignment: .leading, spacing: 8) {
-        if !barIsCustomerView { customerViewAction }
-        Group {
-            if (selectedTab == "Estimates" || selectedTab == "Invoice") && !typeSize.isAccessibilitySize {
-                HStack(spacing: 8) {
-                    PaperQuickActions(phone: job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil })
+            customerViewAction
+            let phone = job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil }
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    PaperQuickActions(phone: phone)
                     directionsAction
                 }
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    PaperQuickActions(phone: job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil })
-                    directionsAction
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        PaperQuickActions(phone: phone)
+                        directionsAction
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        PaperQuickActions(phone: phone)
+                        directionsAction
+                    }
                 }
             }
-        }
         }
         .padding(.top, 8)
     }
@@ -599,12 +667,7 @@ struct JobDetailView: View {
 
     @ViewBuilder
     private func statusControl(_ job: JobRecord) -> some View {
-        let tint: Color = switch job.status {
-        case "completed": Theme.success
-        case "en_route", "dispatched": Theme.brandText
-        case "scheduled", "canceled": Theme.muted
-        default: Theme.warning
-        }
+        let tint = statusTint(job.status)
         let transitions = availableTransitions(job)
         if transitions.isEmpty {
             statusChip(job, tint: tint, showsMenu: false)
@@ -614,6 +677,15 @@ struct JobDetailView: View {
             }, title: "Change status") {
                 statusChip(job, tint: tint, showsMenu: true)
             }
+        }
+    }
+
+    private func statusTint(_ status: String) -> Color {
+        switch status {
+        case "completed": Theme.success
+        case "en_route", "dispatched": Theme.brandText
+        case "scheduled", "canceled": Theme.muted
+        default: Theme.warning
         }
     }
 
@@ -709,23 +781,37 @@ struct JobDetailView: View {
         if selectedTab == "Overview", let step = nextStep {
             PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
                            busy: busy || creatingInvoice) { run(step) }
-        } else if selectedTab == "Estimates" {
-            if !jobEstimates.isEmpty {
-                PaperActionBar(title: "Customer view", symbol: "person.crop.rectangle") { openCustomerView(.estimates) }
-                    .accessibilityIdentifier("job-customer-view-bar")
-            } else if canBuildEstimate {
-                PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
-            }
-        } else if selectedTab == "Invoice", let invoice = selectedInvoice, invoice.status == "draft",
-                  session.can("invoice.view", feature: "invoicing") {
-            PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
-        } else if selectedTab == "Invoice",
-                  session.can("invoice.payment.create", feature: "payments"),
-                  let invoice = selectedInvoice,
-                  let model = invoicePaymentModel,
-                  loadedInvoiceModelID == invoice.id {
-            PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
+        } else if selectedTab == "Money" {
+            moneyAction
         }
+    }
+
+    /// Money's one bar, in the order the paper needs it: a draft invoice to send, then what's owed,
+    /// then the estimates to show the customer, then the first estimate to build.
+    @ViewBuilder private var moneyAction: some View {
+        if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") {
+            PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
+        } else if moneyBarCollects, let model = invoicePaymentModel {
+            PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
+        } else if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
+            PaperActionBar(title: "Customer view", symbol: "person.crop.rectangle") { openCustomerView(.estimates) }
+                .accessibilityIdentifier("job-customer-view-bar")
+        } else if canBuildEstimate {
+            PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
+        }
+    }
+
+    private var moneyBarCollects: Bool {
+        guard session.can("invoice.payment.create", feature: "payments"), let invoice = selectedInvoice,
+              invoice.status != "draft", invoicePaymentModel != nil else { return false }
+        return loadedInvoiceModelID == invoice.id
+    }
+
+    /// Whether Money's bar is already Customer view, so the estimates list doesn't repeat it.
+    private var moneyBarIsCustomerView: Bool {
+        guard !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") else { return false }
+        if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") { return false }
+        return !moneyBarCollects
     }
 
     /// JS-01: the body is for reading, in the order a tech needs it at the door. Every action that
@@ -736,7 +822,7 @@ struct JobDetailView: View {
             JobVisitCounts(latestNote: notes.last?.body, noteCount: notes.count + outbox.pendingNotes(for: job.id).count,
                            photoCount: liveMediaCountContext != nil && liveMediaCountContext == mediaCountContext ? mediaCount : nil, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
                            openNotes: { activityFilter = "Notes"; withMotion(.snappy) { selectedTab = "Activity" } },
-                           openPhotos: { withMotion(.snappy) { selectedTab = "Photos" } },
+                           openPhotos: { activityFilter = "Photos"; withMotion(.snappy) { selectedTab = "Activity" } },
                            openFollowUpsScreen: { showFollowUps = true })
             // JS-05: only when the platform recorded the call that booked this job.
             if let bookingCall { JobBookingCallSection(call: bookingCall) }
@@ -794,6 +880,15 @@ struct JobDetailView: View {
         }
     }
 
+    /// Money: the job's estimates, then its invoices. Each paper shows its own amount once; what's
+    /// owed across them is on Overview and in the bar, never repeated in a header.
+    private func moneyContent(_ job: JobRecord) -> some View {
+        VStack(alignment: .leading, spacing: 28) {
+            estimatesContent(job)
+            invoiceContent(job)
+        }
+    }
+
     /// Every estimate has its own paper and price; the footer builds another on this job.
     private func estimatesContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -833,6 +928,18 @@ struct JobDetailView: View {
                         // A container keeps the id on the card itself; without one it lands on each text.
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("job-estimate-unavailable-\(id)")
+                }
+                // When the bar is busy with the invoice, the estimates' customer door stays here, quieter.
+                if !jobEstimates.isEmpty, !moneyBarIsCustomerView, canOpenCustomerView {
+                    Button { openCustomerView(.estimates) } label: {
+                        Label("Customer view", systemImage: "person.crop.rectangle")
+                            .font(Theme.font(15, weight: .medium))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityHint("Shows this job's estimates to the customer")
+                    .accessibilityIdentifier("job-money-customer-view")
                 }
                 if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true) {
                     DisclosureGroup {
@@ -901,10 +1008,17 @@ struct JobDetailView: View {
             } else if !invoicesLoaded {
                 SkeletonRows(count: 3, leading: false, inset: 0)
             } else if invoices.isEmpty && !invoicesFailed {
-                PaperEmptyState(symbol: "doc.plaintext", title: "No invoice yet",
-                                message: "Start the invoice from this job. Lines come from its approved estimate; you can edit them before sending.",
-                                actionTitle: session.can("invoice.create", feature: "invoicing") ? (creatingInvoice ? "Creating…" : "Create invoice") : nil,
-                                action: { Task { await createInvoice() } })
+                PaperGroupHeader(title: "Invoices")
+                if session.can("invoice.create", feature: "invoicing") {
+                    Button { Task { await createInvoice() } } label: {
+                        PaperMenuRow(creatingInvoice ? "Creating…" : "Create invoice", symbol: "doc.plaintext",
+                                     subtitle: "Lines come from the approved estimate; edit them before sending")
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .disabled(creatingInvoice)
+                } else {
+                    Text("No invoice yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
                 if job.estimateId != nil, session.can("invoice.create", feature: "progress_billing") {
                     Button { showDeposit = true } label: {
                         PaperMenuRow("Request a deposit", symbol: "banknote", subtitle: "Bill part up front from the approved estimate")
@@ -937,22 +1051,28 @@ struct JobDetailView: View {
     }
 
     /// Paper 21B: filter pills, a quiet timeline of notes and status changes, composer last.
+    /// Photos is the fourth filter: the visit's evidence lives in one place.
+    private var activityFilterRow: some View {
+        FlowRow(spacing: 6, lineSpacing: 6) {
+            ForEach(activityFilters, id: \.self) { filter in
+                Button { withMotion(.snappy) { activityFilter = filter } } label: {
+                    Text(filter)
+                        .font(Theme.font(12, weight: .medium))
+                        .foregroundStyle(activityFilter == filter ? Theme.background : Theme.muted)
+                        .padding(.horizontal, 12).frame(minHeight: 28)
+                        .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityAddTraits(activityFilter == filter ? .isSelected : [])
+                .accessibilityIdentifier("activity-filter-\(filter.lowercased())")
+            }
+        }
+    }
+
     private func activityContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 6) {
-                ForEach(["All", "Notes", "Status"], id: \.self) { filter in
-                    Button { activityFilter = filter } label: {
-                        Text(filter)
-                            .font(Theme.font(12, weight: .medium))
-                            .foregroundStyle(activityFilter == filter ? Theme.background : Theme.muted)
-                            .padding(.horizontal, 12).frame(height: 28)
-                            .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityAddTraits(activityFilter == filter ? .isSelected : [])
-                }
-            }
+            activityFilterRow
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(timeline(job)) { entry in
                     ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
@@ -962,7 +1082,6 @@ struct JobDetailView: View {
                                 .foregroundStyle(entry.isNote ? Theme.foreground : Theme.muted)
                                 .frame(width: 26, height: 26)
                                 .background(Theme.fill, in: Circle())
-                            Rectangle().fill(Theme.border).frame(width: 1).frame(maxHeight: .infinity)
                         }
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline) {
@@ -973,8 +1092,7 @@ struct JobDetailView: View {
                             if let body = entry.body {
                                 Text(body).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+                                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                                     .textSelection(.enabled)
                             }
                             Text(entry.date.formatted(.dateTime.month(.abbreviated).day())).font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -1160,10 +1278,6 @@ struct JobDetailView: View {
         }
     }
 
-    /// On Estimates the bar already says Customer view; one door per screen. Elsewhere the header
-    /// door stays put, so the layout never shifts as the job's paper loads.
-    private var barIsCustomerView: Bool { selectedTab == "Estimates" && !jobEstimates.isEmpty }
-
     private func buildEstimate() {
         guard canBuildEstimate, let job, scope(for: job) != nil else { return }
         showNewEstimate = true
@@ -1186,7 +1300,7 @@ struct JobDetailView: View {
                 selectedInvoiceID = invoiceID
                 if let invoice = invoices.first(where: { $0.id == invoiceID }) { await loadInvoicePayments(for: invoice) }
                 if invoicePaymentModel?.canRecordPayment == true { showCollectPayment = true }
-                else { withMotion(.snappy) { selectedTab = "Invoice" } }
+                else { withMotion(.snappy) { selectedTab = "Money" } }
             }
         case .wrapUp: showWrapUp = true
         }

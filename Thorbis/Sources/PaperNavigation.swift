@@ -29,6 +29,9 @@ struct RootView: View {
     @State private var lastPlace: MenuItem?
     /// iPhone search: the bar turns into a field and results rise in a drawer above it.
     @State private var barSearching = false
+    /// How much of a place's root the floating chip and bar cover, above the home indicator. Each
+    /// root reserves it as bottom safe area so its last rows scroll clear of them (F9).
+    @State private var barReserve: CGFloat = 0
     @State private var barQuery = ""
     @State private var newCustomer = false
     @State private var newEstimate = false
@@ -236,7 +239,7 @@ struct RootView: View {
                             .transition(.opacity)
                     }
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
+                .overlay(alignment: .bottom) {
                     // Pulled down into the home indicator's margin, like Linear, so it sits low and small.
                     if atTabRoot || menuOpen || barSearching {
                         VStack(spacing: 10) {
@@ -251,13 +254,18 @@ struct RootView: View {
                             }
                             bottomBar
                         }
+                        // Measured only for the chip and bar; search and the menu cover the place anyway.
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            guard !barSearching, !menuOpen else { return }
+                            barReserve = max(0, height + AppBottomBar.bottomGap - geometry.safeAreaInsets.bottom)
+                        }
                         .padding(.bottom, AppBottomBar.bottomGap)
                         .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85), value: currentJob?.id)
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: barSync)
                     }
                 }
-                // The bar measures from the screen's edge, not the home indicator, so screens get an
-                // inset exactly as tall as the bar and nothing hides behind it.
+                // The bar measures from the screen's edge, not the home indicator. It floats over the
+                // place; each root reserves `barReserve` itself, so nothing hides behind it.
                 .ignoresSafeArea(.container, edges: .bottom)
                 .overlay {
                     if menuOpen {
@@ -360,9 +368,13 @@ struct RootView: View {
         return LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) }
     }
 
-    /// The job this person is on now. Schedule already leads with it, so the chip stays off there.
+    /// The job this person is on now. Schedule and Jobs already lead with it (Jobs' first group is
+    /// In progress, directly above where the chip would float), so it stays off there. It only rides
+    /// a place's root, never the job's own screen, and it sits in the bar's bottom inset so the
+    /// last rows of a list scroll clear of it.
     private var currentJob: Job? {
-        guard selectedTab != MenuItem.schedule.rawValue, session.can("job.view", feature: "jobs") else { return nil }
+        guard selectedTab != MenuItem.schedule.rawValue, selectedTab != MenuItem.jobs.rawValue,
+              session.can("job.view", feature: "jobs") else { return nil }
         let me = session.user?.id
         return PaperWorkGroups.inProgress(store.jobs).first { $0.assignedToUserId == nil || $0.assignedToUserId == me }
     }
@@ -671,19 +683,19 @@ struct RootView: View {
         if let item = MenuItem(rawValue: id) {
             tabRoot(item)
         } else {
-            NavigationStack(path: $morePath) { MoreView().paperDestinations() }
+            NavigationStack(path: $morePath) { MoreView().safeAreaPadding(.bottom, barReserve).paperDestinations() }
         }
     }
 
     @ViewBuilder private func tabRoot(_ item: MenuItem) -> some View {
         switch item {
-        case .schedule: NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.paperDestinations() }
-        case .jobs: NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.paperDestinations() }
-        case .customers: NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.paperDestinations() }
+        case .schedule: NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.safeAreaPadding(.bottom, barReserve).paperDestinations() }
+        case .jobs: NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.safeAreaPadding(.bottom, barReserve).paperDestinations() }
+        case .customers: NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.safeAreaPadding(.bottom, barReserve).paperDestinations() }
         default:
             NavigationStack(path: Binding(get: { customPaths[item.rawValue] ?? NavigationPath() },
                                           set: { customPaths[item.rawValue] = $0 })) {
-                if let route = item.route { PaperRouteView(route: route).paperDestinations() }
+                if let route = item.route { PaperRouteView(route: route).safeAreaPadding(.bottom, barReserve).paperDestinations() }
             }
         }
     }

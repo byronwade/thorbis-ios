@@ -3,8 +3,8 @@ import XCTest
 @MainActor
 /// The job's ••• door to Customer view. The header or bar door has the same name, so this picks the menu row.
 func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@",
-                                     "Customer view", "job-customer-view", "job-customer-view-bar")).firstMatch
+    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
+                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view")).firstMatch
 }
 
 /// Customer view's home: bring a document card fully above the fixed hand-back footer before tapping it.
@@ -425,7 +425,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         // At accessibility sizes the section row is one pinned chooser (a40f825), not tabs.
         let tabs = app.buttons["job-section-chooser"]
         XCTAssertTrue(tabs.exists)
-        XCTAssertTrue(tabs.label.contains("Estimates"))
+        XCTAssertTrue(tabs.label.contains("Money"))
         // At accessibility sizes Present scrolls with the content (a40f825) instead of pinning
         // above the bottom edge, so the card must fit between the pinned chooser and the screen's
         // bottom; while Present is still pinned below the card, it must clear that too.

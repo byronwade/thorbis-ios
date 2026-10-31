@@ -120,15 +120,28 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(jobID.isHittable)
     }
 
+    /// Off Overview the header is one line (title and status word); the customer, balance, Customer
+    /// view and Call/Text/Directions live on Overview and come back with it.
     func testDocumentTabsKeepJobNameWithoutRepeatingOverviewActions() {
         let app = preview("job", working: true)
-        XCTAssertTrue(app.buttons["Estimates"].waitForExistence(timeout: 20))
-        app.buttons["Estimates"].tap()
-        XCTAssertTrue(app.buttons["Call"].exists)
-        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Step ")).firstMatch.exists)
-        XCTAssertTrue(app.buttons["Overview"].exists)
+        XCTAssertTrue(app.buttons["Call"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["job-customer-view"].exists)
+        XCTAssertTrue(app.buttons["Money"].waitForExistence(timeout: 20))
+        for tab in ["Money", "Activity"] {
+            app.buttons[tab].tap()
+            XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 5), "\(tab) keeps the job's name")
+            XCTAssertTrue(app.staticTexts["Job status, In progress"].exists || app.otherElements["Job status, In progress"].exists,
+                          "\(tab) keeps the status as a word")
+            XCTAssertFalse(app.buttons["Call"].exists, "\(tab) must not repeat Overview's contact actions")
+            XCTAssertFalse(app.buttons["job-customer-link"].exists, "\(tab) must not repeat the customer line")
+            XCTAssertFalse(app.buttons["job-customer-view"].exists, "\(tab) must not repeat the header's Customer view")
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Balance due")).firstMatch.exists,
+                           "\(tab) must not repeat the balance")
+            XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Step ")).firstMatch.exists)
+        }
         app.buttons["Overview"].tap()
         XCTAssertTrue(app.buttons["Call"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["job-customer-view"].exists)
     }
 
     func testSingleEstimateOptionUsesSingularLabel() {
@@ -143,7 +156,8 @@ final class JobOverviewUITests: XCTestCase {
         app.launch()
         let title = app.staticTexts["Diagnose the upstairs air conditioner and replace the damaged compressor at the back of the property"]
         XCTAssertTrue(title.waitForExistence(timeout: 20))
-        XCTAssertGreaterThan(title.frame.height, 70, "The complete job title should wrap beyond two lines")
+        // Money's header is one line of title and status, but a long title still wraps in full.
+        XCTAssertGreaterThan(title.frame.height, 45, "The complete job title should wrap instead of truncating")
         XCTAssertTrue(app.buttons["Job actions"].exists)
     }
 
@@ -230,13 +244,39 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(chooser.isHittable)
         XCTAssertTrue(chooser.label.contains("Overview"))
         chooser.tap()
-        app.buttons["Photos"].tap()
+        app.buttons["Activity"].tap()
+        let photos = app.buttons["activity-filter-photos"]
+        for _ in 0..<5 where !photos.isHittable { content.swipeUp() }
+        XCTAssertTrue(photos.isHittable)
+        photos.tap()
         XCTAssertTrue(chooser.waitForExistence(timeout: 10))
         XCTAssertTrue(chooser.isHittable, "The chooser must remain reachable on Photos")
-        XCTAssertTrue(chooser.label.contains("Photos"))
-        chooser.tap()
-        app.buttons["Activity"].tap()
-        XCTAssertTrue(app.buttons["Notes"].waitForExistence(timeout: 10))
+        XCTAssertTrue(chooser.label.contains("Activity"))
+        XCTAssertTrue(app.buttons["activity-filter-notes"].isHittable, "Photos must be able to switch back to notes")
+        app.buttons["activity-filter-notes"].tap()
+        XCTAssertTrue(app.staticTexts["Note"].firstMatch.waitForExistence(timeout: 10) || app.staticTexts["No activity yet"].exists)
+    }
+
+    /// F9: the current-job chip never repeats Jobs' In progress row and never hides a list's last row.
+    func testCurrentJobChipStaysOffJobsAndClearsTheLastRowOnMore() {
+        continueAfterFailure = false
+        let chipQuery = NSPredicate(format: "label BEGINSWITH %@", "Current job")
+        let jobs = preview("jobs", working: true)
+        XCTAssertTrue(jobs.staticTexts["In progress"].waitForExistence(timeout: 20))
+        XCTAssertFalse(jobs.buttons.matching(chipQuery).firstMatch.exists, "Jobs already leads with the job in progress")
+        jobs.terminate()
+
+        let app = preview("more", working: true)
+        let chip = app.buttons.matching(chipQuery).firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 20))
+        let signOut = app.buttons["Sign out"]
+        for _ in 0..<8 { app.swipeUp() }
+        capture(app, name: "More scrolled to the end under the current job")
+        XCTAssertTrue(signOut.isHittable)
+        XCTAssertLessThanOrEqual(signOut.frame.maxY, chip.frame.minY, "The last rows must scroll clear of the chip")
+        let version = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Thorbis Field")).firstMatch
+        XCTAssertTrue(version.exists)
+        XCTAssertLessThanOrEqual(version.frame.maxY, chip.frame.minY, "The very last line must scroll clear of the chip")
     }
 
     private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false) -> XCUIApplication {
