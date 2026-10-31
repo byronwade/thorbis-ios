@@ -990,7 +990,7 @@ struct JobDetailView: View {
                 .background(Theme.well, in: Circle())
         }
         .buttonStyle(PressStyle())
-        .accessibilityLabel("Add photo")
+        .accessibilityLabel("Take photo")
         .accessibilityHint("Opens the camera and adds the photo to this job")
         .accessibilityIdentifier("job-bar-camera")
     }
