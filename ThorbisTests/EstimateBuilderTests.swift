@@ -151,4 +151,88 @@ final class EstimateBuilderTests: XCTestCase {
         loaded.classify(kinds: kinds)
         XCTAssertEqual(loaded.lines.map(\.group), [.work, .work])
     }
+
+    // MARK: Materials switch (EB-13)
+
+    private let groupedEstimateJSON = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"sent","currentRevisionNumber":2,"title":"Repair","lines":[{"id":"00000000-0000-4000-8000-000000000012","description":"Repair","quantity":1,"unitPrice":{"amount":9000,"currency":"USD"},"group":"work"},{"id":"00000000-0000-4000-8000-000000000011","description":"Capacitor","quantity":1,"unitPrice":{"amount":14500,"currency":"USD"},"group":"material","showToCustomer":false}],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+
+    func testStoredGroupsAndTheSwitchLoadAsSaved() throws {
+        let estimate = try JSONDecoder().decode(EstimateRecord.self, from: Data(groupedEstimateJSON.utf8))
+        var state = EstimateRevisionEditorState(estimate: estimate)
+        state.storesLineGroups = true
+        XCTAssertEqual(state.lines.map(\.group), [.work, .material])
+        XCTAssertFalse(state.lines.showsMaterials)
+        XCTAssertFalse(state.hasChanges, "the saved group and switch are not an edit")
+
+        // The catalog never re-sorts a group the server stored.
+        state.classify(kinds: [:])
+        XCTAssertEqual(state.lines.map(\.group), [.work, .material])
+
+        state.lines.setShowsMaterials(true)
+        XCTAssertTrue(state.hasChanges, "turning the switch on is a change to save")
+        let request = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)
+        XCTAssertEqual(request.lines.map(\.group), ["work", "material"])
+        XCTAssertEqual(request.lines.map(\.showToCustomer), [nil, nil], "shown is the default and is not sent")
+    }
+
+    func testTheSwitchHidesEveryMaterialIncludingOnesAddedLater() throws {
+        var lines: [EstimateRevisionLineDraft] = []
+        lines.addPriceBookItem(item(1, "Capacitor", kind: "material", cents: 14_500), to: .material)
+        _ = lines.addCustomLine("Labor", to: .work)
+        lines.setShowsMaterials(false)
+        lines.addPriceBookItem(item(2, "Contactor", kind: "material", cents: 4_000), to: .material)
+        XCTAssertFalse(lines.showsMaterials)
+        let stored = lines.map { lines.storedPresentation(of: $0, storesGroups: true) }
+        XCTAssertEqual(stored.map(\.group), ["work", "material", "material"])
+        XCTAssertEqual(stored.map(\.showToCustomer), [nil, false, false])
+    }
+
+    func testAMaterialAddedWhileHiddenStaysHiddenAfterTheOthersGo() throws {
+        var lines: [EstimateRevisionLineDraft] = []
+        let first = lines.addPriceBookItem(item(1, "Capacitor", kind: "material", cents: 14_500), to: .material)
+        lines.setShowsMaterials(false)
+        let later = lines.addCustomLine("Fuse", to: .material)
+        let copy = lines.duplicateLine(id: try XCTUnwrap(later))
+        _ = lines.removeLine(id: try XCTUnwrap(first))
+        XCTAssertNotNil(copy)
+        XCTAssertFalse(lines.showsMaterials, "removing the first hidden material keeps the switch off")
+
+        // Moving the only material keeps it hidden too.
+        _ = lines.removeLine(id: try XCTUnwrap(copy))
+        lines.setGroup(id: try XCTUnwrap(later), .material)
+        XCTAssertFalse(lines.showsMaterials)
+    }
+
+    func testMovingALineSavedBeforeGroupsIsAChange() throws {
+        let json = groupedEstimateJSON.replacingOccurrences(of: #","group":"work""#, with: "")
+            .replacingOccurrences(of: #","group":"material","showToCustomer":false"#, with: "")
+        let estimate = try JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
+        var state = EstimateRevisionEditorState(estimate: estimate)
+        state.storesLineGroups = true
+        XCTAssertFalse(state.hasChanges)
+        state.lines.setGroup(id: state.lines[1].id, .material)
+        XCTAssertTrue(state.hasChanges, "dragging into Materials must be saved")
+    }
+
+    func testNothingNewIsSentUntilTheWorkspaceStoresGroups() throws {
+        let estimate = try JSONDecoder().decode(EstimateRecord.self, from: Data(groupedEstimateJSON.utf8))
+        var state = EstimateRevisionEditorState(estimate: estimate)
+        state.lines.setShowsMaterials(true)
+        XCTAssertFalse(state.hasChanges, "without the feature the switch is not shown or saved")
+        state.title = "Repair visit"
+        let request = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)
+        XCTAssertEqual(request.lines.map(\.group), [nil, nil])
+        XCTAssertEqual(request.lines.map(\.showToCustomer), [nil, nil])
+        let body = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
+        XCTAssertFalse(body.contains("showToCustomer"))
+        XCTAssertFalse(body.contains("\"group\""))
+    }
+
+    func testTheCustomerSeesHiddenMaterialsAsOneLineWithTheSameTotal() throws {
+        let estimate = try JSONDecoder().decode(EstimateRecord.self, from: Data(groupedEstimateJSON.utf8))
+        let shown = customerEstimateLines(estimate.lines)
+        XCTAssertEqual(shown.map(\.description), ["Repair", "Materials"])
+        XCTAssertEqual(shown.last?.unitPrice.amount, 14_500)
+        XCTAssertEqual(paperLinesTotal(shown), paperLinesTotal(estimate.lines))
+    }
 }

@@ -52,8 +52,30 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
     private func register() async {
         guard signedIn, let api, let token, !Self.disabled else { return }
         let body = DeviceRegistration(installationId: Self.installationID, token: token, environment: Self.environment,
-                                      appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+                                      appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                                      timeZone: TimeZone.current.identifier, morningDigest: Self.morningDigest)
         _ = try? await api.send("POST", "/v1/devices", body: body) as DeviceRegistered
+    }
+
+    // MARK: Morning digest (design.thorbis.com/team-goals TG-11)
+
+    private static let morningDigestKey = "thorbis.push.morningDigest"
+
+    /// The 6:30 digest switch for this phone. On until turned off. Kept on the phone and sent with
+    /// every registration, so a change made offline reaches the server on the next launch.
+    static var morningDigest: Bool {
+        get { UserDefaults.standard.object(forKey: morningDigestKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: morningDigestKey) }
+    }
+
+    func setMorningDigest(_ on: Bool) {
+        Self.morningDigest = on
+        Task { await register() }
+    }
+
+    /// Owners and managers: the people the server sends a digest to (it decides; this only hides the switch).
+    static func receivesMorningDigest(_ session: SessionController) -> Bool {
+        session.can("invoice.create", feature: "invoicing") && session.can("job.assign", feature: "jobs")
     }
 
     // MARK: Notification center
@@ -67,9 +89,16 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         let jobID = Self.jobID(from: userInfo)
         let record = (userInfo["thorbis"] as? [String: Any]).flatMap(RecordLink.init(push:))
+        let digest = Self.isMorningDigest(userInfo)
         await MainActor.run {
-            if let jobID { store?.requestedJobID = jobID } else if let record { store?.requestedRecord = record }
+            // TG-11: the digest opens Today.
+            if digest { store?.openedForRecord = true; store?.requestedSchedule += 1 }
+            else if let jobID { store?.requestedJobID = jobID } else if let record { store?.requestedRecord = record }
         }
+    }
+
+    nonisolated static func isMorningDigest(_ userInfo: [AnyHashable: Any]) -> Bool {
+        (userInfo["thorbis"] as? [String: Any])?["kind"] as? String == "morning.digest"
     }
 
     nonisolated static func jobID(from userInfo: [AnyHashable: Any]) -> String? {
@@ -129,6 +158,8 @@ struct DeviceRegistration: Encodable {
     let token: String
     let environment: String
     let appVersion: String?
+    let timeZone: String?
+    let morningDigest: Bool
 }
 
 private struct DeviceRegistered: Decodable { let installationId: String }

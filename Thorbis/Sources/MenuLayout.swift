@@ -3,7 +3,7 @@ import SwiftUI
 /// Everything an owner can place in the tab bar or the More menu. Search and More stay fixed so
 /// nothing can be lost: whatever is not in the tab bar is in More (or under Hidden in Customize).
 enum MenuItem: String, CaseIterable, Codable, Identifiable {
-    case schedule, jobs, customers, attention, inbox, estimates, invoices, billing, priceBook, money, reports, team, notices, drafts
+    case schedule, jobs, customers, properties, attention, inbox, estimates, invoices, billing, priceBook, money, reports, team, notices, drafts
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .schedule: "Schedule"
         case .jobs: "Jobs"
         case .customers: "Customers"
+        case .properties: "Properties"
         case .attention: "Needs attention"
         case .inbox: "Inbox"
         case .estimates: "Estimates"
@@ -43,6 +44,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .schedule: "calendar"
         case .jobs: "briefcase"
         case .customers: "person.2"
+        case .properties: "house"
         case .attention: "exclamationmark.circle"
         case .inbox: "tray"
         case .estimates: "doc.text"
@@ -61,7 +63,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     var tint: Color {
         switch self {
         case .schedule, .jobs, .attention: Theme.markAccent
-        case .customers, .team, .notices, .inbox: Theme.markOlive
+        case .customers, .properties, .team, .notices, .inbox: Theme.markOlive
         case .estimates, .invoices, .billing, .money: Theme.markForest
         case .priceBook, .reports: Theme.markPumpkin
         case .drafts: Theme.markBurnt
@@ -70,6 +72,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     var subtitle: String? {
         switch self {
+        case .properties: "Every service address, across customers"
         case .attention: "Unpaid invoices, waiting estimates, jobs without a time"
         case .inbox: "Job notices and assignments"
         case .billing: "Progress billing, deposits, retainage"
@@ -95,6 +98,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     var route: PaperRoute? {
         switch self {
         case .schedule, .jobs, .customers: nil
+        case .properties: .properties
         case .attention: .attention
         case .inbox: .inbox
         case .estimates: .estimates
@@ -119,7 +123,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     @MainActor func permitted(_ session: SessionController) -> Bool {
         switch self {
         case .schedule, .jobs: session.can("job.view", feature: "jobs")
-        case .customers: session.can("customer.view", feature: "core_crm")
+        case .customers, .properties: session.can("customer.view", feature: "core_crm")
         case .attention: session.can("invoice.view", feature: "invoicing") || session.can("estimate.view", feature: "estimates")
         case .inbox: session.can("job.view", feature: "job_booking_notices")
         case .estimates: session.can("estimate.view", feature: "estimates")
@@ -130,6 +134,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .reports: session.can("estimate.view", feature: "estimates") || session.can("job.view", feature: "jobs")
         case .team: session.can("organization.members.manage") || session.can("organization.permissions.manage")
         case .notices: session.can("organization.settings.edit", feature: "job_booking_notices")
+            || PushNotifications.receivesMorningDigest(session)
         case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil
         }
     }

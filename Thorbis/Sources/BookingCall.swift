@@ -9,6 +9,8 @@ struct BookingCallRecord: Decodable, Equatable {
     let status: String
     let callerNumber: String?
     let callerName: String?
+    /// The job the office linked this call to; the call log offers to change it.
+    let jobId: String?
     let startedAt: String
     let endedAt: String?
     let durationSeconds: Int?
@@ -38,7 +40,7 @@ struct BookingCallRecord: Decodable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, status, callerNumber, callerName, startedAt, endedAt, durationSeconds, recording, summary, transcript, disclosure
+        case id, status, callerNumber, callerName, jobId, startedAt, endedAt, durationSeconds, recording, summary, transcript, disclosure
     }
 
     init(from decoder: Decoder) throws {
@@ -47,6 +49,7 @@ struct BookingCallRecord: Decodable, Equatable {
         status = try c.decode(String.self, forKey: .status)
         callerNumber = try c.decodeIfPresent(String.self, forKey: .callerNumber)
         callerName = try c.decodeIfPresent(String.self, forKey: .callerName)
+        jobId = try c.decodeIfPresent(String.self, forKey: .jobId)
         startedAt = try c.decode(String.self, forKey: .startedAt)
         endedAt = try c.decodeIfPresent(String.self, forKey: .endedAt)
         durationSeconds = try c.decodeIfPresent(Int.self, forKey: .durationSeconds)
@@ -187,6 +190,7 @@ final class BookingCallPlayer: ObservableObject {
 /// JS-05: who called and when, what they asked for, the recording and its transcript.
 struct JobBookingCallSection: View {
     let call: BookingCallRecord
+    var title = "Booking call"
     @EnvironmentObject private var api: APIClient
     @StateObject private var player = BookingCallPlayer()
     @State private var showTranscript = false
@@ -194,7 +198,7 @@ struct JobBookingCallSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: "Booking call")
+            PaperGroupHeader(title: title)
             VStack(alignment: .leading, spacing: 12) {
                 byline
                 if let summary = call.summary {
