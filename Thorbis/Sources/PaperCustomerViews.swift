@@ -478,7 +478,7 @@ struct CustomerDetailView: View {
             if !chips.isEmpty {
                 FlowRow(spacing: 6, lineSpacing: 6) {
                     ForEach(chips, id: \.text) { chip in
-                        PropertyChip(chip.text, symbol: chip.symbol, tint: chip.tint, textColor: chip.textColor, action: chip.action)
+                        WrappingPropertyChip(chip.text, symbol: chip.symbol, tint: chip.tint, textColor: chip.textColor, action: chip.action)
                             .accessibilityHint(chip.action == nil ? "" : "Shows the customer's jobs")
                     }
                 }
@@ -728,16 +728,18 @@ struct CustomerDetailView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(contacts.enumerated()), id: \.element.id) { index, contact in
-                            if index > 0 { WellDivider(leading: PaperCardMetrics.inset + 28 + 12) }
+                            if index > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? PaperCardMetrics.inset : PaperCardMetrics.inset + 28 + 12) }
                             HStack(spacing: 0) {
-                                InitialsAvatar(name: contact.name, size: 28)
-                                    .padding(.leading, PaperCardMetrics.inset)
-                                    .accessibilityHidden(true)
+                                if !typeSize.isAccessibilitySize {
+                                    InitialsAvatar(name: contact.name, size: 28)
+                                        .padding(.leading, PaperCardMetrics.inset)
+                                        .accessibilityHidden(true)
+                                }
                                 PaperListRow(title: contact.name,
                                              subtitle: [contact.role, contact.phone ?? contact.email].compactMap { $0 }.joined(separator: " · ")) {
                                     if contact.primary { StatusWord(text: "Primary") }
                                 }
-                                .environment(\.paperRowInset, 12)
+                                .environment(\.paperRowInset, typeSize.isAccessibilitySize ? PaperCardMetrics.inset : 12)
                                 // Name, "Primary", role and number as one VoiceOver stop; ••• stays its own.
                                 .accessibilityElement(children: .combine)
                                 ThorbisMenu(items: contactMenuItems(contact),
@@ -768,11 +770,14 @@ struct CustomerDetailView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(locations.enumerated()), id: \.element.id) { index, location in
-                            if index > 0 { WellDivider(leading: PaperCardMetrics.inset + 26 + 12) }
+                            if index > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? PaperCardMetrics.inset : PaperCardMetrics.inset + 26 + 12) }
                             HStack(alignment: .top, spacing: 12) {
-                                PlaceMark(symbol: location.kind == "billing" ? "building.2" : "house",
-                                          tint: location.kind == "billing" ? Theme.markTeal : Theme.markAccent)
-                                    .padding(.top, 2)
+                                // At accessibility sizes the mark gives its width back to the words.
+                                if !typeSize.isAccessibilitySize {
+                                    PlaceMark(symbol: location.kind == "billing" ? "building.2" : "house",
+                                              tint: location.kind == "billing" ? Theme.markTeal : Theme.markAccent)
+                                        .padding(.top, 2)
+                                }
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                                         Text(location.label).font(Theme.font(16, weight: .medium))
