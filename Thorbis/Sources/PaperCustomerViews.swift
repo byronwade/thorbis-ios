@@ -442,21 +442,13 @@ struct CustomerDetailView: View {
         let mail = MailDraft(recipient: primaryEmail)
         if dialable != nil || mail != nil || directionsURL != nil {
             let count = (dialable != nil ? 2 : 0) + (mail != nil ? 1 : 0) + (directionsURL != nil ? 1 : 0)
-            if typeSize.isAccessibilitySize {
-                // At accessibility sizes the circles ride one horizontal row so the header stays short
-                // and the customer's details are reachable without scrolling past a wall of buttons.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 20) { actionCircleItems(dialable: dialable, mail: mail) }
-                        .padding(.horizontal, Theme.gutter)
-                }
-                .padding(.horizontal, -Theme.gutter)
-                .accessibilityElement(children: .contain)
-            } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4, alignment: .top), count: count), spacing: 12) {
-                    actionCircleItems(dialable: dialable, mail: mail)
-                }
-                .accessibilityElement(children: .contain)
+            // At accessibility sizes two across, like the job's reach circles: a sideways-scrolling row
+            // cut "Directions" off the edge, so the last action was easy to miss with large text.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4, alignment: .top),
+                                     count: typeSize.isAccessibilitySize ? min(2, count) : count), spacing: 12) {
+                actionCircleItems(dialable: dialable, mail: mail)
             }
+            .accessibilityElement(children: .contain)
         }
     }
 
@@ -628,6 +620,8 @@ struct CustomerDetailView: View {
         let pendingGrant = smsConsentChoice
         return HStack {
             Text("Job texts").foregroundStyle(Theme.muted)
+                // The menu below says "Job texts" itself, so VoiceOver doesn't stop on the label alone.
+                .accessibilityHidden(canEdit)
             Spacer()
             let granted = smsConsent?.decision == "grant"
             if canEdit {
@@ -640,8 +634,11 @@ struct CustomerDetailView: View {
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(Theme.foreground)
-                    .frame(minHeight: 44)
+                    .frame(minHeight: 44).contentShape(Rectangle())
                 }
+                .accessibilityLabel("Job texts")
+                .accessibilityValue(smsConsentLabel)
+                .accessibilityHint("Record what the customer said about job texts")
             } else {
                 Text(smsConsentLabel).foregroundStyle(Theme.foreground)
             }
@@ -720,6 +717,8 @@ struct CustomerDetailView: View {
                                              subtitle: [contact.role, contact.phone ?? contact.email].compactMap { $0 }.joined(separator: " · ")) {
                                     if contact.primary { StatusWord(text: "Primary") }
                                 }
+                                // Name, "Primary", role and number as one VoiceOver stop; ••• stays its own.
+                                .accessibilityElement(children: .combine)
                                 ThorbisMenu(items: contactMenuItems(contact),
                                             accessibilityLabel: "Contact actions for \(contact.name)") {
                                     Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
@@ -756,6 +755,7 @@ struct CustomerDetailView: View {
                                         Spacer(minLength: 4)
                                         StatusWord(text: location.kind.statusLabel)
                                     }
+                                    .accessibilityElement(children: .combine)
                                     AddressLink(address: location.address, coordinates: location.coordinates)
                                         .labelStyle(.titleOnly).font(Theme.font(15)).tint(Theme.foreground)
                                     if let notes = location.notes { Text(notes).font(Theme.font(15)).foregroundStyle(Theme.muted) }
@@ -1085,7 +1085,22 @@ struct CustomerDetailView: View {
         }
     }
     private func detailRow(_ title: String, value: String) -> some View {
-        HStack(spacing: 12) { Text(title).foregroundStyle(Theme.muted); Spacer(minLength: 10); Text(value).multilineTextAlignment(.trailing) }.font(Theme.font(15)).frame(minHeight: 44)
+        // A short value sits beside its label; a long one (or large text) goes under it, so words
+        // never break mid-word in a narrow right-aligned column.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(title).foregroundStyle(Theme.muted).fixedSize()
+                Spacer(minLength: 10)
+                Text(value).lineLimit(1)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).foregroundStyle(Theme.muted)
+                Text(value).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 6)
+        }
+        .font(Theme.font(15)).frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
     }
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }

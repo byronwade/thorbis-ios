@@ -473,7 +473,7 @@ struct PaperActionBar<Secondary: View>: View {
         HStack(spacing: 8) {
             Button(action: action) {
                 HStack(spacing: 7) {
-                    if busy { ProgressView().tint(Theme.onInk) } else if let symbol { Image(systemName: symbol).font(.system(size: 15, weight: .medium)) }
+                    if busy { ProgressView().tint(Theme.onInk) } else if let symbol { Image(systemName: symbol).font(.subheadline.weight(.medium)).accessibilityHidden(true) }
                     Text(title)
                 }
                 .inkCommit(enabled: !disabled)

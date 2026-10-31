@@ -415,6 +415,8 @@ struct ScheduleView: View {
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityHint("Opens the closeout checklist for this job")
+                // The link inherits a "Selected" trait inside the schedule's list; it is an action, not a choice.
+                .accessibilityRemoveTraits(.isSelected)
             }
         }
     }

@@ -335,9 +335,12 @@ struct NewJobSheet: View {
                     .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                 Spacer()
                 if canReadCustomers && !store.customers.isEmpty {
-                    Button("All customers") { browsing = true }
-                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                        .frame(minHeight: 32)
+                    // A 44pt target for a gloved thumb; the words stay quiet.
+                    Button { browsing = true } label: {
+                        Text("All customers").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .frame(minHeight: 44).padding(.horizontal, 4).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
                 }
             }
             .padding(.horizontal, 4).padding(.bottom, 4)

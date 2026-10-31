@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-large-text-voiceover",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Easier with large text and VoiceOver",
+                      detail: "Customer actions and site notes fit at large text. Contacts and invoice lines read as one item."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-mockup-parity",
             date: "2026-10-31",
             highlights: [

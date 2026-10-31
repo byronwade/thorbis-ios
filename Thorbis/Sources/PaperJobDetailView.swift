@@ -906,7 +906,7 @@ struct JobDetailView: View {
             } label: {
                 HStack(spacing: 7) {
                     if busy || creatingInvoice { ProgressView().tint(Theme.onInk) }
-                    else { Image(systemName: canCompleteHere && next == nil ? "checkmark" : "checkmark.seal").font(.system(size: 15, weight: .medium)) }
+                    else { Image(systemName: canCompleteHere && next == nil ? "checkmark" : "checkmark.seal").font(.subheadline.weight(.medium)).accessibilityHidden(true) }
                     Text(commitTitle(rows))
                 }
                 .inkCommit()
@@ -1378,6 +1378,9 @@ struct JobDetailView: View {
                     JobPanelRow(title: line.description, titleSize: 15) {
                         Text("\(line.quantity)").font(Theme.monoFont(14)).foregroundStyle(Theme.muted)
                     }
+                    // One VoiceOver stop per line, the count said as a quantity, not a bare number.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(line.description), quantity \(line.quantity)")
                 }
             }
         }

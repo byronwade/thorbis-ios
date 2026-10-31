@@ -275,6 +275,7 @@ struct CustomerMembershipSection: View {
                                     PaperListRow(title: membership.name, subtitle: membershipDetail(membership), subtitleLines: 2) {
                                         StatusWord(text: "Active", tint: Theme.success)
                                     }
+                                    .accessibilityElement(children: .combine)
                                     if canEdit {
                                         ThorbisMenu(items: [
                                             ThorbisMenuItem("Cancel membership", icon: "xmark.circle", role: .destructive) { cancelling = membership },
