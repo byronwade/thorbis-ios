@@ -170,6 +170,9 @@ struct JobPropertyHistorySection: View {
     let locationsLoaded: Bool
     let visits: [JobVisitRecord]
     let visitsLoaded: Bool
+    /// False on site, where the "Before you go in" banner already says the access facts: the
+    /// panel then lists only the equipment, so each fact shows once.
+    var showsFacts = true
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
@@ -210,7 +213,7 @@ struct JobPropertyHistorySection: View {
             Color.clear.frame(width: 0, height: 0)
             switch part {
             case .place:
-                if !history.facts.isEmpty || !history.equipment.isEmpty { placePanel(history, savedAt: savedAt) }
+                if (showsFacts && !history.facts.isEmpty) || !history.equipment.isEmpty { placePanel(history, savedAt: savedAt) }
             case .visits:
                 if !history.visits.isEmpty { visitsPanel(history, savedAt: savedAt) }
             }
@@ -244,20 +247,23 @@ struct JobPropertyHistorySection: View {
     private func placePanel(_ history: JobPropertyHistory, savedAt: Date?) -> some View {
         let units = expanded || history.equipment.count <= JobPropertyHistoryLayout.collapsedRows + 1
             ? history.equipment[...] : history.equipment.prefix(JobPropertyHistoryLayout.collapsedRows)
+        let facts = showsFacts ? history.facts : []
         // Access codes, dogs and parking are what to know before going in: a warning mark leads.
-        JobPanelSection(title: history.title, mark: history.facts.isEmpty ? nil : "exclamationmark.triangle.fill",
+        JobPanelSection(title: facts.isEmpty ? "Equipment" : history.title, mark: facts.isEmpty ? nil : "exclamationmark.triangle.fill",
                         actionTitle: history.equipment.count > JobPropertyHistoryLayout.collapsedRows + 1 ? (expanded ? "Show less" : "Show all \(history.equipment.count)") : nil,
                         actionIdentifier: "job-property-history-show-all",
                         action: { withMotion(.snappy) { expanded.toggle() } }) {
             savedLine(savedAt)
-            if let place = history.place, !history.facts.isEmpty {
-                Text(history.scope == .address ? place : "\(place) · only address on file")
+            // The job's own street is the screen's title; the place line shows only when the facts
+            // come from somewhere else (the customer's only address on file).
+            if let place = history.place, !facts.isEmpty, history.scope != .address {
+                Text("\(place) · only address on file")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 16).padding(.top, 10)
                     .jobPanelJoinsNext()
             }
-            ForEach(history.facts) { fact in
+            ForEach(facts) { fact in
                 if fact.isCode {
                     JobPanelFact(label: fact.label, value: fact.value, mono: true)
                         .contentShape(Rectangle())
