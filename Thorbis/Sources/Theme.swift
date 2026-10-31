@@ -124,14 +124,17 @@ enum Theme {
     // Status hues (redesign spec "Colour roles"). `status*` colours a glyph or a dot (non-text, 3:1
     // target); `status*Text` is the text-safe twin (4.5:1 on background, well and its own surface);
     // `status*Surface` is the tinted chip ground.
-    static let statusUnscheduled = adaptive(light: 0x8E8E96, dark: 0x8E8E96)
+    // Phase 4: the unscheduled grey and in-progress amber glyphs were darkened in light (from
+    // #8E8E96 and #E0A100) so the ring holds 3:1 non-text contrast on the ground, the well and its
+    // chip surface; the hue stays grey and amber. Dark already cleared 3:1. The words use `*Text`.
+    static let statusUnscheduled = adaptive(light: 0x7A7A82, dark: 0x8E8E96)
     static let statusScheduled = adaptive(light: 0x5E6AD2, dark: 0x8B94EA)
     static let statusScheduledText = adaptive(light: 0x4A55BD, dark: 0xA9B0F2, highLight: 0x343E9E, highDark: 0xCDD1FA)
     static let statusScheduledSurface = adaptive(light: 0xECEEFB, dark: 0x1F2238)
     static let statusDispatched = brand
     static let statusDispatchedText = brandText
     static let statusDispatchedSurface = brandSurface
-    static let statusInProgress = adaptive(light: 0xE0A100, dark: 0xF2B92E)
+    static let statusInProgress = adaptive(light: 0xA87A00, dark: 0xF2B92E)
     static let statusInProgressText = warning
     static let statusInProgressSurface = warningSurface
     static let statusDone = adaptive(light: 0x1F9D55, dark: 0x3DD47A)
@@ -143,6 +146,12 @@ enum Theme {
     static let statusInvoiced = adaptive(light: 0x0F8F8A, dark: 0x2DC2BC)
     static let statusInvoicedText = adaptive(light: 0x0B6B67, dark: 0x5FD6D0, highLight: 0x064F4C, highDark: 0x9BE8E4)
     static let statusInvoicedSurface = adaptive(light: 0xE3F4F3, dark: 0x102A29)
+
+    /// The toast (Linear style): a dark capsule in both themes. In dark it sits a step above the
+    /// ground so it still reads as raised; `toastText` and `toastMuted` hold 4.5:1 on it.
+    static let toastFill = adaptive(light: 0x18181B, dark: 0x2C2C31, highLight: 0x000000, highDark: 0x3A3A40)
+    static let toastText = adaptive(light: 0xFFFFFF, dark: 0xF4F4F5, highLight: 0xFFFFFF, highDark: 0xFFFFFF)
+    static let toastMuted = adaptive(light: 0xA1A1AA, dark: 0xA8A8B1, highLight: 0xD4D4D8, highDark: 0xD4D4D8)
 
     /// Place marks for menu and section icons: a small tinted rounded square with a white glyph,
     /// like Linear's project icons. The square is decorative; the word beside it carries meaning.
@@ -354,6 +363,14 @@ extension Date {
 
 /// MA-03: with Reduce Motion on, every animation becomes a short 150ms ease-out
 /// with no spring or travel; otherwise the given animation runs as written.
+extension Theme {
+    /// Phase 4: the small spring a chosen pill, segment or chip settles with; a short fade under
+    /// Reduce Motion.
+    static func selectionSpring(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.3, dampingFraction: 0.78)
+    }
+}
+
 @MainActor func withMotion<Result>(_ animation: Animation = .default, _ body: () throws -> Result) rethrows -> Result {
     try withAnimation(UIAccessibility.isReduceMotionEnabled ? .easeOut(duration: 0.15) : animation, body)
 }
