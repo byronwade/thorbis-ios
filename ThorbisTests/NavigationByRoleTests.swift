@@ -28,7 +28,7 @@ final class NavigationByRoleTests: XCTestCase {
         let all: (MenuItem) -> Bool = { _ in true }
         XCTAssertEqual(MenuLayout.defaultTabs(for: .technician, permitted: all), [.schedule, .jobs, .customers])
         XCTAssertEqual(MenuLayout.defaultTabs(for: .office, permitted: all), [.schedule, .inbox, .customers, .jobs])
-        XCTAssertEqual(MenuLayout.defaultTabs(for: .owner, permitted: all), [.schedule, .attention, .money, .customers])
+        XCTAssertEqual(MenuLayout.defaultTabs(for: .owner, permitted: all), [.home, .schedule, .money, .customers])
     }
 
     func testPlacesARoleCannotOpenAreReplacedFromTheStandardBar() {
@@ -36,14 +36,14 @@ final class NavigationByRoleTests: XCTestCase {
         let office = MenuLayout.defaultTabs(for: .office, permitted: { $0 != .inbox })
         XCTAssertEqual(office, [.schedule, .customers, .jobs])
         let owner = MenuLayout.defaultTabs(for: .owner, permitted: { $0 != .money })
-        XCTAssertEqual(owner, [.schedule, .attention, .customers, .jobs])
+        XCTAssertEqual(owner, [.home, .schedule, .customers, .jobs])
         XCTAssertLessThanOrEqual(owner.count, MenuLayout.maxTabs)
     }
 
     func testRoleDefaultsApplyOnlyWithoutASavedPhoneLayout() {
         let fresh = MenuLayout(defaults: store())
         fresh.applyRoleDefaults(.owner, permitted: { _ in true })
-        XCTAssertEqual(fresh.tabs, [.schedule, .attention, .money, .customers])
+        XCTAssertEqual(fresh.tabs, [.home, .schedule, .money, .customers])
         XCTAssertTrue(fresh.isDefault)
         XCTAssertFalse(fresh.hasSavedPhoneLayout, "The role default is derived, not saved")
 
