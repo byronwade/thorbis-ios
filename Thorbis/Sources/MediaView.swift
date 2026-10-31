@@ -30,8 +30,19 @@ enum JobMediaPageIntegrity {
     }
 }
 
+/// A capture the job screen's toolkit asked for (Photo, Scan, Measure). The media screen opens it
+/// once, as soon as its capture context is ready, then clears the request.
+enum JobMediaLaunch: Equatable {
+    /// The camera, filing the photo under this stage ("Before", "After") when given.
+    case camera(stage: String?)
+    case scan
+    case measure
+}
+
 struct JobMediaView: View {
     let jobID: String
+    /// One-shot capture request from the job screen; nil leaves the screen as it opens today.
+    var launch: Binding<JobMediaLaunch?> = .constant(nil)
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var pendingMedia: PendingMediaStore
@@ -401,9 +412,11 @@ struct JobMediaView: View {
                 captureOrigin = api.normalizedOrigin
             }
             pendingMedia.reload()
+            consumeLaunch()
             await load()
             if readScope != nil && !waiting.isEmpty { await retryWaiting() }
         }
+        .onChange(of: launch.wrappedValue) { _, _ in consumeLaunch() }
         .refreshable { thumbnailAttempt += 1; await load() }
         .onChange(of: selection) { _, item in
             Task {
@@ -470,6 +483,22 @@ struct JobMediaView: View {
         .onChange(of: records) { _, _ in if !previewIsCurrent { preview.clear(); previewScope = nil; previewRecord = nil } }
         .onDisappear { selectedData = nil; justCaptured = nil; preview.clear() }
     }
+    /// Opens what the job screen's toolkit asked for, with the same checks as the buttons below.
+    private func consumeLaunch() {
+        guard let request = launch.wrappedValue, captureContext != nil else { return }
+        launch.wrappedValue = nil
+        guard canAdd, readScope != nil, !busy else { return }
+        switch request {
+        case .camera(let requested):
+            if let requested, ["Before", "After", "Other"].contains(requested) { stage = requested }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) { showCamera = true }
+        case .scan:
+            if VNDocumentCameraViewController.isSupported { showScanner = true } else { importDocument = true }
+        case .measure:
+            if SiteMeasure.isSupported { showMeasure = true }
+        }
+    }
+
     private func select(_ data: Data, mime: String, filename: String) throws {
         guard !data.isEmpty, data.count <= 8 * 1024 * 1024 else { throw MediaSelectionError.tooLarge }
         guard ["image/jpeg", "image/png", "image/heic", "image/webp", "application/pdf"].contains(mime) else { throw MediaSelectionError.unsupported }

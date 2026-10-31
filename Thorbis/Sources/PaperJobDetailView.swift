@@ -89,6 +89,20 @@ struct JobDetailView: View {
     @State private var showAssign = false
     @State private var showFollowUps = false
     @State private var handoff: DeviceHandoff?
+    /// The first page of the visit's photos (the strip on Overview, thumbnails in Activity).
+    @State private var mediaPhotos: [MediaAssetRecord] = []
+    @State private var mediaHasMore = false
+    /// The server's closeout checklist, read while on site for "Before you wrap up". Nil hides it.
+    @State private var closeout: FieldCloseout?
+    /// The workspace's business phone, when this role can read it, for the on-site call circle.
+    @State private var officePhone: String?
+    @State private var memberPricing: MemberPricing?
+    /// A capture the toolkit asked the media screen to open (camera, scan, measure).
+    @State private var mediaLaunch: JobMediaLaunch?
+    @State private var followUpKind: FieldFollowUpRequest.Kind = .notifyOffice
+    /// The draft invoice opened in the line editor by Add part.
+    @State private var partsInvoice: InvoiceRecord?
+    @FocusState private var noteFocused: Bool
     #if DEBUG
     @State private var previewOpenedCustomerView = false
     #endif
@@ -128,13 +142,13 @@ struct JobDetailView: View {
                     // Photos keep their own scrolling grid and capture bar (camera, scan, measure),
                     // so the one-line header, sections and filters stay fixed above them.
                     if !typeSize.isAccessibilitySize { header(job, compact: true) }
-                    tabBar
-                    activityFilterRow.padding(.horizontal, Theme.gutter)
-                    JobMediaView(jobID: jobId)
+                    tabBar(job)
+                    activityFilterLabel(title: "Photos").padding(.horizontal, Theme.gutter)
+                    JobMediaView(jobID: jobId, launch: $mediaLaunch)
                 } else {
                     // At accessibility sizes, the full job header can be taller than the
                     // screen. Keep the section chooser reachable above the scrolling content.
-                    if typeSize.isAccessibilitySize { tabBar }
+                    if typeSize.isAccessibilitySize { tabBar(job) }
                     ScrollViewReader { proxy in
                     ScrollView {
                     // The tabs pin under the nav bar, so switching Overview, Invoice or Activity
@@ -153,10 +167,10 @@ struct JobDetailView: View {
                             }
                         }
                         .padding(.horizontal, Theme.gutter)
-                        .padding(.top, selectedTab == "Overview" ? 22 : 8)
+                        .padding(.top, selectedTab == "Overview" ? 14 : 8)
                         .padding(.bottom, 28)
                     } header: {
-                        if !typeSize.isAccessibilitySize { tabBar.background(Theme.background) }
+                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.background) }
                     }
                     }
                     }
@@ -213,10 +227,22 @@ struct JobDetailView: View {
             EstimateDetailView(id: opened.id, jobID: jobId, presentsOnOpen: opened.present)
                 .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices() } } }
         }
-        .thorbisDestination(isPresented: $showWrapUp) { JobCloseoutView(jobID: jobId) }
+        .thorbisDestination(isPresented: $showWrapUp) {
+            JobCloseoutView(jobID: jobId).onDisappear { Task { await loadCloseout() } }
+        }
+        // Add part: the price book on the job's draft invoice, as the invoice screen edits it.
+        .sheet(item: $partsInvoice, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) { invoice in
+            NavigationStack {
+                InvoiceLineEditorView(invoice: invoice) { updated in
+                    updateInvoice(updated)
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .thorbisDestination(isPresented: $showAssign) { JobAssignmentView(jobID: jobId) }
         .thorbisDestination(isPresented: $showFollowUps) {
-            JobFollowUpsView(jobID: jobId).onDisappear { Task { await loadFollowUps() } }
+            JobFollowUpsView(jobID: jobId, initialKind: followUpKind).onDisappear { Task { await loadFollowUps() } }
         }
         .sheet(isPresented: $showNewEstimate, onDismiss: {
             // A saved estimate opens next, so the tech reviews it and hands it over (TF-06).
@@ -310,10 +336,10 @@ struct JobDetailView: View {
         }
         .onDisappear { dictation.stop() }
         .onChange(of: selectedTab) { previous, tab in
-            if tab != "Activity" { dictation.stop() }
+            if tab != "Activity" { dictation.stop(); noteFocused = false }
             if tab == "Money" { Task { await loadInvoices() } }
             // Photos added under Activity show in the Overview count straight away (JS-09).
-            if previous == "Activity", activityFilter == "Photos" { Task { await loadMediaCount() } }
+            if previous == "Activity", activityFilter == "Photos" { Task { await loadMediaCount(); await loadCloseout() } }
         }
         .onChange(of: activityFilter) { previous, _ in
             if previous == "Photos" { Task { await loadMediaCount() } }
@@ -323,7 +349,10 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
-            if !typeSize.isAccessibilitySize { primaryAction }
+            if job != nil, selectedTab == "Activity", !showsPhotos, session.can("job.note", feature: "jobs") {
+                // JobActivity.dc.html: the composer stays at the bottom, quick notes above it.
+                composer.background(Theme.background)
+            } else if !typeSize.isAccessibilitySize { primaryAction }
         }
         .sheet(isPresented: $showPause) {
             // MA-16: Cancel leading, the commit trailing where the thumb is; the form keeps what was typed.
@@ -444,23 +473,33 @@ struct JobDetailView: View {
         }
     }
 
-    /// Overview carries the whole header: who, what, status, when, who's on it, what's owed and how to
-    /// reach them. Money and Activity only need to say which job this is, so their header is one
-    /// line, title and status word, and the actions stay one tap away on Overview or in •••.
-    @ViewBuilder
-    private func header(_ job: JobRecord, compact: Bool = false) -> some View {
-        if compact {
-            compactHeader(job)
-        } else {
-            fullHeader(job)
-        }
+    /// The job's name: its street when the job records a site, else its title (BYR-1593).
+    private func street(_ job: JobRecord) -> String? {
+        JobPropertyHistory.street(job: job, locations: customerLocations)
     }
 
+    private func displayTitle(_ job: JobRecord) -> String { street(job) ?? job.title }
+
+    /// The status the screen shows: a queued offline step counts.
+    private func shownStatus(_ job: JobRecord) -> String { outbox.pendingStatus(for: job.id) ?? job.status }
+
+    /// OnSite.dc.html: once arrived (or working), the job screen is the technician's toolkit.
+    private var isOnSite: Bool {
+        guard let job else { return false }
+        return ["arrived", "in_progress"].contains(shownStatus(job))
+    }
+
+    @ViewBuilder
+    private func header(_ job: JobRecord, compact: Bool = false) -> some View {
+        if compact { compactHeader(job) } else { fullHeader(job) }
+    }
+
+    /// Money and Activity only need to say which job this is: the street (or title) and its status.
     private func compactHeader(_ job: JobRecord) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(job.title)
-                .font(Theme.font(20, weight: .semibold))
-                .tracking(-0.2)
+            Text(displayTitle(job))
+                .font(Theme.font(20, weight: .medium))
+                .tracking(-0.3)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
@@ -472,141 +511,91 @@ struct JobDetailView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// Status as a word, the hue on its glyph; changing it lives on Overview and in •••.
+    /// Status as a word beside its dot; changing it lives on Overview and in •••.
     private func statusWord(_ job: JobRecord) -> some View {
         let queued = outbox.pendingStatus(for: job.id)
-        return HStack(spacing: 5) {
-            Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(queued == nil ? statusTint(job.status) : Theme.warning)
-                .accessibilityHidden(true)
-            Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .fixedSize()
+        return TimelineView(.everyMinute) { context in
+            JobStatusWord(word: statusWordText(job, queued: queued, now: context.date),
+                          color: queued == nil ? statusTint(job.status) : Theme.warning)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Job status, \((queued ?? job.status).statusLabel)")
     }
 
+    /// Job.dc.html: street first, the problem under it, one status line, one row of circles; on
+    /// site, what to know before going in sits right under them.
     private func fullHeader(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // F17: membership is a fact about the customer, so it reads in their line, not as a pill.
-            FlowRow(spacing: 8, lineSpacing: 0) {
-                customerLine(job)
-                MemberFact(customerID: job.customerId)
-            }
-            Text(job.title)
-                .font(Theme.font(26, weight: .semibold))
-                .tracking(-0.39)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(displayTitle(job))
+                .font(Theme.font(28, weight: .medium))
+                .tracking(-0.56)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            // One wrapping row: status is the only pill; time and technician read as plain facts.
-            FlowRow(spacing: 6, lineSpacing: 6) {
-                    statusControl(job)
-                    if let date = JobFiltering.date(job.scheduledFor) {
-                        Button { if session.can("job.assign", feature: "jobs") { showSchedule = true } } label: {
-                            Label(date.visitLabel(), systemImage: "clock")
-                                .font(Theme.font(13, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                                .frame(height: Theme.chipHeight)
-                                .padding(.vertical, 8).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        // Without scheduling rights the chip is a label, not a button that does nothing.
-                        .allowsHitTesting(session.can("job.assign", feature: "jobs"))
-                        .accessibilityHint(session.can("job.assign", feature: "jobs") ? "Change the scheduled time" : "")
-                    }
-                    if let assignedName = assignedDisplayName(for: job) {
-                        Label(shortName(assignedName), systemImage: "person")
-                            .font(Theme.font(13, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .frame(height: Theme.chipHeight)
-                            .padding(.vertical, 8)
-                    }
+                .accessibilityIdentifier("job-title")
+            if let subtitle = headerSubtitle(job) {
+                Text(subtitle)
+                    .font(Theme.font(16))
+                    .foregroundStyle(Theme.subtle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
             }
-            if let balance = invoiceBalanceCents {
-                balanceDue(balance)
+            statusLine(job).padding(.top, 2)
+            reachCircles(job).padding(.top, 8)
+            if isOnSite, let banner = accessBanner(job) {
+                banner.padding(.top, 18)
             }
-            quickActions
         }
         .padding(.horizontal, Theme.gutter)
         .padding(.top, 4)
-        .padding(.bottom, 10)
+        .padding(.bottom, 14)
     }
 
-    @ViewBuilder
-    private func customerLine(_ job: JobRecord) -> some View {
-        if let customer = linkedCustomer(job) {
-            NavigationLink(value: customer) {
-                HStack(alignment: .center, spacing: 6) {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.brandText)
-                        .frame(width: 28, height: 28)
-                        .background(Theme.brandSurface, in: Circle())
-                        .accessibilityHidden(true)
-                    Text(customer.name)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .accessibilityHidden(true)
-                }
-                .font(Theme.font(15, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
+    /// The problem under the street; on site the customer's name rides along.
+    private func headerSubtitle(_ job: JobRecord) -> String? {
+        let customer = isOnSite ? store.customerName(job.customerId) : nil
+        let parts = street(job) == nil ? [customer] : [job.title, customer]
+        let line = parts.compactMap { $0 }.joined(separator: " · ")
+        return line.isEmpty ? nil : line
+    }
+
+    /// "● Dispatched · Today 10:30 AM · Ramon": the word opens the status menu, the time reschedules.
+    private func statusLine(_ job: JobRecord) -> some View {
+        let canSchedule = session.can("job.assign", feature: "jobs")
+        return FlowRow(spacing: 6, lineSpacing: 0) {
+            statusControl(job)
+            if isOnSite, outbox.pendingStatus(for: job.id) == nil, let arrived = JobFiltering.date(job.arrivedAt) {
+                statusFact("· arrived \(arrived.formatted(date: .omitted, time: .shortened))")
+            } else if let date = JobFiltering.date(job.scheduledFor) {
+                Button { if canSchedule { showSchedule = true } } label: { statusFact("· \(date.visitLabel())") }
+                    .buttonStyle(PressStyle())
+                    // Without scheduling rights the time is a label, not a button that does nothing.
+                    .allowsHitTesting(canSchedule)
+                    .accessibilityHint(canSchedule ? "Change the scheduled time" : "")
             }
-            .accessibilityIdentifier("job-customer-link")
-            .accessibilityHint("Opens the customer")
-        } else {
-            Text(store.customerName(job.customerId))
-                .font(Theme.font(15, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(minHeight: 44, alignment: .leading)
+            if let assignedName = assignedDisplayName(for: job) {
+                statusFact("· \(shortName(assignedName))")
+            }
         }
     }
 
-    /// MF-01/MF-03: what's owed on the job, once, on Overview. It opens Money, where it's collected.
-    private func balanceDue(_ balance: Int) -> some View {
-        Button { withMotion(.snappy) { selectedTab = "Money" } } label: {
-            Group {
-                if typeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
-                            Spacer(minLength: 8)
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Theme.brandText)
-                                .accessibilityHidden(true)
-                        }
-                        Text(money(balance, currency: "USD"))
-                            .moneyStyle(.total).foregroundStyle(Theme.foreground)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("Balance due").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 8)
-                        Text(money(balance, currency: "USD")).moneyStyle(.total).foregroundStyle(Theme.foreground)
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.brandText)
-                            .accessibilityHidden(true)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    private func statusFact(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.monoFont(14))
+            .foregroundStyle(Theme.muted)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
+    }
+
+    /// The access facts for the job's place, from the loaded locations or, offline, the copy saved on this phone.
+    private func accessBanner(_ job: JobRecord) -> JobAccessBanner? {
+        if let place = JobPropertyHistory.accessPlace(job: job, locations: customerLocations) {
+            let facts = JobPropertyHistory.facts(place)
+            guard !facts.isEmpty else { return nil }
+            return JobAccessBanner(facts: facts, caveat: job.locationId == nil ? "From the customer's only address on file, \(place.label.isEmpty ? place.address : place.label)." : nil)
         }
-        .buttonStyle(PressStyle())
-        .padding(.top, 8)
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens Money, where it can be collected")
+        guard customerLocations.isEmpty, let saved = JobDetailCache.history(job.id)?.history,
+              saved.jobId == job.id, saved.organizationId == job.organizationId, !saved.facts.isEmpty else { return nil }
+        return JobAccessBanner(facts: saved.facts, caveat: saved.scope == .customer ? "From the customer's only address on file." : nil)
     }
 
     private var customerAuthorityToken: String {
@@ -637,35 +626,41 @@ struct JobDetailView: View {
         return JobLocationPolicy.accountLocations(locations, customerID: job.customerId, organizationID: job.organizationId)
     }
 
+    /// Job.dc.html: Call, Text, Directions and Show customer as one row of labelled circles.
     /// Directions always require choosing an account location; no job site is inferred.
-    /// Customer view, then Call, Text and Directions in one row while they fit.
-    private var quickActions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            customerViewAction
-            let phone = job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil }
-            if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    PaperQuickActions(phone: phone)
-                    directionsAction
-                }
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
-                        PaperQuickActions(phone: phone)
-                        directionsAction
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        PaperQuickActions(phone: phone)
-                        directionsAction
-                    }
-                }
+    private func reachCircles(_ job: JobRecord) -> some View {
+        let phone = customerContext(job) == contactsContext ? customerPhone : nil
+        let reach = JobReach(phone: phone, email: nil)
+        let columns = typeSize.isAccessibilitySize ? 2 : 4
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: columns), spacing: 12) {
+            Button { if let call = reach.call { openURL(call) } } label: {
+                JobCircleLabel(title: "Call", symbol: "phone", enabled: reach.call != nil)
             }
+            .buttonStyle(PressStyle())
+            .disabled(reach.call == nil)
+            .accessibilityLabel("Call \(store.customerName(job.customerId))")
+            .accessibilityIdentifier("job-call")
+            Button { if let text = reach.text { openURL(text) } } label: {
+                JobCircleLabel(title: "Text", symbol: "message", enabled: reach.text != nil)
+            }
+            .buttonStyle(PressStyle())
+            .disabled(reach.text == nil)
+            .accessibilityLabel("Text \(store.customerName(job.customerId))")
+            .accessibilityIdentifier("job-text")
+            directionsCircle
+            Button { openCustomerView(.home) } label: {
+                JobCircleLabel(title: "Show customer", symbol: "iphone", enabled: canOpenCustomerView)
+            }
+            .buttonStyle(PressStyle())
+            .disabled(!canOpenCustomerView)
+            .accessibilityLabel("Show customer")
+            .accessibilityHint("Hands the device to the customer for their estimates, invoices and details")
+            .accessibilityIdentifier("job-customer-view")
         }
-        .padding(.top, 8)
     }
 
     @ViewBuilder
-    private var directionsAction: some View {
+    private var directionsCircle: some View {
         if !customerLocations.isEmpty {
             ThorbisMenu(items: customerLocations.map { place in
                 ThorbisMenuItem(place.label, icon: place.kind == "billing" ? "creditcard" : "mappin.and.ellipse",
@@ -673,55 +668,67 @@ struct JobDetailView: View {
                     if let url = JobLocationPolicy.directions(for: place.id, in: customerLocations) { openURL(url) }
                 }
             }, title: "Directions to") {
-                Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond")
-                    .font(Theme.font(15, weight: .medium))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                JobCircleLabel(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond")
             }
+            .accessibilityLabel("Directions")
             .accessibilityHint("Choose a customer location")
+        } else {
+            JobCircleLabel(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond", enabled: false)
+                .accessibilityLabel("Directions, no address on file")
         }
     }
 
+    /// The status word (with its dot) opens the status menu when there is a move to make.
     @ViewBuilder
     private func statusControl(_ job: JobRecord) -> some View {
-        let tint = statusTint(job.status)
         let transitions = availableTransitions(job)
         if transitions.isEmpty {
-            statusChip(job, tint: tint, showsMenu: false)
+            statusWordLabel(job, showsMenu: false)
         } else {
             ThorbisMenu(items: transitions.map { target in
                 ThorbisMenuItem(transitionTitle(target)) { runTransition(target) }
-            }, title: "Change status") {
-                statusChip(job, tint: tint, showsMenu: true)
+            }, title: "Change status", accessibilityLabel: "Job status, \(shownStatus(job).statusLabel). Change status") {
+                statusWordLabel(job, showsMenu: true)
             }
         }
+    }
+
+    /// "On site 42 min" while there, live each minute from the arrival tap; otherwise the status word.
+    private func statusWordLabel(_ job: JobRecord, showsMenu: Bool) -> some View {
+        let queued = outbox.pendingStatus(for: job.id)
+        return HStack(spacing: 4) {
+            TimelineView(.everyMinute) { context in
+                JobStatusWord(word: statusWordText(job, queued: queued, now: context.date),
+                              color: queued == nil ? statusTint(job.status) : Theme.warning, size: 14)
+            }
+            if showsMenu {
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+            }
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Job status, \(statusWordText(job, queued: queued, now: .now))")
+        .accessibilityIdentifier("job-status")
+    }
+
+    private func statusWordText(_ job: JobRecord, queued: String?, now: Date) -> String {
+        if let queued {
+            return ["arrived", "in_progress"].contains(queued) ? "On site · waiting to sync" : "\(queued.statusLabel) · waiting to sync"
+        }
+        if ["arrived", "in_progress"].contains(job.status), let arrived = JobFiltering.date(job.arrivedAt) {
+            return JobOnSiteClock.line(arrived: arrived, now: now)
+        }
+        return job.status.statusLabel
     }
 
     private func statusTint(_ status: String) -> Color {
         switch status {
-        case "completed": Theme.success
+        case "completed", "arrived", "in_progress": Theme.success
         case "en_route", "dispatched": Theme.brandText
         case "scheduled", "canceled": Theme.muted
         default: Theme.warning
         }
-    }
-
-    private func statusChip(_ job: JobRecord, tint: Color, showsMenu: Bool) -> some View {
-        let queued = outbox.pendingStatus(for: job.id)
-        return HStack(spacing: 5) {
-            // MA-10: the hue rides on the glyph; the word and the pill stay neutral.
-            Image(systemName: queued == nil ? statusIcon(job.status).0 : "clock.arrow.circlepath")
-                .font(.system(size: 12, weight: .medium)).foregroundStyle(queued == nil ? tint : Theme.warning)
-            Text(queued.map { "\($0.statusLabel) · waiting to sync" } ?? job.status.statusLabel)
-                .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
-            if showsMenu { Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted) }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
-        .background(Theme.fill, in: Capsule())
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .accessibilityLabel("Job status, \(job.status.statusLabel)")
     }
 
     private func assignedDisplayName(for job: JobRecord) -> String? {
@@ -760,14 +767,40 @@ struct JobDetailView: View {
         return balanceTotal
     }
 
-    private var tabBar: some View {
+    /// The words on each section: "On site" once arrived, what's owed on Money, how much on Activity.
+    private func sectionLabel(_ tab: String, job: JobRecord) -> String {
+        switch tab {
+        case "Overview": return isOnSite ? "On site" : "Overview"
+        case "Money":
+            guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
+            return "Money · \(jobShortMoney(balance, currency: "USD"))"
+        default:
+            let count = activityCount(job)
+            return count > 0 ? "Activity · \(count)" : "Activity"
+        }
+    }
+
+    private func spokenSectionLabel(_ tab: String, job: JobRecord) -> String {
+        switch tab {
+        case "Money":
+            guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
+            return "Money, \(money(balance, currency: "USD")) due"
+        case "Activity":
+            let count = activityCount(job)
+            return count > 0 ? "Activity, \(count) \(count == 1 ? "entry" : "entries")" : "Activity"
+        default: return sectionLabel(tab, job: job)
+        }
+    }
+
+    /// One segmented control for the job's three sections; a menu at accessibility sizes.
+    private func tabBar(_ job: JobRecord) -> some View {
         Group {
             if typeSize.isAccessibilitySize {
                 ThorbisMenu(items: tabs.map { tab in
-                    ThorbisMenuItem(tab, isSelected: tab == selectedTab) { selectedTab = tab }
-                }, title: "Job sections", accessibilityLabel: "Job sections, \(selectedTab)") {
+                    ThorbisMenuItem(sectionLabel(tab, job: job), isSelected: tab == selectedTab) { selectedTab = tab }
+                }, title: "Job sections", accessibilityLabel: "Job sections, \(spokenSectionLabel(selectedTab, job: job))") {
                     HStack(spacing: 12) {
-                        Text(selectedTab).font(Theme.font(15, weight: .medium))
+                        Text(sectionLabel(selectedTab, job: job)).font(Theme.font(15, weight: .medium))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.up.chevron.down")
@@ -782,18 +815,75 @@ struct JobDetailView: View {
                 .accessibilityHint("Choose a job section")
                 .accessibilityIdentifier("job-section-chooser")
             } else {
-                PaperTabs(options: tabs, selection: $selectedTab, wrapOverflow: true)
+                JobSectionControl(options: tabs.map { ($0, sectionLabel($0, job: job), spokenSectionLabel($0, job: job)) },
+                                  selection: $selectedTab)
+                    .padding(.horizontal, Theme.gutter)
             }
         }
-        .padding(.bottom, 4)
+        .padding(.top, 2)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder private var primaryAction: some View {
         if selectedTab == "Overview", let step = nextStep {
-            PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
-                           busy: busy || creatingInvoice) { run(step) }
+            if isOnSite {
+                onSiteBar(step)
+            } else {
+                PaperActionBar(title: step.title(resuming: job?.status == "paused"), symbol: step.symbol,
+                               busy: busy || creatingInvoice) { run(step) }
+            }
         } else if selectedTab == "Money" {
             moneyAction
+        }
+    }
+
+    /// OnSite.dc.html: a quiet call circle beside the one ink commit.
+    private func onSiteBar(_ step: TechJobStep) -> some View {
+        HStack(spacing: 10) {
+            callCircle
+            Button { run(step) } label: {
+                HStack(spacing: 7) {
+                    if busy || creatingInvoice { ProgressView().tint(Theme.onInk) }
+                    else { Image(systemName: step.symbol).font(.system(size: 15, weight: .medium)) }
+                    Text(commitTitle(step))
+                }
+                .inkCommit()
+            }
+            .buttonStyle(PressStyle())
+            .disabled(busy || creatingInvoice)
+            .accessibilityIdentifier("job-commit")
+        }
+        .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+        .background(Theme.background)
+    }
+
+    /// "Wrap up · 3 left" while the closeout checklist has open rows; otherwise the step's words.
+    private func commitTitle(_ step: TechJobStep) -> String {
+        if step == .wrapUp, let closeout {
+            let progress = CloseoutChecklist.progress(closeout)
+            let left = progress.total - progress.done
+            if left > 0 { return "Wrap up · \(left) left" }
+        }
+        return step.title(resuming: job?.status == "paused")
+    }
+
+    /// Calls the office when the workspace has a business phone this role can read, else the customer.
+    @ViewBuilder private var callCircle: some View {
+        let office = officePhone.flatMap { JobReach(phone: $0, email: nil).call }
+        let customer = job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil }
+            .flatMap { JobReach(phone: $0, email: nil).call }
+        if let url = office ?? customer {
+            Button { openURL(url) } label: {
+                Image(systemName: "phone")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Theme.foreground)
+                    .frame(width: Theme.commitHeight, height: Theme.commitHeight)
+                    .background(Theme.fill, in: Circle())
+                    .overlay(Circle().strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel(office != nil ? "Call the office" : "Call \(job.map { store.customerName($0.customerId) } ?? "the customer")")
+            .accessibilityIdentifier("job-onsite-call")
         }
     }
 
@@ -825,32 +915,33 @@ struct JobDetailView: View {
         return !moneyBarCollects
     }
 
-    /// JS-01: the body is for reading, in the order a tech needs it at the door. Every action that
+    /// Job.dc.html: the visit in the order a tech needs it at the door, each section one panel.
+    /// On site (OnSite.dc.html) the toolkit and what's left before wrapping up come first; every
+    /// other section stays below, so nothing the Overview had is out of reach. Every action that
     /// isn't the bar's next step is in the ••• menu at the top right.
     private func overviewContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 22) {
-            JobOfficeNote(notes: job.notes, pauseReason: job.pauseReason, pauseNextAction: job.pauseNextAction)
-            JobVisitCounts(latestNote: notes.last?.body, noteCount: notes.count + outbox.pendingNotes(for: job.id).count,
-                           photoCount: liveMediaCountContext != nil && liveMediaCountContext == mediaCountContext ? mediaCount : nil, openFollowUps: followUps.map { $0.filter { $0.status == "open" }.count },
-                           openNotes: { activityFilter = "Notes"; withMotion(.snappy) { selectedTab = "Activity" } },
-                           openPhotos: { activityFilter = "Photos"; withMotion(.snappy) { selectedTab = "Activity" } },
-                           openFollowUpsScreen: { showFollowUps = true })
-            // JS-05: only when the platform recorded the call that booked this job.
-            if let bookingCall { JobBookingCallSection(call: bookingCall) }
-            // Before you go in: access facts, equipment and recent visits, here or for the customer.
-            JobPropertyHistorySection(job: job, locations: customerLocations,
+            if isOnSite {
+                toolkit(job)
+                wrapUpPanel(job)
+                partsPanel
+            }
+            customerPanel(job)
+            // Before you go in: access facts and equipment, here or for the customer.
+            JobPropertyHistorySection(job: job, part: .place, locations: customerLocations,
                                       locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
                                       visits: visits, visitsLoaded: visitsLoaded)
                 .id("job-property-history")
+            photosStrip(job)
+            latestActivity(job)
+            JobPropertyHistorySection(job: job, part: .visits, locations: customerLocations,
+                                      locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
+                                      visits: visits, visitsLoaded: visitsLoaded)
+            moneyPanel(job)
+            followUpsPanel
+            // JS-05: only when the platform recorded the call that booked this job.
+            if let bookingCall { JobBookingCallSection(call: bookingCall) }
             if session.can("customer.view", feature: "core_crm") {
-                // Who the job is for, how to reach them and where they are, each opening its own record.
-                if let customer = linkedCustomer(job) {
-                    let current = customerContext(job) != nil && customerContext(job) == contactsContext
-                    JobCustomerSection(customer: customer,
-                                       detail: JobCustomerSection.detail(accountType: current ? customerRecord?.accountType : nil,
-                                                                         jobCount: session.can("job.view", feature: "jobs")
-                                                                             ? store.jobs.filter { $0.customerId == job.customerId }.count : nil))
-                }
                 let current = customerContext(job) != nil && customerContext(job) == contactsContext
                 JobContactsSection(people: JobContacts.people(contacts: current ? contacts : [], customer: current ? customerRecord : nil),
                                    preference: JobContacts.preference(current ? customerRecord : nil),
@@ -863,6 +954,367 @@ struct JobDetailView: View {
             CustomerMembershipSection(customerID: job.customerId, editable: false)
             detailsGroup(job)
         }
+    }
+
+    /// Who the job is for (with membership and the account at a glance, opening their profile),
+    /// then why the office sent the visit, and the pause reason when it's paused.
+    private func customerPanel(_ job: JobRecord) -> some View {
+        let officeNote = job.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return JobPanel {
+            if let customer = linkedCustomer(job) {
+                NavigationLink(value: customer) { customerRow(job, name: customer.name, opens: true) }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityIdentifier("job-customer-link")
+                    .accessibilityHint("Opens the customer's profile")
+            } else {
+                customerRow(job, name: store.customerName(job.customerId), opens: false)
+            }
+            if job.pauseReason != nil || job.pauseNextAction != nil {
+                VStack(alignment: .leading, spacing: 3) {
+                    JobStatusWord(word: "Paused", color: Theme.warning)
+                    if let reason = job.pauseReason { Text(reason).font(Theme.font(15)).foregroundStyle(Theme.foreground) }
+                    if let next = job.pauseNextAction { Text("Next: \(next)").font(Theme.font(15)).foregroundStyle(Theme.subtle) }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16).padding(.bottom, 12)
+                .accessibilityElement(children: .combine)
+            }
+            if !officeNote.isEmpty {
+                Text(officeNote)
+                    .font(Theme.font(15)).foregroundStyle(Theme.subtle).lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 16).padding(.bottom, 14)
+                    .accessibilityLabel("From the office: \(officeNote)")
+            }
+        }
+        .accessibilityIdentifier("job-customer-panel")
+    }
+
+    private func customerRow(_ job: JobRecord, name: String, opens: Bool) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let detail = customerDetail(job) {
+                    Text(detail).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if opens {
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 13)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    /// "Member · 15% off · Residential · 2 jobs".
+    private func customerDetail(_ job: JobRecord) -> String? {
+        let current = customerContext(job) != nil && customerContext(job) == contactsContext
+        var parts: [String] = []
+        if let memberPricing, memberPricing.isMember {
+            parts.append(memberPricing.discountPercent > 0 ? "Member · \(memberPricing.discountPercent)% off" : "Member")
+        }
+        if let account = JobCustomerSection.detail(accountType: current ? customerRecord?.accountType : nil,
+                                                   jobCount: session.can("job.view", feature: "jobs")
+                                                       ? store.jobs.filter { $0.customerId == job.customerId }.count : nil) {
+            parts.append(account)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// The first photos of the visit, "+N" for the rest; Add photo opens the camera.
+    @ViewBuilder
+    private func photosStrip(_ job: JobRecord) -> some View {
+        let count = liveMediaCountContext != nil && liveMediaCountContext == mediaCountContext ? mediaCount : nil
+        let photos = count == nil ? [] : mediaPhotos
+        let canAdd = session.can("job.edit", feature: "jobs")
+        let showsMore = photos.count > 4 || mediaHasMore
+        let shown = Array(photos.prefix(showsMore ? 3 : 4))
+        VStack(alignment: .leading, spacing: 6) {
+            JobPanelLabel(title: count.map { "Photos · \($0)" } ?? "Photos",
+                          actionTitle: canAdd ? "Add photo" : nil, actionIdentifier: "job-add-photo",
+                          action: { openCapture(.camera(stage: nil)) })
+            if photos.isEmpty {
+                Button { openPhotos() } label: {
+                    JobPanel {
+                        JobPanelRow(title: count == nil ? "Photos and documents" : "No photos yet",
+                                    subtitle: "Before and after photos, scans and measurements", titleSize: 15)
+                    }
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityHint("Opens the job's photos")
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                    ForEach(shown) { photo in
+                        Button { openPhotos() } label: { photoTile(photo) }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel(photo.caption ?? "Photo")
+                    }
+                    if showsMore {
+                        Button { openPhotos() } label: {
+                            Text(mediaHasMore ? "More" : "+\(photos.count - shown.count)")
+                                .font(Theme.monoFont(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fit)
+                                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("All photos")
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("job-photos-strip")
+    }
+
+    private func photoTile(_ photo: MediaAssetRecord) -> some View {
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay(MediaThumbnail(record: photo))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(alignment: .bottomLeading) {
+                if let stage = photo.tags.first(where: { $0 == "Before" || $0 == "After" }) {
+                    Text(stage).font(Theme.font(11, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Theme.card.opacity(0.9), in: Capsule())
+                        .padding(5)
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
+    }
+
+    /// The two newest things on the visit; "See all" opens Activity.
+    private func latestActivity(_ job: JobRecord) -> some View {
+        let entries = timeline(job, filter: "All")
+        return JobPanelSection(title: "Latest activity", actionTitle: entries.isEmpty ? nil : "See all \(entries.count)",
+                               actionIdentifier: "job-latest-activity-all",
+                               action: { activityFilter = "All"; withMotion(.snappy) { selectedTab = "Activity" } }) {
+            if entries.isEmpty {
+                JobPanelRow(title: "Nothing yet", subtitle: "Notes, status changes and photos show up here.", titleSize: 15)
+            }
+            ForEach(entries.prefix(2)) { entry in timelineRow(entry, showsDay: true) }
+        }
+    }
+
+    /// The job's estimates and invoices with their status words; Open goes to Money.
+    @ViewBuilder
+    private func moneyPanel(_ job: JobRecord) -> some View {
+        let canEstimates = session.can("estimate.view", feature: "estimates")
+        let canInvoices = session.can("invoice.view", feature: "invoicing")
+        if canEstimates || canInvoices {
+            let estimates = canEstimates ? jobEstimates : []
+            let bills = canInvoices ? invoices : []
+            let loading = (canEstimates && !estimatesLoaded) || (canInvoices && !invoicesLoaded)
+            JobPanelSection(title: "Money", actionTitle: "Open", actionIdentifier: "job-money-open",
+                            action: { withMotion(.snappy) { selectedTab = "Money" } }) {
+                ForEach(estimates) { estimate in
+                    let options = estimate.options ?? []
+                    let (word, tint) = estimateWord(estimate.status)
+                    moneyLine(options.isEmpty ? "Estimate EST-\(estimate.id.suffix(4).uppercased())" : "Estimate · \(options.count) options",
+                              amount: options.isEmpty ? paperLinesTotal(estimate.lines).map { jobShortMoney($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } : nil,
+                              word: word, tint: tint)
+                }
+                ForEach(bills) { invoice in
+                    let due = TechJobFlow.due(invoice)
+                    let (word, tint) = invoiceWord(invoice, due: due)
+                    let amount = invoice.status == "issued" ? due : paperLinesTotal(invoice.lines)
+                    moneyLine("Invoice INV-\(invoice.id.suffix(4).uppercased())",
+                              amount: amount.map { jobShortMoney($0, currency: invoice.currency) }, word: word, tint: tint)
+                }
+                if estimates.isEmpty && bills.isEmpty {
+                    if loading { SkeletonRows(count: 1, leading: false, inset: 16) }
+                    else { JobPanelRow(title: "No estimates or invoices yet", titleSize: 15) }
+                }
+            }
+        }
+    }
+
+    private func moneyLine(_ label: String, amount: String?, word: String, tint: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            HStack(spacing: 0) {
+                if let amount { Text("\(amount) · ").font(Theme.monoFont(15)).foregroundStyle(Theme.foreground) }
+                Text(word).font(Theme.font(15)).foregroundStyle(tint)
+            }
+            .fixedSize()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 11)
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func estimateWord(_ status: String) -> (String, Color) {
+        switch status {
+        case "approved": ("Approved", Theme.success)
+        case "sent": ("Sent", Theme.brandText)
+        case "declined": ("Declined", Theme.destructive)
+        default: (status.statusLabel, Theme.muted)
+        }
+    }
+
+    private func invoiceWord(_ invoice: InvoiceRecord, due: Int?) -> (String, Color) {
+        switch invoice.status {
+        case "issued": (due ?? 0) > 0 ? ("Unpaid", Theme.warning) : ("Issued", Theme.muted)
+        case "paid": ("Paid", Theme.success)
+        default: (invoice.status.statusLabel, Theme.muted)
+        }
+    }
+
+    /// Open follow-ups, waiting on the office; Open goes to the follow-ups screen.
+    private var followUpsPanel: some View {
+        let open = (followUps ?? []).filter { $0.status == "open" }
+        return JobPanelSection(title: open.isEmpty ? "Follow-ups" : "Follow-ups · \(open.count)", actionTitle: "Open",
+                               actionIdentifier: "job-follow-ups-open",
+                               action: { followUpKind = .notifyOffice; showFollowUps = true }) {
+            if open.isEmpty {
+                JobPanelRow(title: followUps == nil ? "Follow-ups" : "None open",
+                            subtitle: "Ask the office for a callback or a return visit.", titleSize: 15)
+            }
+            ForEach(open) { record in
+                Button { followUpKind = .notifyOffice; showFollowUps = true } label: {
+                    JobPanelRow(title: record.reason, subtitle: "Next: \(record.nextAction)", titleSize: 15) {
+                        Text("Office").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                }
+                .buttonStyle(RowPressStyle())
+            }
+        }
+    }
+
+    // MARK: On site (OnSite.dc.html)
+
+    /// Everything a technician reaches for at the house, one tap each. Capture tools open the
+    /// job's media screen straight into the camera, scanner or measure; the rest open their screens.
+    private func toolkit(_ job: JobRecord) -> some View {
+        let canCapture = session.can("job.edit", feature: "jobs")
+        let columns = typeSize.isAccessibilitySize ? 2 : 4
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
+            JobToolTile(title: "Photo", symbol: "camera", enabled: canCapture && UIImagePickerController.isSourceTypeAvailable(.camera),
+                        hint: "Opens the camera and adds the photo to this job") { openCapture(.camera(stage: nil)) }
+            JobToolTile(title: "Note", symbol: "square.and.pencil", enabled: session.can("job.note", feature: "jobs"),
+                        hint: "Type or dictate a note") { openNoteTool() }
+            JobToolTile(title: "Measure", symbol: "ruler", enabled: canCapture && SiteMeasure.isSupported,
+                        hint: "Measure with the camera and add it as a photo") { openCapture(.measure) }
+            // TODO: DataPlateScanner (equipment data-plate scanning) isn't on this branch; once it
+            // lands, Scan should offer it beside the document scanner.
+            JobToolTile(title: "Scan", symbol: "doc.viewfinder", enabled: canCapture,
+                        hint: "Scan a document onto this job") { openCapture(.scan) }
+            JobToolTile(title: "Checklist", symbol: "checklist", hint: "Opens the wrap-up checklist") { showWrapUp = true }
+            JobToolTile(title: "Add part", symbol: "shippingbox", enabled: canAddPart,
+                        hint: "Adds price book items to the job's draft invoice") { Task { await addPart() } }
+            JobToolTile(title: "Estimate", symbol: "doc.text",
+                        enabled: canBuildEstimate || session.can("estimate.view", feature: "estimates"),
+                        hint: jobEstimates.isEmpty ? "Builds an estimate" : "Opens the job's estimates") { openEstimateTool() }
+            JobToolTile(title: "Return visit", symbol: "calendar.badge.plus", enabled: session.can("job.edit", feature: "jobs"),
+                        hint: "Asks the office to book a return visit") { followUpKind = .officeScheduling; showFollowUps = true }
+        }
+        .accessibilityIdentifier("job-toolkit")
+    }
+
+    /// "Before you wrap up": the closeout checklist the server computes, ticked as it's met.
+    /// Tapping an open row goes to the tool that satisfies it.
+    @ViewBuilder
+    private func wrapUpPanel(_ job: JobRecord) -> some View {
+        if let closeout {
+            let items = CloseoutChecklist.items(closeout)
+            let progress = CloseoutChecklist.progress(closeout)
+            JobPanelSection(title: items.isEmpty ? "Before you wrap up" : "Before you wrap up · \(progress.done) of \(progress.total)") {
+                if items.isEmpty {
+                    JobPanelRow(title: "Nothing else is required before closing.", titleSize: 15)
+                }
+                ForEach(items) { item in
+                    Button { openCloseoutItem(item) } label: {
+                        HStack(spacing: 12) {
+                            JobTick(done: item.done)
+                            Text(item.title).font(Theme.font(15)).foregroundStyle(item.done ? Theme.subtle : Theme.foreground)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .disabled(item.done)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(item.title), \(item.done ? "done" : "not done")")
+                    .accessibilityAddTraits(item.done ? [] : .isButton)
+                }
+            }
+            .accessibilityIdentifier("job-wrap-up-panel")
+        }
+    }
+
+    /// What's on the draft invoice so far; Add opens the price book on it.
+    @ViewBuilder private var partsPanel: some View {
+        if session.can("invoice.view", feature: "invoicing"),
+           let draft = invoices.first(where: { $0.status == "draft" }), !draft.lines.isEmpty {
+            JobPanelSection(title: "On the invoice", actionTitle: session.can("invoice.edit", feature: "invoicing") ? "Add" : nil,
+                            actionIdentifier: "job-parts-add", action: { partsInvoice = draft }) {
+                ForEach(draft.lines) { line in
+                    JobPanelRow(title: line.description, titleSize: 15) {
+                        Text("\(line.quantity)").font(Theme.monoFont(14)).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Routes a closeout row to what satisfies it, by the server's next action, then its kind.
+    private func openCloseoutItem(_ item: CloseoutChecklistItem) {
+        switch item.nextAction {
+        case "add_job_note": openNoteTool()
+        case "add_job_photo": openCapture(.camera(stage: nil))
+        case "collect_customer_authorization":
+            // The signature is taken on the invoice, which holds its lines revision.
+            let live = invoices.filter { $0.status != "void" }
+            if let invoice = live.first(where: { $0.origin == "job_completion" }) ?? live.first { documentInvoiceID = invoice.id }
+            else { showWrapUp = true }
+        case "reconcile_commercial_state", "collect_payment":
+            if let step = nextStep {
+                switch step {
+                case .createInvoice, .collect, .reviewInvoice: run(step); return
+                default: break
+                }
+            }
+            showWrapUp = true
+        default:
+            switch item.kind {
+            case "notes": openNoteTool()
+            case "photos": openCapture(.camera(stage: nil))
+            default: showWrapUp = true
+            }
+        }
+    }
+
+    /// Add part works on the job's draft invoice; an issued one can't change, so it opens instead.
+    private var canAddPart: Bool {
+        guard invoicesLoaded, !invoicesFailed, session.can("invoice.view", feature: "invoicing") else { return false }
+        let live = invoices.filter { $0.status != "void" }
+        if live.contains(where: { $0.status == "draft" }) { return session.can("invoice.edit", feature: "invoicing") }
+        if !live.isEmpty { return true }
+        return session.can("invoice.create", feature: "invoicing") && session.can("invoice.edit", feature: "invoicing")
+    }
+
+    private func addPart() async {
+        let live = invoices.filter { $0.status != "void" }
+        if let draft = live.first(where: { $0.status == "draft" }) { partsInvoice = draft; return }
+        if let existing = live.first(where: { $0.origin == "job_completion" }) ?? live.first { documentInvoiceID = existing.id; return }
+        // No invoice yet: the job's completion draft, through the same idempotent command as Create invoice.
+        guard let created = await createInvoice() else { return }
+        if created.status == "draft" { partsInvoice = created } else { documentInvoiceID = created.id }
+    }
+
+    private func openEstimateTool() {
+        if jobEstimates.isEmpty && canBuildEstimate { buildEstimate() }
+        else { withMotion(.snappy) { selectedTab = "Money" } }
     }
 
     private func detailsGroup(_ job: JobRecord) -> some View {
@@ -1063,76 +1515,147 @@ struct JobDetailView: View {
         documents.replaceInvoice(updated)
     }
 
-    /// Paper 21B: filter pills, a quiet timeline of notes and status changes, composer last.
-    /// Photos is the fourth filter: the visit's evidence lives in one place.
-    private var activityFilterRow: some View {
-        FlowRow(spacing: 6, lineSpacing: 6) {
-            ForEach(activityFilters, id: \.self) { filter in
-                Button { withMotion(.snappy) { activityFilter = filter } } label: {
-                    Text(filter)
-                        .font(Theme.font(12, weight: .medium))
-                        .foregroundStyle(activityFilter == filter ? Theme.background : Theme.muted)
-                        .padding(.horizontal, 12).frame(minHeight: 28)
-                        .background(activityFilter == filter ? Theme.foreground : Theme.fill, in: Capsule())
-                        .frame(minHeight: 44).contentShape(Rectangle())
+    /// JobActivity.dc.html: one "Showing all ▾" menu instead of a row of filter chips.
+    private func activityFilterMenu() -> some View {
+        ThorbisMenu(items: activityFilters.map { filter in
+            ThorbisMenuItem(filter == "All" ? "Everything" : filter, isSelected: filter == activityFilter) {
+                withMotion(.snappy) { activityFilter = filter }
+            }
+        }, title: "Show", accessibilityLabel: "Activity filter, showing \(activityFilter == "All" ? "all" : activityFilter.lowercased())") {
+            HStack(spacing: 4) {
+                Text("Showing \(activityFilter == "All" ? "all" : activityFilter.lowercased())")
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+            }
+            .font(Theme.font(13, weight: .medium))
+            .foregroundStyle(Theme.foreground)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("activity-filter")
+    }
+
+    /// A day's label with the filter on the right, the way the first panel of Activity reads.
+    private func activityFilterLabel(title: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            activityFilterMenu()
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, -7)
+        .frame(minHeight: 30)
+    }
+
+    /// Day-grouped timeline, one panel per day; photos inline as thumbnails. The composer is
+    /// pinned at the bottom of the screen (see `composer`).
+    private func activityContent(_ job: JobRecord) -> some View {
+        let days = activityDays(job)
+        return VStack(alignment: .leading, spacing: 18) {
+            if days.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    activityFilterLabel(title: "Activity")
+                    PaperEmptyState(symbol: "clock", title: "No activity yet", message: "Notes, status changes and photos on this job show up here.")
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityAddTraits(activityFilter == filter ? .isSelected : [])
-                .accessibilityIdentifier("activity-filter-\(filter.lowercased())")
+            }
+            ForEach(Array(days.enumerated()), id: \.element.day) { index, group in
+                VStack(alignment: .leading, spacing: 6) {
+                    if index == 0 { activityFilterLabel(title: dayTitle(group.day)) } else { JobPanelLabel(title: dayTitle(group.day)) }
+                    JobPanel {
+                        ForEach(group.entries) { entry in timelineRow(entry, showsDay: false) }
+                    }
+                }
             }
         }
     }
 
-    private func activityContent(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            activityFilterRow
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(timeline(job)) { entry in
-                    ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(spacing: 0) {
-                            Image(systemName: entry.symbol).font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(entry.isNote ? Theme.foreground : Theme.muted)
-                                .frame(width: 26, height: 26)
-                                .background(Theme.fill, in: Circle())
+    private func activityDays(_ job: JobRecord) -> [(day: Date, entries: [TimelineEntry])] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: timeline(job, filter: activityFilter)) { calendar.startOfDay(for: $0.date) }
+        return grouped.keys.sorted(by: >).map { day in (day, grouped[day] ?? []) }
+    }
+
+    private func dayTitle(_ day: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return "Today" }
+        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        return day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+    }
+
+    private func timeLabel(_ date: Date, showsDay: Bool) -> String {
+        let calendar = Calendar.current
+        guard showsDay, !calendar.isDateInToday(date) else { return date.formatted(date: .omitted, time: .shortened) }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    /// A note, a status change or the day's photos; notes and status open what they're about,
+    /// photos open the visit's photos.
+    @ViewBuilder
+    private func timelineRow(_ entry: TimelineEntry, showsDay: Bool) -> some View {
+        if !entry.photos.isEmpty {
+            Button { openPhotos() } label: { timelineRowContent(entry, showsDay: showsDay) }
+                .buttonStyle(RowPressStyle())
+                .accessibilityHint("Opens the job's photos")
+        } else {
+            ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
+                timelineRowContent(entry, showsDay: showsDay)
+            }
+        }
+    }
+
+    private func timelineRowContent(_ entry: TimelineEntry, showsDay: Bool) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let body = entry.body {
+                    Text(body).font(Theme.font(15)).foregroundStyle(Theme.subtle).lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !entry.photos.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(entry.photos.prefix(4)) { photo in
+                            Color.clear.frame(width: 64, height: 64)
+                                .overlay(MediaThumbnail(record: photo))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(entry.title).font(Theme.font(15, weight: .medium))
-                                Spacer(minLength: 8)
-                                Text(entry.date.formatted(.dateTime.hour().minute())).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                            }
-                            if let body = entry.body {
-                                Text(body).font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                                    .textSelection(.enabled)
-                            }
-                            Text(entry.date.formatted(.dateTime.month(.abbreviated).day())).font(Theme.font(12)).foregroundStyle(Theme.muted)
-                        }
-                        .padding(.bottom, 16)
                     }
-                    .accessibilityElement(children: .combine)
-                    }
+                    .padding(.top, 6)
                 }
             }
-            if timeline(job).isEmpty {
-                PaperEmptyState(symbol: "clock", title: "No activity yet", message: "Notes and status changes on this job show up here.")
-            }
-            if session.can("job.note", feature: "jobs") {
-                QuickNotesRow { phrase in note = NoteDraftText.joined(note, phrase) }
-                    .disabled(dictation.isListening)
-                HStack(alignment: .bottom, spacing: 8) {
-                    TextField(dictation.isListening ? "Listening…" : "Add a note or update…", text: $note, axis: .vertical)
-                        .font(Theme.font(16))
-                        .lineLimit(1...6)
-                        .padding(.horizontal, 14).padding(.vertical, 11)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.border))
-                    DictateNoteButton(isListening: dictation.isListening) {
-                        if dictation.isListening { dictation.stop(); return }
-                        Task { await dictation.start(draft: note, isOffline: session.isOffline) { note = $0 } }
-                    }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(timeLabel(entry.date, showsDay: showsDay))
+                .font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                .fixedSize()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    /// JobActivity.dc.html: quick notes, then the field with the mic and a camera circle. Send
+    /// takes the camera's place once there is something to save.
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            QuickNotesRow { phrase in note = NoteDraftText.joined(note, phrase) }
+                .disabled(dictation.isListening)
+                .padding(.horizontal, Theme.gutter)
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(dictation.isListening ? "Listening…" : "Add a note", text: $note, axis: .vertical)
+                    .font(Theme.font(16))
+                    .lineLimit(1...6)
+                    .focused($noteFocused)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).strokeBorder(Theme.border))
+                    .accessibilityIdentifier("job-note-field")
+                DictateNoteButton(isListening: dictation.isListening) {
+                    if dictation.isListening { dictation.stop(); return }
+                    Task { await dictation.start(draft: note, isOffline: session.isOffline) { note = $0 } }
+                }
+                if canSaveNote || busy {
                     Button { dictation.stop(); Task { await saveNote() } } label: {
                         Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .medium)) } }
                             .foregroundStyle(Theme.onInk).frame(width: 44, height: 44)
@@ -1141,21 +1664,33 @@ struct JobDetailView: View {
                     .buttonStyle(PressStyle())
                     .disabled(!canSaveNote || busy)
                     .accessibilityLabel("Save note")
-                }
-                if let problem = dictation.problem {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(problem.message).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if problem == .denied, let url = URL(string: UIApplication.openSettingsURLString) {
-                            Button("Open Settings") { openURL(url) }
-                                .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .buttonStyle(PressStyle()).frame(minHeight: 44)
-                        }
+                } else if session.can("job.edit", feature: "jobs") {
+                    Button { openCapture(.camera(stage: nil)) } label: {
+                        Image(systemName: "camera").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .frame(width: 44, height: 44)
+                            .background(Theme.fill, in: Circle())
                     }
-                    .accessibilityElement(children: .combine)
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Add photo")
+                    .accessibilityIdentifier("job-composer-camera")
                 }
             }
+            .padding(.horizontal, Theme.gutter)
+            if let problem = dictation.problem {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(problem.message).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if problem == .denied, let url = URL(string: UIApplication.openSettingsURLString) {
+                        Button("Open Settings") { openURL(url) }
+                            .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .buttonStyle(PressStyle()).frame(minHeight: 44)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .padding(.horizontal, Theme.gutter)
+            }
         }
+        .padding(.top, 10).padding(.bottom, 8)
     }
 
     private var canSaveNote: Bool {
@@ -1167,28 +1702,46 @@ struct JobDetailView: View {
         let title: String
         let body: String?
         let date: Date
-        let symbol: String
         let subject: ActivityFeedSubject
-        var isNote: Bool { body != nil }
+        /// The day's photos, shown inline as thumbnails.
+        var photos: [MediaAssetRecord] = []
     }
 
-    private func timeline(_ job: JobRecord) -> [TimelineEntry] {
+    /// Everything that happened on the visit, newest first. `filter` is one of `activityFilters`;
+    /// counts always use "All" so the section's number doesn't move with the filter.
+    private func timeline(_ job: JobRecord, filter: String) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
-        if activityFilter != "Status" {
+        if filter == "All" || filter == "Notes" {
             entries += outbox.pendingNotes(for: job.id).compactMap { entry in
                 guard case .note(let payload) = entry.action else { return nil }
                 let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
-                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, symbol: "clock.arrow.circlepath", subject: ActivityFeedSubject(kind: "note", jobID: job.id))
+                return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, subject: ActivityFeedSubject(kind: "note", jobID: job.id))
             }
             entries += notes.compactMap { record in
-                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, symbol: "text.bubble", subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
+                JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: "Note", body: record.body, date: $0, subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
             }
         }
-        if activityFilter != "Notes" {
-            entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, symbol: "circle.fill", subject: ActivityFeedSubject(kind: "status", jobID: job.id)) }
+        if filter == "All" || filter == "Status" {
+            entries += statusEvents(job).map { TimelineEntry(id: "status-\($0.0)", title: $0.0, body: nil, date: $0.1, subject: ActivityFeedSubject(kind: "status", jobID: job.id)) }
+        }
+        if filter == "All", liveMediaCountContext != nil, liveMediaCountContext == mediaCountContext {
+            let calendar = Calendar.current
+            let byDay = Dictionary(grouping: mediaPhotos) { photo in
+                calendar.startOfDay(for: JobFiltering.date(photo.capturedAt) ?? JobFiltering.date(photo.createdAt) ?? .distantPast)
+            }
+            for (day, photos) in byDay where day != calendar.startOfDay(for: .distantPast) {
+                let newest = photos.compactMap { JobFiltering.date($0.capturedAt) ?? JobFiltering.date($0.createdAt) }.max() ?? day
+                let stages = Set(photos.map { $0.tags.contains("Before") ? "Before" : ($0.tags.contains("After") ? "After" : "") })
+                let stage = stages.count == 1 ? stages.first.flatMap { $0.isEmpty ? nil : $0 } : nil
+                let title = "\(photos.count) \(photos.count == 1 ? "photo" : "photos")" + (stage.map { " · \($0)" } ?? "")
+                entries.append(TimelineEntry(id: "photos-\(day.timeIntervalSince1970)", title: title, body: nil, date: newest,
+                                             subject: ActivityFeedSubject(kind: "media", jobID: job.id), photos: photos))
+            }
         }
         return entries.sorted { $0.date > $1.date }
     }
+
+    private func activityCount(_ job: JobRecord) -> Int { timeline(job, filter: "All").count }
 
     private func statusEvents(_ job: JobRecord) -> [(String, Date)] {
         let raw: [(String, String?)] = [
@@ -1205,6 +1758,29 @@ struct JobDetailView: View {
             value.flatMap(JobFiltering.date).map { (label, $0) }
         }
         .sorted { $0.1 > $1.1 }
+    }
+
+    /// Photos, with their capture tools, in Activity.
+    private func openPhotos() {
+        dictation.stop()
+        activityFilter = "Photos"
+        withMotion(.snappy) { selectedTab = "Activity" }
+    }
+
+    /// The toolkit's Photo, Measure and Scan: the media screen opens the capture itself.
+    private func openCapture(_ launch: JobMediaLaunch) {
+        openPhotos()
+        mediaLaunch = launch
+    }
+
+    /// The toolkit's Note: Activity with the field focused, ready to type or dictate.
+    private func openNoteTool() {
+        activityFilter = "All"
+        withMotion(.snappy) { selectedTab = "Activity" }
+        Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            noteFocused = true
+        }
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -1295,17 +1871,6 @@ struct JobDetailView: View {
             await loadContacts(job)
             if case .collect(let invoiceID) = exit { customerPaymentInvoiceID = invoiceID }
             await finishCustomerDocuments()
-        }
-    }
-
-    @ViewBuilder private var customerViewAction: some View {
-        if canOpenCustomerView {
-            Button { openCustomerView(.home) } label: {
-                Label("Customer view", systemImage: "person.crop.rectangle").inkCommit(height: 44)
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityHint("Hands the device to the customer for their estimates, invoices and details")
-            .accessibilityIdentifier("job-customer-view")
         }
     }
 
@@ -1582,6 +2147,20 @@ struct JobDetailView: View {
         guard session.generation == generation else { return }
         if let loadedVisits { visits = loadedVisits; visitsLoaded = true }
         if let loadedCall { bookingCall = loadedCall }
+        if let job, let pricing = try? await api.memberPricing(job.customerId), session.generation == generation,
+           self.job?.customerId == job.customerId { memberPricing = pricing }
+        await loadCloseout()
+        await loadOfficePhone()
+    }
+
+    /// "Before you wrap up" reads the server's closeout while on site. Quiet: a failed read hides
+    /// the panel (the bar then says plain "Wrap up job"); it never shows as a job error.
+    private func loadCloseout() async {
+        guard isOnSite, let job else { closeout = nil; return }
+        let generation = session.generation
+        let loaded = try? await api.fieldCloseout(job.id)
+        guard session.generation == generation, self.job?.id == job.id else { return }
+        closeout = loaded
     }
 
     private func loadMediaCount() async {
@@ -1594,6 +2173,8 @@ struct JobDetailView: View {
                   loaded.items.allSatisfy({ $0.kind == "photo" }) else { return }
             try JobMediaPageIntegrity.validate(loaded, jobID: jobId, organizationID: organization, seen: [])
             mediaCount = loaded.nextCursor == nil ? "\(loaded.items.count)" : "\(loaded.items.count) loaded"
+            mediaPhotos = loaded.items.filter { !$0.archived }
+            mediaHasMore = loaded.nextCursor != nil
             mediaCountContext = context
         } catch { }
     }
@@ -1690,6 +2271,7 @@ struct JobDetailView: View {
             notes.append(saved)
             note = ""
             error = nil
+            await loadCloseout()
         } catch is CancellationError {} catch {
             if error.isConnectivityFailure {
                 outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
