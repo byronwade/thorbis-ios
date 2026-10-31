@@ -151,6 +151,9 @@ struct CustomerEstimatePresentation: View {
     /// The proven drawn-signature approval needs a job and a single scope; options go through
     /// the customer action, which records the chosen option with the typed name.
     private var drawnApproval: Bool { jobID != nil && !flow.hasOptions }
+    private var showsBackCircle: Bool {
+        handoff == nil && returnToDocuments == nil && flow.hasOptions && flow.step == .review && reviewReady && !actionBusy
+    }
     private var reviewReady: Bool {
         !openingReview && flow.issuedRevision != nil && reviewGeneration == api.requestGeneration
     }
@@ -207,6 +210,16 @@ struct CustomerEstimatePresentation: View {
             if handoff != nil, handoff?.signature == nil, handoff?.outcome == nil, reviewReady { await startSigning() }
         }
         .animation(.easeOut(duration: 0.2), value: flow.step)
+        .toolbar {
+            // PresentDetail.dc.html: a round back circle opposite the lock. Only where this screen is
+            // the customer-mode root; pushed hosts (handoff, job documents) already show their back.
+            if showsBackCircle {
+                ThorbisToolbarItem(placement: .topBarLeading, customerFacing: true) {
+                    PaperCircleButton(symbol: "chevron.left", label: "Back to options", size: 44, fill: Theme.fill) { flow.back() }
+                        .accessibilityIdentifier("customer-estimate-back-to-options")
+                }
+            }
+        }
         .thorbisConfirm("Not ready to decide?",
                         message: "You can think about it and decide later, or decline this estimate now.",
                         isPresented: $confirmNotToday,
@@ -219,12 +232,9 @@ struct CustomerEstimatePresentation: View {
     // MARK: Screens
 
     private var chooseScreen: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            header(eyebrow: "Estimate for \(customerName)", title: "Choose an option")
-                .padding(.bottom, -8)
-            Text("Tap one. You'll see every line before you sign.")
-                .font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 18) {
+            header(eyebrow: "Estimate for \(customerName)", title: "Choose an option",
+                   summary: "Tap one. You’ll see every line before you sign.")
             let options = flow.options
             if type.regular && options.count <= 3 {
                 HStack(alignment: .top, spacing: 16) {
@@ -246,12 +256,12 @@ struct CustomerEstimatePresentation: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top, spacing: 12) {
                         Text(total)
-                            .font(Theme.font(type.total, weight: .medium)).monospacedDigit().tracking(-0.3)
+                            .font(Theme.font(type.heading + 6, weight: .medium)).monospacedDigit().tracking(-0.3)
                             .minimumScaleFactor(0.6).lineLimit(1)
                         Spacer(minLength: 8)
                         CustomerRadio(selected: selected)
                     }
-                    Text(option.title).font(Theme.font(type.heading, weight: .medium))
+                    Text(option.title).font(Theme.font(type.body, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                     if !option.description.isEmpty {
@@ -289,13 +299,7 @@ struct CustomerEstimatePresentation: View {
         VStack(alignment: .leading, spacing: 20) {
             let index = flow.options.firstIndex { $0.id == flow.selectedOptionID }
             header(eyebrow: flow.hasOptions ? "Option \((index ?? 0) + 1) of \(flow.options.count)" : "Your estimate",
-                   title: flow.choiceName)
-            if flow.hasOptions, let description = flow.selectedOption?.description, !description.isEmpty {
-                Text(description).font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, -10)
-            }
+                   title: flow.choiceName, summary: flow.hasOptions ? flow.selectedOption?.description : nil)
             CustomerIncludedLines(lines: flow.lines, type: type,
                                   rows: flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? [])
         }
@@ -407,7 +411,7 @@ struct CustomerEstimatePresentation: View {
                 CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
                 // The disabled commit already reads "Choose an option", so no second line repeats it.
                 if let error { hint(error, danger: true) }
-                HStack(spacing: 8) {
+                CustomerQuietActions {
                     CustomerTextButton(title: "Not today", type: type) { confirmNotToday = true }
                     if let returnToDocuments {
                         CustomerTextButton(title: "Job documents", type: type, action: returnToDocuments)
@@ -418,7 +422,8 @@ struct CustomerEstimatePresentation: View {
             case .review:
                 CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
                 if let error { hint(error, danger: true) }
-                HStack(spacing: 8) {
+                // PresentDetail.dc.html: "See other options" is the quiet action right under the commit.
+                CustomerQuietActions {
                     if flow.hasOptions { CustomerTextButton(title: "See other options", type: type) { flow.back() } }
                     CustomerTextButton(title: "Not today", type: type) { confirmNotToday = true }
                 }
@@ -480,11 +485,21 @@ struct CustomerEstimatePresentation: View {
             .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
     }
 
-    private func header(eyebrow: String, title: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(eyebrow).font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-            Text(title).font(Theme.font(type.heading + 4, weight: .medium)).accessibilityAddTraits(.isHeader)
+    /// Present.dc.html: a quiet eyebrow, the 30pt title, then one plain-language sentence in body colour.
+    private func header(eyebrow: String, title: String, summary: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(eyebrow).font(Theme.font(type.small)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
+            Text(title).font(Theme.font(type.heading + 6, weight: .medium)).tracking(-0.4)
+                .accessibilityAddTraits(.isHeader)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            if let summary, !summary.isEmpty {
+                Text(summary).font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+            }
         }
     }
 
@@ -1027,6 +1042,19 @@ struct CustomerRadio: View {
     }
 }
 
+/// The quiet actions under the commit: side by side while they fit, stacked at large text so a
+/// word never breaks across lines.
+struct CustomerQuietActions<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 28) { content().fixedSize(horizontal: true, vertical: false).padding(.horizontal, 8) }
+                .frame(maxWidth: .infinity)
+            VStack(spacing: 0) { content() }
+        }
+    }
+}
+
 /// A quiet action under the commit: words only, still a 56pt target.
 struct CustomerTextButton: View {
     let title: String
@@ -1096,8 +1124,8 @@ struct CustomerIncludedLines: View {
                         .font(Theme.font(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular)).monospacedDigit()
                         .minimumScaleFactor(0.6).lineLimit(1)
                 }
-                .padding(.horizontal, 18).padding(.vertical, row.emphasis ? 18 : 12)
-                .background(Theme.background.opacity(0.6))
+                // On the same sheet as the lines (no band, no rule): the total reads by size alone.
+                .padding(.horizontal, 18).padding(.top, row.emphasis ? 10 : 12).padding(.bottom, row.emphasis ? 18 : 12)
                 .accessibilityElement(children: .combine)
             }
         }

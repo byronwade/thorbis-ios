@@ -214,15 +214,18 @@ struct JobSectionControl: View {
     @Binding var selection: String
 
     var body: some View {
-        HStack(spacing: 2) {
+        JobSectionRowLayout(spacing: 2) {
             ForEach(options, id: \.value) { option in
                 let isOn = option.value == selection
                 Button { withMotion(.snappy) { selection = option.value } } label: {
-                    Text(option.label)
+                    // An amount is never cut ("Money · $3…"): when the whole label can't fit, the
+                    // segment drops the "· amount" and keeps the word; the amount is still spoken.
+                    ViewThatFits(in: .horizontal) {
+                        Text(option.label).fixedSize()
+                        Text(Self.shortLabel(option.label)).lineLimit(1).minimumScaleFactor(0.8)
+                    }
                         .font(Theme.monoFont(14, weight: .medium))
                         .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
                         .padding(.horizontal, 6)
                         .frame(maxWidth: .infinity, minHeight: 36)
                         .background {
@@ -244,6 +247,47 @@ struct JobSectionControl: View {
         .padding(.horizontal, 3)
         .background(Theme.fill, in: Capsule().inset(by: 1))
         .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    /// "Money · $340" → "Money"; a label without a count stays as it is.
+    static func shortLabel(_ label: String) -> String {
+        label.components(separatedBy: " · ").first ?? label
+    }
+}
+
+/// One row of segments that shares the width fairly: each segment gets what its whole label
+/// needs while the row has room (spare width split evenly); when it doesn't, every segment
+/// gives up width in proportion to what it asked for, so no one label is squeezed alone.
+struct JobSectionRowLayout: Layout {
+    var spacing: CGFloat = 2
+
+    private func widths(_ subviews: Subviews, total: CGFloat) -> [CGFloat] {
+        guard !subviews.isEmpty else { return [] }
+        let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let available = max(0, total - spacing * CGFloat(subviews.count - 1))
+        let wanted = ideal.reduce(0, +)
+        if wanted <= available {
+            let extra = (available - wanted) / CGFloat(subviews.count)
+            return ideal.map { $0 + extra }
+        }
+        guard wanted > 0 else { return ideal.map { _ in available / CGFloat(subviews.count) } }
+        return ideal.map { available * $0 / wanted }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let ideal = subviews.map { $0.sizeThatFits(.unspecified) }
+        let total = proposal.width ?? (ideal.map(\.width).reduce(0, +) + spacing * CGFloat(max(0, subviews.count - 1)))
+        let ws = widths(subviews, total: total)
+        let height = zip(subviews, ws).map { $0.sizeThatFits(ProposedViewSize(width: $1, height: proposal.height)).height }.max() ?? 0
+        return CGSize(width: total, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for (subview, width) in zip(subviews, widths(subviews, total: bounds.width)) {
+            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: bounds.height))
+            x += width + spacing
+        }
     }
 }
 
