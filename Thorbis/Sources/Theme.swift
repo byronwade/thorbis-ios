@@ -5,8 +5,9 @@ import UIKit
 enum Theme {
     /// Paper's type ramp at its default size. Each step scales with the
     /// Dynamic Type style closest to its size (HIG-008).
-    /// design.thorbis.com MA-09: weights 400 and 500 only, nothing smaller than 12. Heavier
-    /// requests resolve to 500 and smaller sizes to 12, so every call site follows the rule.
+    /// Weights 400, 500 and 600 (redesign 2026-10-31 lifted the old 500 cap), nothing smaller than
+    /// 12. Bold, heavy and black resolve to 600 and smaller sizes to 12, so every call site follows
+    /// the rule. Semibold is for screen titles, row titles, section headers and amounts.
     static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         let size = onRamp(size)
         return Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
@@ -36,8 +37,9 @@ enum Theme {
         case .line: return monoFont(15, weight: weight)
         }
     }
-    /// MA-09: every size lands on the ramp 12/13/15/17/20/24/30 (16 stays for inputs, so
-    /// iOS never zooms a field). Stray sizes like 14 or 26 snap to the nearest step.
+    /// MA-09: every size lands on the ramp 12/13/15/17/20/24/30/34 (16 stays for inputs, so
+    /// iOS never zooms a field). 34 is the display step for tab-root titles. Stray sizes like 14
+    /// or 26 snap to the nearest step.
     static func onRamp(_ size: CGFloat) -> CGFloat {
         switch size {
         case ..<13: minimumSize
@@ -47,12 +49,13 @@ enum Theme {
         case 17..<18.5: 17
         case 18.5..<22: 20
         case 22..<27: 24
-        default: 30
+        case 27..<32: 30
+        default: 34
         }
     }
     static func allowed(_ weight: Font.Weight) -> Font.Weight {
-        let heavier: [Font.Weight] = [.semibold, .bold, .heavy, .black]
-        return heavier.contains(weight) ? .medium : weight
+        let heavier: [Font.Weight] = [.bold, .heavy, .black]
+        return heavier.contains(weight) ? .semibold : weight
     }
     static func textStyle(for size: CGFloat) -> Font.TextStyle {
         switch size {
@@ -75,48 +78,83 @@ enum Theme {
     static let chipHeight: CGFloat = 28
     /// MA-08: the commit starts at 50 tall and grows with accessible text.
     static let commitHeight: CGFloat = 50
-    // Dark values retain the Paper Mobile palette. Light surfaces are the
-    // design.thorbis.com warm canvas/panel/well/ink tokens converted from OKLCH.
-    static let card = adaptive(light: 0xFDFCFA, dark: 0x232323)
-    static let subtle = adaptive(light: 0x59544D, dark: 0x949494, highLight: 0x201B14, highDark: 0xEDEDED)
-    static let successSurface = adaptive(light: 0xE5F3E9, dark: 0x122B1C)
-    static let destructiveSurface = adaptive(light: 0xFCE8E8, dark: 0x2A1414)
-    static let background = adaptive(light: 0xF7F4EE, dark: 0x1F1F1F)
-    static let surface = adaptive(light: 0xFDFCFA, dark: 0x191919)
-    static let chrome = adaptive(light: 0xF7F4EE, dark: 0x141414)
-    static let accent = adaptive(light: 0xEDE9E2, dark: 0x262626)
-    static let foreground = adaptive(light: 0x201B14, dark: 0xEDEDED, highLight: 0x000000, highDark: 0xFFFFFF)
-    static let muted = adaptive(light: 0x59544D, dark: 0xA0A0A0, highLight: 0x201B14, highDark: 0xEDEDED)
-    static let fill = adaptive(light: 0xEDE9E2, dark: 0x2A2A2A)
+    // 2026-10-31 redesign: a crisp neutral palette (Linear-like). Light is a white ground with
+    // #F4F4F5 grouped wells; dark is #0E0E10 with #1A1A1D wells. Token names are unchanged so every
+    // screen picks the palette up. `card` is the grouped well; `fill` sits a step deeper so chips and
+    // circles still read on a well. Every text token holds 4.5:1 on background, well and fill
+    // (scripts/tests/contrast check in the PR; high-contrast variants go further).
+    static let card = adaptive(light: 0xF4F4F5, dark: 0x1A1A1D)
+    /// The grouped surface rows sit on (radius 14). Same as `card`, named for what it is.
+    static let well = card
+    static let subtle = adaptive(light: 0x5C5C64, dark: 0xA3A3AC, highLight: 0x18181B, highDark: 0xEDEDEF)
+    static let successSurface = adaptive(light: 0xE6F4EC, dark: 0x14291D)
+    static let destructiveSurface = adaptive(light: 0xFBEBEB, dark: 0x2E1717)
+    static let background = adaptive(light: 0xFFFFFF, dark: 0x0E0E10)
+    static let surface = adaptive(light: 0xFFFFFF, dark: 0x141416)
+    static let chrome = adaptive(light: 0xFFFFFF, dark: 0x0E0E10)
+    static let accent = adaptive(light: 0xE9E9EC, dark: 0x26262A)
+    static let foreground = adaptive(light: 0x18181B, dark: 0xEDEDEF, highLight: 0x000000, highDark: 0xFFFFFF)
+    static let muted = adaptive(light: 0x63636B, dark: 0x9A9AA3, highLight: 0x18181B, highDark: 0xEDEDEF)
+    static let fill = adaptive(light: 0xE9E9EC, dark: 0x26262A)
+    /// A 1px rule: card rims and the inset lines between grouped rows. rgba(0,0,0,0.08) in light.
     static let border = Color(uiColor: UIColor { traits in
         let high = traits.accessibilityContrast == .high
         return (traits.userInterfaceStyle == .dark ? UIColor.white : UIColor.black)
-            .withAlphaComponent(high ? 0.6 : traits.userInterfaceStyle == .dark ? 0.08 : 0.12)
+            .withAlphaComponent(high ? 0.6 : traits.userInterfaceStyle == .dark ? 0.09 : 0.08)
     })
+    static let hairline = border
     /// MA-08: a commit is ink (the type colour) with inverse type and a hairline rim.
     static let ink = foreground
-    static let onInk = adaptive(light: 0xFDFCFA, dark: 0x191919, highLight: 0xFFFFFF, highDark: 0x000000)
+    static let onInk = adaptive(light: 0xFFFFFF, dark: 0x0E0E10, highLight: 0xFFFFFF, highDark: 0x000000)
     static let brand = Color(hex: 0x2F6BFF)
     /// Brand used as text or a link; plain brand is below 4.5:1 on both grounds.
-    /// Dark is lifted so links hold 4.5:1 on the field well and the brand surface too.
-    static let brandText = adaptive(light: 0x2558E0, dark: 0x6090FF)
-    static let brandSurface = adaptive(light: 0xE5ECFF, dark: 0x182642)
-    static let success = adaptive(light: 0x18743A, dark: 0x22C55E)
-    static let warning = adaptive(light: 0x895400, dark: 0xF59E0B)
-    static let warningSurface = adaptive(light: 0xFFF0CB, dark: 0x2A2008)
-    /// Red as a word or glyph. Dark is a lighter red so it holds 4.5:1 on card and well.
-    static let destructive = adaptive(light: 0xB3262D, dark: 0xF87171)
+    /// Dark is lifted so links hold 4.5:1 on the well and the brand surface too.
+    static let brandText = adaptive(light: 0x2457DB, dark: 0x6E9AFF, highLight: 0x1A44B8, highDark: 0x9DBBFF)
+    static let brandSurface = adaptive(light: 0xE8EEFF, dark: 0x18233D)
+    static let success = adaptive(light: 0x17703A, dark: 0x3DD47A, highLight: 0x0E5229, highDark: 0x7CE8A6)
+    static let warning = adaptive(light: 0x895400, dark: 0xF2B92E, highLight: 0x663E00, highDark: 0xFFD27A)
+    static let warningSurface = adaptive(light: 0xFCF2D9, dark: 0x2B220C)
+    /// Red as a word or glyph. Dark is a lighter red so it holds 4.5:1 on well and fill.
+    static let destructive = adaptive(light: 0xB3262D, dark: 0xF87171, highLight: 0x8A1A20, highDark: 0xFFA3A3)
     /// Red as a fill under white type or a white glyph (a badge, a destructive button): 5.6:1 or better.
     static let destructiveFill = adaptive(light: 0xB3262D, dark: 0xC62828)
     /// The chosen segment's raised pill. In dark it sits lighter than the well so the choice shows.
-    static let selectedSegment = adaptive(light: 0xFDFCFA, dark: 0x3A3A3A)
-    /// Soft place-mark hues for menu icons (design.thorbis.com Color: olive, forest, pumpkin,
-    /// burnt, or accent mixed down). Only the mark is tinted; the word stays body.
-    static let markOlive = adaptive(light: 0x6E6A2E, dark: 0xB5B07A)
-    static let markForest = adaptive(light: 0x2F6B4A, dark: 0x7FB394)
-    static let markPumpkin = adaptive(light: 0x9A5A1E, dark: 0xD9A06A)
-    static let markBurnt = adaptive(light: 0x8E4630, dark: 0xC98A72)
-    static let markAccent = adaptive(light: 0x3D5FB8, dark: 0x8BA6E8)
+    static let selectedSegment = adaptive(light: 0xFFFFFF, dark: 0x323238)
+
+    // Status hues (redesign spec "Colour roles"). `status*` colours a glyph or a dot (non-text, 3:1
+    // target); `status*Text` is the text-safe twin (4.5:1 on background, well and its own surface);
+    // `status*Surface` is the tinted chip ground.
+    static let statusUnscheduled = adaptive(light: 0x8E8E96, dark: 0x8E8E96)
+    static let statusScheduled = adaptive(light: 0x5E6AD2, dark: 0x8B94EA)
+    static let statusScheduledText = adaptive(light: 0x4A55BD, dark: 0xA9B0F2, highLight: 0x343E9E, highDark: 0xCDD1FA)
+    static let statusScheduledSurface = adaptive(light: 0xECEEFB, dark: 0x1F2238)
+    static let statusDispatched = brand
+    static let statusDispatchedText = brandText
+    static let statusDispatchedSurface = brandSurface
+    static let statusInProgress = adaptive(light: 0xE0A100, dark: 0xF2B92E)
+    static let statusInProgressText = warning
+    static let statusInProgressSurface = warningSurface
+    static let statusDone = adaptive(light: 0x1F9D55, dark: 0x3DD47A)
+    static let statusDoneText = success
+    static let statusDoneSurface = successSurface
+    static let statusAttention = adaptive(light: 0xD64545, dark: 0xF06A6A)
+    static let statusAttentionText = destructive
+    static let statusAttentionSurface = destructiveSurface
+    static let statusInvoiced = adaptive(light: 0x0F8F8A, dark: 0x2DC2BC)
+    static let statusInvoicedText = adaptive(light: 0x0B6B67, dark: 0x5FD6D0, highLight: 0x064F4C, highDark: 0x9BE8E4)
+    static let statusInvoicedSurface = adaptive(light: 0xE3F4F3, dark: 0x102A29)
+
+    /// Place marks for menu and section icons: a small tinted rounded square with a white glyph,
+    /// like Linear's project icons. The square is decorative; the word beside it carries meaning.
+    static let markOlive = adaptive(light: 0x7A7330, dark: 0x9C9550)
+    static let markForest = adaptive(light: 0x2F8A57, dark: 0x2F8A57)
+    static let markPumpkin = adaptive(light: 0xD9761E, dark: 0xC9701F)
+    static let markBurnt = adaptive(light: 0xB4533A, dark: 0xA84E37)
+    static let markAccent = adaptive(light: 0x5E6AD2, dark: 0x5E6AD2)
+    static let markBlue = adaptive(light: 0x2F6BFF, dark: 0x2F6BFF)
+    static let markTeal = adaptive(light: 0x0F8F8A, dark: 0x0F8F8A)
+    static let markRed = adaptive(light: 0xD64545, dark: 0xC93C3C)
+    static let markGrey = adaptive(light: 0x7A7A84, dark: 0x5E5E66)
 
     private static func adaptive(light: UInt32, dark: UInt32,
                                  highLight: UInt32? = nil, highDark: UInt32? = nil) -> Color {
@@ -177,16 +215,35 @@ func initials(_ name: String) -> String {
     return s.isEmpty ? "?" : s.uppercased()
 }
 
-struct SectionHeader: View {
+/// Redesign 2026-10-31: a grouped section's header, semibold 15 in the secondary colour with the
+/// count beside it ("Up next  2"), and an optional trailing accessory. Sits above a `Well`.
+struct SectionHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
+    var horizontalPadding: CGFloat = 4
+    @ViewBuilder var trailing: Trailing
+
     var body: some View {
-        HStack {
-            Text(title).font(Theme.font( 13, weight: .medium)).foregroundStyle(Theme.muted)
-            if let count { Text("\(count)").font(Theme.font( 12)).foregroundStyle(Theme.muted) }
-            Spacer()
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title).font(Theme.font(15, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            if let count, count > 0 {
+                Text("\(count)").font(Theme.font(15)).monospacedDigit()
+                    .accessibilityLabel("\(count)")
+            }
+            Spacer(minLength: 0)
+            trailing
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 6)
+        .foregroundStyle(Theme.muted)
+        .padding(.horizontal, horizontalPadding)
+        .frame(minHeight: 32)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension SectionHeader where Trailing == EmptyView {
+    init(title: String, count: Int? = nil, horizontalPadding: CGFloat = 4) {
+        self.init(title: title, count: count, horizontalPadding: horizontalPadding) { EmptyView() }
     }
 }
 

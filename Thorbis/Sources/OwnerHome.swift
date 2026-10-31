@@ -135,7 +135,7 @@ struct OwnerHomeView: View {
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Home", subtitle: headline(day))
+                PaperHeader(title: "Home", subtitle: headline(day), showsCreate: true)
                 OfflineBanner()
                 SavedCopyNote(savedAt: savedAt).padding(.bottom, 6)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }

@@ -21,9 +21,9 @@ struct ThorbisLogoLockup: View {
     }
 }
 
-/// The tab-root header (design.thorbis.com MA-05): a 44-tall top row with the menu button leading and
-/// at most one circle trailing, then the 30/500 large title and one muted subtitle line. The title
-/// scrolls with its content; the tab bar stays put.
+/// The tab-root header (redesign 2026-10-31, after Linear): a 34pt semibold title with round circles
+/// at top right (filter, then + on tab roots that opt in), then one muted subtitle line. On iPad a
+/// 44-tall top row holds the menu button. The title scrolls with its content; the tab bar stays put.
 struct PaperHeader: View {
     let title: String
     var icon: String = ""
@@ -34,6 +34,9 @@ struct PaperHeader: View {
     var filterMenu: [ThorbisMenuItem]? = nil
     /// Shows the circle as on while a filter narrows the screen.
     var filterActive = false
+    /// Tab roots show the shell's + (New job / estimate / customer) beside the filter.
+    var showsCreate = false
+    @Environment(\.paperCreate) private var create
     @EnvironmentObject private var session: SessionController
     @Environment(\.paperShowMenu) private var openAccount
     @Environment(\.paperMenuButton) private var showsMenuButton
@@ -47,16 +50,20 @@ struct PaperHeader: View {
                     PaperCircleButton(symbol: "line.3.horizontal", label: "Open menu", action: openAccount)
                     Spacer(minLength: 0)
                     filterButton
+                    createButton
                 }
                 .frame(minHeight: 44)
             }
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
                 Text(title)
-                    .font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                    .font(Theme.font(34, weight: .semibold)).tracking(-0.8)
                     .lineLimit(1).minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
-                if !showsMenuButton { filterButton }
+                if !showsMenuButton {
+                    filterButton
+                    createButton
+                }
             }
             Text(subtitle)
                 .font(Theme.font(15)).foregroundStyle(Theme.muted)
@@ -67,18 +74,31 @@ struct PaperHeader: View {
         .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 12)
     }
 
+    /// The tab root's +. Several creates open the create menu; a long press lists them directly.
+    @ViewBuilder private var createButton: some View {
+        if showsCreate, let create {
+            PaperCircleButton(symbol: "plus", label: create.label, size: 40, fill: Theme.fill, action: create.run)
+                .contextMenu {
+                    ForEach(create.choices) { choice in
+                        Button(action: choice.run) { Label(choice.title, systemImage: choice.symbol) }
+                    }
+                }
+                .accessibilityIdentifier("header-create")
+        }
+    }
+
     /// Filters this list; the bar's Search finds anything. Different glyphs, different jobs.
     @ViewBuilder private var filterButton: some View {
         let symbol = "line.3.horizontal.decrease"
         if let filterMenu, !filterMenu.isEmpty {
             ThorbisMenu(items: filterMenu, title: "Show", accessibilityLabel: "Filter \(title.lowercased())") {
-                PaperCircleLabel(symbol: symbol, size: 44, fill: filterActive ? Theme.brandSurface : Theme.fill, bordered: true)
+                PaperCircleLabel(symbol: symbol, size: 40, fill: filterActive ? Theme.brandSurface : Theme.fill)
             }
             .accessibilityValue(filterActive ? "Filtered" : "")
             .accessibilityIdentifier("header-filter")
         } else if let filter {
-            PaperCircleButton(symbol: symbol, label: "Filter \(title.lowercased())", size: 44,
-                              fill: filterActive ? Theme.brandSurface : Theme.fill, bordered: true, action: filter)
+            PaperCircleButton(symbol: symbol, label: "Filter \(title.lowercased())", size: 40,
+                              fill: filterActive ? Theme.brandSurface : Theme.fill, action: filter)
                 .accessibilityValue(filterActive ? "Filtered" : "")
         }
     }
@@ -130,6 +150,9 @@ struct PaperTabs: View {
     var wrapOverflow = false
     /// Offer a button as well as a swipe when a row has hidden sections.
     var explicitScrollControl = false
+    /// Linear text tabs (redesign 2026-10-31): plain words on the ground, the chosen one on a light
+    /// well pill, left-aligned under the large title. Used by Today; other screens keep the segments.
+    var textTabs = false
     /// True while tabs remain past the trailing edge; the fade shows only then, so the
     /// last tab is never left dimmed once you've scrolled to it.
     @State private var moreTrailing = true
@@ -168,6 +191,12 @@ struct PaperTabs: View {
                 // Accessibility sizes: the job screen's chooser. Three words at XXXL never fit one
                 // row, and a row of fixed-width words would widen the whole screen past its edges.
                 accessibleChooser
+            } else if textTabs {
+                HStack(spacing: 4) {
+                    ForEach(options, id: \.self) { option in tab(option, padding: 12) }
+                }
+                .padding(.horizontal, Theme.gutter - 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else if let fit = fittingCandidate {
                 // design 2026-10-30: one selector style everywhere, the segmented pill. A field
                 // track, the chosen segment raised as a white pill, every segment the same width.
@@ -567,6 +596,42 @@ extension EnvironmentValues {
     var paperShowMenu: @Sendable () -> Void {
         get { self[PaperShowMenuKey.self] }
         set { self[PaperShowMenuKey.self] = newValue }
+    }
+}
+
+/// The header + (redesign 2026-10-31: New moved from the bar into the tab roots' headers).
+/// One choice starts it directly; several open the create menu, and a long press lists them.
+struct PaperCreateAction: @unchecked Sendable {
+    let label: String
+    let run: () -> Void
+    var choices: [AppBottomBar.QuickAction] = []
+}
+
+private struct PaperCreateKey: EnvironmentKey {
+    static let defaultValue: PaperCreateAction? = nil
+}
+private struct PaperOpenPlaceKey: EnvironmentKey {
+    static let defaultValue: (@Sendable (MenuItem) -> Void)? = nil
+}
+private struct PaperManageBusinessesKey: EnvironmentKey {
+    static let defaultValue: (@Sendable () -> Void)? = nil
+}
+extension EnvironmentValues {
+    /// What a tab root's + starts. Nil (iPad, or nothing this person may create) hides the circle.
+    var paperCreate: PaperCreateAction? {
+        get { self[PaperCreateKey.self] }
+        set { self[PaperCreateKey.self] = newValue }
+    }
+    /// Opens a place the way the bar would (More lists every place). Nil where the shell has its own
+    /// list of places (the iPad sidebar), so More leaves out places it could not open.
+    var paperOpenPlace: (@Sendable (MenuItem) -> Void)? {
+        get { self[PaperOpenPlaceKey.self] }
+        set { self[PaperOpenPlaceKey.self] = newValue }
+    }
+    /// Opens the business list to add or manage businesses, when the shell offers it.
+    var paperManageBusinesses: (@Sendable () -> Void)? {
+        get { self[PaperManageBusinessesKey.self] }
+        set { self[PaperManageBusinessesKey.self] = newValue }
     }
 }
 

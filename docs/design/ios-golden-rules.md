@@ -47,6 +47,12 @@ source evidence; verify platform/API/version claims before relying on them.
    Jobs/Today is the field-work home direction; Current/Arrive, Inbox and Search
    are meaningful destinations. Preserve existing routes while deliberately
    aligning navigation; the sample tab diagram is not a completed migration.
+   *Redesign, 31 October 2026:* the iPhone bar is a floating labeled tab bar — the
+   person's pinned places (Today · Jobs · Customers by default; role and company
+   layouts still apply) and a fixed More, icon over label, the showing tab on a
+   brand-tinted pill — with Search as a separate round button. More is a real
+   screen listing every other place with coloured place marks and counts (no
+   hidden switcher). New lives in the tab roots' header + circle, not the bar.
 7. **Match the surface to the task.** Durable job/customer/site/equipment/document
    records belong in navigation destinations. Assignment, payment and completion
    are focused transactions. Small local choices use native menus/pickers;
@@ -61,6 +67,14 @@ source evidence; verify platform/API/version claims before relying on them.
    creating an equal-button dashboard. Reserve cards for bounded objects such as
    media or a financial summary. Status is always a word, with color/symbols as
    reinforcement. Keep list scope, filters, position and saved views on return.
+   *Redesign, 31 October 2026 (owner: "bland and hard to navigate"; target Linear
+   mobile):* grouped sections are the norm — a semibold section header with its
+   count above rows on one rounded well (`Theme.well`, radius 14), with inset
+   hairlines between rows (`Well`, `WellList`, `WellDivider`, `SectionHeader`).
+   Job rows lead with a Linear-style `StatusGlyph` in place of the trailing word:
+   its shape (not only colour) carries the state and VoiceOver reads the word. The
+   lead card and chips still show the word.
+   Avatars (`InitialsAvatar`) and property chips (`PropertyChip`) are allowed.
 
 ## Visual and interaction system
 
@@ -69,6 +83,15 @@ source evidence; verify platform/API/version claims before relying on them.
     Thorbis palette and official logo. The 4/8/12/16/24/32/48 spacing rhythm and
     approximate content radii are semantic guidance, not scattered constants.
     Respect native margins and Paper geometry; document a needed adaptation.
+    *Redesign, 31 October 2026 — these lifted earlier rules; do not revert them:*
+    the palette is crisp and neutral (light: white ground, #F4F4F5 wells,
+    #63636B secondary text, 8% black hairline; dark: #0E0E10 ground, #1A1A1D
+    wells, #9A9AA3 secondary) instead of the warm cream; semibold (600) is allowed
+    for screen titles, row titles, section headers and amounts (bold and heavier
+    resolve to 600); the ramp gains a 34pt display step for tab-root titles. Status
+    hues (`Theme.status*`) each have a glyph colour, a text-safe colour and a
+    tinted surface. `scripts/tests/contrast.py` and `AppearanceTests` hold every
+    text token at 4.5:1 on its grounds in light, dark and Increase Contrast.
 11. **Let system chrome be system chrome.** Use native typography and geometry in
     tabs/toolbars/navigation. Use accessible Inter and the existing money/mono
     styles in content. Liquid Glass belongs to supported system navigation/action

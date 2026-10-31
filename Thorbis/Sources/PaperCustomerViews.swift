@@ -47,7 +47,7 @@ struct CustomersView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Finding a customer is the bar's Search; Recent / All / Archived narrow the book.
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs")
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", showsCreate: true)
                 PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
                     .padding(.bottom, 4)
                 if let error = error ?? store.error {

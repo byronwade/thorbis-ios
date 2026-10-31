@@ -1,6 +1,24 @@
 # Thorbis design system — controls
 
-One custom control system, Linear-mobile style. **No stock SwiftUI controls** in app screens:
+One custom control system, Linear-mobile style.
+
+## Redesign rules (31 October 2026) — keep these
+
+The owner found the app "bland and hard to navigate", so the visual rules moved toward Linear's
+mobile app. Later passes must not undo them:
+
+- **Palette:** crisp neutrals. Light: white ground, `#F4F4F5` wells (`Theme.card` / `Theme.well`),
+  `#63636B` secondary text, 8% black hairline. Dark: `#0E0E10` ground, `#1A1A1D` wells, `#9A9AA3`
+  secondary. No warm cream. Contrast stays ≥ 4.5:1 (`python3 scripts/tests/contrast.py`).
+- **Type:** 400, 500 and 600. Semibold for screen titles (34pt display step), row titles, section
+  headers and amounts. `Theme.allowed()` maps bold/heavy/black to 600.
+- **Status:** job rows lead with `StatusGlyph` (dashed ring unscheduled, ring scheduled, quarter
+  dispatched, half in progress, check done, × cancelled, ! attention). Its label is the word.
+  Status hues: `Theme.status*` (glyph), `status*Text` (words), `status*Surface` (chip grounds).
+- **Grouping:** `SectionHeader` (semibold 15, secondary, count) over a `Well`; inset hairlines
+  between rows are allowed. Avatars and property chips are allowed.
+- **Navigation:** floating labeled tab bar (pinned places + More), Search a separate circle, New in
+  the tab root header's + (`PaperHeader(showsCreate: true)`), More lists every other place. **No stock SwiftUI controls** in app screens:
 no `Menu {}`, `Picker`, `confirmationDialog`, `.buttonStyle(.bordered*)`, or `.borderedProminent`.
 Everything is built from `Theme` tokens (see `../Theme.swift`) so it looks the same everywhere,
 in light and dark, and scales with Dynamic Type.
@@ -14,6 +32,13 @@ in light and dark, and scales with Dynamic Type.
 | The screen's one primary action | `PrimaryButton` / `.inkCommit()` / `PaperActionBar` | `../Theme.swift`, `../PaperComponents.swift` |
 | Pill segmented tabs | `PaperTabs` | `../PaperComponents.swift` |
 | Status / value chip (display only) | `Chip` | `../Theme.swift` |
+| Job status as a Linear progress ring | `StatusGlyph` (+ `StatusTone` mapping) | `StatusGlyph.swift` |
+| Tinted property chip (status, time, tech, amount) | `PropertyChip` | `StatusGlyph.swift` |
+| Person's initials circle | `InitialsAvatar` | `StatusGlyph.swift` |
+| Place mark (tinted square + white glyph) | `PlaceMark` | `StatusGlyph.swift` |
+| Grouped rows on a well, inset hairlines | `Well`, `WellList`, `WellDivider` | `StatusGlyph.swift` |
+| Section header with count | `SectionHeader` | `../Theme.swift` |
+| Linear text tabs (plain words, well pill) | `PaperTabs(textTabs: true)` | `../PaperComponents.swift` |
 | **Dropdown menu** (replaces `Menu {}`) | **`ThorbisMenu`** | `ThorbisMenu.swift` |
 | **Filter / display bottom sheet** | **`ThorbisSheet*`** | `ThorbisSheet.swift` |
 | **Select row** (replaces menu/default `Picker`) | **`ThorbisSelect`** | `ThorbisControls.swift` |

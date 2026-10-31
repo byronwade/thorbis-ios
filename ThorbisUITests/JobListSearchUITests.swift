@@ -30,7 +30,7 @@ final class JobListSearchUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
         app.launch()
-        let create = app.buttons["bottom-bar-create"]
+        let create = app.buttons["header-create"]
         XCTAssertTrue(create.waitForExistence(timeout: 30))
         XCTAssertEqual(create.label, "Create")
         create.tap()
