@@ -221,7 +221,7 @@ struct WorkspaceRevenueView: View {
     @ViewBuilder private var sections: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !available {
-                PaperEmptyState(symbol: "chart.bar.xaxis", title: "Money reports are off for your role", message: "Ask your office for access to invoices and payments.")
+                PaperEmptyState(symbol: "chart.bar.xaxis", title: "You can't see money reports", message: "Your role doesn't include invoices and payments. Ask an owner for access.")
             } else if let error {
                 ErrorBanner(message: error).padding(.horizontal, -Theme.gutter)
             } else if let report {

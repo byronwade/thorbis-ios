@@ -418,6 +418,10 @@ struct InvoiceDetailFooter: View {
     let onIssue: () -> Void
 
     var body: some View {
+        if (model.canOfferCollection && canCollect) || (model.invoice?.status == "draft" && canIssue) { bar }
+    }
+
+    private var bar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if model.canOfferCollection && canCollect {
                 PrimaryButton(title: "Collect payment", busy: model.isRecording, action: onCollect)

@@ -109,6 +109,7 @@ struct NewCustomerSheet: View {
                 request.name = ""
                 email = "danielle@"
                 await commit()
+                try? await Task.sleep(for: .milliseconds(600))
                 focused = nil
             }
             #endif

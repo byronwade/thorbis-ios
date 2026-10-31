@@ -145,8 +145,8 @@ struct EstimateDetailView: View {
         let total = options.isEmpty ? paperLinesTotal(record.lines) : nil
         let reference = "EST-\(record.id.suffix(4).uppercased())"
         EvidenceHeader(title: "Estimate \(record.id.suffix(4).uppercased())", status: status, subtitle: record.title,
-                       figureLabel: total == nil && !options.isEmpty ? "Highest option" : "Total",
-                       cents: total ?? options.map(\.totalAmount).max() ?? 0, currency: currency,
+                       figureLabel: total == nil && !options.isEmpty ? "Options from" : "Total",
+                       cents: total ?? options.map(\.totalAmount).min() ?? 0, currency: currency,
                        statusIdentifier: "estimate-chip-status")
         EvidenceProperties {
             EvidenceProperty(label: "Customer", value: customerName, action: customer.map { found in { openCustomer = found } })
