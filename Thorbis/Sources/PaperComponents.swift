@@ -1257,7 +1257,8 @@ struct PaperListRow<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
-    @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 70
+    /// Wide enough for "12:15 p.m." on one line (trade-style times are longer than "12:15 PM").
+    @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 82
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
