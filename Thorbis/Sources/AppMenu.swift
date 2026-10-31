@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Jobs and customers opened on this phone, newest first, for the phone's search.
+/// Jobs and customers opened on this phone, and the words searched for, newest first, for search.
 @MainActor
 final class RecentItems: ObservableObject {
     struct Item: Codable, Hashable, Identifiable {
@@ -14,13 +14,18 @@ final class RecentItems: ObservableObject {
     static let shared = RecentItems()
     /// Only the verified person and workspace's history; empty until one is bound.
     @Published private(set) var items: [Item] = []
+    /// Words this person searched for and then opened something from, newest first.
+    @Published private(set) var searches: [String] = []
     private var owner: String?
     private var byOwner: [String: [Item]]
+    private var searchesByOwner: [String: [String]]
     private let key = "thorbis.recentItems.v2"
+    private let searchKey = "thorbis.recentSearches.v1"
 
     private init() {
         UserDefaults.standard.removeObject(forKey: "thorbis.recentItems.v1")
         byOwner = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([String: [Item]].self, from: $0) } ?? [:]
+        searchesByOwner = UserDefaults.standard.data(forKey: searchKey).flatMap { try? JSONDecoder().decode([String: [String]].self, from: $0) } ?? [:]
     }
 
     /// Follows the session's verified identity, like the workspace cache, so a workspace switch
@@ -32,6 +37,34 @@ final class RecentItems: ObservableObject {
             owner = nil
         }
         items = owner.flatMap { byOwner[$0] } ?? []
+        searches = owner.flatMap { searchesByOwner[$0] } ?? []
+    }
+
+    /// Kept when a search led somewhere, not on every keystroke.
+    func recordSearch(_ text: String) {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let owner, !words.isEmpty else { return }
+        searches.removeAll { $0.caseInsensitiveCompare(words) == .orderedSame }
+        searches.insert(words, at: 0)
+        searches = Array(searches.prefix(6))
+        searchesByOwner[owner] = searches
+        saveSearches()
+    }
+
+    /// Search's Clear: only this person and workspace's searches.
+    func clearSearches() {
+        guard let owner else { return }
+        searches = []
+        searchesByOwner[owner] = nil
+        saveSearches()
+    }
+
+    /// Search's Clear on recently opened records: only this person and workspace's.
+    func clearOpened() {
+        guard let owner else { return }
+        items = []
+        byOwner[owner] = nil
+        save()
     }
 
     func record(_ kind: Item.Kind, id: String, title: String, subtitle: String) {
@@ -48,11 +81,18 @@ final class RecentItems: ObservableObject {
     func clear() {
         items = []
         byOwner = [:]
+        searches = []
+        searchesByOwner = [:]
         UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: searchKey)
     }
 
     private func save() {
         if let data = try? JSONEncoder().encode(byOwner) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    private func saveSearches() {
+        if let data = try? JSONEncoder().encode(searchesByOwner) { UserDefaults.standard.set(data, forKey: searchKey) }
     }
 }
 
@@ -137,6 +177,8 @@ struct AppBottomBar: View {
     var searchActive = false
     var searchQuery: Binding<String> = .constant("")
     var closeSearch: () -> Void = {}
+    /// Return in the field: search opens its top hit.
+    var submitSearch: () -> Void = {}
     @FocusState private var fieldFocused: Bool
     @Namespace private var pill
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -157,10 +199,11 @@ struct AppBottomBar: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(Theme.muted)
-                TextField("Jobs, customers, invoices", text: searchQuery)
+                TextField("Street, name, phone or number", text: searchQuery)
                     .font(Theme.font(16))
                     .focused($fieldFocused)
                     .submitLabel(.search)
+                    .onSubmit(submitSearch)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                 if !searchQuery.wrappedValue.isEmpty {
