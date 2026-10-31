@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-stop-cards",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "rectangle.stack", title: "Swipe through today's stops",
+                      detail: "Today opens on your current stop as a card. Swipe for the next one; the list toggle is beside the tabs."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-thorbis-design",
             date: "2026-10-31",
             highlights: [

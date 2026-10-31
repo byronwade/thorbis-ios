@@ -93,6 +93,11 @@ struct ScheduleView: View {
     /// Who each tech is, for the rows' avatars. Never kept on the phone: offline the rows show none
     /// rather than guess.
     @State private var roster: [String: String] = [:]
+    /// Today as stop cards or the list; empty until the person picks (the role decides).
+    @AppStorage(TodayLayoutMode.storageKey) private var storedTodayLayout = ""
+    /// The stop card showing, by job id; its next step is the one loaded for the commit.
+    @State private var cardFocus: String?
+    @StateObject private var cardPlaces = StopCardPlaces()
 
     private var range: ScheduleRange {
         switch tab {
@@ -149,8 +154,14 @@ struct ScheduleView: View {
                             filterActive: tab == "Unscheduled" || (showsScope && scope == .everyone && WorkRole(session).schedulesOwnDay),
                             showsCreate: true)
                 OfflineBanner()
-                PaperTabs(options: tabOptions, selection: segment, textTabs: true)
-                    .padding(.bottom, 8)
+                HStack(alignment: .center, spacing: 0) {
+                    PaperTabs(options: tabOptions, selection: segment, textTabs: true)
+                    if tab == "Today" {
+                        TodayLayoutToggle(mode: todayLayout) { storedTodayLayout = todayLayout.toggled.rawValue }
+                            .padding(.trailing, Theme.gutter - 4)
+                    }
+                }
+                .padding(.bottom, 8)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if store.loading && store.jobs.isEmpty {
@@ -158,7 +169,8 @@ struct ScheduleView: View {
                 } else if tab == "Board" && canSchedule {
                     DispatchBoardView()
                 } else if jobs.isEmpty {
-                    emptyState
+                    // Every stop done: the cards still show the day, opening on the last one.
+                    if showsStopCards { stopCards(lead: nil) } else { emptyState }
                     if range == .today { doneToday }
                 } else if tab == "Map" {
                     ScheduleMapView(jobs: jobs.filter { $0.status != "canceled" })
@@ -192,6 +204,11 @@ struct ScheduleView: View {
             if PaperPreview.enabled && PaperPreview.screen == "schedule-week" { tab = "Week" }
             if PaperPreview.enabled && PaperPreview.screen == "schedule-unscheduled" { tab = "Unscheduled" }
             if PaperPreview.enabled && PaperPreview.screen == "dispatch-board" { tab = "Board" }
+            // Previews start from the role's layout each launch, so a capture or UI test never inherits a toggle.
+            if PaperPreview.enabled && !TodayStopCardsPreview.resetThisLaunch {
+                TodayStopCardsPreview.resetThisLaunch = true
+                storedTodayLayout = ""
+            }
         }
         #endif
     }
@@ -239,8 +256,36 @@ struct ScheduleView: View {
         }
     }
 
+    /// Cards or the list on Today; office and owners start on the list, technicians on cards.
+    private var todayLayout: TodayLayoutMode {
+        #if DEBUG
+        if storedTodayLayout.isEmpty, let forced = TodayStopCardsPreview.forced { return forced }
+        #endif
+        return TodayLayoutMode.resolve(stored: storedTodayLayout, schedulesOwnDay: WorkRole(session).schedulesOwnDay)
+    }
+
+    /// Today's stops in pager order: done ones to the left, then the day by time.
+    private var cardStops: [Job] {
+        TodayStopOrder.ordered(todayVisits) { outbox.pendingStatus(for: $0.id) ?? $0.status }
+    }
+
+    private var showsStopCards: Bool { tab == "Today" && todayLayout == .cards && !todayVisits.isEmpty }
+
     @ViewBuilder private var dayContent: some View {
-        if let first = leadJob {
+        if showsStopCards, let first = leadJob {
+            // The card replaces the Now panel; the rest of the day stays below as the list.
+            let rest = jobs.filter { $0.id != first.id }
+            VStack(alignment: .leading, spacing: 0) {
+                stopCards(lead: first)
+                if ScheduleLead.activeStatuses.contains(first.status), let next = rest.first {
+                    section("Up next", [next], leading: .time)
+                    if rest.count > 1 { section("Later today", Array(rest.dropFirst()), leading: .time) }
+                } else if !rest.isEmpty {
+                    section("Later today", rest, leading: .time)
+                }
+                doneToday
+            }
+        } else if let first = leadJob {
             let isActive = ScheduleLead.activeStatuses.contains(first.status)
             let isToday = range == .today
             let booked = ["scheduled", "dispatched"].contains(first.status)
@@ -285,6 +330,66 @@ struct ScheduleView: View {
                 if isToday { doneToday }
             }
         }
+    }
+
+    /// The pager of today's stops. The card showing loads its job's next step (the commit), its
+    /// place and drive time, as the Now panel does for the lead job.
+    private func stopCards(lead: Job?) -> some View {
+        let stops = cardStops
+        let shown = stops.first { $0.id == cardFocus } ?? lead ?? stops.last
+        let place = shown.flatMap { job in stop.flatMap { $0.jobID == job.id ? $0 : nil } }
+        let driving = shown.map { ["scheduled", "dispatched", "en_route"].contains(outbox.pendingStatus(for: $0.id) ?? $0.status) } ?? false
+        let canCustomerView = session.can("estimate.view", feature: "estimates") || session.can("invoice.view", feature: "invoicing")
+            || session.can("customer.edit", feature: "core_crm")
+        return TodayStopCards(
+            stops: stops, focus: $cardFocus,
+            customer: { store.customerName($0.customerId) },
+            street: { addresses.street($0) },
+            place: { job in job.id == place?.jobID ? place : cardPlaces.place(job) },
+            access: { cardPlaces.access[$0.id] },
+            pendingStatus: { outbox.pendingStatus(for: $0.id) },
+            // Drive time only for the stop the tech drives to next (the Now panel's rule), never a later one.
+            etaMinutes: { job in job.id == place?.jobID && job.id == lead?.id && driving ? eta.minutes : nil },
+            onSiteSince: { onSiteSince($0) },
+            locationNotice: { job in
+                job.id == place?.jobID && place?.coordinates != nil && driving && !session.isOffline && eta.locationOff && !locationNoticeDismissed
+                    ? { NextStopLocationNotice.dismissedThisLaunch = true
+                        withMotion(.easeOut(duration: 0.2)) { locationNoticeDismissed = true } } : nil
+            },
+            canOpenCustomerView: canCustomerView
+        ) { commit(for: $0) }
+        .padding(.top, 4)
+        .onAppear { placeCards(stops) }
+        .onChange(of: stops.map(\.id)) { _, _ in placeCards(stops) }
+        .task(id: "card|\(shown?.id ?? "")|\(shown?.status ?? "")|\(shown?.updatedAt ?? "")") {
+            if let shown { await loadHero(shown) }
+        }
+        .task(id: "cardstop|\(shown?.id ?? "")|\(shown?.customerId ?? "")|\(shown?.locationId ?? "")|\(session.generation)|\(session.isOffline)") {
+            if let shown { await loadStop(shown) }
+        }
+        .task(id: "cardeta|\(place?.jobID ?? "")|\(place?.coordinates.map { "\($0.latitude),\($0.longitude)" } ?? "")|\(driving)") {
+            guard let place else { return }
+            await eta.update(to: place.coordinates, key: "\(place.jobID)|\(place.locationID ?? "")", enabled: driving && !session.isOffline)
+        }
+        .task(id: "cardplaces|\(shown?.id ?? "")|\(stops.map(\.id).joined(separator: ","))|\(session.generation)|\(session.isOffline)") {
+            // The card showing and its neighbours, so the circles are there before a swipe lands.
+            guard let at = stops.firstIndex(where: { $0.id == shown?.id }) else { return }
+            let near = [at, at + 1, at - 1].filter(stops.indices.contains).map { stops[$0] }
+            await cardPlaces.load(near, api: api, organizationID: session.activeOrganization?.id,
+                                  canView: session.can("customer.view", feature: "core_crm"),
+                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
+        }
+    }
+
+    /// Opens the pager on the stop under way, else the next booked one; only on first show or when
+    /// the day's stops change, so a refresh or a step never moves the card under the person's thumb.
+    private func placeCards(_ stops: [Job]) {
+        if let cardFocus, stops.contains(where: { $0.id == cardFocus }) { return }
+        var start = TodayStopOrder.startIndex(stops) { outbox.pendingStatus(for: $0.id) ?? $0.status }
+        #if DEBUG
+        if let forced = TodayStopCardsPreview.startIndex, stops.indices.contains(forced) { start = forced }
+        #endif
+        cardFocus = start.map { stops[$0].id }
     }
 
     /// When the tech reached the lead job, from the server's own arrival (or start) time. Nil when the
