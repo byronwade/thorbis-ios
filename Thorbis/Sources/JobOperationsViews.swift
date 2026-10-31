@@ -478,7 +478,7 @@ struct JobScheduleView: View {
                 switch picked {
                 case "Today": showsCalendar = false; selectDay(offset: 0)
                 case "Tomorrow": showsCalendar = false; selectDay(offset: 1)
-                default: showsCalendar = true
+                default: showsCalendar = current == "Pick date" ? !showsCalendar : true
                 }
             }))
             .padding(.horizontal, -Theme.gutter)

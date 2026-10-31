@@ -208,34 +208,64 @@ private struct InboxLocalComposerView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Message") {
-                    ThorbisSelect(options: InboxLocalMessage.Channel.allCases.map { ($0, $0.rawValue) },
-                                  selection: $composer.channel, label: "Channel")
-                    TextField(composer.channel == .sms ? "Phone number" : "Email address", text: $composer.recipient)
-                        .textInputAutocapitalization(.never)
-                    if composer.channel == .email { TextField("Subject", text: $composer.subject) }
-                    TextEditor(text: $composer.body).frame(minHeight: 130)
-                }
-                if composer.channel == .sms {
-                    Section("Optional local schedule") {
-                        Toggle("Queue for a time", isOn: $composer.scheduleText)
-                        if composer.scheduleText { DatePicker("Intended time", selection: $composer.scheduledDate) }
+            // design 2026-10-30: one column, labels above, field wells; Save draft is the ink
+            // commit, Queue locally the quiet text action beside it (was the bottom toolbar).
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    PaperFormField("Channel") {
+                        ThorbisSelect(options: InboxLocalMessage.Channel.allCases.map { ($0, $0.rawValue) },
+                                      selection: $composer.channel, label: "Channel").fieldWell()
                     }
+                    PaperFormField(composer.channel == .sms ? "Phone number" : "Email address") {
+                        TextField(composer.channel == .sms ? "Phone number" : "Email address", text: $composer.recipient)
+                            .textInputAutocapitalization(.never).font(Theme.font(16)).fieldWell()
+                    }
+                    if composer.channel == .email {
+                        PaperFormField("Subject") { TextField("Subject", text: $composer.subject).font(Theme.font(16)).fieldWell() }
+                    }
+                    PaperFormField("Message") {
+                        TextEditor(text: $composer.body).font(Theme.font(16)).scrollContentBackground(.hidden)
+                            .frame(minHeight: 130).padding(8)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                    if composer.channel == .sms {
+                        PaperFormField("Optional local schedule") {
+                            VStack(spacing: 0) {
+                                Toggle("Queue for a time", isOn: $composer.scheduleText).font(Theme.font(16)).tint(Theme.brand)
+                                    .frame(minHeight: 44)
+                                if composer.scheduleText {
+                                    DatePicker("Intended time", selection: $composer.scheduledDate).font(Theme.font(16))
+                                        .frame(minHeight: 44)
+                                }
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 2)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        }
+                    }
+                    Text("Queued means held on this screen. No message will be delivered or sent automatically.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
                 }
-                Text("Queued means held on this screen. No message will be delivered or sent automatically.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let error { Text(error).foregroundStyle(.red) }
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.background)
             .navigationTitle("Compose")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
-                    Button("Save draft") { save(.draft) }
-                }
-                ThorbisToolbarItem(placement: .bottomBar) {
-                    Button(composer.channel == .sms ? "Queue locally" : "Queue email locally") { save(.queue) }
-                        .disabled(composer.channel == .sms && !composer.scheduleText)
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 0) {
+                    PaperActionBar(title: "Save draft") { save(.draft) }
+                    Button { save(.queue) } label: {
+                        Text(composer.channel == .sms ? "Queue locally" : "Queue email locally")
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(composer.channel == .sms && !composer.scheduleText)
+                    .background(Theme.background)
                 }
             }
         }

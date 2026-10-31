@@ -318,37 +318,47 @@ private struct LocalWorkspaceEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("On this device") {
+            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("On this device · Not synced").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                     if section == .agreements {
-                        ThorbisSelect(options: [(LocalAgreementRecord.Kind.maintenance, "Maintenance"),
-                                                (LocalAgreementRecord.Kind.membership, "Membership")],
-                                      selection: $draft.kind, label: "Kind")
+                        PaperFormField("Kind") {
+                            ThorbisSelect(options: [(LocalAgreementRecord.Kind.maintenance, "Maintenance"),
+                                                    (LocalAgreementRecord.Kind.membership, "Membership")],
+                                          selection: $draft.kind, label: "Kind").fieldWell()
+                        }
                     }
                     ForEach(section.fields.indices, id: \.self) { index in
                         let field = section.fields[index]
-                        TextField(field.label, text: Binding(
-                            get: { draft.value(field.key) },
-                            set: { draft.values[field.key] = $0 }
-                        ), axis: field.key == "notes" ? .vertical : .horizontal)
+                        PaperFormField(field.label, note: field.required ? nil : "Optional") {
+                            TextField(field.label, text: Binding(
+                                get: { draft.value(field.key) },
+                                set: { draft.values[field.key] = $0 }
+                            ), axis: field.key == "notes" ? .vertical : .horizontal)
+                            .font(Theme.font(16)).fieldWell()
+                        }
                     }
+                    if section == .fleet {
+                        Text("Values and maintenance dates are written as entered. Market value is your estimate; no live valuation is connected.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                    if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
                 }
-                if section == .fleet {
-                    Text("Values and maintenance dates are written as entered. Market value is your estimate; no live valuation is connected.")
-                        .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.background)
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                PaperActionBar(title: "Save", disabled: section.fields.filter { $0.required }.contains { draft.required($0.key).isEmpty }) {
+                    do { try onSave(draft); dismiss() }
+                    catch { self.error = error.localizedDescription }
                 }
-                if let error { Text(error).foregroundStyle(.red) }
             }
             .navigationTitle(draft.values.isEmpty ? "New \(section.title)" : "Edit \(section.title)")
             .toolbar {
                 ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
-                    Button("Save") {
-                        do { try onSave(draft); dismiss() }
-                        catch { self.error = error.localizedDescription }
-                    }
-                    .disabled(section.fields.filter { $0.required }.contains { draft.required($0.key).isEmpty })
-                }
             }
         }
     }

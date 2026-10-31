@@ -612,7 +612,7 @@ struct RootView: View {
             case "team": primaryTab = .more; morePath.append(PaperRoute.team)
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true
-            case "job-schedule", "equipment-editor": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
+            case "job-schedule", "equipment-editor", "equipment-sections": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
             case "new-job": createJob = true
             case "create-menu": primaryTab = .jobs; createMenuOpen = true
             case "schedule-unscheduled": primaryTab = .schedule
@@ -1375,6 +1375,15 @@ private struct PreviewFormSheet: ViewModifier {
         content.sheet(isPresented: shown) {
             if screen == "job-schedule" {
                 QuickScheduleSheet(jobID: PaperPreview.jobID)
+            } else if screen == "equipment-sections" {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        CustomerMembershipSection(customerID: PaperPreview.customerID)
+                        CustomerEquipmentSection(customerID: PaperPreview.customerID, locations: [])
+                    }
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 24)
+                }
+                .background(Theme.background)
             } else {
                 EquipmentEditor(customerID: PaperPreview.customerID, locations: [], existing: nil) {}
             }

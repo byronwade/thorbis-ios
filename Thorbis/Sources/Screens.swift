@@ -103,7 +103,7 @@ struct NewJobSheet: View {
                                 .accessibilityLabel(when == nil ? "Choose a time" : "Time: \(when!.formatted())")
                                 .disabled(busy || timeSaved)
                             }
-                            labelled("Technician", note: "Optional") { techPicker }
+                            labelled("Tech", note: "Optional") { techPicker }
                         }
 
                         if let error {
@@ -196,14 +196,14 @@ struct NewJobSheet: View {
 
     private var techPicker: some View {
         var items: [ThorbisMenuItem] = [
-            ThorbisMenuItem("No technician yet", icon: "person.crop.circle.badge.xmark", isSelected: tech == nil) { tech = nil }
+            ThorbisMenuItem("No tech yet", icon: "person.crop.circle.badge.xmark", isSelected: tech == nil) { tech = nil }
         ]
         items.append(contentsOf: people.map { person in
             ThorbisMenuItem(person.displayName, isSelected: person == tech) { tech = person; techSaved = false }
         })
-        return ThorbisMenu(items: items, title: "Technician",
-                           accessibilityLabel: "Technician: \(tech?.displayName ?? "none")") {
-            rowLabel(tech?.displayName ?? "No technician yet", symbol: "person.badge.clock", set: tech != nil)
+        return ThorbisMenu(items: items, title: "Tech",
+                           accessibilityLabel: "Tech: \(tech?.displayName ?? "none")") {
+            rowLabel(tech?.displayName ?? "No tech yet", symbol: "person.badge.clock", set: tech != nil)
         }
         .disabled(busy || techSaved)
         .task { if people.isEmpty { people = (try? await api.fieldAssignees()) ?? [] } }

@@ -787,32 +787,43 @@ struct PriceBookItemEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Name customers see", text: $content.description, axis: .vertical).lineLimit(1...3)
-                    HStack {
-                        Text("Price")
-                        Spacer()
-                        TextField("0.00", text: $priceText).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-                            .font(Theme.monoFont(15, weight: .medium))
+            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    PaperFormField("Name customers see") {
+                        TextField("Replace capacitor", text: $content.description, axis: .vertical).lineLimit(1...3)
+                            .font(Theme.font(16)).fieldWell()
                     }
-                    TextField("Unit (each, hour, foot…)", text: $content.unit)
+                    PaperFormField("Price") {
+                        TextField("0.00", text: $priceText).keyboardType(.decimalPad)
+                            .font(Theme.font(16, weight: .medium)).monospacedDigit().fieldWell()
+                    }
+                    PaperFormField("Unit") {
+                        TextField("each, hour, foot…", text: $content.unit).font(Theme.font(16)).fieldWell()
+                    }
+                    PaperFormField("Kind") {
+                        ThorbisSelect(options: PriceBookContent.kinds.map { ($0, $0.capitalized) },
+                                      selection: $content.kind, label: "Kind").fieldWell()
+                    }
+                    PaperFormField("Tax") {
+                        ThorbisSelect(options: [("taxable", "Taxable"), ("non_taxable", "Not taxable")],
+                                      selection: $content.taxClassification, label: "Tax").fieldWell()
+                    }
+                    if let error { ListErrorRow(message: error) }
                 }
-                Section {
-                    ThorbisSelect(options: PriceBookContent.kinds.map { ($0, $0.capitalized) },
-                                  selection: $content.kind, label: "Kind")
-                    ThorbisSelect(options: [("taxable", "Taxable"), ("non_taxable", "Not taxable")],
-                                  selection: $content.taxClassification, label: "Tax")
-                }
-                if let error { Section { ListErrorRow(message: error) } }
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
-            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)
+            .safeAreaInset(edge: .bottom) {
+                PaperActionBar(title: existing == nil ? "Add to price book" : "Save item", busy: busy, disabled: !valid) {
+                    Task { await save() }
+                }
+            }
             .navigationTitle(existing == nil ? "New price book item" : "Edit item")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ThorbisToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(!valid || busy) }
             }
             .onAppear {
                 guard let existing, content.description.isEmpty else { return }

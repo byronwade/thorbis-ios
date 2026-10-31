@@ -45,7 +45,7 @@ struct JobEstimateHandoffView: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.jobTitle).font(Theme.font(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Text(model.complete ? "\(model.records.count) estimates · Choose any work to approve" : "Some estimates still need a refresh")
+                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : "Some estimates still need a refresh")
                     .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
             }
             if !model.approvalAuthority {
