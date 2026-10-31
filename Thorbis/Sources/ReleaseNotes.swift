@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-next-stop-lock-screen",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "lock.rectangle", title: "Your next stop on the lock screen",
+                      detail: "Widgets, the lock screen card and Control Center show the street and the next step: On my way, Arrived, Start.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-book-job-board",
             date: "2026-10-31",
             highlights: [

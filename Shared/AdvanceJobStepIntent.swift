@@ -29,3 +29,27 @@ struct AdvanceJobStepIntent: LiveActivityIntent {
         return .result()
     }
 }
+
+/// Opens a job (or the schedule when `jobID` is empty) from a control or widget that has no
+/// step to take. Opens the app, so it performs in the app's process.
+struct OpenJobIntent: AppIntent {
+    static let title: LocalizedStringResource = "Open job"
+    static let description = IntentDescription("Opens a job in Thorbis.")
+    static let isDiscoverable = false
+    static let openAppWhenRun = true
+
+    @Parameter(title: "Job") var jobID: String
+
+    init() {}
+
+    init(jobID: String) {
+        self.jobID = jobID
+    }
+
+    func perform() async throws -> some IntentResult {
+        #if !THORBIS_WIDGET_EXTENSION
+        await JobStepIntentRunner.open(jobID: jobID)
+        #endif
+        return .result()
+    }
+}

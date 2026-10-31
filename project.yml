@@ -45,6 +45,9 @@ targets:
     sources:
       - ThorbisWidgets
       - Shared
+      # Inter for the widgets and Live Activity, the same face as the app.
+      - path: Thorbis/Resources/Fonts/Inter.ttf
+      - path: Thorbis/Resources/Fonts/Inter-OFL.txt
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thorbis.field.widgets

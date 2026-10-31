@@ -13,6 +13,22 @@ struct OpenNextJobIntent: AppIntent {
     }
 }
 
+/// "On my way": marks the next job On my way, hands-free. Siri names the stop and asks before it
+/// sends anything, since the customer may be told. Same path as the Lock Screen card: the server's
+/// progress call, or the phone's outbox with no signal.
+struct OnMyWayIntent: AppIntent {
+    static let title: LocalizedStringResource = "On my way"
+    static let description = IntentDescription("Marks your next booked job On my way.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let stop = try await JobStepIntentRunner.nextBookedStop()
+        try await requestConfirmation(actionName: .go, dialog: "Mark On my way \(stop.place)?")
+        try await JobStepIntentRunner.run(jobID: stop.jobID, target: "en_route")
+        return .result(dialog: "On my way \(stop.place).")
+    }
+}
+
 /// "Show my schedule": opens the Schedule tab.
 struct OpenScheduleIntent: AppIntent {
     static let title: LocalizedStringResource = "Show my schedule"
@@ -50,10 +66,19 @@ struct ThorbisShortcuts: AppShortcutsProvider {
                               "Next \(.applicationName) job"],
                     shortTitle: "Next job",
                     systemImageName: "wrench.and.screwdriver")
+        AppShortcut(intent: OnMyWayIntent(),
+                    phrases: ["On my way in \(.applicationName)",
+                              "Tell \(.applicationName) I'm on my way",
+                              "I'm on my way in \(.applicationName)",
+                              "Mark on my way in \(.applicationName)"],
+                    shortTitle: "On my way",
+                    systemImageName: "car")
         AppShortcut(intent: OpenScheduleIntent(),
                     phrases: ["Open my schedule in \(.applicationName)",
                               "Show my schedule in \(.applicationName)",
-                              "Open my \(.applicationName) schedule"],
+                              "Open my \(.applicationName) schedule",
+                              "Today's schedule in \(.applicationName)",
+                              "What's on today in \(.applicationName)"],
                     shortTitle: "Schedule",
                     systemImageName: "calendar")
         // App Shortcut phrases can't carry free text, so Siri asks for the search words next.

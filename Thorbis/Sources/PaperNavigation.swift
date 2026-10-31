@@ -71,9 +71,8 @@ struct RootView: View {
         #if DEBUG
         .modifier(PreviewLandscape())
         #endif
-        // The Home Screen widget reads today's jobs from the shared container.
-        .onChange(of: store.jobs, initial: true) { writeTodaySnapshot() }
-        .onChange(of: store.customers) { writeTodaySnapshot() }
+        // Widgets, the Control Center control and Spotlight read today's jobs from here.
+        .modifier(GlanceSnapshotWriter())
         // The owner's company-wide tabs and More menu, when one has been saved.
         .task(id: session.activeOrganization?.id) {
             guard session.activeOrganization != nil else { return }
@@ -119,15 +118,6 @@ struct RootView: View {
         guard layout.visibleTabs(session).first == .home, selectedTab == PrimaryTab.initial.rawValue,
               schedulePath.isEmpty, !store.openedForRecord else { return }
         selectedTab = MenuItem.home.rawValue
-    }
-
-    private func writeTodaySnapshot() {
-        guard !store.jobs.isEmpty, session.can("job.view", feature: "jobs") else { return }
-        let items = store.jobs.map {
-            TodaySnapshot.Item(id: $0.id, at: JobFiltering.date($0.scheduledFor), title: $0.title,
-                               customer: store.customerName($0.customerId), status: $0.status)
-        }
-        TodaySnapshot.save(TodaySnapshot(items: items, writtenAt: Date()))
     }
 
     /// iPad at regular width gets the sidebar and split columns; compact width (Slide Over, a
