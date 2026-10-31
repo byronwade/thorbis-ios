@@ -122,7 +122,7 @@ struct AppDrawer: View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
                 .font(Theme.font(30, weight: .semibold)).tracking(-0.6)
-                .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
                 .minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityFocused(titleFocus)
