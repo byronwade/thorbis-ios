@@ -45,8 +45,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     /// drawer's menu circle. The others (a visible bar: Inbox, Estimates, Reports, …) carry it in the bar.
     var drawerCircleInHeader: Bool { [.home, .schedule, .jobs, .customers, .priceBook].contains(self) }
 
-    /// The drawer's word: the schedule reads as the day's work, everything else by its name.
-    var drawerTitle: String { self == .schedule ? "Today" : title }
+    // The drawer's words for a place are `DrawerPlaces.title(_:role:)` (Today for technicians).
 
     var symbol: String {
         switch self {

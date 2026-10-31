@@ -48,15 +48,12 @@ final class SavedWorkReviewUITests: XCTestCase {
         cleanupArguments = base
         app.launchArguments = base + ["--paper-preview-reset-saved-work", "--paper-preview-seed-saved-work"]
         app.launch()
-        // The menu circle says what is still on the phone; the drawer's row opens the review.
+        // The menu circle says what is still on the phone; the drawer's gear opens the review.
         let menu = app.drawerMenu
         XCTAssertTrue(menu.waitForExistence(timeout: 20))
         let status = NSPredicate(format: "value CONTAINS %@", "saved item")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: status, object: menu)], timeout: 15), .completed)
-        app.openDrawer()
-        let review = app.drawerRow("saved-work")
-        XCTAssertTrue(review.waitForExistence(timeout: 5))
-        review.tap()
+        app.openSavedWorkFromDrawer()
         XCTAssertTrue(app.navigationBars["Saved on this phone"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "saved-work-command:00000000-0000-4000-8000-000000009711").firstMatch.exists)
         XCTAssertFalse(app.staticTexts["Foreign actor scan.pdf"].exists)
@@ -76,7 +73,7 @@ final class SavedWorkReviewUITests: XCTestCase {
         reveal(uncached, in: app); uncached.tap()
         XCTAssertTrue(app.staticTexts["Uncached drain visit"].waitForExistence(timeout: 10))
         capture(app, "Uncached job opened inside review")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons["Back"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Saved on this phone"].waitForExistence(timeout: 5))
         let cached = app.buttons["saved-work-open-00000000-0000-4000-8000-000000002214"]
         app.scrollViews["saved-work-review"].swipeDown()
