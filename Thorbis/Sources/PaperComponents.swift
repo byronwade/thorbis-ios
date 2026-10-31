@@ -368,37 +368,6 @@ struct StatusRing: View {
     }
 }
 
-/// MA-14: what will be here, in one sentence, and one bordered button that starts it.
-struct PaperEmptyState: View {
-    let symbol: String
-    let title: String
-    let message: String
-    var actionTitle: String? = nil
-    var action: (() -> Void)? = nil
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(Theme.muted)
-                .padding(.bottom, 6)
-            Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
-                .multilineTextAlignment(.center)
-            Text(message).font(Theme.font(15)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
-            if let actionTitle, let action {
-                Button(action: action) {
-                    Text(actionTitle).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
-                }
-                .buttonStyle(PressStyle())
-                .padding(.top, 8)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 48).padding(.horizontal, Theme.gutter)
-    }
-}
-
 /// Paper's quick-edit value row: muted label left, value right.
 struct PaperDetailRow<Value: View>: View {
     let label: String

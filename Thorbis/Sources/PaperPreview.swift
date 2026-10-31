@@ -24,6 +24,19 @@ enum PaperPreview {
               ["onboard-signup", "onboard-company", "onboard-details", "onboard-setup"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
+    /// First-run and edge-state screens (2026-10-31): --paper-preview-screen state-login | state-login-error |
+    /// state-session-expired | state-restore-failed | state-opening | state-signing-out | state-workspaces |
+    /// state-empty | state-errors | state-loading. Kept apart from `screen` so the list stays separate.
+    static var statesScreen: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
+              ["state-login", "state-login-error", "state-session-expired", "state-restore-failed", "state-opening",
+               "state-signing-out", "state-workspaces", "state-empty", "state-errors", "state-loading"].contains(args[index + 1]) else { return nil }
+        return args[index + 1]
+    }
+    /// `--paper-preview-empty`: the workspace has no jobs, customers, estimates or invoices yet,
+    /// so the real list screens show their empty states.
+    static var isEmptyWorkspace: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-empty") }
     static var isJobEstimateHandoff: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-handoff") }
     /// A data seed (the job's estimates and invoices), not a screen: it still opens the plain job.
     /// To capture the documents themselves use `--paper-preview-screen customer-view`.
@@ -931,6 +944,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "facts": [["factKey": "legal_name", "label": "Legal business name", "tier": 1, "value": "Wade’s Plumbing LLC",
                                "source": "user_confirmed", "confirmedAt": now, "version": 1]],
                     "catalog": catalog.map { ["factKey": $0.0, "label": $0.1, "tier": $0.2, "required": $0.3, "confirmed": $0.0 == "legal_name"] }] as [String: Any]
+        }
+        if PaperPreview.isEmptyWorkspace, ["/v1/jobs", "/v1/customers", "/v1/invoices", "/v1/estimates"].contains(path) {
+            return ["items": [Any]()]
         }
         switch path {
         case "/api/auth/get-session":

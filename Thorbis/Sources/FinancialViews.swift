@@ -45,7 +45,7 @@ struct EstimatesView: View {
                     PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
                 }
                 if !loading && records.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet", message: "Estimates you build for customers appear here.",
+                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
                                     actionTitle: session.can("estimate.create", feature: "estimates") ? "New estimate" : nil, action: { showCreate = true })
                 }
             }
@@ -366,7 +366,7 @@ struct InvoicesView: View {
                     PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
                 }
                 if !loading && records.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices created from jobs appear here.")
+                    PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices are made from a job.")
                 }
             }
             .paperCardMargin().padding(.bottom, 24)

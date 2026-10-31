@@ -107,7 +107,8 @@ final class SessionController: ObservableObject {
     private var sessionDeadline: Date?
     private var authorityDeadline: Date?
     private var expiryTask: Task<Void, Never>?
-    private var signingOut = false
+    /// True while sign-out runs, so the waiting screen says "Signing out" instead of "Opening".
+    @Published private(set) var signingOut = false
     private var revalidation: UUID?
     private let snapshots: SessionSnapshotStoring
 
@@ -518,10 +519,22 @@ final class SessionController: ObservableObject {
         guard generation == requestGeneration else { return }
         if failure.isTransientServerFailure, !defaults.bool(forKey: Self.explicitSignOutKey),
            adoptSnapshot(generation: requestGeneration) { return }
-        let description = failure.localizedDescription
+        let description = failure.plainMessage()
         invalidate(next: .failed)
         error = description
     }
+
+    #if DEBUG
+    /// Screenshot fixtures only (PaperPreview states screens): show a signed-out, expired or
+    /// waiting screen without a server. Not reachable outside `--paper-preview`.
+    func previewForce(_ next: Phase, error message: String? = nil, signingOut out: Bool = false) {
+        guard PaperPreview.enabled else { return }
+        // The picker keeps the account and its companies; every other state starts clean.
+        if next == .choosingWorkspace { phase = next } else if next != .ready { invalidate(next: next) }
+        error = message
+        signingOut = out
+    }
+    #endif
 
     private static func date(_ value: String) -> Date? {
         let formatter = ISO8601DateFormatter()

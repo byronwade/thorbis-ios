@@ -1406,7 +1406,7 @@ struct JobDetailView: View {
     private func estimatesContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if !session.can("estimate.view", feature: "estimates") {
-                PaperEmptyState(symbol: "doc.text", title: "Estimates unavailable", message: "Your role cannot view estimates.")
+                PaperEmptyState(symbol: "lock", title: "Estimates are off for your role", message: "Ask your office for access to estimates.")
             } else {
                 // At accessibility sizes "Add estimate" goes under the label so neither breaks mid-word.
                 let headerLayout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
@@ -1427,8 +1427,8 @@ struct JobDetailView: View {
                 if !estimatesLoaded {
                     SkeletonRows(count: 2, leading: false, inset: 0)
                 } else if jobEstimates.isEmpty && !estimatesFailed {
-                    PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
-                                    message: "Build one from the price book. It's added to this job automatically.")
+                    PaperEmptyState(symbol: "doc.text", title: "No estimates on this job",
+                                    message: "Build one from the price book.")
                 }
                 ForEach(jobEstimates) { estimate in
                     NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId).thorbisBackButton() } label: {
@@ -1610,7 +1610,7 @@ struct JobDetailView: View {
             if days.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     activityFilterLabel(title: "Activity")
-                    PaperEmptyState(symbol: "clock", title: "No activity yet", message: "Notes, status changes and photos on this job show up here.")
+                    PaperEmptyState(symbol: "clock", title: "No activity yet")
                 }
             }
             ForEach(Array(days.enumerated()), id: \.element.day) { index, group in
@@ -1740,7 +1740,9 @@ struct JobDetailView: View {
                 }
             }
             .padding(.horizontal, Theme.gutter)
-            if let problem = dictation.problem {
+            if let problem = dictation.problem, problem == .denied {
+                PermissionNotice(permission: .microphone, purpose: "dictate notes", message: problem.message)
+            } else if let problem = dictation.problem {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(problem.message).font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)

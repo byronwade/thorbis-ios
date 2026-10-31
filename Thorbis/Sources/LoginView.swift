@@ -1,5 +1,27 @@
 import SwiftUI
 
+/// Better Auth's sign-in answers, in plain words that name the way out.
+enum LoginCopy {
+    static func message(for raw: String?) -> String {
+        guard let raw, !raw.isEmpty else { return "You weren’t logged in. Try again." }
+        let lower = raw.lowercased()
+        if lower.contains("invalid email or password") || lower.contains("invalid_email_or_password")
+            || lower.contains("invalid password") || lower.contains("user not found") {
+            return "That email and password don’t match. Check them, or reset your password."
+        }
+        if lower.contains("not verified") || lower.contains("email_not_verified") {
+            return "Confirm your email first. Open the link we sent, then log in."
+        }
+        if lower.contains("banned") || lower.contains("disabled") {
+            return "This account can’t log in. Ask your office for help."
+        }
+        return raw
+    }
+}
+
+/// Sign in (2026-10-31): the shield on the cream ground, two fields with their labels above,
+/// one ink "Log in" pinned under the thumb. A wrong password is said under the password field;
+/// an ended session or a failed restore is said once at the top with its way out.
 @MainActor
 struct LoginView: View {
     @EnvironmentObject private var api: APIClient
@@ -9,7 +31,13 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var busy = false
-    @State private var error: String?
+    @State private var emailError: String?
+    @State private var passwordError: String?
+    /// Set once this screen has tried to log in, so the session's error belongs to that try.
+    @State private var attempted: Bool
+
+    /// `attempted` starts true only for screenshot fixtures of a refused try.
+    init(attempted: Bool = false) { _attempted = State(initialValue: attempted) }
     @State private var showingReset = false
     @State private var showingSignUp = false
     @State private var showPassword = false
@@ -17,128 +45,155 @@ struct LoginView: View {
 
     private enum FocusField { case email, password }
 
+    /// The session ended or could not be restored before anyone typed here.
+    private var sessionProblem: String? {
+        guard !attempted, let message = session.error, !message.isEmpty else { return nil }
+        return message
+    }
+
+    /// The server's answer to this screen's own try, under the password.
+    private var signInProblem: String? {
+        guard attempted, !busy, let message = session.error, !message.isEmpty else { return nil }
+        return LoginCopy.message(for: message)
+    }
+
     var body: some View {
-        GeometryReader { geometry in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                ThorbisLogoLockup(markSize: 30, wordmarkSize: 19)
+                Image("ThorbisMark")
+                    .resizable().scaledToFit()
+                    .frame(width: 40, height: 40)
+                    .accessibilityLabel("Thorbis")
 
                 Text("Welcome back")
                     .font(Theme.font(30, weight: .medium))
                     .tracking(-0.6)
                     .foregroundStyle(Theme.foreground)
-                    .padding(.top, 20)
+                    .padding(.top, 24)
                     .accessibilityAddTraits(.isHeader)
                 Text("Log in to your Thorbis workspace")
                     .font(Theme.font(15))
                     .foregroundStyle(Theme.muted)
                     .padding(.top, 6)
 
+                if let sessionProblem {
+                    ErrorBanner(message: sessionProblem,
+                                symbol: sessionProblem.localizedCaseInsensitiveContains("expired") ? "person.crop.circle.badge.exclamationmark" : "exclamationmark.triangle",
+                                action: session.phase == .failed && !sessionProblem.localizedCaseInsensitiveContains("expired")
+                                    ? .init(title: String(localized: "Try again")) { await session.restore() } : nil)
+                        .padding(.horizontal, -Theme.gutter).padding(.top, 12)
+                        .accessibilityIdentifier("login-error")
+                }
                 if let warning = pendingMedia.cleanupWarning {
-                    ErrorBanner(message: warning).padding(.top, 16)
+                    ErrorBanner(message: warning).padding(.horizontal, -Theme.gutter).padding(.top, 12)
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("login-media-cleanup-warning")
                 }
-                label("Email").padding(.top, 32)
-                TextField("Work email", text: $email)
-                    .textContentType(.username)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(.plain)
-                    .focused($focused, equals: .email)
-                    .submitLabel(.next)
-                    .onSubmit { focused = .password }
-                    .paperField()
-                    .padding(.top, 8)
 
-                HStack {
-                    label("Password")
-                    Spacer()
-                    Button("Forgot?") { showingReset = true }
-                        .font(Theme.font(13, weight: .medium))
-                        .foregroundStyle(Theme.brandText)
+                PaperFormField("Email") {
+                    TextField("Email", text: $email, prompt: Text(verbatim: "you@company.com").foregroundStyle(Theme.muted))
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.plain)
+                        .focused($focused, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit { focused = .password }
+                        .onChange(of: email) { _, _ in emailError = nil }
+                        .font(Theme.font(16))
+                        .fieldWell()
+                        .accessibilityLabel("Email")
+                    if let emailError { FieldProblem(message: emailError) }
+                }
+                .padding(.top, 28)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Password").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                            .accessibilityHidden(true)
+                        Spacer()
+                        Button { showingReset = true } label: {
+                            Text("Forgot password?").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
+                                .frame(minHeight: 32).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("login-forgot")
+                    }
+                    HStack(spacing: 0) {
+                        Group {
+                            if showPassword {
+                                TextField("Password", text: $password)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            } else {
+                                SecureField("Password", text: $password)
+                            }
+                        }
+                        .textContentType(.password)
+                        .textFieldStyle(.plain)
+                        .font(Theme.font(16))
+                        .focused($focused, equals: .password)
+                        .submitLabel(.go)
+                        .onSubmit { Task { await signIn() } }
+                        .onChange(of: password) { _, _ in passwordError = nil }
+                        .accessibilityLabel("Password")
+                        // Typing a password on a phone in a truck is error-prone; let people check it.
+                        Button { showPassword.toggle(); focused = .password } label: {
+                            Image(systemName: showPassword ? "eye.slash" : "eye").foregroundStyle(Theme.muted)
+                                .frame(width: 44, height: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showPassword ? "Hide password" : "Show password")
+                        // Full 44pt target without making this field taller than Email.
+                        .padding(.vertical, -10).padding(.trailing, -6)
+                    }
+                    .fieldWell()
+                    if let message = passwordError ?? signInProblem {
+                        FieldProblem(message: message).accessibilityIdentifier("login-error")
+                    }
                 }
                 .padding(.top, 16)
-                HStack(spacing: 0) {
-                    Group {
-                        if showPassword {
-                            TextField("Password", text: $password)
-                                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        } else {
-                            SecureField("Password", text: $password)
-                        }
-                    }
-                    .textContentType(.password)
-                    .textFieldStyle(.plain)
-                    .focused($focused, equals: .password)
-                    .submitLabel(.go)
-                    .onSubmit { Task { await signIn() } }
-                    // Typing a password on a phone in a truck is error-prone; let people check it.
-                    Button { showPassword.toggle(); focused = .password } label: {
-                        Image(systemName: showPassword ? "eye.slash" : "eye").foregroundStyle(Theme.muted)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(showPassword ? "Hide password" : "Show password")
-                    // Full 44pt target without making this field taller than Email.
-                    .padding(.vertical, -10).padding(.trailing, -10)
-                }
-                .paperField()
-                .padding(.top, 8)
 
-                if let message = error ?? session.error {
-                    // MA-15: plain words in body colour; only the mark is tinted.
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.destructive)
-                        Text(message).foregroundStyle(Theme.foreground)
-                    }
-                    .font(Theme.font(15))
-                    .padding(.top, 12)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("login-error")
-                }
-                Button { Task { await signIn() } } label: {
-                    HStack(spacing: 8) {
-                        if busy { ProgressView().tint(Theme.onInk) }
-                        Text("Log in")
-                    }
-                    .inkCommit()
-                }
-                .buttonStyle(PressStyle())
-                .disabled(busy)
-                .padding(.top, 24)
-                .accessibilityIdentifier("login-submit")
-
-                if session.phase == .failed {
-                    Button("Retry session") { Task { await session.restore() } }
-                        .font(Theme.font(13, weight: .medium))
-                        .foregroundStyle(Theme.brandText)
-                        .padding(.top, 20)
-                }
-                Spacer(minLength: 80)
+                Spacer(minLength: 40)
                 // Owners register here; people joining a team accept their email invite first.
                 Button { showingSignUp = true } label: {
                     HStack(spacing: 5) {
                         Text("New to Thorbis?").foregroundStyle(Theme.muted)
                         Text("Create an account").foregroundStyle(Theme.brandText)
                     }
-                    .font(Theme.font(13, weight: .medium))
+                    .font(Theme.font(15, weight: .medium))
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .padding(.bottom, 12)
                 .accessibilityIdentifier("login-create-account")
             }
-            .padding(.horizontal, 20)
-            .padding(.top, sizeClass == .regular ? 72 : 32)
-            .frame(maxWidth: 430, minHeight: max(620, geometry.size.height - 32), alignment: .topLeading)
+            .padding(.horizontal, Theme.gutter)
+            .padding(.top, sizeClass == .regular ? 72 : 40)
+            .padding(.bottom, 8)
+            .frame(maxWidth: 430, alignment: .topLeading)
             .frame(maxWidth: .infinity)
         }
-        }
         .scrollDismissesKeyboard(.interactively)
+        .scrollBounceBehavior(.basedOnSize)
         .background(Theme.background.ignoresSafeArea())
+        // MA-16: the one commit, under the thumb and above the keyboard.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button { Task { await signIn() } } label: {
+                HStack(spacing: 8) {
+                    if busy { ProgressView().tint(Theme.onInk) }
+                    Text("Log in")
+                }
+                .inkCommit()
+            }
+            .buttonStyle(PressStyle())
+            .disabled(busy)
+            .accessibilityIdentifier("login-submit")
+            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
+            .frame(maxWidth: 470)
+            .frame(maxWidth: .infinity)
+            .background(Theme.background)
+        }
         .sheet(isPresented: $showingSignUp) {
             SignUpView(initialEmail: email)
         }
@@ -147,21 +202,35 @@ struct LoginView: View {
         }
     }
 
-    private func label(_ title: String) -> some View {
-        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-    }
-
     private func signIn() async {
         guard !busy else { return }
         let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !address.isEmpty, !password.isEmpty else {
-            error = "Enter your email and password."
-            return
-        }
+        emailError = nil
+        passwordError = nil
+        guard !address.isEmpty else { emailError = "Enter your work email."; focused = .email; return }
+        guard address.contains("@") else { emailError = "That doesn’t look like an email. Check it and try again."; focused = .email; return }
+        guard !password.isEmpty else { passwordError = "Enter your password."; focused = .password; return }
         busy = true
         defer { busy = false }
-        error = nil
+        attempted = true
         await session.signIn(email: address, password: password)
+    }
+}
+
+/// An error in place of a field's help text: the words in body colour, only the mark tinted.
+struct FieldProblem: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill").font(.system(size: 13)).foregroundStyle(Theme.destructive)
+                .accessibilityHidden(true)
+            Text(message).font(Theme.font(13)).foregroundStyle(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Error: \(message)")
     }
 }
 
@@ -169,11 +238,7 @@ private extension View {
     func paperField() -> some View {
         font(Theme.font(16))
             .foregroundStyle(Theme.foreground)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(minHeight: 46)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
+            .fieldWell()
     }
 }
 
@@ -203,7 +268,7 @@ private struct PasswordResetRequestView: View {
                         .font(Theme.font(13, weight: .medium))
                         .foregroundStyle(Theme.muted)
                         .padding(.top, 32)
-                    TextField("you@company.com", text: $email)
+                    TextField("Email", text: $email, prompt: Text(verbatim: "you@company.com").foregroundStyle(Theme.muted))
                         .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)

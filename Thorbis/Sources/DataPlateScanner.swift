@@ -304,7 +304,7 @@ struct DataPlateScannerSheet: View {
         }
     }
 
-    private var photoFallback: some View {
+    @ViewBuilder private var photoFallback: some View {
         PaperCard(padding: 14) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Take a photo of the tag").font(Theme.font(16, weight: .medium))
@@ -326,6 +326,9 @@ struct DataPlateScannerSheet: View {
             }
         }
         .accessibilityIdentifier("data-plate-fallback")
+        if cameraDenied {
+            PermissionNotice(permission: .camera, purpose: "scan data plates live", outer: 0)
+        }
     }
 
     // MARK: Fields

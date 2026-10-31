@@ -78,6 +78,8 @@ struct JobMediaView: View {
     @StateObject private var preview = DocumentPreviewController()
     @State private var importDocument = false
     @State private var showCamera = false
+    /// Camera access is off in Settings; the notice above the capture buttons says so.
+    @State private var cameraDenied = false
     @State private var showScanner = false
     @State private var showLegacyRecovery = false
     /// Markup opened from a photo's preview (drawn over that sheet) or right after capture.
@@ -277,7 +279,7 @@ struct JobMediaView: View {
                 // One empty state for the whole tab instead of two empty sections.
                 if allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && (currentPendingContext == nil || (pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil)) && !loading && !hasMore && pageError == nil && readScope == sourceScope && readScope != nil {
                     PaperEmptyState(symbol: "camera", title: "No photos yet",
-                                    message: canAdd ? "Take a before photo when you arrive. Photos, PDFs and video clips up to 8 MB." : "Photos and documents added to this job show here.")
+                                    message: canAdd ? "Take a before photo when you arrive. Photos, PDFs and clips up to 8 MB." : nil)
                 }
                 if !photos.isEmpty { PaperGroupHeader(title: hasMore ? "Photos loaded" : "Photos", count: photos.count) }
                 if !photos.isEmpty {
@@ -495,6 +497,13 @@ struct JobMediaView: View {
         .onChange(of: records) { _, _ in if !previewIsCurrent { preview.clear(); previewScope = nil; previewRecord = nil } }
         .onDisappear { selectedData = nil; justCaptured = nil; preview.clear() }
     }
+    /// The camera, or, when it is turned off for Thorbis, the notice that says so with Open Settings.
+    private func openCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return }
+        cameraDenied = [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video))
+        if !cameraDenied { showCamera = true }
+    }
+
     /// Opens what the job screen's toolkit asked for, with the same checks as the buttons below.
     private func consumeLaunch() {
         guard let request = launch.wrappedValue, captureContext != nil else { return }
@@ -503,7 +512,7 @@ struct JobMediaView: View {
         switch request {
         case .camera(let requested):
             if let requested, ["Before", "After", "Other"].contains(requested) { stage = requested }
-            if UIImagePickerController.isSourceTypeAvailable(.camera) { showCamera = true }
+            openCamera()
         case .scan:
             if VNDocumentCameraViewController.isSupported { showScanner = true } else { importDocument = true }
         case .measure:
@@ -536,11 +545,14 @@ struct JobMediaView: View {
 
     private var photoCaptureControls: some View {
         VStack(spacing: 8) {
+            if cameraDenied {
+                PermissionNotice(permission: .camera, purpose: "add photos to jobs", outer: 0)
+            }
             ThorbisSegmented(options: [("Before", "Before"), ("After", "After"), ("Other", "Other")],
                              selection: $stage)
                 .disabled(busy)
             HStack(spacing: 8) {
-                Button { showCamera = true } label: {
+                Button { openCamera() } label: {
                     HStack(spacing: 7) {
                         if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "camera") }
                         Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")

@@ -49,8 +49,7 @@ struct PaperTabletSchedule: View {
                     }
                     if jobs.isEmpty && !store.loading {
                         PaperEmptyState(symbol: "calendar", title: "Nothing booked today",
-                                        message: "Booked jobs show here in time order.",
-                                        actionTitle: newJob == nil ? nil : "New job", action: newJob)
+                                        actionTitle: newJob == nil ? nil : "Book a job", action: newJob)
                     }
                     if store.loading && jobs.isEmpty { SkeletonRows(count: 5, leading: false) }
                 }
