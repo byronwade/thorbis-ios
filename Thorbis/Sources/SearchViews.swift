@@ -229,6 +229,9 @@ struct SearchHit: Identifiable {
     var status: StatusWord? = nil
     var amount: String? = nil
     var dimmed = false
+    /// What leads the row by kind (redesign phase 2): a job's status glyph, a customer's initials,
+    /// a document's place mark.
+    var glyph: SearchGlyph = .none
     let target: Target
 }
 
@@ -276,16 +279,17 @@ struct SearchResultsBuilder {
         let customer = customerName(job.customerId)
         // Street first (BYR-1593): the problem follows; with no site the job title leads.
         let subtitle = place == nil ? "\(customer) · \(job.shortRef)" : "\(job.title) · \(customer) · \(job.shortRef)"
+        // The glyph carries the status (VoiceOver reads its word), like Linear's search.
         return SearchHit(id: "job:\(job.id)", title: place ?? job.title, subtitle: subtitle,
-                         status: StatusWord(jobStatus: job.status), dimmed: ["completed", "canceled"].contains(job.status),
-                         target: .open(.job(job)))
+                         dimmed: ["completed", "canceled"].contains(job.status),
+                         glyph: .job(status: job.status, hasTime: job.scheduledFor != nil), target: .open(.job(job)))
     }
 
     func customerHit(_ customer: Customer) -> SearchHit {
         let record = record(customer.id)
         let detail = [record?.phone, record?.address].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
         return SearchHit(id: "customer:\(customer.id)", title: customer.name, subtitle: detail.isEmpty ? nil : detail,
-                         target: .open(.customer(customer)))
+                         glyph: .customer(customer.name), target: .open(.customer(customer)))
     }
 
     func estimateHit(_ estimate: EstimateRecord) -> SearchHit {
@@ -293,7 +297,7 @@ struct SearchResultsBuilder {
                   subtitle: "\(customerName(estimate.customerId)) · \(Self.estimateRef(estimate.id))",
                   status: StatusWord(documentStatus: estimate.status),
                   amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") },
-                  target: .open(.route(.estimate(estimate.id))))
+                  glyph: SearchGlyph.document("estimate"), target: .open(.route(.estimate(estimate.id))))
     }
 
     func invoiceHit(_ invoice: InvoiceRecord) -> SearchHit {
@@ -303,7 +307,7 @@ struct SearchResultsBuilder {
         return SearchHit(id: "invoice:\(invoice.id)", title: customerName(invoice.customerId),
                          subtitle: Self.invoiceRef(invoice.id), status: StatusWord(documentStatus: invoice.status),
                          amount: shown.map { money($0, currency: invoice.currency) },
-                         target: .open(.route(.invoice(invoice.id))))
+                         glyph: SearchGlyph.document("invoice"), target: .open(.route(.invoice(invoice.id))))
     }
 
     func actionHit(_ action: SearchAction) -> SearchHit {
@@ -313,8 +317,13 @@ struct SearchResultsBuilder {
 
     /// A server result the phone holds no copy of: its own words, opened by id.
     func serverHit(_ result: ServerSearchResult) -> SearchHit {
-        let tint = result.status.flatMap { result.resultType == "job" ? StatusWord.jobTint($0) : StatusWord.documentTint($0) }
-        let status = result.status.map { result.resultType == "job" ? StatusWord(text: $0.statusLabel, tint: tint) : StatusWord(documentStatus: $0) }
+        // A job's status is its glyph; documents keep their status word beside the amount.
+        let status = result.resultType == "job" ? nil : result.status.map { StatusWord(documentStatus: $0) }
+        let glyph: SearchGlyph = switch result.resultType {
+        case "job": .job(status: result.status ?? "scheduled", hasTime: true)
+        case "customer": .customer(result.title)
+        default: SearchGlyph.document(result.resultType)
+        }
         let target: SearchHit.Target = switch result.resultType {
         case "job": .open(.route(.job(result.entityId)))
         case "customer": .open(.customer(Customer(id: result.entityId, name: result.title, archived: nil, createdAt: nil)))
@@ -324,7 +333,7 @@ struct SearchResultsBuilder {
         default: .none
         }
         return SearchHit(id: "\(result.resultType):\(result.entityId)", title: result.title, subtitle: result.subtitle,
-                         status: status, target: target)
+                         status: status, glyph: glyph, target: target)
     }
 
     static func estimateRef(_ id: String) -> String { "EST-\(id.suffix(4).uppercased())" }
@@ -733,6 +742,8 @@ private struct SearchScreen: View {
                 }
                 .padding(.horizontal, PaperCardMetrics.margin)
                 .padding(.top, 8).padding(.bottom, 24)
+                // Redesign phase 2: results grouped by kind, a semibold header over each well.
+                .environment(\.paperGroupedWells, true)
             }
             .onChange(of: model.selection) { _, selection in
                 guard let selection else { return }
@@ -810,16 +821,27 @@ private struct SearchScreen: View {
 
     private func row(_ hit: SearchHit) -> some View {
         let selected = isSelected(hit)
-        let label = PaperListRow(leading: hit.leading, title: hit.title, subtitle: hit.subtitle, dimmed: hit.dimmed,
-                                 highlight: terms.marks) {
-            if hit.amount != nil || hit.status != nil {
-                VStack(alignment: .trailing, spacing: 4) {
-                    if let amount = hit.amount {
-                        Text(amount).font(Theme.moneyFont(.line, regular: false)).foregroundStyle(Theme.foreground)
+        let hasGlyph: Bool = { if case .none = hit.glyph { false } else { true } }()
+        // Redesign phase 2: the kind's glyph leads (status, initials, place mark), then the words.
+        let label = HStack(alignment: .firstTextBaseline, spacing: 0) {
+            if hasGlyph {
+                hit.glyph.view
+                    .frame(minWidth: 26)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
+                    .padding(.leading, PaperCardMetrics.inset)
+            }
+            PaperListRow(leading: hit.leading, title: hit.title, subtitle: hit.subtitle, dimmed: hit.dimmed,
+                         highlight: terms.marks) {
+                if hit.amount != nil || hit.status != nil {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        if let amount = hit.amount {
+                            Text(amount).font(Theme.moneyFont(.line, regular: false)).foregroundStyle(Theme.foreground)
+                        }
+                        if let status = hit.status { status }
                     }
-                    if let status = hit.status { status }
                 }
             }
+            .environment(\.paperRowInset, hasGlyph ? 12 : PaperCardMetrics.inset)
         }
         .background {
             if selected {
@@ -903,7 +925,7 @@ private struct SearchScreen: View {
         }
         // On Jobs the open jobs are the place's records too, so they follow its recents.
         if focus == .jobs && !openJobs.isEmpty { groups.append(SearchGroup(id: "open", title: "Open jobs", hits: openJobs)) }
-        if !rest.isEmpty { groups.append(SearchGroup(id: "opened", title: "Recently opened", hits: rest.map(\.1))) }
+        if !rest.isEmpty { groups.append(SearchGroup(id: "opened", title: "Recently viewed", hits: rest.map(\.1))) }
         if focus != .jobs && !openJobs.isEmpty { groups.append(SearchGroup(id: "open", title: "Open jobs", hits: openJobs)) }
         return groups
     }

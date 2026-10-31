@@ -38,6 +38,11 @@ in light and dark, and scales with Dynamic Type.
 | Person's initials circle | `InitialsAvatar` | `StatusGlyph.swift` |
 | Place mark (tinted square + white glyph) | `PlaceMark` | `StatusGlyph.swift` |
 | Grouped rows on a well, inset hairlines | `Well`, `WellList`, `WellDivider` | `StatusGlyph.swift` |
+| A long list's well, row by row (stays lazy) | `WellSection`, `.wellSlice(first:last:)` | `ListRows.swift` |
+| Job row (glyph, street, problem, who and when, avatar) | `JobListRowContent` | `ListRows.swift` |
+| Customer row (initials, name, where, open job's status) | `CustomerListRowContent` | `ListRows.swift` |
+| Search row's kind glyph (status, initials, place mark) | `SearchGlyph` | `ListRows.swift` |
+| Old `PaperSection`/`PaperCard` drawn as header + well | `.environment(\.paperGroupedWells, true)` | `PaperComponents.swift` |
 | Section header with count | `SectionHeader` | `../Theme.swift` |
 | Linear text tabs (plain words, well pill) | `PaperTabs(textTabs: true)` | `../PaperComponents.swift` |
 | Activity timeline row (glyph on a thin line) | `JobTimelineItem`, `JobActivityGlyph` | `../JobScreenParts.swift` |

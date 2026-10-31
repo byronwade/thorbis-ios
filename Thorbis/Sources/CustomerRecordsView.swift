@@ -15,6 +15,7 @@ struct CustomerRecordsView: View {
     var retryMedia: () async -> Void = {}
     var parts: Set<CustomerRecordsPart> = Set(CustomerRecordsPart.allCases)
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.paperGroupedWells) private var wells
     @State private var openedLegacy: LegacyCustomerPhoto?
 
     /// The record a Records-tab activity row opens. A payment with no invoice id stays closed.
@@ -241,11 +242,18 @@ struct CustomerRecordsView: View {
     }
 
     /// design 2026-10-30: the section label above its panel ("Estimates · 2"), no glyph.
-    private func heading(_ title: String, count: Int, symbol: String, incomplete: Bool = false) -> some View {
-        Text(incomplete ? "\(title) · partial" : "\(title) · \(count)")
-            .font(Theme.font(13, weight: .medium)).monospacedDigit()
-            .foregroundStyle(Theme.muted).padding(.horizontal, 4)
-            .accessibilityAddTraits(.isHeader)
+    @ViewBuilder private func heading(_ title: String, count: Int, symbol: String, incomplete: Bool = false) -> some View {
+        if wells {
+            // Redesign phase 2: the grouped section header, "partial" in place of a count it can't vouch for.
+            SectionHeader(title: title, count: incomplete ? nil : count) {
+                if incomplete { Text("Partial").font(Theme.font(15)) }
+            }
+        } else {
+            Text(incomplete ? "\(title) · partial" : "\(title) · \(count)")
+                .font(Theme.font(13, weight: .medium)).monospacedDigit()
+                .foregroundStyle(Theme.muted).padding(.horizontal, 4)
+                .accessibilityAddTraits(.isHeader)
+        }
     }
 
     /// One white panel per section; rows pad to the panel's inset.
