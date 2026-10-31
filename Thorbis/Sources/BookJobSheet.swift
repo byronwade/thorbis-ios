@@ -161,8 +161,9 @@ struct NewJobSheet: View {
                 ScrollView {
                     // In the order a call gives it: who, what, where, when, who goes.
                     VStack(alignment: .leading, spacing: 22) {
+                        // Redesign phase 3: the form's title at 30 semibold, like a detail screen.
                         Text("New job")
-                            .font(Theme.font(24, weight: .medium)).tracking(-0.39)
+                            .font(Theme.font(30, weight: .semibold)).tracking(-0.6)
                             .accessibilityAddTraits(.isHeader)
                             .padding(.top, 4)
                         callerSection
@@ -186,6 +187,8 @@ struct NewJobSheet: View {
                         }
                     }
                     .padding(.horizontal, Theme.gutter).padding(.vertical, 8).padding(.bottom, 12)
+                    // Redesign phase 3: result lists and the chosen customer sit on grouped wells.
+                    .environment(\.paperGroupedWells, true)
                 }
                 .scrollDismissesKeyboard(.interactively)
                 #if DEBUG
@@ -332,7 +335,8 @@ struct NewJobSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(typed ? (matches.isEmpty ? "No match" : "Matches") : "Recent customers")
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 if canReadCustomers && !store.customers.isEmpty {
                     // A 44pt target for a gloved thumb; the words stay quiet.
@@ -347,11 +351,15 @@ struct NewJobSheet: View {
             PaperCard {
                 VStack(spacing: 0) {
                     ForEach(matches) { person in
+                        // The Customers list's row: tinted initials, the name in semibold, where and the last job.
                         Button { select(person.id) } label: {
-                            PaperListRow(title: person.name, subtitle: person.detail, meta: lastJobLine(person.id))
+                            CustomerListRowContent(name: person.name, detail: person.detail, meta: lastJobLine(person.id))
                         }
                         .buttonStyle(RowPressStyle())
                         .accessibilityHint("Books the job for \(person.name)")
+                        if canCreateCustomer || person.id != matches.last?.id {
+                            WellDivider(leading: CustomerListRowContent.dividerInset)
+                        }
                     }
                     if canCreateCustomer {
                         Button { startNewCustomer() } label: {

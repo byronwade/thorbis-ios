@@ -24,7 +24,8 @@ struct WorkspaceNoticesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Inbox").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
+                    // Redesign phase 3: a place's title, 34 semibold like the tab roots.
+                    Text("Inbox").font(Theme.font(34, weight: .semibold)).tracking(-0.8).accessibilityAddTraits(.isHeader)
                     Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
@@ -32,7 +33,8 @@ struct WorkspaceNoticesView: View {
                     PaperEmptyState(symbol: "bell.slash", title: "Inbox is off for your role",
                                     message: "Ask your office for access to notices.")
                 } else {
-                    PaperTabs(options: ["All", "Unread"], selection: $filter)
+                    // Linear text tabs under the title, as on Today.
+                    PaperTabs(options: ["All", "Unread"], selection: $filter, textTabs: true)
                     if let error { ErrorBanner(message: error) { await refresh() } }
                     if loading && items.isEmpty && error == nil { SkeletonRows(count: 5) }
                     let notices = visible
@@ -44,8 +46,9 @@ struct WorkspaceNoticesView: View {
                         let endsRun = index == notices.count - 1 || InboxNoticeDay.header(notices[index + 1].at, after: notice.at,
                                                                                          hasPrevious: true, calendar: displayCalendar, locale: locale) != nil
                         if let heading {
-                            PaperGroupHeader(title: heading)
-                                .padding(.horizontal, Theme.gutter).padding(.top, 10)
+                            SectionHeader(title: heading)
+                                .padding(.top, 12).padding(.bottom, 2)
+                                .paperCardMargin()
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityIdentifier("inbox-day-heading")
                         }
@@ -56,7 +59,7 @@ struct WorkspaceNoticesView: View {
                                                                      : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
                         rowLayout {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .medium))
+                                Text(notice.title).font(Theme.font(16, weight: notice.read ? .regular : .semibold))
                                     .foregroundStyle(notice.read ? Theme.muted : Theme.foreground)
                                     .fixedSize(horizontal: false, vertical: true)
                                 Text([notice.meta, timeLabel(notice.at)].filter { !$0.isEmpty }.joined(separator: " · "))
@@ -76,7 +79,7 @@ struct WorkspaceNoticesView: View {
                         .accessibilityLabel([notice.title, notice.meta, timeLabel(notice.at), notice.read ? "Read" : "Unread"]
                             .filter { !$0.isEmpty }.joined(separator: ", "))
                         .accessibilityHint("Opens the job")
-                        .paperCardSlot(first: heading != nil || index == 0, last: endsRun)
+                        .wellSlice(first: heading != nil || index == 0, last: endsRun)
                         .paperCardMargin()
                     }
                     if nextCursor != nil {
@@ -417,11 +420,13 @@ struct WorkspacePriceBookView: View {
                                     if collapsedGroups.contains(groupName) { collapsedGroups.remove(groupName) }
                                     else { collapsedGroups.insert(groupName) }
                                 } label: {
-                                    HStack(spacing: 6) {
-                                        Text("\(groupName) · \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
-                                            .font(Theme.font(13, weight: .medium)).monospacedDigit()
+                                    // Redesign phase 3: the semibold section header with its count.
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text(groupName).font(Theme.font(15, weight: .semibold))
+                                        Text("\(grouped.count)\(currentCursor == nil ? "" : " loaded")")
+                                            .font(Theme.font(15)).monospacedDigit()
                                         Image(systemName: collapsedGroups.contains(groupName) ? "chevron.right" : "chevron.down")
-                                            .font(.system(size: 10, weight: .semibold))
+                                            .font(.system(size: 11, weight: .semibold))
                                         Spacer()
                                     }
                                     .foregroundStyle(Theme.muted).frame(minHeight: 36).contentShape(Rectangle())
@@ -432,21 +437,25 @@ struct WorkspacePriceBookView: View {
                                 .accessibilityLabel("\(groupName), \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
                                 .accessibilityValue(collapsedGroups.contains(groupName) ? "Collapsed" : "Expanded")
                                 if !collapsedGroups.contains(groupName) {
+                                    // Redesign phase 3: the group's items on one well, hairlines between rows.
                                     LazyVStack(spacing: 0) {
-                                        PaperCardList(data: grouped) { item in
-                                            if canViewDetail {
-                                                NavigationLink {
-                                                    WorkspacePriceBookDetailView(api: api, id: item.id, canEdit: canEdit).thorbisBackButton()
-                                                } label: { row(item, showFullDescription: showingPreviousItems) }
-                                                .buttonStyle(RowPressStyle())
-                                            } else if showingPreviousItems {
-                                                // Preserve the previously visible description without opening new detail under stale authority.
-                                                row(item, showFullDescription: true)
-                                            } else {
-                                                Button {
-                                                    if let scope = localScope { localDetail = PriceBookLocalSelection(item: item, scope: scope) }
-                                                } label: { row(item) }.buttonStyle(RowPressStyle())
+                                        ForEach(Array(grouped.enumerated()), id: \.element.id) { index, item in
+                                            Group {
+                                                if canViewDetail {
+                                                    NavigationLink {
+                                                        WorkspacePriceBookDetailView(api: api, id: item.id, canEdit: canEdit).thorbisBackButton()
+                                                    } label: { row(item, showFullDescription: showingPreviousItems) }
+                                                    .buttonStyle(RowPressStyle())
+                                                } else if showingPreviousItems {
+                                                    // Preserve the previously visible description without opening new detail under stale authority.
+                                                    row(item, showFullDescription: true)
+                                                } else {
+                                                    Button {
+                                                        if let scope = localScope { localDetail = PriceBookLocalSelection(item: item, scope: scope) }
+                                                    } label: { row(item) }.buttonStyle(RowPressStyle())
+                                                }
                                             }
+                                            .wellSlice(first: index == 0, last: index == grouped.count - 1)
                                         }
                                     }
                                 }
@@ -573,7 +582,8 @@ struct WorkspacePriceBookView: View {
 
     private func itemPrice(_ item: PriceBookListItem) -> some View {
         Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-            .moneyStyle(.row).foregroundStyle(Theme.foreground)
+            .font(Theme.amountFont(17)).lineLimit(1).minimumScaleFactor(0.7)
+            .foregroundStyle(Theme.foreground)
     }
 
     private func activate(scope: PriceBookLocalScope) async {
@@ -683,8 +693,8 @@ private struct PriceBookItemSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(price).font(Theme.font(34, weight: .medium)).monospacedDigit()
-                Text(PriceBookPresentation.title(description)).font(Theme.font(20, weight: .medium))
+                Text(price).font(Theme.font(34, weight: .semibold)).monospacedDigit()
+                Text(PriceBookPresentation.title(description)).font(Theme.font(20, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 4)
@@ -701,6 +711,8 @@ private struct PriceBookItemSummary: View {
                 .padding(.vertical, PaperCardMetrics.edge)
             }
         }
+        // Redesign phase 3: semibold headers over grouped wells.
+        .environment(\.paperGroupedWells, true)
     }
 }
 

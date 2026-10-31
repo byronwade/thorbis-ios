@@ -24,11 +24,11 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     VStack(spacing: 8) {
-                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(24, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .frame(width: 72, height: 72).background(Theme.fill, in: Circle())
-                            .overlay(Circle().stroke(Theme.border))
-                        Text(session.user?.name ?? "Account").font(Theme.font(20, weight: .medium))
+                        // Redesign phase 3: the person's tinted initials, as on every other screen.
+                        InitialsAvatar(name: session.user?.name ?? session.user?.email ?? "?", size: 72)
+                            .accessibilityHidden(true)
+                        Text(session.user?.name ?? "Account").font(Theme.font(24, weight: .semibold)).tracking(-0.4)
+                            .multilineTextAlignment(.center)
                         if let email = session.user?.email { Text(email).font(Theme.font(15)).foregroundStyle(Theme.muted) }
                     }
                     .frame(maxWidth: .infinity)
@@ -41,20 +41,24 @@ struct SettingsView: View {
                                 row("Company", symbol: "building.2", value: session.activeOrganization?.name ?? "Choose")
                             }
                             .buttonStyle(RowPressStyle())
+                            WellDivider(leading: Self.rowDivider)
                             NavigationLink { CustomizeMenuView().thorbisBackButton() } label: {
                                 row("Customize menu", symbol: "slider.horizontal.3", value: nil)
                             }
                             .buttonStyle(RowPressStyle())
                             // Owners reach the business screens here, now that the More screen is off the menu.
                             if session.can("organization.settings.edit") {
+                                WellDivider(leading: Self.rowDivider)
                                 NavigationLink(value: PaperRoute.businessSetup) {
                                     row("Set up your business", symbol: "checklist", value: nil)
                                 }
                                 .buttonStyle(RowPressStyle())
+                                WellDivider(leading: Self.rowDivider)
                                 NavigationLink(value: PaperRoute.companyDetails) {
                                     row("Company details", symbol: "building.2", value: nil)
                                 }
                                 .buttonStyle(RowPressStyle())
+                                WellDivider(leading: Self.rowDivider)
                                 NavigationLink(value: PaperRoute.payments) {
                                     row("Payments", symbol: "creditcard", value: nil)
                                 }
@@ -62,6 +66,7 @@ struct SettingsView: View {
                             }
                             // Who hears about booked and changed jobs; the feed itself is Inbox.
                             if MenuItem.notices.permitted(session) {
+                                WellDivider(leading: Self.rowDivider)
                                 NavigationLink(value: PaperRoute.notices) {
                                     row("Notification rules", symbol: "bell.badge", value: nil)
                                 }
@@ -81,6 +86,7 @@ struct SettingsView: View {
                                 row("Appearance", symbol: "circle.lefthalf.filled",
                                     value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System")
                             }
+                            WellDivider(leading: Self.rowDivider)
                             Button {
                                 Task { await notificationsTapped() }
                             } label: {
@@ -101,10 +107,9 @@ struct SettingsView: View {
 
                     VStack(spacing: 8) {
                         Button { confirmSignOut = true } label: {
-                            Text("Sign out").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.destructive)
+                            Text("Sign out").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
                                 .frame(maxWidth: .infinity, minHeight: 48)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous).strokeBorder(Theme.border))
+                                .background(Theme.well, in: RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous))
                         }
                         .buttonStyle(PressStyle())
                         Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
@@ -113,6 +118,8 @@ struct SettingsView: View {
                     }
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 32)
+                // Redesign phase 3: semibold section headers over grouped wells.
+                .environment(\.paperGroupedWells, true)
             }
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
@@ -161,9 +168,33 @@ struct SettingsView: View {
         }
     }
 
+    /// A settings row, Linear style: a tinted place mark, the setting, its value as a quiet word.
     private func row(_ title: String, symbol: String, value: String?) -> some View {
-        PaperListRow(leading: .icon(symbol), title: title) {
-            if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 3 : 1) }
+        HStack(alignment: .center, spacing: 12) {
+            PlaceMark(symbol: symbol, tint: Self.markTint(symbol))
+            PaperListRow(title: title) {
+                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(typeSize.isAccessibilitySize ? 3 : 1) }
+            }
+            .environment(\.paperRowInset, 0)
+        }
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .contentShape(Rectangle())
+    }
+
+    /// The hairline between rows starts under the words, past the place mark.
+    private static let rowDivider: CGFloat = PaperCardMetrics.inset + 26 + 12
+
+    /// One hue per kind of setting, from the place-mark palette (decorative; the word carries it).
+    private static func markTint(_ symbol: String) -> Color {
+        switch symbol {
+        case "building.2": Theme.markBlue
+        case "slider.horizontal.3": Theme.markAccent
+        case "checklist": Theme.markForest
+        case "creditcard": Theme.markTeal
+        case "bell.badge", "bell": Theme.markRed
+        case "circle.lefthalf.filled": Theme.markGrey
+        case "sparkles": Theme.markPumpkin
+        default: Theme.markGrey
         }
     }
 }
