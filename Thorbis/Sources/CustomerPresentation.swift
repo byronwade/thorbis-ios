@@ -228,49 +228,52 @@ struct CustomerEstimatePresentation: View {
         }
     }
 
+    /// The whole card is the choice (F25): price first, then the option's name and what it is.
+    /// "See what's included" sits below the tap area so it never doubles as a choice.
     private func optionCard(_ option: FieldEstimateOption) -> some View {
         let selected = flow.selectedOptionID == option.id
-        return VStack(alignment: .leading, spacing: 10) {
-            Text(option.title).font(Theme.font(type.heading, weight: .medium))
-                .accessibilityAddTraits(.isHeader)
-            if !option.description.isEmpty {
-                Text(option.description).font(Theme.font(type.body))
-                    .fixedSize(horizontal: false, vertical: true)
+        let total = money(option.totalAmount, currency: option.currency)
+        return VStack(alignment: .leading, spacing: 4) {
+            Button { flow.choose(option.id) } label: {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(total)
+                            .font(Theme.monoFont(type.total, weight: .medium))
+                            .minimumScaleFactor(0.6).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 26))
+                            .foregroundStyle(selected ? Theme.brandText : Theme.muted)
+                    }
+                    Text(option.title).font(Theme.font(type.heading, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !option.description.isEmpty {
+                        Text(option.description).font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .foregroundStyle(Theme.foreground)
+                .frame(maxWidth: .infinity, minHeight: type.target, alignment: .topLeading)
+                .contentShape(Rectangle())
             }
-            Text(money(option.totalAmount, currency: option.currency))
-                .font(Theme.monoFont(type.total, weight: .medium))
-                .minimumScaleFactor(0.6).lineLimit(1)
-                .accessibilityLabel("Total \(money(option.totalAmount, currency: option.currency))")
+            .buttonStyle(PressStyle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(selected ? "\(option.title), selected" : "Choose \(option.title)")
+            .accessibilityValue("Total \(total)")
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            Spacer(minLength: 0)
             Button { detailsFor = option } label: {
                 Text("See what's included").font(Theme.font(type.body)).underline()
                     .foregroundStyle(Theme.brandText)
                     .frame(minHeight: type.target, alignment: .leading)
             }
             .buttonStyle(.plain)
-            Spacer(minLength: 0)
-            Button { flow.choose(option.id) } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 24))
-                        .foregroundStyle(selected ? Theme.brandText : Theme.muted)
-                        .accessibilityHidden(true)
-                    Text(selected ? "Selected" : "Choose \(option.title)")
-                        .font(Theme.font(type.body, weight: .medium))
-                }
-                .frame(maxWidth: .infinity, minHeight: type.target)
-                .foregroundStyle(Theme.foreground)
-                // Selection is the blue pointer; the screen's only ink is the commit (CP-07).
-                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 14))
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(selected ? .isSelected : [])
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        // Selection is the blue pointer and a firmer rim; the screen's only ink is the commit (CP-07).
+        .background(selected ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(selected ? Theme.foreground : Theme.border, lineWidth: selected ? 2 : 1))
-        .contentShape(RoundedRectangle(cornerRadius: 14))
-        .onTapGesture { flow.choose(option.id) }
     }
 
     private var reviewScreen: some View {
