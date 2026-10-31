@@ -759,8 +759,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let expiry = ISO8601DateFormatter().string(from: PaperPreview.isSavedWorkPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-expiry") ? PaperPreview.savedWorkDeadline : Date().addingTimeInterval(86_400))
         let now = ISO8601DateFormatter().string(from: Date())
         // `--paper-preview-empty` answers the list reads before any screen-specific fixture.
-        if PaperPreview.isEmptyWorkspace, ["/v1/invoices", "/v1/staff/notices"].contains(path) {
-            return ["items": [Any](), "nextCursor": NSNull()] as [String: Any]
+        if PaperPreview.isEmptyWorkspace, path == "/v1/invoices" { return ["items": [Any]()] }
+        if PaperPreview.isEmptyWorkspace, path == "/v1/staff/notices" {
+            return ["items": [Any](), "unreadState": "present", "nextCursor": NSNull()] as [String: Any]
         }
         if PaperPreview.isEmptyWorkspace, path == "/v1/query", queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
             return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",

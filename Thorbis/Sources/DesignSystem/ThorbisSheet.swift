@@ -16,7 +16,7 @@ struct ThorbisSheetScaffold<Content: View>: View {
             if title != nil || onClose != nil {
                 HStack {
                     if let title {
-                        Text(title).font(Theme.font(20, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        Text(title).font(Theme.font(18, weight: .semibold)).foregroundStyle(Theme.foreground)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityAddTraits(.isHeader)
                     }
@@ -29,7 +29,8 @@ struct ThorbisSheetScaffold<Content: View>: View {
                 .padding(.top, 14).padding(.bottom, 6)
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                // Calm and roomy, like Linear's display options: grouped wells with generous gaps.
+                VStack(alignment: .leading, spacing: 24) {
                     content()
                 }
                 .padding(.horizontal, Theme.gutter)
