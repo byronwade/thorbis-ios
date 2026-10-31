@@ -83,6 +83,8 @@ struct JobDetailView: View {
     @State private var mediaCountContext: String?
     @State private var mediaCountRequest = UUID()
     @State private var visits: [JobVisitRecord] = []
+    /// True once visit history answered for this job, so an unread history is never shown as none.
+    @State private var visitsLoaded = false
     @State private var bookingCall: BookingCallRecord?
     @State private var showAssign = false
     @State private var showFollowUps = false
@@ -133,6 +135,7 @@ struct JobDetailView: View {
                     // At accessibility sizes, the full job header can be taller than the
                     // screen. Keep the section chooser reachable above the scrolling content.
                     if typeSize.isAccessibilitySize { tabBar }
+                    ScrollViewReader { proxy in
                     ScrollView {
                     // The tabs pin under the nav bar, so switching Overview, Invoice or Activity
                     // never means scrolling back to the top first.
@@ -156,6 +159,15 @@ struct JobDetailView: View {
                         if !typeSize.isAccessibilitySize { tabBar.background(Theme.background) }
                     }
                     }
+                    }
+                    #if DEBUG
+                    // `--paper-preview-scroll-history`: screenshots start at "At this address".
+                    .task {
+                        guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-scroll-history") else { return }
+                        try? await Task.sleep(for: .seconds(3))
+                        proxy.scrollTo("job-property-history", anchor: UnitPoint(x: 0.5, y: 0.22))
+                    }
+                    #endif
                     }
                 }
             } else if error == nil {
@@ -836,6 +848,11 @@ struct JobDetailView: View {
                            openFollowUpsScreen: { showFollowUps = true })
             // JS-05: only when the platform recorded the call that booked this job.
             if let bookingCall { JobBookingCallSection(call: bookingCall) }
+            // Before you go in: access facts, equipment and recent visits, here or for the customer.
+            JobPropertyHistorySection(job: job, locations: customerLocations,
+                                      locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
+                                      visits: visits, visitsLoaded: visitsLoaded)
+                .id("job-property-history")
             if session.can("customer.view", feature: "core_crm") {
                 // Who the job is for, how to reach them and where they are, each opening its own record.
                 if let customer = linkedCustomer(job) {
@@ -854,10 +871,7 @@ struct JobDetailView: View {
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
                                            loaded: placesCurrent, failed: locationsFailed) { await loadLocations(job) }
             }
-            // No account location is assumed to be this job's site; keep all equipment visible.
-            CustomerEquipmentSection(customerID: job.customerId, locations: customerLocations)
             CustomerMembershipSection(customerID: job.customerId, editable: false)
-            JobPastVisitsSection(visits: visits, currentUserID: session.user?.id)
             detailsGroup(job)
         }
     }
@@ -1577,7 +1591,7 @@ struct JobDetailView: View {
         let loadedVisits = try? await api.fieldVisitHistory(jobId)
         let loadedCall = try? await api.fieldBookingCall(jobId)
         guard session.generation == generation else { return }
-        if let loadedVisits { visits = loadedVisits }
+        if let loadedVisits { visits = loadedVisits; visitsLoaded = true }
         if let loadedCall { bookingCall = loadedCall }
     }
 

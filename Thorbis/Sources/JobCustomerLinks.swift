@@ -61,11 +61,7 @@ struct JobServiceAddressesSection: View {
                 ForEach(Self.ordered(places)) { place in
                     JobServiceAddressRow(customerID: customerID, place: place)
                 }
-                if places.count == 1, let only = places.first,
-                   Self.accessSummary(only) != nil || !(only.notes ?? "").isEmpty {
-                    // With one address there is no choice to make: its access facts are shown in full.
-                    JobSiteSection(place: only, showsLabel: true, showsAddress: false).padding(.top, 8)
-                }
+                // Access facts are shown once, in "Before you go in" above (JobPropertyHistorySection).
             }
         }
     }
