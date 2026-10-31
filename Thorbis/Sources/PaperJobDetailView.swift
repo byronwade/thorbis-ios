@@ -177,7 +177,8 @@ struct JobDetailView: View {
                             }
                         }
                         .padding(.horizontal, Theme.gutter)
-                        .padding(.top, selectedTab == "Overview" ? 14 : 8)
+                        // On site the tool grid sits 18pt under the selector, as in OnSite.dc.html.
+                        .padding(.top, selectedTab == "Overview" ? (isOnSite ? 12 : 14) : 8)
                         .padding(.bottom, 28)
                     } header: {
                         if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.background) }
@@ -583,12 +584,13 @@ struct JobDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
-            statusLine(job).padding(.top, 2)
+            // Job.dc.html / OnSite.dc.html: 8pt above the status line (the facts carry 3 of it).
+            statusLine(job).padding(.top, 5)
             // On site, what to know before touching anything comes before every action.
             if isOnSite, let banner = accessBanner(job) {
-                banner.padding(.top, 16)
+                banner.padding(.top, 18)
             }
-            reachCircles(job).padding(.top, isOnSite && accessBanner(job) != nil ? 16 : 8)
+            reachCircles(job).padding(.top, isOnSite && accessBanner(job) != nil ? 18 : 8)
         }
         .padding(.horizontal, Theme.gutter)
         .padding(.top, 4)
@@ -606,21 +608,41 @@ struct JobDetailView: View {
     /// "● Dispatched · Today 10:30 AM · Ramon": the word opens the status menu, the time reschedules.
     private func statusLine(_ job: JobRecord) -> some View {
         let canSchedule = session.can("job.assign", feature: "jobs")
+        let arrived = isOnSite && outbox.pendingStatus(for: job.id) == nil ? JobFiltering.date(job.arrivedAt) : nil
+        let scheduled = arrived == nil ? JobFiltering.date(job.scheduledFor) : nil
+        let assignee = assignedDisplayName(for: job).map(shortName)
+        // At accessibility sizes each fact gets its own line with no dots between them.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                             : AnyLayout(FlowRow(spacing: 6, lineSpacing: 2))
         // Each fact is laid out at its text height and keeps a 44pt hit area beyond it, so a
-        // wrapped fact ("· Ramon M.") sits right under the line instead of 44pt boxes apart.
-        return FlowRow(spacing: 6, lineSpacing: 2) {
-            statusControl(job)
-            if isOnSite, outbox.pendingStatus(for: job.id) == nil, let arrived = JobFiltering.date(job.arrivedAt) {
-                statusFact("· arrived \(arrived.tradeTime)")
-            } else if let date = JobFiltering.date(job.scheduledFor) {
-                Button { if canSchedule { showSchedule = true } } label: { statusFact("· \(date.visitLabel())") }
-                    .buttonStyle(PressStyle())
-                    // Without scheduling rights the time is a label, not a button that does nothing.
-                    .allowsHitTesting(canSchedule)
-                    .accessibilityHint(canSchedule ? "Change the scheduled time" : "")
+        // wrapped fact sits right under the line instead of 44pt boxes apart. The "·" rides at the
+        // end of the fact before it, so a wrapped line never starts with a dot.
+        return layout {
+            statusPiece(dotAfter: !stacked && (arrived != nil || scheduled != nil || assignee != nil)) { statusControl(job) }
+            if let arrived {
+                statusPiece(dotAfter: !stacked && assignee != nil) {
+                    statusFact(stacked ? "Arrived \(arrived.tradeTime)" : "arrived \(arrived.tradeTime)")
+                }
+            } else if let scheduled {
+                statusPiece(dotAfter: !stacked && assignee != nil) {
+                    Button { if canSchedule { showSchedule = true } } label: { statusFact(scheduled.visitLabel()) }
+                        .buttonStyle(PressStyle())
+                        // Without scheduling rights the time is a label, not a button that does nothing.
+                        .allowsHitTesting(canSchedule)
+                        .accessibilityHint(canSchedule ? "Change the scheduled time" : "")
+                }
             }
-            if let assignedName = assignedDisplayName(for: job) {
-                statusFact("· \(shortName(assignedName))")
+            if let assignee { statusFact(assignee) }
+        }
+    }
+
+    /// A status fact with, when another follows, the quiet "·" after it (hidden from VoiceOver).
+    private func statusPiece<Content: View>(dotAfter: Bool, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            content()
+            if dotAfter {
+                Text("·").font(Theme.monoFont(14)).foregroundStyle(Theme.muted).accessibilityHidden(true)
             }
         }
     }
@@ -907,17 +929,36 @@ struct JobDetailView: View {
                 HStack(spacing: 7) {
                     if busy || creatingInvoice { ProgressView().tint(Theme.onInk) }
                     else { Image(systemName: canCompleteHere && next == nil ? "checkmark" : "checkmark.seal").font(.subheadline.weight(.medium)).accessibilityHidden(true) }
-                    Text(commitTitle(rows))
+                    commitLabel(rows)
                 }
                 .inkCommit()
             }
             .buttonStyle(PressStyle())
             .disabled(busy || creatingInvoice)
+            .accessibilityLabel(commitTitle(rows))
             .accessibilityHint(next.map { "Opens \($0.title.lowercased())" } ?? (canCompleteHere ? "Completes the job" : "Opens the closeout checklist"))
             .accessibilityIdentifier("job-commit")
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+        .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 8)
         .background(Theme.background)
+    }
+
+    /// "Wrap up · 3 left" on one line; when large text can't fit it, "Wrap up" over "3 left" so the
+    /// second line never starts with a dot.
+    @ViewBuilder private func commitLabel(_ rows: [WrapUpRow]) -> some View {
+        let left = WrapUpList.left(rows)
+        if left > 0 {
+            ViewThatFits(in: .horizontal) {
+                Text(commitTitle(rows)).lineLimit(1)
+                VStack(spacing: 0) {
+                    Text("Wrap up")
+                    Text("\(left) left")
+                }
+                .multilineTextAlignment(.center)
+            }
+        } else {
+            Text(commitTitle(rows))
+        }
     }
 
     /// "Wrap up · 3 left" while rows are open; "Complete job" once the server will take it.
@@ -1000,7 +1041,8 @@ struct JobDetailView: View {
     /// other section stays below, so nothing the Overview had is out of reach. Every action that
     /// isn't the bar's next step is in the ••• menu at the top right.
     private func overviewContent(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
+        // OnSite.dc.html sets its blocks 18pt apart; Job.dc.html 22.
+        VStack(alignment: .leading, spacing: isOnSite ? 18 : 22) {
             if isOnSite {
                 toolkit(job).id("job-toolkit")
                 wrapUpPanel(job).id("job-wrap-up")

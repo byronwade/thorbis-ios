@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-onsite-polish",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "wrench.and.screwdriver", title: "A cleaner on-site screen",
+                      detail: "Tool names wrap instead of shrinking, and the status line and Wrap up button read cleanly at large text."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-large-text-voiceover",
             date: "2026-10-31",
             highlights: [
