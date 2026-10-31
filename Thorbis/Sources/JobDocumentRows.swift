@@ -10,6 +10,8 @@ struct JobDocumentRow: View {
     var fresh = true
     var customerFacing = false
     var symbol = "doc.text"
+    /// On a grouped well with other rows (the job's Money): no card of its own.
+    var grouped = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -21,9 +23,16 @@ struct JobDocumentRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, customerFacing ? 16 : 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+        .background(grouped ? Color.clear : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay { if !grouped { RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border) } }
         .contentShape(Rectangle())
+    }
+
+    /// The row for a grouped well: the well draws the surface and the hairlines.
+    func onWell() -> JobDocumentRow {
+        var row = self
+        row.grouped = true
+        return row
     }
 
     /// design 2026-10-30 row: title and one supporting line (reference, options or what's due),

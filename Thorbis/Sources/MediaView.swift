@@ -507,7 +507,7 @@ struct JobMediaView: View {
     @ViewBuilder private var photoSections: some View {
         if !waitingPhotos.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                JobPanelLabel(title: "On this phone · \(waitingPhotos.count)")
+                JobPanelLabel(title: "On this phone", count: "\(waitingPhotos.count)")
                 LazyVGrid(columns: gridColumns, spacing: MediaGridMetrics.spacing) {
                     ForEach(waitingPhotos) { media in pendingTile(media) }
                 }
@@ -598,7 +598,7 @@ struct JobMediaView: View {
     @ViewBuilder private var documentSection: some View {
         if !documents.isEmpty || !waitingDocuments.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                JobPanelLabel(title: (hasMore ? "Documents loaded" : "Documents") + " · \(documents.count + waitingDocuments.count)")
+                JobPanelLabel(title: hasMore ? "Documents loaded" : "Documents", count: "\(documents.count + waitingDocuments.count)")
                 JobPanel {
                     ForEach(waitingDocuments) { media in
                         let state = MediaUploadState.of(media, in: pendingMedia)

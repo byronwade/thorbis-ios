@@ -1,26 +1,54 @@
 import SwiftUI
 import UIKit
 
-// The job screen's pieces (Job.dc.html, OnSite.dc.html, JobActivity.dc.html): one white panel per
-// section on the cream ground with a 13pt label above it, rows of a title and one line, status as
-// a word beside its dot, quiet 44pt circles, and the technician's on-site toolkit.
+// The job screen's pieces (redesign 2026-10-31, after Linear's issue detail): each section is a
+// grouped well under a semibold header with its count, rows separated by inset hairlines; status as
+// a glyph and a word; quiet circles; the technician's on-site toolkit; and the activity timeline.
 
-/// A section's white panel: radius 14, a faint rim, no separators between rows.
+extension ContainerValues {
+    /// Set on a row inside a `JobPanel` to leave out the hairline under it (a caption that belongs
+    /// to the row below, say).
+    @Entry var jobPanelJoinsNext = false
+}
+
+extension View {
+    /// No hairline between this row and the next one in its `JobPanel`.
+    func jobPanelJoinsNext() -> some View { containerValue(\.jobPanelJoinsNext, true) }
+}
+
+/// A section's grouped well (radius 14, `Theme.well`), with an inset hairline between rows. Pass
+/// `dividers: false` for content that draws its own structure (the activity timeline).
 struct JobPanel<Content: View>: View {
+    var dividers = true
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.55), lineWidth: 1))
-            .shadow(color: Color.black.opacity(0.04), radius: 1, y: 1)
+        Well {
+            if dividers {
+                Group(subviews: content) { rows in
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        row
+                        if index < rows.count - 1, !row.containerValues.jobPanelJoinsNext {
+                            WellDivider(leading: 16)
+                        }
+                    }
+                }
+            } else {
+                content
+            }
+        }
     }
 }
 
-/// The 13pt marker label above a panel, with at most one text action on the right.
+/// A section's header (redesign `SectionHeader` type: semibold 15 in the secondary colour, the
+/// count beside it in the same voice), with at most one text action on the right. `mark` puts a
+/// small tinted glyph before the title (the access and hazards header uses a warning triangle).
 struct JobPanelLabel: View {
     let title: String
+    /// Shown beside the title ("6", "3 of 6"); spoken with it.
+    var count: String? = nil
+    var mark: String? = nil
+    var markTint: Color = Theme.warning
     var actionTitle: String? = nil
     var actionIdentifier: String? = nil
     var action: (() -> Void)? = nil
@@ -32,16 +60,26 @@ struct JobPanelLabel: View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
                              : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         layout {
-            Text(title)
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let mark {
+                    Image(systemName: mark)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(markTint)
+                        .accessibilityHidden(true)
+                }
+                (Text(title).font(Theme.font(15, weight: .semibold))
+                 + Text(count.map { "  \($0)" } ?? "").font(Theme.font(15)))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
+                    .accessibilityAddTraits(.isHeader)
+            }
             if !stacked { Spacer(minLength: 8) }
             if let actionTitle, let action {
                 Button(action: action) {
                     Text(actionTitle)
-                        .font(Theme.font(13, weight: .medium))
+                        .font(Theme.font(15, weight: .medium))
                         .foregroundStyle(Theme.foreground)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -53,23 +91,27 @@ struct JobPanelLabel: View {
             }
         }
         .padding(.horizontal, 4)
-        .frame(minHeight: 30)
-        .padding(.vertical, actionTitle == nil || stacked ? 0 : -7)
+        .frame(minHeight: 32)
+        .padding(.vertical, actionTitle == nil || stacked ? 0 : -6)
     }
 }
 
-/// A label and its panel.
+/// A header and its well.
 struct JobPanelSection<Content: View>: View {
     let title: String
+    var count: String? = nil
+    var mark: String? = nil
     var actionTitle: String? = nil
     var actionIdentifier: String? = nil
     var action: (() -> Void)? = nil
+    var dividers = true
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            JobPanelLabel(title: title, actionTitle: actionTitle, actionIdentifier: actionIdentifier, action: action)
-            JobPanel { content }
+            JobPanelLabel(title: title, count: count, mark: mark, actionTitle: actionTitle,
+                          actionIdentifier: actionIdentifier, action: action)
+            JobPanel(dividers: dividers) { content }
         }
     }
 }
@@ -193,8 +235,7 @@ struct JobCircleLabel: View {
                 .font(.system(size: min(glyph, 26), weight: .medium))
                 .foregroundStyle(Theme.foreground)
                 .frame(width: min(max(circle, 44), 64), height: min(max(circle, 44), 64))
-                .background(Theme.fill, in: Circle())
-                .overlay(Circle().strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
+                .background(Theme.well, in: Circle())
             Text(title)
                 .font(Theme.font(12, weight: .medium))
                 .foregroundStyle(Theme.subtle)
@@ -207,35 +248,32 @@ struct JobCircleLabel: View {
     }
 }
 
-/// The three job sections as one pill segmented control: field track, the chosen one a raised
-/// white pill. Values stay "Overview", "Money", "Activity"; only the words change.
+/// The three job sections as Linear text tabs (the style Today uses, `PaperTabs(textTabs:)`): plain
+/// words on the ground, the chosen one on a light well pill, left-aligned. Values stay "Overview",
+/// "Money", "Activity"; only the words change. A label with its own words and spoken form keeps
+/// `PaperTabs` out (it binds the label to the value and has no per-tab identifiers).
 struct JobSectionControl: View {
     let options: [(value: String, label: String, spoken: String)]
     @Binding var selection: String
 
     var body: some View {
-        JobSectionRowLayout(spacing: 2) {
+        JobSectionRowLayout(spacing: 4, fills: false) {
             ForEach(options, id: \.value) { option in
                 let isOn = option.value == selection
                 Button { withMotion(.snappy) { selection = option.value } } label: {
                     // An amount is never cut ("Money · $3…"): when the whole label can't fit, the
-                    // segment drops the "· amount" and keeps the word; the amount is still spoken.
+                    // tab drops the "· amount" and keeps the word; the amount is still spoken.
                     ViewThatFits(in: .horizontal) {
                         Text(option.label).fixedSize()
                         Text(Self.shortLabel(option.label)).lineLimit(1).minimumScaleFactor(0.8)
                     }
-                        .font(Theme.monoFont(14, weight: .medium))
+                        .font(Theme.font(15, weight: .medium))
+                        .monospacedDigit()
                         .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
-                        .padding(.horizontal, 6)
-                        .frame(maxWidth: .infinity, minHeight: 36)
-                        .background {
-                            if isOn {
-                                Capsule().fill(Theme.selectedSegment)
-                                    .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-                                    .shadow(color: Color.black.opacity(0.10), radius: 1, y: 1)
-                            }
-                        }
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .frame(minHeight: Theme.chipHeight + 4)
+                        .background(isOn ? Theme.fill : .clear, in: Capsule())
+                        .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
@@ -244,8 +282,6 @@ struct JobSectionControl: View {
                 .accessibilityIdentifier("job-section-\(option.value.lowercased())")
             }
         }
-        .padding(.horizontal, 3)
-        .background(Theme.fill, in: Capsule().inset(by: 1))
         .sensoryFeedback(.selection, trigger: selection)
     }
 
@@ -260,6 +296,8 @@ struct JobSectionControl: View {
 /// gives up width in proportion to what it asked for, so no one label is squeezed alone.
 struct JobSectionRowLayout: Layout {
     var spacing: CGFloat = 2
+    /// False for text tabs: each keeps its own width, left-aligned, while the row has room.
+    var fills = true
 
     private func widths(_ subviews: Subviews, total: CGFloat) -> [CGFloat] {
         guard !subviews.isEmpty else { return [] }
@@ -267,6 +305,7 @@ struct JobSectionRowLayout: Layout {
         let available = max(0, total - spacing * CGFloat(subviews.count - 1))
         let wanted = ideal.reduce(0, +)
         if wanted <= available {
+            guard fills else { return ideal }
             let extra = (available - wanted) / CGFloat(subviews.count)
             return ideal.map { $0 + extra }
         }
@@ -276,10 +315,11 @@ struct JobSectionRowLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let ideal = subviews.map { $0.sizeThatFits(.unspecified) }
-        let total = proposal.width ?? (ideal.map(\.width).reduce(0, +) + spacing * CGFloat(max(0, subviews.count - 1)))
+        let natural = ideal.map(\.width).reduce(0, +) + spacing * CGFloat(max(0, subviews.count - 1))
+        let total = proposal.width ?? natural
         let ws = widths(subviews, total: total)
         let height = zip(subviews, ws).map { $0.sizeThatFits(ProposedViewSize(width: $1, height: proposal.height)).height }.max() ?? 0
-        return CGSize(width: total, height: height)
+        return CGSize(width: fills ? total : min(total, natural), height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -291,7 +331,7 @@ struct JobSectionRowLayout: Layout {
     }
 }
 
-/// One tool on the on-site grid: an 84pt white tile, glyph over word.
+/// One tool on the on-site grid: an 84pt well tile, glyph over word.
 struct JobToolTile: View {
     let title: String
     let symbol: String
@@ -320,9 +360,7 @@ struct JobToolTile: View {
             }
             .padding(.horizontal, 4).padding(.vertical, 10)
             .frame(maxWidth: .infinity, minHeight: 84)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.55), lineWidth: 1))
-            .shadow(color: Color.black.opacity(0.04), radius: 1, y: 1)
+            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .opacity(enabled ? 1 : 0.45)
             .contentShape(Rectangle())
         }
@@ -341,10 +379,10 @@ struct JobTick: View {
     var body: some View {
         ZStack {
             if done {
-                Circle().fill(Theme.success)
-                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.onInk)
+                Circle().fill(Theme.statusDone)
+                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
             } else {
-                Circle().strokeBorder(Theme.foreground.opacity(0.3), lineWidth: 1.5)
+                Circle().strokeBorder(Theme.statusUnscheduled, style: StrokeStyle(lineWidth: 1.5, dash: [2.5, 2.5]))
             }
         }
         .frame(width: 22, height: 22)
@@ -374,12 +412,16 @@ struct JobAccessBanner: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 16, weight: .medium))
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Theme.warning)
                 .padding(.top, 1)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
+                Text("Before you go in")
+                    .font(Theme.font(13, weight: .semibold))
+                    .foregroundStyle(Theme.warning)
+                    .accessibilityHidden(true)
                 (Text(headline.isEmpty ? "" : headline + ".").font(Theme.monoFont(15, weight: .semibold)).foregroundStyle(Theme.foreground)
                  + Text(notes.map { (headline.isEmpty ? "" : " ") + $0 } ?? "").font(Theme.font(15)).foregroundStyle(Theme.subtle))
                     .lineSpacing(3)
@@ -393,8 +435,14 @@ struct JobAccessBanner: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.55), lineWidth: 1))
+        .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(alignment: .leading) {
+            // A warning edge, so the hazards read as hazards before a word is read.
+            UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, bottomLeadingRadius: Theme.cardRadius, style: .continuous)
+                .fill(Theme.statusInProgress).frame(width: 4)
+                .accessibilityHidden(true)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .contentShape(Rectangle())
         .contextMenu {
             ForEach(facts.filter(\.isCode)) { fact in
@@ -420,4 +468,87 @@ enum JobOnSiteClock {
 func jobShortMoney(_ cents: Int, currency: String) -> String {
     let text = money(cents, currency: currency)
     return cents % 100 == 0 && text.hasSuffix(".00") ? String(text.dropLast(3)) : text
+}
+
+// MARK: Activity timeline (Linear's issue activity: a thin line through small glyphs)
+
+/// What kind of thing happened, for the timeline's glyph. Decorative: the row's words say it.
+struct JobActivityGlyph: View {
+    /// `ActivityFeedSubject.kind`: note, status, estimate, call, media.
+    let kind: String
+    /// The entry's title; a status entry's word picks its status glyph ("Dispatched", "Arrived").
+    let title: String
+    /// A note saved on this phone and still waiting to sync.
+    var pending = false
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 20
+
+    static func tone(forStatusEvent title: String) -> StatusTone {
+        switch title {
+        case "Dispatched", "En route": .dispatched
+        case "Arrived", "Work started", "Paused": .inProgress
+        case "Completed": .done
+        case "Canceled": .cancelled
+        default: .unscheduled
+        }
+    }
+
+    private var mark: (symbol: String, tint: Color) {
+        if pending { return ("clock", Theme.statusInProgress) }
+        switch kind {
+        case "note": return ("text.alignleft", Theme.markAccent)
+        case "media": return ("camera.fill", Theme.markPumpkin)
+        case "estimate": return ("doc.text.fill", Theme.markTeal)
+        case "call": return ("phone.fill", Theme.markForest)
+        default: return ("circle.fill", Theme.markGrey)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if kind == "status" {
+                StatusGlyph(tone: Self.tone(forStatusEvent: title), label: title)
+                    .frame(width: size, height: size)
+                    .background(Theme.background, in: Circle())
+            } else {
+                Image(systemName: mark.symbol)
+                    .font(.system(size: size * 0.48, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: size, height: size)
+                    .background(mark.tint, in: Circle())
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// One timeline row: the glyph on a thin vertical line, then the entry. The line runs into the
+/// row above unless this is the first, and on to the row below unless this is the last.
+struct JobTimelineItem<Content: View>: View {
+    let kind: String
+    let title: String
+    var pending = false
+    var isFirst = false
+    var isLast = false
+    /// Top padding of the row; the glyph sits level with the first line of text.
+    var verticalPadding: CGFloat = 10
+    @ViewBuilder var content: Content
+    @ScaledMetric(relativeTo: .body) private var glyph: CGFloat = 20
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            JobActivityGlyph(kind: kind, title: title, pending: pending)
+                .padding(.top, 1)
+            content
+        }
+        .padding(.vertical, verticalPadding)
+        .background(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                Rectangle().fill(isFirst ? Color.clear : Theme.fill).frame(width: 1.5, height: verticalPadding + 1)
+                Color.clear.frame(height: glyph)
+                Rectangle().fill(isLast ? Color.clear : Theme.fill).frame(width: 1.5).frame(maxHeight: .infinity)
+            }
+            .frame(width: glyph)
+            .accessibilityHidden(true)
+        }
+    }
 }
