@@ -389,6 +389,13 @@ struct WorkspacePriceBookView: View {
         ["All"] + Array(Set(currentItems.map { $0.kind.capitalized })).sorted()
     }
 
+    /// The first group with rows on screen; its label sits closer to the search field.
+    private var firstVisibleGroup: String? {
+        categories.first { name in
+            name != "All" && (category == "All" || category == name) && visibleItems.contains { $0.kind.capitalized == name }
+        }
+    }
+
     private var visibleItems: [PriceBookListItem] {
         currentItems.filter { item in
             (category == "All" || item.kind.capitalized == category) &&
@@ -420,8 +427,8 @@ struct WorkspacePriceBookView: View {
                     .environment(\.paperMenuButton, false)
                 PaperSearchField(text: $search, prompt: "Search price book")
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() }.padding(.horizontal, -PaperCardMetrics.margin) }
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() } }
                         if showingPreviousItems {
                             HStack {
                                 Text("Showing previously loaded items. Refresh to update.")
@@ -429,29 +436,24 @@ struct WorkspacePriceBookView: View {
                                 Spacer()
                                 Button("Refresh") { Task { await refresh() } }
                                     .disabled(loading)
-                            }.frame(minHeight: 44).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                            }.frame(minHeight: 44).padding(.horizontal, ListRoom.gutter)
                         }
-                        if (loading || !hasCurrentOwner) && currentItems.isEmpty && error == nil { SkeletonList(count: 6) }
+                        if (loading || !hasCurrentOwner) && currentItems.isEmpty && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
                         ForEach(categories.filter { $0 != "All" && (category == "All" || category == $0) }, id: \.self) { groupName in
                             let grouped = visibleItems.filter { $0.kind.capitalized == groupName }
                             if !grouped.isEmpty {
+                                // v2 List room, like Jobs and Customers: the group's 13 Medium label with
+                                // its count on the canvas (it folds the group), then the rows, no panel.
                                 Button {
                                     if collapsedGroups.contains(groupName) { collapsedGroups.remove(groupName) }
                                     else { collapsedGroups.insert(groupName) }
                                 } label: {
-                                    // v2: the group's 13 Medium label with its count (a chrome label, not a heading).
-                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                        Text(groupName).font(Theme.font(13, weight: .medium))
-                                        Text("\(grouped.count)\(currentCursor == nil ? "" : " loaded")")
-                                            .font(Theme.font(13)).monospacedDigit()
+                                    ListGroupLabel(title: groupName, count: grouped.count, first: groupName == firstVisibleGroup) {
                                         Image(systemName: collapsedGroups.contains(groupName) ? "chevron.right" : "chevron.down")
                                             .font(.system(size: 10, weight: .medium))
-                                        Spacer()
                                     }
-                                    .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
-                                    .padding(.horizontal, 4)
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(.bottom, -10)
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("\(groupName), \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
                                 .accessibilityValue(collapsedGroups.contains(groupName) ? "Collapsed" : "Expanded")
@@ -474,7 +476,7 @@ struct WorkspacePriceBookView: View {
                                                     } label: { row(item) }.buttonStyle(RowPressStyle())
                                                 }
                                             }
-                                            .wellSlice(first: index == 0, last: index == grouped.count - 1)
+                                            .environment(\.paperRowInset, ListRoom.gutter)
                                         }
                                     }
                                 }
@@ -490,13 +492,13 @@ struct WorkspacePriceBookView: View {
                                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
                                 .buttonStyle(PressStyle())
                                 .disabled(loading)
+                                .padding(.horizontal, ListRoom.gutter).padding(.top, 16)
                         }
                         if hasCurrentOwner && visibleItems.isEmpty && !loading && error == nil {
                             if currentItems.isEmpty {
-                                PaperEmptyState(symbol: "book.closed", title: "No price book items",
-                                                message: canEdit ? "Services, parts and fees you add here fill estimates and invoices. Add an item." : "Services, parts and fees your office adds show up here.",
-                                                actionTitle: canEdit ? "Add an item" : nil, tint: Theme.markBurnt, prominent: true,
-                                                action: canEdit ? { creating = true } : nil)
+                                ListRoomEmpty(title: "No price book items.",
+                                              message: canEdit ? "Services, parts and fees you add here fill estimates and invoices." : "Services, parts and fees your office adds show up here.",
+                                              actionTitle: canEdit ? "Add an item" : nil, action: { creating = true })
                             } else {
                                 PaperEmptyState(symbol: "magnifyingglass", title: "No matching items",
                                                 message: showingPreviousItems ? "No previously loaded items match. Refresh to search the current price book." : (currentCursor == nil ? "Nothing in \(category == "All" ? "the price book" : category.lowercased()) matches that search." : "No loaded items match. Load more items to search the rest."),
@@ -504,7 +506,7 @@ struct WorkspacePriceBookView: View {
                             }
                         }
                     }
-                    .paperCardMargin().padding(.top, 8).padding(.bottom, 100)
+                    .padding(.top, 0).padding(.bottom, 100)
                 }
                 .refreshable { await refresh() }
                 .task(id: localScope) {
@@ -573,7 +575,7 @@ struct WorkspacePriceBookView: View {
                     }
                     itemPrice(item).fixedSize(horizontal: true, vertical: false)
                 }
-                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                .padding(.horizontal, ListRoom.gutter).padding(.vertical, 12)
             } else {
                 PaperListRow(title: PriceBookPresentation.title(item.description), subtitle: unit) {
                     itemPrice(item).fixedSize(horizontal: true, vertical: false)

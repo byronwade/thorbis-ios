@@ -57,41 +57,48 @@ struct NeedsAttentionView: View {
                 .foregroundStyle(Theme.foreground)
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
                 if let error { ErrorBanner(message: error) }
-                // Each row names its state in words ("Unpaid", "Sent 9 days ago", "No time").
-                VStack(alignment: .leading, spacing: 0) {
-                    WellSection(title: "Unpaid invoices", count: unpaid.count,
-                                data: unpaid.map { AttentionInvoice(invoice: $0.0, balance: $0.1) },
-                                dividerInset: DocumentListRowContent.dividerInset) { item in
-                        NavigationLink(value: PaperRoute.invoice(item.invoice.id)) {
-                            MoneyListRow(title: store.customerName(item.invoice.customerId),
-                                         subtitle: "INV-\(item.invoice.id.suffix(4).uppercased()) · \(since("Issued", item.invoice.issuedAt))",
-                                         status: DocumentStatus(invoice: item.invoice),
-                                         amount: money(item.balance, currency: item.invoice.currency))
-                        }.buttonStyle(RowPressStyle())
+                // v2 List room, like Jobs and Customers: rows on the canvas under a 13 Medium label
+                // with its count. Each row names its state as a word ("Unpaid", "Waiting", "No time").
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if !loaded { ListRoomSkeleton(count: 5, threeLines: false) }
+                    let rows = unpaid.map { AttentionInvoice(invoice: $0.0, balance: $0.1) }
+                    if !rows.isEmpty {
+                        ListGroupLabel(title: "Unpaid invoices", count: rows.count, first: true)
+                        ForEach(rows) { item in
+                            NavigationLink(value: PaperRoute.invoice(item.invoice.id)) {
+                                MoneyListRow(title: store.customerName(item.invoice.customerId),
+                                             subtitle: "INV-\(item.invoice.id.suffix(4).uppercased()) · \(since("Issued", item.invoice.issuedAt))",
+                                             status: DocumentStatus(invoice: item.invoice),
+                                             amount: money(item.balance, currency: item.invoice.currency))
+                            }.buttonStyle(RowPressStyle())
+                        }
                     }
-                    WellSection(title: "Estimates waiting on the customer", count: waiting.count, data: waiting,
-                                dividerInset: DocumentListRowContent.dividerInset) { estimate in
-                        NavigationLink(value: PaperRoute.estimate(estimate.id)) {
-                            MoneyListRow(title: store.customerName(estimate.customerId),
-                                         subtitle: "\(estimate.title) · \(since("Sent", estimate.sentAt))",
-                                         status: DocumentStatus(estimateStatus: estimate.status),
-                                         statusWord: "Waiting",
-                                         amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") })
-                        }.buttonStyle(RowPressStyle())
+                    if !waiting.isEmpty {
+                        ListGroupLabel(title: "Estimates waiting on the customer", count: waiting.count, first: rows.isEmpty)
+                        ForEach(waiting) { estimate in
+                            NavigationLink(value: PaperRoute.estimate(estimate.id)) {
+                                MoneyListRow(title: store.customerName(estimate.customerId),
+                                             subtitle: "\(estimate.title) · \(since("Sent", estimate.sentAt))",
+                                             status: DocumentStatus(estimateStatus: estimate.status),
+                                             statusWord: "Waiting",
+                                             amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") })
+                            }.buttonStyle(RowPressStyle())
+                        }
                     }
-                    WellSection(title: "Jobs without a time", count: unscheduled.count, data: unscheduled,
-                                dividerInset: JobListRowContent.dividerInset) { job in
-                        NavigationLink(value: job) {
-                            JobListRowContent(job: job, customer: store.customerName(job.customerId),
-                                              place: job.shortRef, when: "No time")
-                        }.buttonStyle(RowPressStyle())
+                    if !unscheduled.isEmpty {
+                        ListGroupLabel(title: "Jobs without a time", count: unscheduled.count, first: rows.isEmpty && waiting.isEmpty)
+                        ForEach(unscheduled) { job in
+                            NavigationLink(value: job) {
+                                JobRoomRow(job: job, customer: store.customerName(job.customerId), when: "No time yet")
+                            }.buttonStyle(RowPressStyle())
+                        }
+                    }
+                    if loaded && unpaid.isEmpty && waiting.isEmpty && unscheduled.isEmpty {
+                        ListRoomEmpty(title: "Nothing needs attention.",
+                                      message: "Unpaid invoices, estimates waiting over a week and jobs with no time land here. Pull down to check again.")
                     }
                 }
-                .paperCardMargin()
-                if loaded && unpaid.isEmpty && waiting.isEmpty && unscheduled.isEmpty {
-                    PaperEmptyState(symbol: "checkmark.circle", title: "Nothing needs attention",
-                                    message: "Unpaid invoices, estimates waiting over a week and jobs with no time land here. Pull down to check again.")
-                }
+                .environment(\.paperRowInset, ListRoom.gutter)
             }
             .padding(.bottom, 24)
         }

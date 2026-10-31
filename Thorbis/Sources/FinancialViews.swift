@@ -24,19 +24,19 @@ struct EstimatesView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                // v2 List room (matches Jobs and Customers): rows on the canvas, a 13 Medium label
+                // with its count per status, the name first and the amount over the status word.
                 PaperHeader(title: "Estimates", subtitle: records.isEmpty && loading ? "Loading…" : estimatesSummary(records))
                     .environment(\.paperMenuButton, false)
-                    .padding(.horizontal, -PaperCardMetrics.margin)
                 if let error { ErrorBanner(message: error) { await load() } }
-                if loading && records.isEmpty { SkeletonList(count: 5) }
-                ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
-                    WellSection(title: DocumentStatus(estimateStatus: status).word, count: group.count, data: group,
-                                dividerInset: DocumentListRowContent.dividerInset) { record in
+                if loading && records.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
+                let groups = paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"])
+                ForEach(Array(groups.enumerated()), id: \.element.0) { index, pair in
+                    ListGroupLabel(title: DocumentStatus(estimateStatus: pair.0).word, count: pair.1.count, first: index == 0)
+                    ForEach(pair.1) { record in
                         PaperSplitDestinationLink(id: record.id, value: PaperRoute.estimate(record.id)) {
                             EstimateDetailView(id: record.id).thorbisBackButton()
                         } label: {
-                            // v2 list room: the name first, the work and reference under it, then the
-                            // tabular amount over the status word on the trailing edge.
                             MoneyListRow(title: store.customerName(record.customerId),
                                          subtitle: "\(record.title) · EST-\(record.id.suffix(4).uppercased())",
                                          status: DocumentStatus(estimateStatus: record.status),
@@ -45,16 +45,18 @@ struct EstimatesView: View {
                     }
                 }
                 if !records.isEmpty && visible.isEmpty {
-                    PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
+                    ListRoomEmpty(title: "No estimates match \u{201C}\(search.trimmingCharacters(in: .whitespaces))\u{201D}.",
+                                  message: "Try a customer's name, the work, or an EST number.")
                 }
                 if !loading && records.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "doc.text", title: "No estimates",
-                                    message: session.can("estimate.create", feature: "estimates") ? "Price the work before you start. Create an estimate." : "Estimates your shop sends show up here.",
-                                    actionTitle: session.can("estimate.create", feature: "estimates") ? "Create an estimate" : nil,
-                                    tint: Theme.markPumpkin, prominent: true, action: { showCreate = true })
+                    let canCreate = session.can("estimate.create", feature: "estimates")
+                    ListRoomEmpty(title: "No estimates.",
+                                  message: canCreate ? "Price the work before you start." : "Estimates your shop sends show up here.",
+                                  actionTitle: canCreate ? "Create an estimate" : nil, action: { showCreate = true })
                 }
             }
-            .paperCardMargin().padding(.bottom, 24)
+            .environment(\.paperRowInset, ListRoom.gutter)
+            .padding(.bottom, 24)
         }
         .background(Theme.background)
         .navigationTitle("")
@@ -383,14 +385,15 @@ struct InvoicesView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                // v2 List room, like Jobs and Customers: rows on the canvas, grouped by status.
                 PaperHeader(title: "Invoices", subtitle: records.isEmpty && loading ? "Loading…" : invoicesSummary(records))
                     .environment(\.paperMenuButton, false)
-                    .padding(.horizontal, -PaperCardMetrics.margin)
                 if let error { ErrorBanner(message: error) { await load() } }
-                if loading && records.isEmpty { SkeletonList(count: 5) }
-                ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
-                    WellSection(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count, data: group,
-                                dividerInset: DocumentListRowContent.dividerInset) { record in
+                if loading && records.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
+                let groups = paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"])
+                ForEach(Array(groups.enumerated()), id: \.element.0) { index, pair in
+                    ListGroupLabel(title: pair.0 == "issued" ? "Awaiting payment" : pair.0.statusLabel, count: pair.1.count, first: index == 0)
+                    ForEach(pair.1) { record in
                         PaperSplitDestinationLink(id: record.id, value: PaperRoute.invoice(record.id)) {
                             InvoiceDetailView(id: record.id).thorbisBackButton()
                         } label: {
@@ -405,14 +408,15 @@ struct InvoicesView: View {
                     }
                 }
                 if !records.isEmpty && visible.isEmpty {
-                    PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
+                    ListRoomEmpty(title: "No invoices match \u{201C}\(search.trimmingCharacters(in: .whitespaces))\u{201D}.",
+                                  message: "Try a customer's name or an INV number.")
                 }
                 if !loading && records.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "doc.plaintext", title: "No invoices", message: "Invoices are made from a job. Open a finished job to invoice it.",
-                                    tint: Theme.markForest)
+                    ListRoomEmpty(title: "No invoices.", message: "Invoices are made from a job. Open a finished job to invoice it.")
                 }
             }
-            .paperCardMargin().padding(.bottom, 24)
+            .environment(\.paperRowInset, ListRoom.gutter)
+            .padding(.bottom, 24)
         }
         .background(Theme.background)
         .navigationTitle("")
