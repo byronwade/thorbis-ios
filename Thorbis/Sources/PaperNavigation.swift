@@ -32,8 +32,6 @@ struct RootView: View {
     @State private var editingMenu = false
     /// Whether Inbox holds unread notices, as the server last said. Unknown shows no dot.
     @State private var inboxUnread = false
-    /// The version of each recent job last seen in the drawer, so a change since then wears a dot.
-    @State private var recentSeen: [String: String] = [:]
     /// iPhone search: a field floats low on the screen and results rise in a card above it.
     @State private var barSearching = false
     /// The floating search's field and results share this.
@@ -47,6 +45,7 @@ struct RootView: View {
     @ObservedObject private var recents = RecentItems.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showSettings = false
     @State private var schedulePath = NavigationPath()
     @State private var jobsPath = NavigationPath()
@@ -105,8 +104,9 @@ struct RootView: View {
 
     private func applyRoleDefaults() {
         #if DEBUG
-        // Screenshots and UI tests keep the standard layout (the owner Home screenshot sets its own).
-        if PaperPreview.enabled { return }
+        // Screenshots and UI tests keep the standard layout (the owner Home screenshot sets its own);
+        // the role screenshots (`--paper-preview-role`) start from that role's layout.
+        if PaperPreview.enabled, PaperPreview.role == nil { return }
         #endif
         guard session.phase == .ready else { return }
         layout.applyRoleDefaults(WorkRole(session), permitted: { $0.permitted(session) })
@@ -150,10 +150,14 @@ struct RootView: View {
             let progress = DrawerMotion.progress(open: drawerOpen, drag: drawerDrag, width: width)
             let insets = geometry.safeAreaInsets
             ZStack(alignment: .leading) {
-                if !reduceMotion, progress > 0 {
+                // Kept built under the card so opening (from a root or a pushed screen) only slides.
+                if !reduceMotion {
                     drawer(width: width, full: typeSize.isAccessibilitySize)
                         .frame(width: width)
                         .simultaneousGesture(closeDrag(width: width))
+                        .opacity(progress > 0 ? 1 : 0)
+                        .accessibilityHidden(!drawerOpen)
+                        .allowsHitTesting(drawerOpen)
                 }
                 card(progress: progress, width: width, insets: insets)
                 if reduceMotion, drawerOpen {
@@ -179,19 +183,28 @@ struct RootView: View {
     }
 
     private var drawerAnimation: Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.36, dampingFraction: 0.86)
+        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.9)
     }
 
     /// The place showing, as the drawer's card.
     private func card(progress: CGFloat, width: CGFloat, insets: EdgeInsets) -> some View {
-        let shape = DrawerCardShape(radius: 44 * progress, top: insets.top, bottom: insets.bottom)
+        let shape = DrawerCardShape(radius: DrawerMotion.cornerRadius(topInset: insets.top) * progress,
+                                    top: insets.top, bottom: insets.bottom)
         return phonePlaces()
             .accessibilityHidden(barSearching || drawerOpen)
             .overlay { searchOverlay }
+            // The pushed card dims a little as it slides, so the drawer reads as the thing in front.
+            .overlay {
+                Color.black.opacity((colorScheme == .dark ? 0.28 : 0.10) * progress)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
             .clipShape(shape)
+            // A hairline edge keeps the card's outline in dark mode, where the shadow vanishes.
+            .overlay { shape.strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.10 * progress : 0), lineWidth: 1).allowsHitTesting(false) }
             .background {
                 shape.fill(Theme.background)
-                    .shadow(color: .black.opacity(0.16 * progress), radius: 28, x: -6)
+                    .shadow(color: .black.opacity(0.18 * progress), radius: 30, x: -8)
             }
             .overlay {
                 // While open the card only closes the drawer: a tap, or a drag back to the left.
@@ -221,14 +234,13 @@ struct RootView: View {
     private func drawer(width: CGFloat, full: Bool) -> some View {
         AppDrawer(
             title: session.activeOrganization?.name ?? "Thorbis",
+            role: WorkRole(session),
             current: selectedTab,
-            now: currentJob.map { ($0, store.customerName($0.customerId)) },
-            savedWork: barSync,
-            pinned: pinnedPlaces,
-            places: otherPlaces,
+            places: drawerPlaces,
             local: localSections,
             recents: drawerRecents,
-            dots: placeDots,
+            inboxUnread: showsInboxDot,
+            savedWork: barSync,
             create: drawerCreate,
             settingsItems: settingsItems,
             showsClose: full,
@@ -237,14 +249,10 @@ struct RootView: View {
             close: { closeDrawer() },
             openPlace: { item in closeDrawer(thenRun: nil); open(item) },
             openLocal: { section in closeDrawer(thenRun: nil); openLocal(section) },
-            openNow: { if let job = currentJob { closeDrawer(thenRun: nil); store.requestedJobID = job.id } },
-            openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) },
             openRecent: { item in
-                markSeen(item)
                 closeDrawer(thenRun: nil)
                 openRecent(item)
-            },
-            editMenu: { closeDrawer(thenRun: { editingMenu = true }) }
+            }
         )
         // VoiceOver: the drawer is a modal group while open; the escape gesture closes it.
         .accessibilityElement(children: .contain)
@@ -298,7 +306,6 @@ struct RootView: View {
     /// Closes the drawer, then runs `thenRun` (a sheet or search) once the card is back.
     private func closeDrawer(thenRun: (() -> Void)? = nil) {
         guard drawerOpen else { thenRun?(); return }
-        markRecentsSeen()
         withAnimation(drawerAnimation) {
             drawerOpen = false
             drawerDrag = 0
@@ -311,16 +318,17 @@ struct RootView: View {
         }
     }
 
-    /// The place root's menu circle: opens the drawer and wears its dot.
+    /// The menu circle: opens the drawer and wears its dot only for unread Inbox notices or saved
+    /// work that needs the person.
     private var drawerControl: PaperDrawerControl {
         PaperDrawerControl(open: { Task { @MainActor in openDrawer() } },
-                           hasNews: !placeDots.isEmpty || drawerRecents.contains(where: \.changed) || (barSync?.needsPerson ?? false),
+                           hasNews: showsInboxDot || (barSync?.needsPerson ?? false),
                            status: barSync?.words)
     }
 
     // MARK: - Drawer content
 
-    /// The places the person pinned to the top of the drawer (the layout's tabs) this role can open.
+    /// The places the person pinned (the layout's tabs) this role can open.
     private var pinnedPlaces: [MenuItem] { layout.visibleTabs(session) }
 
     private var menuPlaces: [MenuItem] {
@@ -328,10 +336,12 @@ struct RootView: View {
                               permitted: { $0.permitted(session) })
     }
 
-    /// Every other place, in the order the person set in Edit menu.
-    private var otherPlaces: [MenuItem] {
-        AppMenuContent.menu(tabs: pinnedPlaces, hidden: layout.hidden, order: layout.menuOrder,
-                            permitted: { $0.permitted(session) })
+    /// The drawer's places for this role: at most five primary rows, extra pins, then All places.
+    private var drawerPlaces: DrawerPlaces {
+        DrawerPlaces.make(role: WorkRole(session), tabs: pinnedPlaces,
+                          explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
+                          hidden: layout.hidden, order: layout.menuOrder, access: primaryAccess,
+                          permitted: { $0.permitted(session) })
     }
 
     /// Records kept only on this phone (Fleet, Equipment, Agreements, Team), as More listed them.
@@ -340,17 +350,12 @@ struct RootView: View {
         return LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) }
     }
 
-    /// Places that wear the drawer's dot: Inbox with unread notices, Needs attention with jobs that
-    /// have no time (the part this phone already holds; unpaid and waiting documents need a read).
-    private var placeDots: Set<MenuItem> {
-        var dots: Set<MenuItem> = []
-        if inboxUnread, MenuItem.inbox.permitted(session), !layout.hidden.contains(.inbox) { dots.insert(.inbox) }
-        if MenuItem.attention.permitted(session), !layout.hidden.contains(.attention),
-           !NeedsAttention.unscheduled(store.jobs).isEmpty { dots.insert(.attention) }
-        return dots
+    /// Inbox's dot, the drawer's only place dot: unread notices this person can open.
+    private var showsInboxDot: Bool {
+        inboxUnread && MenuItem.inbox.permitted(session) && !layout.hidden.contains(.inbox)
     }
 
-    /// The recently opened jobs and customers search shows, newest first.
+    /// The recently opened jobs and customers, newest first (the drawer shows five).
     private var drawerRecents: [DrawerRecent] {
         recents.items.prefix(8).compactMap { item in
             switch item.kind {
@@ -359,24 +364,9 @@ struct RootView: View {
                 return DrawerRecent(item: item)
             case .job:
                 guard session.can("job.view", feature: "jobs") else { return nil }
-                let job = store.jobs.first { $0.id == item.id }
-                let waiting = outbox.entries.contains { $0.jobID == item.id }
-                let changed = job.flatMap { job in recentSeen[item.id].map { $0 != (job.updatedAt ?? "") } } ?? false
-                return DrawerRecent(item: item, status: job?.status, busy: job?.status == "in_progress" || waiting, changed: changed)
+                return DrawerRecent(item: item, status: store.jobs.first { $0.id == item.id }?.status)
             }
         }
-    }
-
-    /// Records the version of each recent job as seen, so only later changes wear a dot.
-    private func markRecentsSeen() {
-        for item in recents.items where item.kind == .job {
-            if let job = store.jobs.first(where: { $0.id == item.id }) { recentSeen[item.id] = job.updatedAt ?? "" }
-        }
-    }
-
-    private func markSeen(_ item: RecentItems.Item) {
-        guard item.kind == .job, let job = store.jobs.first(where: { $0.id == item.id }) else { return }
-        recentSeen[item.id] = job.updatedAt ?? ""
     }
 
     /// Asks the server whether Inbox holds unread notices (one row is enough to know).
@@ -395,7 +385,12 @@ struct RootView: View {
                 Task { await session.selectOrganization(id: organization.id) }
             }
         }
-        return businesses + [
+        // Saved work left the drawer's list; the gear wears its dot and opens the review.
+        let saved = barSync.map { sync in
+            [ThorbisMenuItem("Saved on this phone", icon: sync.needsPerson ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath",
+                             subtitle: sync.words) { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }]
+        } ?? []
+        return businesses + saved + [
             ThorbisMenuItem("Add a business", icon: "plus") { closeDrawer(thenRun: { workspace = true }) },
             ThorbisMenuItem("Settings", icon: "gearshape") { closeDrawer(thenRun: { showSettings = true }) },
             ThorbisMenuItem("Edit menu", icon: "slider.horizontal.3") { closeDrawer(thenRun: { editingMenu = true }) },
@@ -505,13 +500,6 @@ struct RootView: View {
             openPlace: { place in closeBarSearch(); open(place) })
     }
 
-    /// The job this person is on now: the drawer's Now row (the in-app twin of the Live Activity).
-    private var currentJob: Job? {
-        guard session.can("job.view", feature: "jobs") else { return nil }
-        let me = session.user?.id
-        return PaperWorkGroups.inProgress(store.jobs).first { $0.assignedToUserId == nil || $0.assignedToUserId == me }
-    }
-
     private var savedWorkScope: SavedWorkScope? {
         .capture(session: session, api: api, media: pendingMedia, outbox: outbox)
     }
@@ -577,12 +565,9 @@ struct RootView: View {
         place(selectedTab).id(selectedTab)
         // Kept off phonePlaces' long modifier chain, which is at the type checker's limit.
         .onChange(of: store.requestedSearch, initial: true) { openRequestedSearch(phone: true) }
-        // The menu circle shows on a place's root only, never on a pushed screen.
+        // Roots carry the menu circle in their header or bar; pushed screens beside Back.
         .environment(\.paperDrawer, atTabRoot && !barSearching ? drawerControl : nil)
-        .onChange(of: recents.items) { _, items in
-            // A record opened just now is seen as it is.
-            if let first = items.first { markSeen(first) }
-        }
+        .environment(\.paperDrawerReach, barSearching ? nil : drawerControl)
     }
 
     /// The selected place, with the sheets and request handlers every place shares.
@@ -688,6 +673,8 @@ struct RootView: View {
         if ["estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line"].contains(PaperPreview.screen) { previewEstimateRevision = true; return }
         switch PaperPreview.screen {
         case "jobs", "jobs-filters": primaryTab = .jobs
+        // The owner's layout leads with Home, where owners open.
+        case "schedule" where PaperPreview.role == "owner": selectedTab = MenuItem.home.rawValue
         case "my-day", "schedule": primaryTab = .schedule
         case "customers": primaryTab = .customers
         // More became the drawer: these open it over Today.
@@ -809,8 +796,12 @@ struct RootView: View {
         guard RecentItems.shared.items.isEmpty else { return }
         RecentItems.shared.record(.customer, id: "preview-customer-2", title: "Riverstone HVAC", subtitle: "Customer")
         RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
-        if let other = store.jobs.first(where: { $0.id != PaperPreview.jobID }) {
+        if let other = store.jobs.first(where: { $0.id != PaperPreview.jobID && $0.status != "in_progress" }) {
             RecentItems.shared.record(.job, id: other.id, title: other.title, subtitle: other.shortRef)
+        }
+        // The job under way, so Recents shows its glyph.
+        if let busy = store.jobs.first(where: { $0.status == "in_progress" && $0.id != PaperPreview.jobID }) {
+            RecentItems.shared.record(.job, id: busy.id, title: busy.title, subtitle: busy.shortRef)
         }
         RecentItems.shared.record(.job, id: PaperPreview.jobID, title: store.jobs.first { $0.id == PaperPreview.jobID }?.title ?? "AC not cooling",
                                   subtitle: "JOB-2214 · Danielle Marlowe")

@@ -16,8 +16,8 @@ enum ReleaseNotes {
             id: "2026-10-31-drawer-menu",
             date: "2026-10-31",
             highlights: [
-                .init(symbol: "sidebar.left", title: "Every place in one side menu",
-                      detail: "Tap the menu circle or swipe from the left edge for every place, recent jobs and customers, and New job."),
+                .init(symbol: "sidebar.left", title: "A simpler side menu, on every screen",
+                      detail: "Your main places, recent jobs and New job. More is under All places; the menu circle sits beside Back."),
             ]
         ),
         ReleaseNote(

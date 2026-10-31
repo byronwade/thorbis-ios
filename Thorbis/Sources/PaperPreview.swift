@@ -35,6 +35,14 @@ enum PaperPreview {
                "state-sheets", "state-toasts"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
+    /// `--paper-preview-role tech | office | owner`: who the preview session signs in as, for the
+    /// drawer's role screenshots. Absent keeps the standard preview session (office capabilities).
+    static var role: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard enabled, let index = args.firstIndex(of: "--paper-preview-role"), args.indices.contains(index + 1),
+              ["tech", "office", "owner"].contains(args[index + 1]) else { return nil }
+        return args[index + 1]
+    }
     /// `--paper-preview-empty`: the workspace has no jobs, customers, estimates or invoices yet,
     /// so the real list screens show their empty states.
     static var isEmptyWorkspace: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-empty") }
@@ -964,7 +972,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if path == "/v1/notice-preferences" {
             return ["items": [["subjectKind": "role", "subjectKey": "technician", "channel": "email", "enabled": false]]]
         }
-        if path == "/v1/staff/notices", PaperPreview.screen == "inbox" {
+        if path == "/v1/staff/notices", PaperPreview.screen == "inbox" || PaperPreview.role != nil {
             var notices: [[String: Any]] = [
                 ["id": "preview-notice-new", "jobId": PaperPreview.jobID, "title": "A visit is ready", "meta": "Water heater install", "at": now, "read": false],
                 ["id": "preview-notice-read", "jobId": PaperPreview.jobID, "title": "A visit was updated", "meta": "Water heater install", "at": now, "read": true]
@@ -1105,6 +1113,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "owner-home" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
             if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
+            switch PaperPreview.role {
+            case "tech": capabilities.removeAll { $0 == "job.assign" }
+            case "owner": capabilities += ["organization.settings.edit", "organization.members.manage"]
+            default: break
+            }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
                     "capabilities": capabilities,
                     "resources": [], "views": []] as [String: Any]
@@ -1114,6 +1127,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
+            if PaperPreview.role != nil { enabledFeatures.append("job_booking_notices") }
+            if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
             let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
