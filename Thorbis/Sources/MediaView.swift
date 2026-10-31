@@ -73,27 +73,41 @@ struct JobMediaView: View {
     @State private var loading = true
     /// Bumped by pull-to-refresh so thumbnails that failed to download try again.
     @State private var thumbnailAttempt = 0
+    /// A server change in flight (tag, archive, a file being prepared). Never blocks the camera.
     @State private var busy = false
+    /// Uploads running in the background. Capture, tagging and launch never wait on this.
+    @State private var draining = false
     @State private var error: String?
     @StateObject private var preview = DocumentPreviewController()
     @State private var importDocument = false
-    @State private var showCamera = false
+    @State private var showLibrary = false
     /// Camera access is off in Settings; the notice above the capture buttons says so.
     @State private var cameraDenied = false
     @State private var showScanner = false
     @State private var showLegacyRecovery = false
-    /// Markup opened from a photo's preview (drawn over that sheet) or right after capture.
-    @State private var previewMarkup: PhotoMarkupTarget?
+    /// Markup opened from the "just taken" suggestion.
     @State private var captureMarkup: PhotoMarkupTarget?
-    /// The bounded JPEG just saved from the camera or library, offered for markup.
+    /// The bounded JPEG last saved from the camera or library, offered for markup.
     @State private var justCaptured: PhotoMarkupTarget?
     @State private var showMeasure = false
     /// A short clip (60 s at most) recorded with the system camera, filed under Documents.
     @State private var showVideo = false
     @State private var videoNotice: String?
-    /// Paper 21C: the stage a new photo is filed under (server tags "Before" / "After").
+    /// The stage the quick tag step preselects ("Before", "After", "Other"). Paper 21C.
     @State private var stage = "Before"
-    @State private var filter = "All"
+    @State private var filter: MediaFilter = .all
+    @State private var capture: MediaCaptureRequest?
+    @State private var viewer: MediaViewerStart?
+    @State private var showCompare = false
+    @State private var selecting = false
+    @State private var picked = Set<String>()
+    @State private var confirmBulkArchive = false
+    @State private var shareFiles: MediaShareFiles?
+    @State private var contentWidth: CGFloat = 353
+    #if DEBUG
+    @State private var previewStateApplied = false
+    #endif
+
     /// Photos taken but not yet confirmed by the server; kept on disk until they are.
     private var currentPendingContext: PendingMediaStore.CaptureContext? {
         guard let scope = readScope else { return nil }
@@ -125,265 +139,69 @@ struct JobMediaView: View {
         return records.contains(record)
     }
     private var allPhotos: [MediaAssetRecord] { visible.filter { $0.kind == "photo" } }
-    private var photos: [MediaAssetRecord] {
+    private var photos: [MediaAssetRecord] { allPhotos.filter { matches($0.tags) } }
+    private var documents: [MediaAssetRecord] { visible.filter { $0.kind != "photo" } }
+    private var waitingPhotos: [PendingMedia] { waiting.filter { $0.kind == "photo" && matches($0.tags) } }
+    private var waitingDocuments: [PendingMedia] { waiting.filter { $0.kind != "photo" } }
+    private var storedPhotos: [MediaAssetRecord] { photos.filter { $0.uploadState == "stored" } }
+    private var befores: [MediaAssetRecord] { allPhotos.filter { $0.uploadState == "stored" && $0.tags.contains("Before") } }
+    private var afters: [MediaAssetRecord] { allPhotos.filter { $0.uploadState == "stored" && $0.tags.contains("After") } }
+    private var showsPhotos: Bool { filter != .documents }
+    private var showsDocuments: Bool { filter == .all || filter == .documents }
+    private var canAdd: Bool { session.can("job.edit", feature: "jobs") }
+    private var pickedRecords: [MediaAssetRecord] { storedPhotos.filter { picked.contains($0.id) } }
+
+    private func matches(_ tags: [String]) -> Bool {
         switch filter {
-        case "Before", "After": allPhotos.filter { $0.tags.contains(filter) }
-        case "Untagged": allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }
-        default: allPhotos
+        case .before: tags.contains("Before")
+        case .after: tags.contains("After")
+        case .untagged: !tags.contains("Before") && !tags.contains("After")
+        case .all, .documents: true
         }
     }
-    private var documents: [MediaAssetRecord] { visible.filter { $0.kind != "photo" } }
-    private var canAdd: Bool { session.can("job.edit", feature: "jobs") }
 
-    /// Paper 21A: a photo grid, a documents list, and one commit to add more.
+    /// Camera, scanner, measure and video availability. The simulator has none; a DEBUG screenshot
+    /// flag shows the full bar so it can be reviewed.
+    private var tools: (camera: Bool, scan: Bool, measure: Bool, video: Bool) {
+        #if DEBUG
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-all-tools") { return (true, true, true, true) }
+        #endif
+        return (UIImagePickerController.isSourceTypeAvailable(.camera), VNDocumentCameraViewController.isSupported,
+                SiteMeasure.isSupported, VideoCapture.isAvailable)
+    }
+
+    /// Photos screen (2026-10-31 redesign): one selector, a square-thumbnail grid with each photo's
+    /// stage and upload state, documents as rows, and one ink "Take photo" with quiet circles beside.
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let error = error ?? (previewIsCurrent ? preview.error : nil) {
-                    ErrorBanner(message: error, retry: selectedData == nil ? nil : { enqueueSelection() })
-                        .padding(.horizontal, -Theme.gutter)
-                }
-                if let pageError, let scope = readScope, pageErrorScope == scope {
-                    ErrorBanner(message: pageError) {
-                        if retryPage && hasMore { await loadMore() } else { await load() }
-                    }
-                }
-                if readScope == nil {
-                    Label("Photos and documents are unavailable with your current access.", systemImage: "lock")
-                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                }
+                notices
+                selectorRow
                 if loading || (previewIsCurrent && preview.loading) { SkeletonRows(count: 2, inset: 0) }
-                if let selectedData, canShowSelection {
-                    HStack(spacing: 12) {
-                        Image(systemName: selectedMime == "application/pdf" ? "doc" : "photo")
-                            .frame(width: 36, height: 36).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(selectedFilename).font(Theme.font(14, weight: .medium)).lineLimit(1)
-                            Text(ByteCountFormatter.string(fromByteCount: Int64(selectedData.count), countStyle: .file))
-                                .font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
-                        }
-                        Spacer()
-                        Button("Discard", role: .destructive) { self.selectedData = nil; selection = nil }
-                            .font(Theme.font(13, weight: .medium)).frame(minHeight: 44).disabled(busy)
-                    }
-                    .padding(12)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+                selectedFileRow
+                waitingSummary
+                if canAdd && dynamicTypeSize.isAccessibilitySize && !selecting {
+                    captureControls.padding(.top, 4)
                 }
-                if !allPhotos.isEmpty || hasMore {
-                    // Activity's All/Notes/Status/Photos chips are the screen's one chip row; the
-                    // photo stage filter under them is a quieter row of words, not a second chip row.
-                    if dynamicTypeSize.isAccessibilitySize {
-                        ThorbisMenu(items: ["All", "Before", "After", "Untagged"].map { option in
-                            ThorbisMenuItem(filterLabel(option), isSelected: filter == option) { filter = option }
-                        }, title: "Show photos") {
-                            Label("Filter photos · \(filter)", systemImage: "line.3.horizontal.decrease.circle")
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(Theme.foreground)
-                                .frame(minHeight: 44, alignment: .leading)
-                        }
-                        .accessibilityIdentifier("photo-filter-menu")
-                    } else {
-                        HStack(spacing: 16) {
-                            ForEach(["All", "Before", "After", "Untagged"], id: \.self) { option in
-                                Button { filter = option } label: {
-                                    Text(filterLabel(option))
-                                        .font(Theme.font(13, weight: filter == option ? .semibold : .regular))
-                                        .foregroundStyle(filter == option ? Theme.foreground : Theme.muted)
-                                        .frame(minHeight: 44).contentShape(Rectangle())
-                                }
-                                .buttonStyle(PressStyle())
-                                .accessibilityAddTraits(filter == option ? .isSelected : [])
-                            }
-                        }
-                    }
-                    if hasMore {
-                        Text("Counts show loaded photos")
-                            .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                    }
-                }
-                if !loading && (!allPhotos.isEmpty || hasMore) && photos.isEmpty {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 12) {
-                            Text(hasMore ? "No matches in loaded photos. More may be available." : "No matching photos").foregroundStyle(Theme.muted)
-                            Spacer(minLength: 0)
-                            Button("Show all photos") { filter = "All" }.frame(minHeight: 44)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(hasMore ? "No matches in loaded photos. More may be available." : "No matching photos").foregroundStyle(Theme.muted)
-                            Button("Show all photos") { filter = "All" }.frame(minHeight: 44)
-                        }
-                    }
-                    .font(.subheadline)
-                    .tint(Theme.brandText)
-                    .frame(minHeight: 44)
-                    if hasMore {
-                        Button(loadingMore ? "Loading…" : "Load more") { Task { await loadMore() } }
-                            .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                            .frame(minHeight: 44).disabled(loadingMore || loading)
-                            .accessibilityIdentifier("job-media-load-more-matches")
-                    }
-                }
-                if currentPendingContext != nil, let warning = pendingMedia.storageWarning { ErrorBanner(message: warning) }
-                if currentPendingContext != nil && pendingMedia.legacyCount > 0 {
-                    ErrorBanner(message: "Older photos remain on this phone. Check this job before choosing which photos to recover.")
-                    Button("Recover older photos") { showLegacyRecovery = true }
-                        .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                        .frame(minHeight: 44).disabled(!canAdd || busy)
-                }
-                if canAdd && dynamicTypeSize.isAccessibilitySize {
-                    photoCaptureControls.padding(.top, 10)
-                }
-                if let justCaptured, canAdd {
-                    HStack(spacing: 12) {
-                        Button { captureMarkup = justCaptured } label: {
-                            Label("Mark up the photo you just took", systemImage: "pencil.tip.crop.circle")
-                                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("markup-just-captured")
-                        Button { self.justCaptured = nil } label: {
-                            Image(systemName: "xmark").foregroundStyle(Theme.muted).frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Dismiss markup suggestion")
-                    }
-                    .padding(.horizontal, 12)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                }
-                if !waiting.isEmpty {
-                    PaperGroupHeader(title: "Waiting to upload", count: waiting.count) {
-                        Button("Retry") { Task { await retryWaiting() } }
-                            .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                            .frame(minHeight: 44).disabled(busy || !canAdd)
-                    }
-                    ForEach(waiting) { photo in
-                        HStack(spacing: 12) {
-                            Image(systemName: pendingMedia.errors[photo.id] != nil ? "exclamationmark.triangle" : photo.kind == "document" ? "doc" : photo.kind == "video" ? "video" : "clock.arrow.circlepath").foregroundStyle(Theme.warning)
-                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(photo.title).font(Theme.font(15, weight: .medium))
-                                Text(pendingMedia.errors[photo.id].map { "Needs attention · \($0)" } ?? (pendingMedia.uploadingID == photo.id ? "Uploading…" : pendingMedia.unverifiedIDs.contains(photo.id) ? "Saved copy not yet verified" : "Saved on this phone · \(photo.capturedAt.tradeTime)"))
-                                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                        }
-                        .frame(minHeight: 48)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("pending-media-\(photo.id)")
-                        .accessibilityValue(Text("Captured \(photo.capturedAt.formatted(date: .abbreviated, time: .shortened))"))
-                    }
-                }
-                // One empty state for the whole tab instead of two empty sections.
-                if allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && (currentPendingContext == nil || (pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil)) && !loading && !hasMore && pageError == nil && readScope == sourceScope && readScope != nil {
-                    PaperEmptyState(symbol: "camera", title: "No photos yet",
-                                    message: canAdd ? "Take a before photo when you arrive. Photos, PDFs and clips up to 8 MB." : nil)
-                }
-                if !photos.isEmpty { PaperGroupHeader(title: hasMore ? "Photos loaded" : "Photos", count: photos.count) }
-                if !photos.isEmpty {
-                    ForEach(JobPhotoDateGroups.group(photos, calendar: calendar), id: \.day) { group in
-                        Text(group.day.map(photoDayLabel) ?? "Date unavailable")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.muted)
-                            .accessibilityAddTraits(.isHeader)
-                        LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize
-                                  ? [GridItem(.flexible())]
-                                  : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                            ForEach(group.photos) { record in
-                                ZStack(alignment: .bottomTrailing) {
-                                    Button { open(record) } label: {
-                                        VStack(alignment: .leading, spacing: 0) {
-                                            MediaThumbnail(record: record, attempt: thumbnailAttempt)
-                                                .frame(maxWidth: .infinity).frame(height: 120)
-                                                .clipShape(UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius))
-                                                .overlay(alignment: .topLeading) {
-                                                    if let tag = ["Before", "After"].first(where: record.tags.contains) {
-                                                        Text(tag).font(Theme.font(11, weight: .semibold))
-                                                            .foregroundStyle(Theme.foreground)
-                                                            .padding(.horizontal, 8).frame(height: 24)
-                                                            .background(Theme.background.opacity(0.9), in: Capsule())
-                                                            .padding(8)
-                                                    }
-                                                }
-                                            Text(record.caption ?? record.originalFilename).font(Theme.font(13, weight: .medium))
-                                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                                                .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
-                                                .padding(.horizontal, 10).padding(.vertical, 8)
-                                                .padding(.trailing, dynamicTypeSize.isAccessibilitySize && canAdd && record.uploadState == "stored" ? 46 : 0)
-                                            if record.uploadState != "stored" {
-                                                Text(record.uploadState.statusLabel).font(Theme.font(11)).foregroundStyle(Theme.warning)
-                                                    .padding(.horizontal, 10).padding(.bottom, 8)
-                                            }
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(busy || preview.loading || record.uploadState != "stored")
-                                    .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
-                                    if canAdd, record.uploadState == "stored" {
-                                        ThorbisMenu(items: [
-                                            ThorbisMenuItem("Before") { Task { await retag(record, .before) } },
-                                            ThorbisMenuItem("After") { Task { await retag(record, .after) } },
-                                            ThorbisMenuItem("Other") { Task { await retag(record, .other) } },
-                                        ], title: "Tag photo", accessibilityLabel: stageName(record)) {
-                                            Image(systemName: "tag")
-                                                .font(.system(size: 15, weight: .semibold))
-                                                .foregroundStyle(Theme.foreground)
-                                                .frame(width: 44, height: 44)
-                                                .background(Theme.background.opacity(0.92), in: Circle())
-                                        }
-                                        .disabled(busy)
-                                        .padding(4)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if !documents.isEmpty { PaperGroupHeader(title: hasMore ? "Documents loaded" : "Documents", count: documents.count).padding(.top, 6) }
-                ForEach(documents) { record in
-                    Button { open(record) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: record.kind == "video" ? "video" : "doc").font(.system(size: 15)).foregroundStyle(Theme.muted)
-                                .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(record.originalFilename).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                Text(record.uploadState == "stored" ? (record.kind == "video" ? "Video" : "PDF") : record.uploadState.statusLabel)
-                                    .font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            Image(systemName: "arrow.down.circle").foregroundStyle(Theme.muted)
-                        }
-                        .frame(minHeight: 48).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(busy || preview.loading || record.uploadState != "stored")
-                }
-                if hasMore {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("More photos and documents may be available. Filters apply to loaded items.")
-                            .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                        Button(loadingMore ? "Loading…" : "Load more") { Task { await loadMore() } }
-                            .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
-                            .frame(minHeight: 44).disabled(loadingMore || loading)
-                            .accessibilityIdentifier("job-media-load-more")
-                    }
-                }
-                if canAdd && !(photos.isEmpty && documents.isEmpty) {
+                justCapturedRow
+                emptyStates
+                if showsPhotos { photoSections }
+                if showsDocuments { documentSection }
+                loadMoreRow
+                if canAdd && !(allPhotos.isEmpty && documents.isEmpty) {
                     Text(videoNotice ?? "Photos, PDFs and video clips up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width - Theme.gutter * 2 } action: { contentWidth = $0 }
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .safeAreaInset(edge: .bottom) {
-            if canAdd && !dynamicTypeSize.isAccessibilitySize {
-                photoCaptureControls
+            if selecting {
+                selectionBar
+            } else if canAdd && !dynamicTypeSize.isAccessibilitySize {
+                captureControls
                     .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
                     .background(Theme.background)
             }
@@ -411,13 +229,23 @@ struct JobMediaView: View {
             }
             .ignoresSafeArea()
         }
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraCapture { image in
-                showCamera = false
-                guard let image else { return }
-                uploadImage(image)
-            }
-            .ignoresSafeArea()
+        .fullScreenCover(item: $capture) { request in
+            MediaCaptureFlow(request: request, file: { data, tags, caption in
+                try filePhoto(data, tags: tags, caption: caption)
+            }, fileMarkup: { image, tags in
+                try enqueueDerived(image, tags: tags, caption: "Marked up", prefix: "markup")
+            }, onStage: { stage = $0 }, onClose: { capture = nil })
+        }
+        .fullScreenCover(item: $viewer) { start in
+            MediaPhotoViewer(records: storedPhotos, start: start.id, canEdit: canAdd, currentUserID: session.user?.id,
+                             load: { try await download($0) },
+                             retag: { await retag($0, $1) },
+                             archive: { await archive([$0]) },
+                             fileMarkup: { image, tags in try enqueueDerived(image, tags: tags, caption: "Marked up", prefix: "markup") },
+                             onClose: { viewer = nil })
+        }
+        .fullScreenCover(isPresented: $showCompare) {
+            MediaCompareView(befores: befores, afters: afters, load: { try await download($0) }) { showCompare = false }
         }
         .task(id: readScope) {
             if captureContext == nil {
@@ -429,6 +257,9 @@ struct JobMediaView: View {
             consumeLaunch()
             await load()
             if readScope != nil && !waiting.isEmpty { await retryWaiting() }
+            #if DEBUG
+            applyPreviewState()
+            #endif
         }
         .onChange(of: launch.wrappedValue) { _, _ in consumeLaunch() }
         .refreshable { thumbnailAttempt += 1; await load() }
@@ -441,8 +272,9 @@ struct JobMediaView: View {
                     guard let data = try await item.loadTransferable(type: Data.self) else { throw CocoaError(.fileReadCorruptFile) }
                     selection = nil
                     if let image = UIImage(data: data) {
-                        busy = false
-                        uploadImage(image)
+                        // A library photo goes through the same quick tag step as a new one.
+                        guard let jpeg = Self.jpeg(image) else { throw MediaSelectionError.tooLarge }
+                        capture = MediaCaptureRequest(mode: .library, stage: stage, held: jpeg)
                     } else {
                         let type = item.supportedContentTypes.first ?? .jpeg
                         try select(data, mime: type.preferredMIMEType ?? "image/jpeg", filename: "photo." + (type.preferredFilenameExtension ?? "jpg"))
@@ -451,6 +283,7 @@ struct JobMediaView: View {
                 } catch { self.error = error.localizedDescription }
             }
         }
+        .photosPicker(isPresented: $showLibrary, selection: $selection, matching: .images)
         .fileImporter(isPresented: $importDocument, allowedContentTypes: [.pdf]) { result in
             do {
                 let url = try result.get()
@@ -462,26 +295,10 @@ struct JobMediaView: View {
                 enqueueSelection()
             } catch { self.error = error.localizedDescription }
         }
+        // Documents and clips keep the system preview.
         .sheet(isPresented: Binding(get: { previewIsCurrent && preview.url != nil }, set: { if !$0 { preview.clear(); previewScope = nil; previewRecord = nil } })) {
             if previewIsCurrent, let file = preview.url {
                 NativeDocumentPreview(url: file).accessibilityIdentifier("job-media-preview")
-                    .safeAreaInset(edge: .bottom) {
-                        if canAdd, let record = previewRecord, record.kind == "photo" {
-                            Button { openPreviewMarkup(file: file, record: record) } label: {
-                                Label("Mark up a copy", systemImage: "pencil.tip.crop.circle").inkCommit()
-                            }
-                            .buttonStyle(PressStyle())
-                            .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
-                            .background(Theme.background)
-                            .accessibilityIdentifier("job-media-markup")
-                        }
-                    }
-                    .fullScreenCover(item: $previewMarkup) { target in
-                        markupCover(target, cancel: { previewMarkup = nil }) {
-                            previewMarkup = nil
-                            preview.clear(); previewScope = nil; previewRecord = nil
-                        }
-                    }
             }
         }
         .fullScreenCover(item: $captureMarkup) { target in
@@ -489,35 +306,484 @@ struct JobMediaView: View {
         }
         .fullScreenCover(isPresented: $showMeasure) {
             SiteMeasureView(onSave: { image, caption in
-                try enqueueDerived(image, tags: stageTags, caption: caption, prefix: "measure")
+                // A measurement is filed with no stage; tag it from the grid if it belongs to one.
+                try enqueueDerived(image, tags: [], caption: caption, prefix: "measure")
                 showMeasure = false
             }, onClose: { showMeasure = false })
         }
-        .onChange(of: readScope) { _, _ in preview.clear(); previewScope = nil; previewRecord = nil; busy = false; justCaptured = nil; previewMarkup = nil; captureMarkup = nil }
+        .thorbisConfirm(pickedRecords.count == 1 ? "Remove this photo from the job?" : "Remove \(pickedRecords.count) photos from the job?",
+                        message: "They’re archived, not erased: the office can still restore them.",
+                        isPresented: $confirmBulkArchive,
+                        actions: [ThorbisConfirmAction(pickedRecords.count == 1 ? "Remove photo" : "Remove photos", role: .destructive) {
+                            let chosen = pickedRecords
+                            Task { if await archive(chosen) { endSelecting() } }
+                        }])
+        .sheet(item: $shareFiles) { files in
+            MediaShareSheet(urls: files.urls) {
+                for url in files.urls { try? FileManager.default.removeItem(at: url) }
+                shareFiles = nil
+            }
+        }
+        .onChange(of: readScope) { _, _ in
+            preview.clear(); previewScope = nil; previewRecord = nil; busy = false; justCaptured = nil; captureMarkup = nil
+            viewer = nil; showCompare = false; endSelecting()
+        }
         .onChange(of: records) { _, _ in if !previewIsCurrent { preview.clear(); previewScope = nil; previewRecord = nil } }
         .onDisappear { selectedData = nil; justCaptured = nil; preview.clear() }
     }
+
+    // MARK: Sections
+
+    @ViewBuilder private var notices: some View {
+        if let error = error ?? (previewIsCurrent ? preview.error : nil) {
+            ErrorBanner(message: error, retry: selectedData == nil ? nil : { enqueueSelection() })
+                .padding(.horizontal, -Theme.gutter)
+        }
+        if let pageError, let scope = readScope, pageErrorScope == scope {
+            ErrorBanner(message: pageError) {
+                if retryPage && hasMore { await loadMore() } else { await load() }
+            }
+        }
+        if readScope == nil {
+            Label("Photos and documents are unavailable with your current access.", systemImage: "lock")
+                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+        }
+        if currentPendingContext != nil, let warning = pendingMedia.storageWarning { ErrorBanner(message: warning) }
+        if currentPendingContext != nil && pendingMedia.legacyCount > 0 {
+            ErrorBanner(message: "Older photos remain on this phone. Check this job before choosing which photos to recover.")
+            Button("Recover older photos") { showLegacyRecovery = true }
+                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                .frame(minHeight: 44).disabled(!canAdd || busy)
+        }
+    }
+
+    /// The screen's one selector, with Untagged and Select in the filter circle beside it.
+    @ViewBuilder private var selectorRow: some View {
+        if readScope != nil && !(allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && !hasMore) {
+            HStack(spacing: 8) {
+                if dynamicTypeSize.isAccessibilitySize {
+                    ThorbisMenu(items: (MediaFilter.selector + [.untagged]).map { option in
+                        ThorbisMenuItem(option.rawValue, isSelected: filter == option) { filter = option; endSelecting() }
+                    }, title: "Show") {
+                        Label("Show · \(filter.rawValue)", systemImage: "line.3.horizontal.decrease.circle")
+                            .font(.body.weight(.medium)).foregroundStyle(Theme.foreground)
+                            .frame(minHeight: 44, alignment: .leading)
+                    }
+                    .accessibilityIdentifier("photo-filter-menu")
+                } else {
+                    ThorbisSegmented(options: MediaFilter.selector.map { ($0, $0.rawValue) },
+                                     selection: Binding(get: { filter == .untagged ? .all : filter },
+                                                        set: { filter = $0; if $0 == .documents { endSelecting() } }))
+                        .accessibilityIdentifier("job-media-selector")
+                    ThorbisMenu(items: filterMenuItems, title: "Photos", accessibilityLabel: "More photo options") {
+                        PaperCircleLabel(symbol: "line.3.horizontal.decrease", size: 44,
+                                         fill: filter == .untagged ? Theme.brandSurface : Theme.fill)
+                    }
+                    .accessibilityValue(filter == .untagged ? "Showing untagged photos" : "")
+                    .accessibilityIdentifier("photo-filter-menu")
+                }
+            }
+        }
+    }
+
+    private var filterMenuItems: [ThorbisMenuItem] {
+        var items = [
+            ThorbisMenuItem("All photos", icon: "square.grid.3x3", isSelected: filter == .all) { filter = .all },
+            ThorbisMenuItem("Untagged photos", icon: "tag.slash", subtitle: "\(allPhotos.filter { mediaStageWord($0.tags) == nil }.count) loaded",
+                            isSelected: filter == .untagged) { filter = .untagged },
+        ]
+        if canAdd && !storedPhotos.isEmpty {
+            items.append(ThorbisMenuItem("Select photos", icon: "checkmark.circle") { startSelecting() })
+        }
+        if !befores.isEmpty && !afters.isEmpty {
+            items.append(ThorbisMenuItem("Compare before and after", icon: "rectangle.split.2x1") { showCompare = true })
+        }
+        return items
+    }
+
+    @ViewBuilder private var selectedFileRow: some View {
+        if let selectedData, canShowSelection {
+            JobPanel {
+                MediaDocumentRow(title: selectedFilename,
+                                 detail: ByteCountFormatter.string(fromByteCount: Int64(selectedData.count), countStyle: .file) + " · not saved yet",
+                                 state: .stored)
+                    .overlay(alignment: .trailing) {
+                        Button("Discard", role: .destructive) { self.selectedData = nil; selection = nil }
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+                            .frame(minWidth: 44, minHeight: 44).padding(.trailing, 12).disabled(busy)
+                    }
+            }
+        }
+    }
+
+    /// One calm line for everything saved on this phone and not on the server yet.
+    @ViewBuilder private var waitingSummary: some View {
+        if !waiting.isEmpty {
+            let failed = waiting.filter { if case .failed = MediaUploadState.of($0, in: pendingMedia) { true } else { false } }.count
+            let offline = session.isOffline || waiting.contains { pendingMedia.waitingForConnection.contains($0.id) }
+            JobPanel {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(waiting.count) saved on this phone").font(Theme.font(16, weight: .medium)).monospacedDigit()
+                        Text(pendingMedia.uploadingID != nil ? "Sending now…"
+                             : failed > 0 ? "\(failed) couldn’t send. Tap one to see why."
+                             : offline ? "They send by themselves when you’re back online."
+                             : "Waiting to send.")
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 8)
+                    if pendingMedia.uploadingID == nil && !session.isOffline {
+                        Button("Send now") { Task { await retryWaiting() } }
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .padding(.horizontal, 14).frame(minHeight: 44)
+                            .background(Theme.fill, in: Capsule())
+                            .buttonStyle(PressStyle())
+                            .disabled(draining || !canAdd)
+                            .accessibilityIdentifier("job-media-send-now")
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    @ViewBuilder private var justCapturedRow: some View {
+        if let justCaptured, canAdd, !selecting {
+            JobPanel {
+                HStack(spacing: 8) {
+                    Button { captureMarkup = justCaptured } label: {
+                        Label("Mark up the photo you just took", systemImage: "pencil.tip.crop.circle")
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("markup-just-captured")
+                    Button { self.justCaptured = nil } label: {
+                        Image(systemName: "xmark").foregroundStyle(Theme.muted).frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss markup suggestion")
+                }
+                .padding(.leading, 16).padding(.trailing, 6)
+            }
+        }
+    }
+
+    @ViewBuilder private var emptyStates: some View {
+        // One empty state for the whole tab instead of two empty sections.
+        if allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && (currentPendingContext == nil || (pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil)) && !loading && !hasMore && pageError == nil && readScope == sourceScope && readScope != nil {
+            PaperEmptyState(symbol: "camera", title: "No photos yet",
+                            message: canAdd ? "Take a before photo when you arrive. Photos, PDFs and clips up to 8 MB." : nil)
+        } else if !loading && showsPhotos && (!allPhotos.isEmpty || hasMore || !waiting.isEmpty) && photos.isEmpty && waitingPhotos.isEmpty {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    Text(hasMore ? "No matches in loaded photos. More may be available." : "No matching photos").foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                    Button("Show all photos") { filter = .all }.frame(minHeight: 44)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(hasMore ? "No matches in loaded photos. More may be available." : "No matching photos").foregroundStyle(Theme.muted)
+                    Button("Show all photos") { filter = .all }.frame(minHeight: 44)
+                }
+            }
+            .font(.subheadline)
+            .tint(Theme.brandText)
+            .frame(minHeight: 44)
+            if hasMore {
+                Button(loadingMore ? "Loading…" : "Load more") { Task { await loadMore() } }
+                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .frame(minHeight: 44).disabled(loadingMore || loading)
+                    .accessibilityIdentifier("job-media-load-more-matches")
+            }
+        }
+    }
+
+    private var gridColumns: [GridItem] {
+        let count = MediaGridMetrics.columns(width: contentWidth, accessibility: dynamicTypeSize.isAccessibilitySize)
+        return Array(repeating: GridItem(.flexible(), spacing: MediaGridMetrics.spacing), count: count)
+    }
+
+    @ViewBuilder private var photoSections: some View {
+        if !waitingPhotos.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                JobPanelLabel(title: "On this phone · \(waitingPhotos.count)")
+                LazyVGrid(columns: gridColumns, spacing: MediaGridMetrics.spacing) {
+                    ForEach(waitingPhotos) { media in pendingTile(media) }
+                }
+            }
+        }
+        if !photos.isEmpty {
+            let groups = JobPhotoDateGroups.group(photos, calendar: calendar)
+            ForEach(Array(groups.enumerated()), id: \.element.day) { index, group in
+                VStack(alignment: .leading, spacing: 6) {
+                    photoGroupLabel(group, first: index == 0)
+                    LazyVGrid(columns: gridColumns, spacing: MediaGridMetrics.spacing) {
+                        ForEach(group.photos) { record in recordTile(record) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func photoGroupLabel(_ group: JobPhotoDateGroups.Group, first: Bool) -> some View {
+        let day = group.day.map(photoDayLabel) ?? "Date unavailable"
+        let title = "\(day) · \(group.photos.count)"
+        return HStack(spacing: 8) {
+            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).monospacedDigit()
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            if first && canAdd && !storedPhotos.isEmpty {
+                Button(selecting ? "Done" : "Select") { if selecting { endSelecting() } else { startSelecting() } }
+                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .padding(.horizontal, 14).frame(minHeight: 44)
+                    .background(selecting ? Theme.brandSurface : Theme.fill, in: Capsule())
+                    .buttonStyle(PressStyle())
+                    .accessibilityIdentifier("job-media-select")
+            }
+            if first && !selecting && !befores.isEmpty && !afters.isEmpty {
+                Button { showCompare = true } label: {
+                    Label("Compare", systemImage: "rectangle.split.2x1")
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 14).frame(minHeight: 44)
+                        .background(Theme.fill, in: Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("job-media-compare")
+            }
+        }
+        .frame(minHeight: 44)
+    }
+
+    private func recordTile(_ record: MediaAssetRecord) -> some View {
+        let stored = record.uploadState == "stored"
+        let isPicked = picked.contains(record.id)
+        return Button {
+            if selecting {
+                guard stored else { return }
+                if isPicked { picked.remove(record.id) } else { picked.insert(record.id) }
+            } else {
+                open(record)
+            }
+        } label: {
+            MediaTile(stage: mediaStageWord(record.tags), state: .of(record), selecting: selecting && stored, selected: isPicked) {
+                MediaThumbnail(record: record, attempt: thumbnailAttempt)
+            }
+        }
+        .buttonStyle(PressStyle())
+        .disabled(!stored || (!selecting && preview.loading))
+        .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
+        .accessibilityValue([mediaStageWord(record.tags), MediaUploadState.of(record).word, selecting ? (isPicked ? "Selected" : "Not selected") : nil].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityIdentifier("job-media-photo-\(record.id)")
+    }
+
+    @ViewBuilder private func pendingTile(_ media: PendingMedia) -> some View {
+        let state = MediaUploadState.of(media, in: pendingMedia)
+        let tile = MediaTile(stage: mediaStageWord(media.tags), state: state) { PendingMediaThumbnail(media: media) }
+        Group {
+            if case .failed(let reason) = state {
+                ThorbisMenu(items: [
+                    ThorbisMenuItem("Try sending again", icon: "arrow.clockwise", subtitle: reason) { Task { await retryWaiting() } },
+                ], title: "Couldn’t send this photo", accessibilityLabel: "\(media.title), failed to send") { tile }
+                    .disabled(draining || !canAdd)
+            } else {
+                tile
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("pending-media-\(media.id)")
+        .accessibilityValue(Text("\(state.word ?? "") · captured \(media.capturedAt.formatted(date: .abbreviated, time: .shortened))"))
+    }
+
+    @ViewBuilder private var documentSection: some View {
+        if !documents.isEmpty || !waitingDocuments.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                JobPanelLabel(title: (hasMore ? "Documents loaded" : "Documents") + " · \(documents.count + waitingDocuments.count)")
+                JobPanel {
+                    ForEach(waitingDocuments) { media in
+                        let state = MediaUploadState.of(media, in: pendingMedia)
+                        Group {
+                            if case .failed(let reason) = state {
+                                ThorbisMenu(items: [ThorbisMenuItem("Try sending again", icon: "arrow.clockwise", subtitle: reason) { Task { await retryWaiting() } }],
+                                            title: "Couldn’t send this file") {
+                                    MediaDocumentRow(title: media.title, detail: pendingDetail(media), state: state)
+                                }
+                            } else {
+                                MediaDocumentRow(title: media.title, detail: pendingDetail(media), state: state)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("pending-media-\(media.id)")
+                        .accessibilityValue(Text("Captured \(media.capturedAt.formatted(date: .abbreviated, time: .shortened))"))
+                    }
+                    ForEach(documents) { record in
+                        Button { open(record) } label: {
+                            MediaDocumentRow(title: record.originalFilename, detail: documentDetail(record), state: .of(record))
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .disabled(busy || preview.loading || record.uploadState != "stored")
+                    }
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    @ViewBuilder private var loadMoreRow: some View {
+        if hasMore {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("More photos and documents may be available. Counts and filters apply to loaded items.")
+                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                Button(loadingMore ? "Loading…" : "Load more") { Task { await loadMore() } }
+                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .frame(minHeight: 44).disabled(loadingMore || loading)
+                    .accessibilityIdentifier("job-media-load-more")
+            }
+        }
+    }
+
+    private func documentDetail(_ record: MediaAssetRecord) -> String {
+        let kind = record.kind == "video" ? "Video clip" : "PDF"
+        let size = ByteCountFormatter.string(fromByteCount: Int64(record.sizeBytes), countStyle: .file)
+        let day = record.capturedAt.flatMap { JobFiltering.isoFractional.date(from: $0) ?? JobFiltering.isoPlain.date(from: $0) }
+        return [kind, size, day.map(photoDayLabel)].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func pendingDetail(_ media: PendingMedia) -> String {
+        let kind = media.kind == "video" ? "Video clip" : "PDF"
+        if pendingMedia.unverifiedIDs.contains(media.id), pendingMedia.errors[media.id] == nil { return "\(kind) · saved copy not yet verified" }
+        return "\(kind) · saved on this phone \(media.capturedAt.tradeTime)"
+    }
+
+    // MARK: Bars
+
+    /// One ink "Take photo", with Burst, Scan, Measure, Video and Import as quiet circles above it.
+    private var captureControls: some View {
+        let tools = tools
+        return VStack(spacing: 10) {
+            if cameraDenied {
+                PermissionNotice(permission: .camera, purpose: "add photos to jobs", outer: 0)
+            }
+            HStack(spacing: 0) {
+                if tools.camera {
+                    toolCircle("Burst", symbol: "square.stack.3d.down.right", identifier: "job-media-burst",
+                               hint: "Keeps the camera open for many shots. Tag them later.") { openCamera(.burst) }
+                }
+                toolCircle("Scan", symbol: "doc.viewfinder", identifier: "job-media-scan",
+                           hint: tools.scan ? "Scan a paper document into a PDF." : "Choose a PDF to add.") {
+                    if tools.scan { showScanner = true } else { importDocument = true }
+                }
+                if tools.measure {
+                    toolCircle("Measure", symbol: "ruler", identifier: "job-media-measure",
+                               hint: "Measure a distance with the camera and add it to this job as a photo.") { showMeasure = true }
+                }
+                if tools.video {
+                    toolCircle("Video", symbol: "video", identifier: "job-media-video", hint: "Record a clip of up to 60 seconds.") { showVideo = true }
+                }
+                VStack(spacing: 3) {
+                    ThorbisMenu(items: [
+                        ThorbisMenuItem("Choose a photo", icon: "photo.on.rectangle") { showLibrary = true },
+                        ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true },
+                    ] + (tools.scan ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }] : []),
+                                title: "Add from this phone", accessibilityLabel: "Import a photo or PDF") {
+                        PaperCircleLabel(symbol: "square.and.arrow.down", size: 48)
+                    }
+                    .accessibilityIdentifier("job-media-import")
+                    Text("Import").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            Button { openCamera(.single) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "camera")
+                    Text("Take photo")
+                }
+                .inkCommit(height: 56)
+            }
+            .buttonStyle(PressStyle())
+            .disabled(!tools.camera)
+            .accessibilityIdentifier("job-media-take-photo")
+        }
+    }
+
+    private func toolCircle(_ title: String, symbol: String, identifier: String, hint: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                PaperCircleLabel(symbol: symbol, size: 48)
+                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(title)
+        .accessibilityHint(hint)
+        .accessibilityIdentifier(identifier)
+    }
+
+    /// Bulk actions on picked photos: stage them, share them, or remove them.
+    private var selectionBar: some View {
+        let count = pickedRecords.count
+        return VStack(spacing: 10) {
+            HStack {
+                Text(count == 0 ? "Tap photos to choose them" : "\(count) chosen")
+                    .font(Theme.font(15, weight: .medium)).monospacedDigit()
+                Spacer()
+                Button(count == storedPhotos.count ? "Clear" : "Choose all") {
+                    picked = count == storedPhotos.count ? [] : Set(storedPhotos.map(\.id))
+                }
+                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).frame(minHeight: 44)
+                .accessibilityIdentifier("job-media-choose-all")
+            }
+            HStack(spacing: 8) {
+                MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
+                MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
+                MenuOrCircle(symbol: "tag.slash", label: "No stage") { Task { await retagPicked(.other) } }
+                MenuOrCircle(symbol: "square.and.arrow.up", label: "Share") { Task { await sharePicked() } }
+                MenuOrCircle(symbol: "trash", label: "Remove") { confirmBulkArchive = true }
+                    .accessibilityIdentifier("job-media-remove-picked")
+            }
+            .disabled(count == 0 || busy)
+            if busy { ProgressView().frame(height: 20) }
+        }
+        .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+        .background(Theme.background)
+    }
+
+    // MARK: Actions
+
     /// The camera, or, when it is turned off for Thorbis, the notice that says so with Open Settings.
-    private func openCamera() {
+    private func openCamera(_ mode: MediaCaptureMode) {
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return }
         cameraDenied = [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video))
-        if !cameraDenied { showCamera = true }
+        if !cameraDenied { capture = MediaCaptureRequest(mode: mode, stage: stage) }
     }
 
     /// Opens what the job screen's toolkit asked for, with the same checks as the buttons below.
     private func consumeLaunch() {
         guard let request = launch.wrappedValue, captureContext != nil else { return }
         launch.wrappedValue = nil
-        guard canAdd, readScope != nil, !busy else { return }
+        guard canAdd, readScope != nil else { return }
         switch request {
         case .camera(let requested):
             if let requested, ["Before", "After", "Other"].contains(requested) { stage = requested }
-            openCamera()
+            openCamera(.single)
         case .scan:
             if VNDocumentCameraViewController.isSupported { showScanner = true } else { importDocument = true }
         case .measure:
             if SiteMeasure.isSupported { showMeasure = true }
         }
+    }
+
+    private func startSelecting() {
+        filter = filter == .documents ? .all : filter
+        picked = []
+        justCaptured = nil
+        withMotion(.easeOut(duration: 0.2)) { selecting = true }
+    }
+
+    private func endSelecting() {
+        picked = []
+        withMotion(.easeOut(duration: 0.2)) { selecting = false }
     }
 
     private func select(_ data: Data, mime: String, filename: String) throws {
@@ -530,72 +796,6 @@ struct JobMediaView: View {
         selectedCapturedAt = Date()
         error = nil
     }
-    private func photoFilterCount(_ option: String) -> Int {
-        switch option {
-        case "Before", "After": allPhotos.filter { $0.tags.contains(option) }.count
-        case "Untagged": allPhotos.filter { !$0.tags.contains("Before") && !$0.tags.contains("After") }.count
-        default: allPhotos.count
-        }
-    }
-
-    private func filterLabel(_ option: String) -> String {
-        let count = photoFilterCount(option)
-        return "\(option) · \(count)"
-    }
-
-    private var photoCaptureControls: some View {
-        VStack(spacing: 8) {
-            if cameraDenied {
-                PermissionNotice(permission: .camera, purpose: "add photos to jobs", outer: 0)
-            }
-            ThorbisSegmented(options: [("Before", "Before"), ("After", "After"), ("Other", "Other")],
-                             selection: $stage)
-                .disabled(busy)
-            HStack(spacing: 8) {
-                Button { openCamera() } label: {
-                    HStack(spacing: 7) {
-                        if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "camera") }
-                        Text(busy ? "Uploading…" : "Take \(stage == "Other" ? "a" : stage.lowercased()) photo")
-                    }
-                    .inkCommit()
-                }
-                .buttonStyle(PressStyle())
-                .disabled(busy || !UIImagePickerController.isSourceTypeAvailable(.camera))
-                PhotosPicker(selection: $selection, matching: .images) {
-                    Image(systemName: "photo.on.rectangle").font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                        .frame(width: 46, height: 46)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                }
-                .disabled(busy)
-                .accessibilityLabel("Choose from library")
-                if SiteMeasure.isSupported {
-                    Button { showMeasure = true } label: {
-                        Image(systemName: "ruler").font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                            .frame(width: 46, height: 46)
-                            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(busy)
-                    .accessibilityLabel("Measure")
-                    .accessibilityHint("Measure a distance with the camera and add it to this job as a photo.")
-                    .accessibilityIdentifier("job-media-measure")
-                }
-                ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
-                    ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
-                    : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }]
-                    + (VideoCapture.isAvailable ? [ThorbisMenuItem("Record a video clip", icon: "video") { showVideo = true }] : []),
-                            title: "Add a document or clip", accessibilityLabel: "Add a document or video clip") {
-                    Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                        .frame(width: 46, height: 46)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                }
-                .disabled(busy)
-            }
-        }
-    }
 
     private func photoDayLabel(_ day: Date) -> String {
         let formatter = DateFormatter()
@@ -607,19 +807,11 @@ struct JobMediaView: View {
         return formatter.string(from: day)
     }
 
-    private func stageName(_ record: MediaAssetRecord) -> String {
-        if record.tags.contains("Before") { return "Change photo stage, currently Before" }
-        if record.tags.contains("After") { return "Change photo stage, currently After" }
-        return "Change photo stage, currently Other"
-    }
-
     private func retag(_ record: MediaAssetRecord, _ stage: MediaStage) async {
-        guard !busy, let scope = readScope, sourceScope == scope else { return }
-        busy = true
-        defer { if readScope == scope { busy = false } }
+        guard let scope = readScope, sourceScope == scope else { return }
         do {
             let updated = try await api.tagFieldMedia(record.id, tags: MediaStageTags.applying(stage, to: record.tags), caption: record.caption)
-            guard readScope == scope, sourceScope == scope, updated.id == record.id, records.contains(record),
+            guard readScope == scope, sourceScope == scope, updated.id == record.id, records.contains(where: { $0.id == record.id }),
                   updated.jobId == jobID, updated.organizationId == scope.organization else { return }
             if let index = records.firstIndex(where: { $0.id == updated.id }) { records[index] = updated }
             error = nil
@@ -628,6 +820,79 @@ struct JobMediaView: View {
             guard readScope == scope, sourceScope == scope else { return }
             self.error = error.localizedDescription
         }
+    }
+
+    private func retagPicked(_ stage: MediaStage) async {
+        let chosen = pickedRecords
+        guard !chosen.isEmpty, !busy else { return }
+        busy = true
+        defer { busy = false }
+        for record in chosen {
+            guard readScope != nil else { return }
+            await retag(record, stage)
+            if error != nil { return }
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        endSelecting()
+    }
+
+    /// Archives each record on the server, removing it from the grid once the server confirms.
+    /// Returns true when every one was archived.
+    private func archive(_ chosen: [MediaAssetRecord]) async -> Bool {
+        guard let scope = readScope, sourceScope == scope, canAdd else { return false }
+        busy = true
+        defer { if readScope == scope { busy = false } }
+        for record in chosen {
+            do {
+                let updated = try await api.archiveFieldMedia(record.id)
+                guard readScope == scope, sourceScope == scope, updated.id == record.id, updated.archived,
+                      updated.jobId == jobID, updated.organizationId == scope.organization else {
+                    if readScope == scope { error = "The server didn’t confirm that this photo was removed. Refresh and check." }
+                    return false
+                }
+                records.removeAll { $0.id == record.id }
+                picked.remove(record.id)
+            } catch is CancellationError {
+                return false
+            } catch {
+                if readScope == scope { self.error = error.localizedDescription }
+                return false
+            }
+        }
+        error = nil
+        return true
+    }
+
+    /// Downloads the picked photos and opens the share sheet; the copies are deleted afterwards.
+    private func sharePicked() async {
+        let chosen = pickedRecords
+        guard !chosen.isEmpty, !busy else { return }
+        busy = true
+        defer { busy = false }
+        var urls: [URL] = []
+        do {
+            for record in chosen { urls.append(try await download(record)) }
+            shareFiles = MediaShareFiles(urls: urls)
+        } catch {
+            for url in urls { try? FileManager.default.removeItem(at: url) }
+            if !(error is CancellationError) { self.error = error.localizedDescription }
+        }
+    }
+
+    /// The full file for a stored record, bound to the scope the screen is showing.
+    private func download(_ record: MediaAssetRecord) async throws -> URL {
+        guard let scope = readScope, sourceScope == scope, records.contains(where: { $0.id == record.id }), record.uploadState == "stored" else {
+            throw CancellationError()
+        }
+        #if DEBUG
+        if PaperPreview.enabled, let sample = MediaSample.file(caption: record.caption ?? record.originalFilename, tags: record.tags) { return sample }
+        #endif
+        let file = try await MediaTransfer(api: api).download(mediaID: record.id, filename: record.originalFilename)
+        guard !Task.isCancelled, readScope == scope, sourceScope == scope else {
+            try? FileManager.default.removeItem(at: file)
+            throw CancellationError()
+        }
+        return file
     }
 
     private func load() async {
@@ -691,7 +956,7 @@ struct JobMediaView: View {
         }
         let kind = selectedMime == "application/pdf" ? "document" : selectedMime.hasPrefix("video/") ? "video" : "photo"
         let media = PendingMedia(id: clientAssetID, jobID: jobID, filename: selectedFilename,
-            tags: kind == "photo" ? stageTags : [], capturedAt: selectedCapturedAt,
+            tags: kind == "photo" ? MediaStageChoice.tags(stage) : [], capturedAt: selectedCapturedAt,
             kind: kind, mime: selectedMime, caption: kind == "video" ? "Video clip" : nil)
         do {
             try pendingMedia.save(media, data: selectedData, context: captureContext)
@@ -702,7 +967,23 @@ struct JobMediaView: View {
             Task { await retryWaiting() }
         } catch { self.error = error.localizedDescription }
     }
-    private var stageTags: [String] { stage == "Other" ? [] : [stage] }
+
+    /// Saves one photo from the capture flow to the on-phone queue under its chosen stage and
+    /// caption, then starts sending in the background. Original bytes are on disk first.
+    private func filePhoto(_ data: Data, tags: [String], caption: String?) throws {
+        guard canAdd, captureGeneration == api.requestGeneration, captureOrigin == api.normalizedOrigin,
+              let captureContext else { throw MediaSelectionError.workspaceChanged }
+        guard !data.isEmpty, data.count <= 8 * 1024 * 1024 else { throw MediaSelectionError.tooLarge }
+        let capturedAt = Date()
+        let stamp = capturedAt.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
+        let name = (mediaStageWord(tags) ?? "photo").lowercased()
+        let media = PendingMedia(id: UUID().uuidString, jobID: jobID, filename: "\(name)-\(stamp).jpg", tags: tags,
+                                 capturedAt: capturedAt, kind: "photo", mime: "image/jpeg", caption: caption)
+        try pendingMedia.save(media, data: data, context: captureContext)
+        error = nil
+        justCaptured = PhotoMarkupTarget(data: data, tags: tags)
+        Task { await retryWaiting() }
+    }
 
     /// Re-encodes a recorded clip to MP4 under the 8 MB single-upload limit, then queues it like a
     /// photo. A clip too long for the limit keeps its first part, and the screen says so.
@@ -721,25 +1002,6 @@ struct JobMediaView: View {
         } catch { self.error = error.localizedDescription }
     }
 
-    /// Save original bounded JPEG bytes before the first network request.
-    private func uploadImage(_ image: UIImage) {
-        guard canAdd else { return }
-        guard let data = Self.jpeg(image) else {
-            error = MediaSelectionError.tooLarge.localizedDescription
-            return
-        }
-        let capturedAt = Date()
-        let stamp = capturedAt.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
-        do {
-            try select(data, mime: "image/jpeg", filename: "\(stage.lowercased())-\(stamp).jpg")
-            let tags = stageTags
-            enqueueSelection()
-            if selectedData == nil, error == nil {
-                justCaptured = PhotoMarkupTarget(data: data, tags: tags)
-            }
-        } catch { self.error = error.localizedDescription }
-    }
-
     private func markupCover(_ target: PhotoMarkupTarget, cancel: @escaping () -> Void, saved close: @escaping () -> Void) -> some View {
         Group {
             if let image = UIImage(data: target.data) {
@@ -752,15 +1014,6 @@ struct JobMediaView: View {
                     .onTapGesture(perform: cancel)
             }
         }
-    }
-
-    /// Reads the previewed photo's bytes now; the preview file is deleted when the sheet closes.
-    private func openPreviewMarkup(file: URL, record: MediaAssetRecord) {
-        guard let data = try? Data(contentsOf: file), UIImage(data: data) != nil else {
-            error = "This photo could not be opened for markup."
-            return
-        }
-        previewMarkup = PhotoMarkupTarget(data: data, tags: record.tags.filter { $0 == "Before" || $0 == "After" })
     }
 
     /// Files a new image (markup or measurement) through the same on-phone queue as a captured
@@ -779,12 +1032,26 @@ struct JobMediaView: View {
         Task { await retryWaiting() }
     }
 
+    /// Sends everything saved for this job, in the background. Runs again while new photos arrive
+    /// mid-send, stops at a failure or lost connection, and reloads the grid once at the end.
     private func retryWaiting() async {
-        guard !Task.isCancelled, let scope = readScope, currentPendingContext != nil else { return }
-        busy = true
-        defer { if readScope == scope { busy = false } }
-        await pendingMedia.drain(api: api, jobID: jobID, canUpload: { session.can("job.edit", feature: "jobs") })
-        guard !Task.isCancelled, readScope == scope, currentPendingContext != nil else { return }
+        guard !Task.isCancelled, !draining, let scope = readScope, currentPendingContext != nil else { return }
+        draining = true
+        defer { if readScope == scope { draining = false } }
+        var sent = false
+        var attempted = Set<String>()
+        while !Task.isCancelled, readScope == scope, currentPendingContext != nil {
+            let batch = waiting.filter { !attempted.contains($0.id) }
+            guard !batch.isEmpty else { break }
+            attempted.formUnion(batch.map(\.id))
+            let before = Set(waiting.map(\.id))
+            await pendingMedia.drain(api: api, jobID: jobID, canUpload: { session.can("job.edit", feature: "jobs") })
+            let after = Set(waiting.map(\.id))
+            if !before.subtracting(after).isEmpty { sent = true }
+            // A failure or lost connection leaves items behind; try again on the next save or reconnect.
+            if batch.contains(where: { after.contains($0.id) }) { break }
+        }
+        guard sent, !Task.isCancelled, readScope == scope, currentPendingContext != nil else { return }
         await load()
     }
 
@@ -801,8 +1068,13 @@ struct JobMediaView: View {
         return nil
     }
 
+    /// Photos open in the viewer; documents and clips open in the system preview.
     private func open(_ record: MediaAssetRecord) {
         guard let scope = readScope, sourceScope == scope, records.contains(record), record.uploadState == "stored" else { return }
+        if record.kind == "photo" {
+            viewer = MediaViewerStart(id: record.id)
+            return
+        }
         previewScope = scope
         previewRecord = record
         preview.open {
@@ -830,6 +1102,43 @@ struct JobMediaView: View {
             }
             return file
         }
+    }
+
+    #if DEBUG
+    /// Screenshot fixtures: `--paper-preview-media-state viewer|compare|tag|select|markup|measure|burst`
+    /// opens that part of the flow once the sample grid has loaded.
+    private func applyPreviewState() {
+        let args = ProcessInfo.processInfo.arguments
+        guard PaperPreview.enabled, !previewStateApplied, let index = args.firstIndex(of: "--paper-preview-media-state"),
+              args.indices.contains(index + 1) else { return }
+        previewStateApplied = true
+        let sample = MediaSample.image(caption: "Water heater, as found", tags: ["Before"], size: CGSize(width: 1200, height: 1600))
+        switch args[index + 1] {
+        case "viewer": if let first = storedPhotos.first { viewer = MediaViewerStart(id: first.id) }
+        case "compare": showCompare = true
+        case "tag": capture = MediaCaptureRequest(mode: .single, stage: "Before", held: sample.jpegData(compressionQuality: 0.8))
+        case "select":
+            startSelecting()
+            picked = Set(storedPhotos.prefix(3).map(\.id))
+        case "markup": captureMarkup = sample.jpegData(compressionQuality: 0.8).map { PhotoMarkupTarget(data: $0, tags: ["Before"]) }
+        case "measure": showMeasure = true
+        case "untagged": filter = .untagged
+        case "documents": filter = .documents
+        default: break
+        }
+    }
+    #endif
+}
+
+/// Picks one of the selection bar's quiet circles (a 56pt field circle with a spoken name).
+private struct MenuOrCircle: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) { PaperCircleLabel(symbol: symbol, size: 56) }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel(label)
     }
 }
 

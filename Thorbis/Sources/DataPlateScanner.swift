@@ -250,7 +250,9 @@ struct DataPlateScannerSheet: View {
             .navigationTitle("Scan data plate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) { PaperCircleButton(symbol: "xmark", label: saved ? "Done" : "Close", action: finish) }
+                ThorbisToolbarItem(placement: .topBarLeading) {
+                    Button(saved ? "Done" : "Close", action: finish).accessibilityIdentifier("data-plate-close")
+                }
             }
             .safeAreaInset(edge: .bottom) { commitBar }
             .fullScreenCover(isPresented: $showCamera) {
