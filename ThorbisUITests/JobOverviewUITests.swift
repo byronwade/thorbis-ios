@@ -246,16 +246,24 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(chooser.label.contains("Overview"))
         chooser.tap()
         thorbisSection(app, "Activity").tap()
-        let photos = app.buttons["activity-filter-photos"]
-        for _ in 0..<5 where !photos.isHittable { content.swipeUp() }
-        XCTAssertTrue(photos.isHittable)
-        photos.tap()
+        // v2: one "Showing all ▾" popover (`activity-filter`) replaced the row of filter chips.
+        let filter = app.buttons["activity-filter"]
+        for _ in 0..<5 where !filter.isHittable { content.swipeUp() }
+        XCTAssertTrue(filter.isHittable)
+        filter.tap()
+        menuRow(app, "Photos").tap()
         XCTAssertTrue(chooser.waitForExistence(timeout: 10))
         XCTAssertTrue(chooser.isHittable, "The chooser must remain reachable on Photos")
         XCTAssertTrue(chooser.label.contains("Activity"))
-        XCTAssertTrue(app.buttons["activity-filter-notes"].isHittable, "Photos must be able to switch back to notes")
-        app.buttons["activity-filter-notes"].tap()
-        XCTAssertTrue(app.staticTexts["Note"].firstMatch.waitForExistence(timeout: 10) || app.staticTexts["No activity yet"].exists)
+        XCTAssertTrue(filter.waitForExistence(timeout: 5))
+        XCTAssertTrue(filter.label.contains("photos"), filter.label)
+        for _ in 0..<5 where !filter.isHittable { content.swipeUp() }
+        XCTAssertTrue(filter.isHittable, "Photos must be able to switch back to notes")
+        filter.tap()
+        menuRow(app, "Notes").tap()
+        // A note's row reads "Note · You"; an empty feed says so.
+        let note = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Note")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 10) || app.staticTexts["No activity yet"].exists)
     }
 
     /// F9: the current-job chip never repeats Jobs' In progress row and never hides a list's last row.
@@ -278,6 +286,13 @@ final class JobOverviewUITests: XCTestCase {
         let version = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Thorbis Field")).firstMatch
         XCTAssertTrue(version.exists)
         XCTAssertLessThanOrEqual(version.frame.maxY, chip.frame.minY, "The very last line must scroll clear of the chip")
+    }
+
+    /// A row in the open `ThorbisMenu` popover (the last match: the popover sits above the page).
+    private func menuRow(_ app: XCUIApplication, _ title: String) -> XCUIElement {
+        let rows = app.buttons.matching(NSPredicate(format: "label == %@", title))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "\(title) is not in the menu")
+        return rows.element(boundBy: max(0, rows.count - 1))
     }
 
     private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false) -> XCUIApplication {

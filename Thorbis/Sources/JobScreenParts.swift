@@ -303,7 +303,7 @@ struct JobSectionControl: View {
         .sensoryFeedback(.selection, trigger: selection)
     }
 
-    /// "Money · $340" → "Money"; a label without a count stays as it is.
+    /// "Money · $340.00" → "Money"; a label without a count stays as it is.
     static func shortLabel(_ label: String) -> String {
         label.components(separatedBy: " · ").first ?? label
     }
