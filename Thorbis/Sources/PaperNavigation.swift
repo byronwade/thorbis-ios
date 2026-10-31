@@ -150,7 +150,6 @@ struct RootView: View {
             let progress = DrawerMotion.progress(open: drawerOpen, drag: drawerDrag, width: width)
             let insets = geometry.safeAreaInsets
             ZStack(alignment: .leading) {
-                Theme.card.ignoresSafeArea()
                 if !reduceMotion, progress > 0 {
                     drawer(width: width, full: typeSize.isAccessibilitySize)
                         .frame(width: width)
@@ -163,6 +162,8 @@ struct RootView: View {
                         .transition(.opacity)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(Theme.card.ignoresSafeArea())
         }
         .sheet(isPresented: $createMenuOpen, onDismiss: {
             let run = pendingCreate

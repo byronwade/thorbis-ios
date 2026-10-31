@@ -76,6 +76,9 @@ struct AppDrawer: View {
     let editMenu: () -> Void
 
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// Row icons grow with the words beside them.
+    @ScaledMetric(relativeTo: .body) private var iconSize: CGFloat = 20
+    @ScaledMetric(relativeTo: .body) private var iconColumn: CGFloat = 28
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -104,6 +107,9 @@ struct AppDrawer: View {
                 .padding(.bottom, 120)
             }
             .scrollIndicators(.hidden)
+            #if DEBUG
+            .modifier(PaperPreviewScrollAnchor())
+            #endif
             bottomControls
         }
         .foregroundStyle(Theme.foreground)
@@ -148,7 +154,7 @@ struct AppDrawer: View {
         Button(action: openNow) {
             HStack(alignment: .center, spacing: 14) {
                 StatusGlyph(jobStatus: job.status)
-                    .frame(width: 28)
+                    .frame(width: iconColumn)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Now · \(job.status.statusLabel)")
                         .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
@@ -237,7 +243,7 @@ struct AppDrawer: View {
         Button { openRecent(recent.item) } label: {
             HStack(alignment: .center, spacing: 14) {
                 if let status = recent.status {
-                    StatusGlyph(jobStatus: status).frame(width: 28)
+                    StatusGlyph(jobStatus: status).frame(width: iconColumn)
                 }
                 Text(recent.item.title)
                     .font(Theme.font(17))
@@ -266,8 +272,8 @@ struct AppDrawer: View {
                                          @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: symbol)
-                .font(.system(size: 20, weight: here ? .medium : .regular))
-                .frame(width: 28)
+                .font(.system(size: iconSize, weight: here ? .medium : .regular))
+                .frame(width: iconColumn)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)

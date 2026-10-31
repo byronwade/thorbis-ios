@@ -47,12 +47,27 @@ source evidence; verify platform/API/version claims before relying on them.
    Jobs/Today is the field-work home direction; Current/Arrive, Inbox and Search
    are meaningful destinations. Preserve existing routes while deliberately
    aligning navigation; the sample tab diagram is not a completed migration.
-   *Redesign, 31 October 2026:* the iPhone bar is a floating labeled tab bar — the
-   person's pinned places (Today · Jobs · Customers by default; role and company
-   layouts still apply) and a fixed More, icon over label, the showing tab on a
-   brand-tinted pill — with Search as a separate round button. More is a real
-   screen listing every other place with coloured place marks and counts (no
-   hidden switcher). New lives in the tab roots' header + circle, not the bar.
+   *Redesign, 31 October 2026 (drawer):* the iPhone navigates with a side drawer
+   in the style of the Claude and ChatGPT iOS apps; the floating tab bar and the
+   More screen are gone. Every place root (Today, Jobs, Customers, Home, Inbox, …)
+   leads its header with a round menu circle at top left, keeping its own circles
+   (filter, +) on the right; an edge swipe from the left opens the drawer on roots
+   only, so pushed screens keep the system back swipe. The drawer pushes the place
+   right as a rounded card (tap or drag it to close; Reduce Motion fades instead).
+   It lists, on its own ground with no wells: the business name and a search
+   circle; the job on now; the person's pinned places (Edit menu, up to four; role
+   and company layouts still apply); every other permitted place and the records
+   kept on this phone; Edit menu; and Recents (jobs with their `StatusGlyph`,
+   customers as words). Section labels are semibold in the primary colour. A small
+   brand dot marks unread Inbox, Needs attention with items, a recent that changed
+   and saved work that needs the person; the menu circle wears the same dot. At the
+   bottom an ink "New job" capsule (long press for the other creates) sits left and
+   a gear circle right (Settings, Edit menu, business switcher). Saved-work status
+   lives on the menu circle's VoiceOver value and a drawer row that opens the
+   review. At accessibility sizes the drawer is full width with its own close
+   circle. VoiceOver: the circle reads "Menu", the open drawer is a modal group
+   that the escape gesture closes, and focus moves to the drawer and back. iPad at
+   regular width keeps its sidebar.
 7. **Match the surface to the task.** Durable job/customer/site/equipment/document
    records belong in navigation destinations. Assignment, payment and completion
    are focused transactions. Small local choices use native menus/pickers;

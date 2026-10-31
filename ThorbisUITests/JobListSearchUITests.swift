@@ -1,6 +1,6 @@
 import XCTest
 
-/// One search (the bar's), one create (the bar's + menu), and Schedule straight from a row.
+/// One search (the drawer's), one create (the header's + menu), and Schedule straight from a row.
 @MainActor
 final class JobListSearchUITests: XCTestCase {
     func testBarSearchFindsJobsAndClosingRestoresTheBoard() {
@@ -10,8 +10,8 @@ final class JobListSearchUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Kitchen sink backup — Petrov"].waitForExistence(timeout: 30))
         // The list keeps no search field of its own.
         XCTAssertFalse(app.textFields["Search title or job number"].exists)
-        app.buttons["bottom-bar-search"].tap()
-        // #186: the bar's field reads "Street, name, phone or number"; result rows lead with the street, the job title follows.
+        app.openFromDrawer("search")
+        // #186: the floating field reads "Street, name, phone or number"; result rows lead with the street, the job title follows.
         let field = app.textFields["Street, name, phone or number"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.typeText("Kitchen")
