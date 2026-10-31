@@ -131,6 +131,7 @@ struct CustomerEstimatePresentation: View {
     @State private var error: String?
     @State private var signedAt: Date?
     @State private var signedName = ""
+    @State private var isMember = false
 
     init(estimate: EstimateRecord, jobID: String?, customerName: String, preselectedOptionID: String? = nil, financing: Bool = false,
          onApproved: @escaping (EstimateRecord?) -> Void, onDone: @escaping () -> Void) {
@@ -178,6 +179,7 @@ struct CustomerEstimatePresentation: View {
         .sheet(item: $detailsFor) { option in includedSheet(option) }
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadOffer() }
+        .task { isMember = await api.customerIsMember(flow.estimate.customerId) }
         .thorbisConfirm("Not ready to decide?",
                         message: "You can think about it and decide later, or decline this estimate now.",
                         isPresented: $confirmNotToday,
@@ -232,6 +234,10 @@ struct CustomerEstimatePresentation: View {
                 .font(Theme.monoFont(type.total, weight: .medium))
                 .minimumScaleFactor(0.6).lineLimit(1)
                 .accessibilityLabel("Total \(money(option.totalAmount, currency: option.currency))")
+            if let saved = customerSavingsText(option.lines, currency: option.currency) {
+                Text("Includes \(savingsLabel(isMember).lowercased()) of \(saved)")
+                    .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+            }
             if let example = offer.example(for: option.totalAmount) {
                 CustomerFinancingLine(example: example, type: type)
             }
@@ -274,7 +280,8 @@ struct CustomerEstimatePresentation: View {
                 Text(description).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
             }
             CustomerLinesCard(lines: customerEstimateLines(flow.lines), currency: flow.currency, type: type,
-                              rows: flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? [])
+                              rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
+                                  + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
             if let total = flow.total, let example = offer.example(for: total) {
                 CustomerFinancingLine(example: example, type: type)
                 seeTerms
@@ -406,7 +413,8 @@ struct CustomerEstimatePresentation: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(option.title).font(Theme.font(type.heading + 4, weight: .medium))
                     CustomerLinesCard(lines: customerEstimateLines(option.lines), currency: option.currency, type: type,
-                                      rows: [CustomerAmountRow(label: "Total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
+                                      rows: customerSavingsRows(option.lines, currency: option.currency, isMember: isMember)
+                                          + [CustomerAmountRow(label: "Total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
                 }
                 .padding(Theme.gutter)
             }
@@ -564,6 +572,7 @@ struct CustomerInvoicePresentation: View {
     @State private var busy = false
     @State private var error: String?
     @State private var signedBy: String?
+    @State private var isMember = false
 
     /// Opens on "Choose how to pay" once the offer loads (the pay-screen preview).
     private let opensPayChoice: Bool
@@ -606,6 +615,7 @@ struct CustomerInvoicePresentation: View {
         .animation(.easeOut(duration: 0.2), value: payChoice)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadFinancing() }
+        .task { isMember = await api.customerIsMember(invoice.customerId) }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
@@ -758,7 +768,8 @@ struct CustomerInvoicePresentation: View {
 
     /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest.
     private var amountRows: [CustomerAmountRow] {
-        var rows = [CustomerAmountRow(label: "Total", amount: money(total, currency: invoice.currency), emphasis: invoice.amountPaid == 0)]
+        var rows = customerSavingsRows(invoice.lines, currency: invoice.currency, isMember: isMember)
+        rows.append(CustomerAmountRow(label: "Total", amount: money(total, currency: invoice.currency), emphasis: invoice.amountPaid == 0))
         if invoice.amountPaid > 0 {
             rows.append(CustomerAmountRow(label: "Paid", amount: money(invoice.amountPaid, currency: invoice.currency), emphasis: false))
             rows.append(CustomerAmountRow(label: "Amount due", amount: dueText, emphasis: true))
@@ -922,6 +933,42 @@ struct CustomerInvoicePresentation: View {
 }
 
 // MARK: - Shared pieces
+
+/// What the customer saves off list price on these lines: each price book line records the list
+/// price it came from, and the server charges a member the member price (CP: savings show only
+/// when the amount already includes them). Invoice lines carry the estimate line's provenance.
+func customerSavings(_ lines: [FieldLine]) -> Int {
+    lines.reduce(0) { sum, line in
+        let source = line.source?.kind == "price_book" ? line.source?.originalUnitPrice
+            : line.source?.estimateLineSource?.kind == "price_book" ? line.source?.estimateLineSource?.originalUnitPrice : nil
+        guard let list = source, list.currency == line.unitPrice.currency, list.amount > line.unitPrice.amount,
+              line.unitPrice.amount >= 0 else { return sum }
+        return sum + line.quantity * (list.amount - line.unitPrice.amount)
+    }
+}
+
+func customerSavingsText(_ lines: [FieldLine], currency: String) -> String? {
+    let saved = customerSavings(lines)
+    return saved > 0 ? money(saved, currency: currency) : nil
+}
+
+/// "Member savings" when the customer holds a membership; otherwise the plain word.
+func savingsLabel(_ isMember: Bool) -> String { isMember ? "Member savings" : "Savings" }
+
+/// A labelled savings row (CP-06), shown above the total and never as a strike-through alone.
+func customerSavingsRows(_ lines: [FieldLine], currency: String, isMember: Bool) -> [CustomerAmountRow] {
+    guard let saved = customerSavingsText(lines, currency: currency) else { return [] }
+    return [CustomerAmountRow(label: savingsLabel(isMember), amount: "−\(saved)", emphasis: false)]
+}
+
+@MainActor
+extension APIClient {
+    /// Whether to call savings "member savings". Technicians may not read memberships yet, so any
+    /// refusal reads as not known and the row says "Savings".
+    func customerIsMember(_ customerID: String) async -> Bool {
+        (try? await memberPricing(customerID))?.isMember ?? false
+    }
+}
 
 struct CustomerAmountRow: Hashable {
     let label: String
