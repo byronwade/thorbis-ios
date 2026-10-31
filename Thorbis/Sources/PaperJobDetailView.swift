@@ -93,6 +93,8 @@ struct JobDetailView: View {
     @State private var visitsLoaded = false
     @State private var bookingCall: BookingCallRecord?
     @State private var showAssign = false
+    @State private var pauseReasonProblem: String?
+    @State private var pauseNextProblem: String?
     @State private var showFollowUps = false
     @State private var handoff: DeviceHandoff?
     /// The first page of the visit's photos (the strip on Overview, thumbnails in Activity).
@@ -285,7 +287,19 @@ struct JobDetailView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
-        .thorbisDestination(isPresented: $showAssign) { JobAssignmentView(jobID: jobId) }
+        // v2: assigning a tech is a modal (one task), not a pushed page.
+        .sheet(isPresented: $showAssign, onDismiss: { Task { await load() } }) { JobAssignmentView(jobID: jobId) }
+        .task {
+            #if DEBUG
+            // Screenshot-only: the job's modals open over the job (job-assign, --paper-preview-pause).
+            guard PaperPreview.enabled else { return }
+            let opensAssign = PaperPreview.screen == "job-assign"
+            let opensPause = ProcessInfo.processInfo.arguments.contains("--paper-preview-pause")
+            guard opensAssign || opensPause else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            if opensAssign { showAssign = true } else { showPause = true }
+            #endif
+        }
         .thorbisDestination(isPresented: $showFollowUps) {
             JobFollowUpsView(jobID: jobId, initialKind: followUpKind).onDisappear { Task { await loadFollowUps() } }
         }
@@ -411,28 +425,21 @@ struct JobDetailView: View {
             } else if !typeSize.isAccessibilitySize { primaryAction }
         }
         .sheet(isPresented: $showPause) {
-            // MA-16: Cancel leading, the commit trailing where the thumb is; the form keeps what was typed.
-            NavigationStack {
-                Form {
-                    Section {
-                        TextField("Why are you pausing?", text: $reason, axis: .vertical)
-                        TextField("What needs to happen next?", text: $nextAction, axis: .vertical)
-                    } footer: {
-                        if let error { Text(error).foregroundStyle(Theme.destructive) }
-                        else { Text("The office sees both on the job.") }
-                    }
+            // v2 modal: two sunk fields, one ink commit in the sheet's pad. The commit is never
+            // pre-disabled: pressing it says what is missing under the field. The form keeps what was typed.
+            ThorbisModalSheet(title: "Pause job", closeLabel: "Cancel", onClose: { showPause = false },
+                              detents: [.medium, .large], commitTitle: "Pause job", busy: busy,
+                              commitIdentifier: "pause-commit", commit: { attemptPause() }) {
+                ThorbisSheetField(label: "Why are you pausing?", error: pauseReasonProblem) {
+                    TextField("Waiting on a part from the supplier", text: $reason, axis: .vertical)
+                        .font(Theme.font(16)).lineLimit(2...5).fieldWell()
                 }
-                .navigationTitle("Pause job")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { showPause = false }.disabled(busy) }
-                    ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
-                        Button("Pause") { Task { await pause() } }
-                            .disabled(busy || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reason.utf16.count > 2000 || nextAction.utf16.count > 2000)
-                    }
+                ThorbisSheetField(label: "What needs to happen next?", help: "The office sees both on the job.",
+                                  error: pauseNextProblem ?? error) {
+                    TextField("Order the 40/5 capacitor and book a return", text: $nextAction, axis: .vertical)
+                        .font(Theme.font(16)).lineLimit(2...5).fieldWell()
                 }
             }
-            .presentationDetents([.medium, .large])
             .interactiveDismissDisabled(busy || !reason.isEmpty || !nextAction.isEmpty)
         }
         .sheet(isPresented: $showSchedule, onDismiss: { Task { await load() } }) {
@@ -446,6 +453,7 @@ struct JobDetailView: View {
         .sheet(isPresented: $showCollectPayment, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) {
             if let invoice = selectedInvoice, let model = invoicePaymentModel {
                 InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
+                    .presentationBackground(Theme.surface)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
@@ -778,6 +786,15 @@ struct JobDetailView: View {
         }
     }
 
+    /// Screenshot-only (`--paper-preview-status-menu`): the status popover opens on its chip.
+    private static var previewOpensStatusMenu: Bool {
+        #if DEBUG
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-status-menu")
+        #else
+        false
+        #endif
+    }
+
     /// The status chip (glyph and word) opens the status menu when there is a move to make.
     @ViewBuilder
     private func statusControl(_ job: JobRecord) -> some View {
@@ -787,9 +804,15 @@ struct JobDetailView: View {
         } else {
             // Glyph-led (phase 4): each move shows the status it leads to; the title says where the
             // job is now. Only the server's allowed moves are listed.
-            ThorbisMenu(items: transitions.map { target in
+            // v2: a popover from the chip. The current status leads, checked; then the server's
+            // allowed moves, each led by the mark of where it takes the job.
+            let current = shownStatus(job)
+            ThorbisMenu(items: [ThorbisMenuItem(current.statusLabel, status: StatusTone(jobStatus: current, hasTime: job.scheduledFor != nil),
+                                                isSelected: true) {}]
+                        + transitions.map { target in
                 ThorbisMenuItem(transitionTitle(target), status: StatusTone(jobStatus: target)) { runTransition(target) }
-            }, title: "Change status · now \(shownStatus(job).statusLabel.lowercased())", accessibilityLabel: "Job status, \(shownStatus(job).statusLabel). Change status") {
+            }, title: "Status", accessibilityLabel: "Job status, \(current.statusLabel). Change status",
+                        opensOnAppear: Self.previewOpensStatusMenu) {
                 statusChip(job, showsMenu: true)
             }
         }
@@ -2298,7 +2321,7 @@ struct JobDetailView: View {
         switch target {
         case "paused": "Pause job…"
         case "en_route": "On my way"
-        case "arrived": "Mark arrived"
+        case "arrived": "Arrive"
         case "in_progress": job?.status == "paused" ? "Resume work" : "Start work"
         case "dispatched": "Dispatch"
         case "scheduled": "Move back to scheduled"
@@ -2592,6 +2615,16 @@ struct JobDetailView: View {
         }
         await progress(request)
     }
+    /// Press first, then show what is missing under each field (design.thorbis.com Forms).
+    private func attemptPause() {
+        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = nextAction.trimmingCharacters(in: .whitespacesAndNewlines)
+        pauseReasonProblem = why.isEmpty ? "Say why the job is paused." : (reason.utf16.count > 2000 ? "Keep it under 2,000 characters." : nil)
+        pauseNextProblem = next.isEmpty ? "Say what needs to happen next." : (nextAction.utf16.count > 2000 ? "Keep it under 2,000 characters." : nil)
+        guard pauseReasonProblem == nil, pauseNextProblem == nil, !busy else { return }
+        Task { await pause() }
+    }
+
     private func pause() async {
         if await progress(.pause(reason: reason.trimmingCharacters(in: .whitespacesAndNewlines), nextAction: nextAction.trimmingCharacters(in: .whitespacesAndNewlines))) {
             showPause = false

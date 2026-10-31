@@ -138,7 +138,7 @@ final class JobNextStepTests: XCTestCase {
         XCTAssertEqual(next("dispatched")?.target, "en_route")
         XCTAssertEqual(next("dispatched")?.title, "On my way")
         XCTAssertEqual(next("en_route")?.target, "arrived")
-        XCTAssertEqual(next("en_route")?.title, "Mark arrived")
+        XCTAssertEqual(next("en_route")?.title, "Arrive")
         XCTAssertEqual(next("arrived")?.target, "in_progress")
         XCTAssertEqual(next("arrived")?.title, "Start work")
         // Pausing, resuming and finishing need the app.

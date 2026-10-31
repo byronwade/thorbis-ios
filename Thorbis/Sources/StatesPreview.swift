@@ -146,14 +146,21 @@ private struct CustomerStatesGallery: View {
     }
 }
 
-/// The job's status picker as the status chip opens it (a dispatched job's moves), shown open.
+/// The job's status picker as the status chip opens it (a dispatched job's moves): v2 shows the
+/// real popover, anchored to a status chip, open.
 private struct SheetStatesGallery: View {
     var body: some View {
-        Color.clear
-            .background(Theme.background.ignoresSafeArea())
-            .sheet(isPresented: .constant(true)) {
-                ThorbisMenuCard(items: StatesPreviewFixtures.statusPickerItems, title: StatesPreviewFixtures.statusPickerTitle) { _ in }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("412 Birchwood Ln").font(Theme.font(30, weight: .medium)).tracking(-0.4)
+            ThorbisMenu(items: StatesPreviewFixtures.statusPickerItems, title: StatesPreviewFixtures.statusPickerTitle,
+                        opensOnAppear: true) {
+                WrappingPropertyChip(text: "Dispatched", showsChevron: true) { AnyView(StatusMark(tone: .dispatched)) }
             }
+            Spacer()
+        }
+        .padding(Theme.gutter).padding(.top, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.background.ignoresSafeArea())
     }
 }
 
@@ -172,10 +179,10 @@ private struct ToastStatesGallery: View {
 }
 
 enum StatesPreviewFixtures {
-    static let statusPickerTitle = "Change status · now dispatched"
+    static let statusPickerTitle = "Status"
     /// The same rows `PaperJobDetailView.statusControl` builds for a dispatched job.
     static var statusPickerItems: [ThorbisMenuItem] {
-        [("On my way", "en_route"), ("Mark arrived", "arrived"), ("Start work", "in_progress"),
+        [ThorbisMenuItem("Dispatched", status: .dispatched, isSelected: true) {}] + [("On my way", "en_route"), ("Arrive", "arrived"), ("Start work", "in_progress"),
          ("Pause job…", "paused"), ("Move back to scheduled", "scheduled")].map { title, target in
             ThorbisMenuItem(title, status: StatusTone(jobStatus: target)) {}
         }

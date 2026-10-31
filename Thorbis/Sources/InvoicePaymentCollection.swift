@@ -885,13 +885,14 @@ struct InvoicePaymentCollectionSheet: View {
 
                 footer
             }
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.surface.ignoresSafeArea())
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Collect payment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }.frame(minWidth: 44, minHeight: 44)
+                // v2 sheet grammar: the close circle at top right.
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    PaperCircleButton(symbol: "xmark", label: "Close", size: 30, fill: Theme.fill) { dismiss() }
                 }
                 ThorbisKeyboardDoneBar { amountFocused = false }
             }
@@ -928,7 +929,7 @@ struct InvoicePaymentCollectionSheet: View {
     }
 
     /// Redesign phase 3: the amount being collected in semibold tabular figures (staff screen only).
-    private static let heroFont = Font.custom("Inter-Regular", size: 34, relativeTo: .largeTitle).weight(.semibold).monospacedDigit()
+    private static let heroFont = Font.custom("Inter-Regular", size: 30, relativeTo: .largeTitle).weight(.medium).monospacedDigit()
 
     private var amountHero: some View {
         VStack(spacing: 7) {
@@ -1130,11 +1131,19 @@ struct InvoicePaymentCollectionSheet: View {
                 Task { await submit() }
             }
             .disabled(!canSubmit)
+            .accessibilityHint(blockedReason ?? "")
+            // Money keeps its guard, but a disabled commit always says why.
+            if let blockedReason {
+                Text(blockedReason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 10)
-        .background(Theme.background)
+        .background(Theme.surface)
     }
 
     private func optionRow(title: String, subtitle: String, icon: String, selected: Bool,
@@ -1201,6 +1210,21 @@ struct InvoicePaymentCollectionSheet: View {
         case .externalCard:
             return amountCents.map { "Record \(money($0, currency: invoice.currency)) card payment received" } ?? "Record card payment received"
         }
+    }
+
+    /// Why the commit is off, in a sentence (nil while it can be pressed or while work is running).
+    private var blockedReason: String? {
+        guard !canSubmit, !model.isRecording, !model.isLoading, !isCreatingPayLink, tapToPay?.busy != true else { return nil }
+        if !session.can("invoice.payment.create", feature: "payments") { return "Your role can't take payments. Ask your office." }
+        if !model.canRecordPayment { return "This invoice can't take a payment right now." }
+        if option == .tapToPay {
+            if !tapToPayAvailable { return "Tap to Pay isn't ready on this iPhone. Pick another way to pay." }
+            return (model.outstandingCents ?? 0) > 0 ? nil : "Nothing is due on this invoice."
+        }
+        if option == .paymentLink { return "A payment link is for the full balance due." }
+        guard let amountCents else { return "Enter an amount up to the balance due." }
+        if hasLockedIntent { return "Finish the payment already started, or change it back to match." }
+        return amountCents > (model.outstandingCents ?? 0) ? "That is more than the balance due." : nil
     }
 
     private var canSubmit: Bool {

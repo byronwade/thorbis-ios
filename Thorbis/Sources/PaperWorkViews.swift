@@ -394,7 +394,7 @@ struct ScheduleView: View {
         } else {
             return nil
         }
-        // Only ever forward: a job already in progress never offers "Mark arrived" again.
+        // Only ever forward: a job already in progress never offers "Arrive" again.
         let order = ["scheduled": 0, "dispatched": 0, "en_route": 1, "arrived": 2, "in_progress": 3, "paused": 3]
         let current = order[status] ?? 0
         return ["en_route", "arrived", "in_progress"].first {
@@ -435,7 +435,7 @@ struct ScheduleView: View {
             .accessibilityHint("Tells the office and customer you are driving to this job")
         case "arrived":
             Button { Task { await progress(job, .arrived()) } } label: {
-                commitLabel("Mark arrived", symbol: "mappin.and.ellipse", busy: busyJobID == job.id)
+                commitLabel("Arrive", symbol: "mappin.and.ellipse", busy: busyJobID == job.id)
             }
             .buttonStyle(PressStyle()).disabled(busyJobID != nil)
         case "in_progress":

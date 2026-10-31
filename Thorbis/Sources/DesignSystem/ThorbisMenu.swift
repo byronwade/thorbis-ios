@@ -56,23 +56,40 @@ struct ThorbisMenuItem: Identifiable {
 /// Presentation state kept apart from the view so selection logic is unit-tested without UI.
 struct ThorbisMenuModel {
     var isPresented = false
+    /// The row chosen in an open popover; its action runs once the popover has gone, so an action
+    /// that presents a sheet never collides with the closing menu.
+    var pending: ThorbisMenuItem? = nil
 
     /// Runs the row's action and dismisses. A menu is a one-shot choice.
     mutating func select(_ item: ThorbisMenuItem) {
         item.action()
         isPresented = false
     }
+
+    /// Popover path: close first, keep the choice for `finish()`.
+    mutating func choose(_ item: ThorbisMenuItem) {
+        pending = item
+        isPresented = false
+    }
+
+    /// The popover has gone: run the kept choice, once.
+    mutating func finish() {
+        let item = pending
+        pending = nil
+        item?.action()
+    }
 }
 
 // MARK: - Menu
 
-/// A custom dropdown, Linear-mobile style: a rounded card of rows that floats up from the
-/// bottom (no system `Menu` chrome — no grey material, no caret). Icons left, a checkmark on
-/// the chosen row, destructive rows in red. This replaces stock `Menu {}` everywhere.
+/// v2 (design.thorbis.com Places, "A popover is one choice"): an anchored popover that grows from
+/// the control that opened it, at overlay depth (the panel, radius 14, a real shadow; the only thing
+/// that floats). Rows are about 44pt: a leading mark where it helps (a status's mark for the status
+/// picker), the word, and a check on the current value. Destructive rows sit in their own group in
+/// the danger tone. It replaces stock `Menu {}` everywhere.
 ///
-/// The card is presented as a height-fitted sheet with a clear background, so the system gives
-/// us free dimming, drag-to-dismiss, tap-outside-to-close and VoiceOver focus while we draw the
-/// card ourselves.
+/// It is a real `.popover` with compact adaptation, so tap-outside, VoiceOver's escape gesture and
+/// focus come from the system; our panel replaces Liquid Glass (`presentationBackground`).
 struct ThorbisMenu<Label: View>: View {
     let items: [ThorbisMenuItem]
     /// A quiet caption above the rows (e.g. the thing being changed).
@@ -80,6 +97,8 @@ struct ThorbisMenu<Label: View>: View {
     var accessibilityLabel: String? = nil
     /// CustomerPresentation's stronger floor (rule 13): 17pt words, 56pt rows.
     var customerFacing = false
+    /// Screenshot-only: open on appear (preview flags).
+    var opensOnAppear = false
     @ViewBuilder var label: () -> Label
 
     @State private var model = ThorbisMenuModel()
@@ -92,18 +111,153 @@ struct ThorbisMenu<Label: View>: View {
                 button
             }
         }
-        .sheet(isPresented: $model.isPresented) {
-            ThorbisMenuCard(items: items, title: title, customerFacing: customerFacing) { model.select($0) }
+        .popover(isPresented: $model.isPresented, arrowEdge: .top) {
+            ThorbisMenuPanel(items: items, title: title, customerFacing: customerFacing,
+                             onSelect: { model.choose($0) }, onClose: { model.isPresented = false })
+                .onDisappear { model.finish() }
+                .presentationCompactAdaptation(.popover)
+                .presentationBackground(Theme.surface)
+        }
+        .task {
+            guard opensOnAppear else { return }
+            try? await Task.sleep(for: .milliseconds(900))
+            model.isPresented = true
         }
     }
 
     private var button: some View {
         Button { model.isPresented = true } label: { label() }
             .buttonStyle(PressStyle())
+            .sensoryFeedback(.selection, trigger: model.isPresented) { _, open in open }
     }
 }
 
-/// The floating card. Split out so previews and tests can show it directly.
+/// The popover's content: an optional caption, the rows, and destructive rows in their own group.
+/// Sized to its rows (about 260pt wide, wider at accessibility sizes) and scrolls only when it
+/// would outgrow the screen.
+struct ThorbisMenuPanel: View {
+    let items: [ThorbisMenuItem]
+    var title: String? = nil
+    var customerFacing = false
+    let onSelect: (ThorbisMenuItem) -> Void
+    var onClose: () -> Void = {}
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
+
+    private var width: CGFloat {
+        if customerFacing || typeSize.isAccessibilitySize { return 340 }
+        return typeSize >= .xxLarge ? 300 : 264
+    }
+
+    private var estimatedHeight: CGFloat {
+        let row: CGFloat = customerFacing ? 58 : 46
+        let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? row : row + 16) }
+        return (rows + (title == nil ? 12 : 44) + 16) * typeSize.sheetHeightScale
+    }
+
+    var body: some View {
+        Group {
+            if estimatedHeight > 460 {
+                ScrollView { ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect) }
+                    .frame(height: 460)
+            } else {
+                ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect)
+            }
+        }
+        .frame(width: width)
+        // design.thorbis.com Motion: a menu fades in at 120ms ease-out; it does not fly.
+        .opacity(shown || reduceMotion ? 1 : 0)
+        .onAppear { withAnimation(.easeOut(duration: 0.12)) { shown = true } }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title ?? "Menu")
+        .accessibilityAction(.escape) { onClose() }
+    }
+}
+
+/// The rows themselves, shared by the popover and by `ThorbisMenuCard` (a menu shown in a sheet).
+struct ThorbisMenuRows: View {
+    let items: [ThorbisMenuItem]
+    var title: String? = nil
+    var customerFacing = false
+    let onSelect: (ThorbisMenuItem) -> Void
+    @ScaledMetric(relativeTo: .body) private var glyphColumn: CGFloat = 20
+
+    private var regular: [ThorbisMenuItem] { items.filter { $0.role != .destructive } }
+    private var destructive: [ThorbisMenuItem] { items.filter { $0.role == .destructive } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let title {
+                Text(title)
+                    .font(customerFacing ? Theme.customerFont(17, weight: .medium) : Theme.font(13, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            group(regular)
+            if !destructive.isEmpty {
+                // Destructive choices sit apart: space, not a line.
+                if !regular.isEmpty { Color.clear.frame(height: 8).accessibilityHidden(true) }
+                group(destructive)
+            }
+        }
+        .padding(6)
+    }
+
+    private func group(_ rows: [ThorbisMenuItem]) -> some View {
+        ForEach(rows) { item in
+            Button { onSelect(item) } label: { row(item) }
+                .buttonStyle(MenuRowPressStyle())
+                .disabled(item.isDisabled)
+                .opacity(item.isDisabled ? 0.4 : 1)
+        }
+    }
+
+    private func row(_ item: ThorbisMenuItem) -> some View {
+        let isDestructive = item.role == .destructive
+        let titleColor = isDestructive ? Theme.destructive : Theme.foreground
+        return HStack(spacing: 10) {
+            if let status = item.status {
+                StatusGlyph(tone: status, label: item.title, size: 14)
+                    .accessibilityHidden(true)
+                    .frame(width: glyphColumn)
+            } else if let icon = item.icon {
+                Image(systemName: icon).font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(isDestructive ? Theme.destructive : (item.tint ?? Theme.muted))
+                    .frame(width: glyphColumn)
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(customerFacing ? Theme.customerFont(17, weight: .medium) : Theme.font(16))
+                    .foregroundStyle(titleColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let subtitle = item.subtitle {
+                    Text(subtitle).font(customerFacing ? Theme.customerFont(17) : Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            if item.isSelected {
+                Image(systemName: "checkmark").font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.brandText)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: customerFacing ? 56 : 44, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(item.isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A menu shown as a bottom sheet by callers that own their presentation (Create, the dispatch
+/// board's job menu). v2: a clean system sheet on the panel, its title at 17 Medium and the rows
+/// filling it; no floating card inside the sheet, no glass.
 struct ThorbisMenuCard: View {
     let items: [ThorbisMenuItem]
     var title: String? = nil
@@ -111,120 +265,58 @@ struct ThorbisMenuCard: View {
     let onSelect: (ThorbisMenuItem) -> Void
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .body) private var glyphColumn: CGFloat = 22
 
     private var estimatedHeight: CGFloat {
-        let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? 50 : 62) + (customerFacing ? 12 : 0) }
-        let header: CGFloat = title == nil ? 0 : 32
-        // Bias up with Dynamic Type so a fitted-height sheet never clips at large text; over-
-        // estimating only leaves dim space above the bottom-anchored card.
+        let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? 46 : 62) + (customerFacing ? 12 : 0) }
+        let header: CGFloat = title == nil ? 28 : 64
         return (rows + header + 40) * dynamicTypeSize.sheetHeightScale
     }
 
     private var detents: Set<PresentationDetent> {
         if verticalSizeClass == .compact { return [.large] }
-        return estimatedHeight <= 420 && !dynamicTypeSize.isAccessibilitySize
+        return estimatedHeight <= 520 && !dynamicTypeSize.isAccessibilitySize
             ? [.height(estimatedHeight)] : [.medium, .large]
     }
 
     var body: some View {
-        // The card hugs its rows, so every menu (Create, status, sections…) is exactly as tall as
-        // what it offers instead of stretching to the sheet's estimated detent. It scrolls only
-        // when the rows outgrow the screen.
-        ViewThatFits(in: .vertical) {
-            rows
-            ScrollView { rows }
-        }
-        .padding(6)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.border))
-        .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: 460)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .padding(.bottom, 10)
-        .presentationDetents(detents)
-        .presentationBackground(.clear)
-        .presentationDragIndicator(.hidden)
-    }
-
-    /// Linear's menu (phase 4): a semibold title over rounded rows, each led by its glyph (a status
-    /// ring or a symbol) in a fixed column so the words line up.
-    private var rows: some View {
-        VStack(spacing: 0) {
-            if let title {
-                Text(title)
-                    .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 6)
-                    .accessibilityAddTraits(.isHeader)
-            }
-            ForEach(items) { item in
-                Button { onSelect(item) } label: { row(item) }
-                    .buttonStyle(MenuRowPressStyle())
-                    .disabled(item.isDisabled)
-                    .opacity(item.isDisabled ? 0.4 : 1)
-            }
-        }
-        .padding(.bottom, 2)
-    }
-
-    private func row(_ item: ThorbisMenuItem) -> some View {
-        let destructive = item.role == .destructive
-        let titleColor = destructive ? Theme.destructive : Theme.foreground
-        return HStack(spacing: 12) {
-            if let status = item.status {
-                StatusGlyph(tone: status, label: item.title)
-                    .accessibilityHidden(true)
-                    .frame(width: glyphColumn)
-            } else if let icon = item.icon {
-                Image(systemName: icon).font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(destructive ? Theme.destructive : (item.tint ?? Theme.muted))
-                    .frame(width: glyphColumn)
-                    .accessibilityHidden(true)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.title).font(Theme.font(customerFacing ? 17 : 15, weight: .medium)).foregroundStyle(titleColor)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let subtitle = item.subtitle {
-                    Text(subtitle).font(Theme.font(customerFacing ? 17 : 13)).foregroundStyle(Theme.muted)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                if let title {
+                    Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Theme.gutter - 6)
+                        .accessibilityAddTraits(.isHeader)
                 }
+                ThorbisMenuRows(items: items, customerFacing: customerFacing, onSelect: onSelect)
             }
-            Spacer(minLength: 8)
-            if item.isSelected {
-                Image(systemName: "checkmark").font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.brandText)
-                    .accessibilityHidden(true)
-            }
+            .padding(.horizontal, 6).padding(.top, 20).padding(.bottom, 12)
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: customerFacing ? 56 : (item.subtitle == nil ? 48 : 58))
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(item.isSelected ? [.isButton, .isSelected] : .isButton)
+        .scrollBounceBehavior(.basedOnSize)
+        .background(Theme.surface)
+        .presentationDetents(detents)
+        .presentationBackground(Theme.surface)
+        .presentationCornerRadius(Theme.cardRadius + 6)
+        .presentationDragIndicator(.visible)
     }
 }
 
-/// A menu row's press: a rounded `fill` highlight inside the card, like Linear's menus.
+/// A menu row's press: a rounded `fill` highlight inside the panel (hover is a quieter fill).
 struct MenuRowPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(configuration.isPressed ? Theme.fill : .clear,
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
     }
 }
 
 #if DEBUG
-#Preview("ThorbisMenu card") {
-    ThorbisMenuCard(items: [
+#Preview("ThorbisMenu panel") {
+    ThorbisMenuPanel(items: [
+        ThorbisMenuItem("Dispatched", status: .dispatched, isSelected: true) {},
         ThorbisMenuItem("On my way", status: .dispatched) {},
         ThorbisMenuItem("Start work", status: .inProgress) {},
-        ThorbisMenuItem("ETA 15 min", icon: "clock", isSelected: true) {},
-        ThorbisMenuItem("ETA 30 min", icon: "clock") {},
         ThorbisMenuItem("Cancel trip", icon: "xmark.circle", role: .destructive) {},
-    ], title: "On my way") { _ in }
-    .background(Theme.background)
+    ], title: "Status") { _ in }
+    .background(Theme.surface)
 }
 #endif

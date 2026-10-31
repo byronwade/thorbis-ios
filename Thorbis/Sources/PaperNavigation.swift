@@ -771,7 +771,7 @@ struct RootView: View {
                 primaryTab = .jobs
                 jobsPath.append(job)
                 if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
-                if PaperPreview.screen == "job-assign" { jobsPath.append(PaperRoute.assign(jobID: job.id)) }
+                // v2: Assign tech is a sheet over the job (`--paper-preview-screen job-assign` opens it there).
                 if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
             }
         case "customer", "customer-activity", "customer-records", "customer-jobs", "customer-money":
