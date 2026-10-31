@@ -42,6 +42,12 @@ in light and dark, and scales with Dynamic Type.
 | Job row (glyph, street, problem, who and when, avatar) | `JobListRowContent` | `ListRows.swift` |
 | Customer row (initials, name, where, open job's status) | `CustomerListRowContent` | `ListRows.swift` |
 | Search row's kind glyph (status, initials, place mark) | `SearchGlyph` | `ListRows.swift` |
+| Estimate / invoice status as a glyph tone and word (no new `StatusTone` cases) | `DocumentStatus` | `DocumentRows.swift` |
+| Estimate / invoice row (glyph, title, who · reference, semibold amount) | `DocumentListRowContent` | `DocumentRows.swift` |
+| Document status chip | `WrappingPropertyChip(document:)` | `DocumentRows.swift` |
+| Label and amount on a well (totals) | `WellAmountRow` | `DocumentRows.swift` |
+| Semibold tabular amount (staff screens; customer mode keeps `moneyFont`) | `Theme.amountFont(_:)` | `DocumentRows.swift` |
+| Document header (eyebrow, 30pt title, wrapping chips) | `DocumentHeader` | `../FinancialViews.swift` |
 | Old `PaperSection`/`PaperCard` drawn as header + well | `.environment(\.paperGroupedWells, true)` | `PaperComponents.swift` |
 | Section header with count | `SectionHeader` | `../Theme.swift` |
 | Linear text tabs (plain words, well pill) | `PaperTabs(textTabs: true)` | `../PaperComponents.swift` |
