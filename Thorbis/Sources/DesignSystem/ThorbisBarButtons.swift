@@ -36,7 +36,8 @@ struct ThorbisCompactBackButton: View {
             Image(systemName: "chevron.left")
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(Theme.foreground)
-                .frame(width: 36, height: 44)
+                // A full 44pt target (golden rule 13), even beside the menu circle.
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())

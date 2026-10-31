@@ -1259,6 +1259,8 @@ struct JobDetailView: View {
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
         }
+        // A container, so the link inside keeps its own `job-customer-link` identifier.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("job-customer-panel")
         }
     }
