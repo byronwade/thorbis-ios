@@ -42,6 +42,15 @@ enum PaperPreview {
     /// book) never answer, so the real list screens stay on their loading skeletons for a capture.
     static var holdsLists: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-hold-lists") }
     static let heldListPaths: Set<String> = ["/v1/jobs", "/v1/customers", "/v1/invoices", "/v1/estimates", "/v1/staff/notices", "/v1/query", "/v1/search"]
+    /// With `--paper-preview-hold-after-first` the first read of each list path is answered (so the
+    /// preview reaches its screen) and every later one waits: the screen's own list read stays loading.
+    static var holdsAfterFirst: Bool { ProcessInfo.processInfo.arguments.contains("--paper-preview-hold-after-first") }
+    /// `--paper-preview-hold-path /v1/estimates`: hold only that list (for screens whose own read is the first).
+    static var heldPath: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--paper-preview-hold-path"), args.indices.contains(index + 1) else { return nil }
+        return args[index + 1]
+    }
     static var isJobEstimateHandoff: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-handoff") }
     /// A data seed (the job's estimates and invoices), not a screen: it still opens the plain job.
     /// To capture the documents themselves use `--paper-preview-screen customer-view`.
@@ -605,6 +614,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var priceBookReads = 0
         var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
+        var answeredListPaths: Set<String> = []
     }
     private static let scenario = Scenario()
     static func resetScenario() {
@@ -663,7 +673,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
         // Left unanswered on purpose: the screen keeps showing what it draws while it waits.
-        if PaperPreview.holdsLists, PaperPreview.heldListPaths.contains(url.path) { return }
+        if PaperPreview.enabled, let held = PaperPreview.heldPath, url.path == held { return }
+        if PaperPreview.holdsLists, PaperPreview.heldListPaths.contains(url.path) {
+            let firstRead = PaperPreview.holdsAfterFirst && Self.scenario.lock.withLock { Self.scenario.answeredListPaths.insert(url.path).inserted }
+            if !firstRead { return }
+        }
         if PaperPreview.screen == "customer-records",
            ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup"),
            request.httpMethod == "GET",
@@ -744,6 +758,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let org = changedWorkspace ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID
         let expiry = ISO8601DateFormatter().string(from: PaperPreview.isSavedWorkPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-expiry") ? PaperPreview.savedWorkDeadline : Date().addingTimeInterval(86_400))
         let now = ISO8601DateFormatter().string(from: Date())
+        // `--paper-preview-empty` answers the list reads before any screen-specific fixture.
+        if PaperPreview.isEmptyWorkspace, ["/v1/invoices", "/v1/staff/notices"].contains(path) {
+            return ["items": [Any](), "nextCursor": NSNull()] as [String: Any]
+        }
+        if PaperPreview.isEmptyWorkspace, path == "/v1/query", queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
+            return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
+                    "items": [Any](), "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
+        }
         if changedWorkspace, path == "/v1/jobs" || path == "/v1/customers" { return ["items": []] }
         if PaperPreview.isSavedWorkPreview, path == "/v1/jobs/\(PaperPreview.savedWorkUncachedJobID)" {
             return ["id": PaperPreview.savedWorkUncachedJobID, "organizationId": org, "customerId": PaperPreview.customerID,
@@ -1059,12 +1081,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                "source": "user_confirmed", "confirmedAt": now, "version": 1]] + phone,
                     "catalog": catalog.map { ["factKey": $0.0, "label": $0.1, "tier": $0.2, "required": $0.3, "confirmed": $0.0 == "legal_name"] }] as [String: Any]
         }
-        if PaperPreview.isEmptyWorkspace, ["/v1/jobs", "/v1/customers", "/v1/invoices", "/v1/estimates", "/v1/staff/notices"].contains(path) {
+        if PaperPreview.isEmptyWorkspace, ["/v1/jobs", "/v1/customers", "/v1/estimates"].contains(path) {
             return ["items": [Any]()]
-        }
-        if PaperPreview.isEmptyWorkspace, path == "/v1/query", queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
-            return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
-                    "items": [Any](), "nextCursor": NSNull(), "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
         }
         switch path {
         case "/api/auth/get-session":
