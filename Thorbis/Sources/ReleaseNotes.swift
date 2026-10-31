@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-10-30-review-requests",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "star.bubble", title: "Ask paid customers for a review",
+                      detail: "Add your review link in Settings. Customers get one text after paying, never twice in 90 days."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-morning-digest",
             date: "2026-10-30",
             highlights: [

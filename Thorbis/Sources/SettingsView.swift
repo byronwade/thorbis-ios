@@ -49,6 +49,9 @@ struct SettingsView: View {
                         NavigationLink(value: PaperRoute.payments) {
                             row("Payments", symbol: "creditcard", value: nil)
                         }
+                        NavigationLink { ReviewRequestsView() } label: {
+                            row("Review requests", symbol: "star.bubble", value: nil)
+                        }
                     }
                 }
 
