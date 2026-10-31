@@ -44,8 +44,10 @@ enum SpotlightCatalog {
         }
     }
 
+    /// `streets` maps a job id to the street of its own service location: those jobs are titled
+    /// street first, with the problem kept in the detail and keywords so it still matches.
     static func entries(jobs: [Job], customers: [Customer], scope: String?,
-                        includeJobs: Bool, includeCustomers: Bool,
+                        includeJobs: Bool, includeCustomers: Bool, streets: [String: String] = [:],
                         timeZone: TimeZone = .current, locale: Locale = .current) -> [Entry] {
         guard let scope else { return [] }
         var entries: [Entry] = []
@@ -55,9 +57,12 @@ enum SpotlightCatalog {
                 let customer = job.customerId.flatMap { names[$0] }
                 let status = job.status.statusLabel
                 let time = visitTime(job.scheduledFor, timeZone: timeZone, locale: locale)
-                let detail = [customer, status, time].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-                entries.append(Entry(identifier: identifier(.job(job.id), scope: scope), title: job.title, detail: detail,
-                                     keywords: [customer, status, job.shortRef, "job"].compactMap { $0 }))
+                let street = streets[job.id]
+                let detail = [street == nil ? nil : job.title, customer, status, time].compactMap { $0 }.filter { !$0.isEmpty }
+                    .joined(separator: " · ")
+                let keywords = [street == nil ? nil : job.title, customer, status, job.shortRef, "job"].compactMap { $0 }
+                entries.append(Entry(identifier: identifier(.job(job.id), scope: scope), title: street ?? job.title, detail: detail,
+                                     keywords: keywords))
             }
         }
         if includeCustomers {
@@ -104,6 +109,8 @@ final class SpotlightIndex {
 
     func bind(actorID: String?, organizationID: String?) {
         let next = SpotlightCatalog.scope(actorID: actorID, organizationID: organizationID)
+        // Another person or workspace: never re-index the previous one's lists or streets.
+        if next != scope { last = nil; streets = [:] }
         guard enabled else { scope = next; return }
         let indexed = UserDefaults.standard.string(forKey: scopeKey)
         scope = next
@@ -120,15 +127,30 @@ final class SpotlightIndex {
     func clear() {
         scope = nil
         pending = nil
+        streets = [:]
+        last = nil
         UserDefaults.standard.removeObject(forKey: scopeKey)
         guard enabled else { return }
         enqueue { try? await CSSearchableIndex.default().deleteAllSearchableItems() }
     }
 
+    /// Streets of today's jobs, read from their own service locations; titles lead with them.
+    private var streets: [String: String] = [:]
+    private var last: (jobs: [Job], customers: [Customer], includeJobs: Bool, includeCustomers: Bool)?
+
+    /// New street lines arrived: re-index the last lists with them.
+    func update(streets: [String: String]) {
+        guard streets != self.streets else { return }
+        self.streets = streets
+        if let last { replace(jobs: last.jobs, customers: last.customers, includeJobs: last.includeJobs, includeCustomers: last.includeCustomers) }
+    }
+
     func replace(jobs: [Job], customers: [Customer], includeJobs: Bool, includeCustomers: Bool) {
         guard enabled, let scope else { return }
+        last = (jobs, customers, includeJobs, includeCustomers)
         let items = SpotlightCatalog.entries(jobs: jobs, customers: customers, scope: scope,
-                                             includeJobs: includeJobs, includeCustomers: includeCustomers).map { entry in
+                                             includeJobs: includeJobs, includeCustomers: includeCustomers,
+                                             streets: streets).map { entry in
             let attributes = CSSearchableItemAttributeSet(contentType: .content)
             attributes.title = entry.title
             attributes.contentDescription = entry.detail

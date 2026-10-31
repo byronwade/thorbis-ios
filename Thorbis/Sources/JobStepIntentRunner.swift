@@ -69,6 +69,29 @@ enum JobStepIntentRunner {
         }
     }
 
+    /// The next booked job for "On my way" from Siri or Shortcuts: the same job `thorbis://job/next`
+    /// opens, named street first when the snapshot knows its street.
+    static func nextBookedStop() async throws -> (jobID: String, place: String) {
+        guard let api, let session, let store else { throw Failure(message: "Open Thorbis to update this job.") }
+        guard await ready(session) else { throw Failure(message: "Open Thorbis to sign in.") }
+        if store.jobs.isEmpty { await store.refresh(api) }
+        guard let job = PaperWorkGroups.next(store.jobs) else { throw Failure(message: "You have no booked job to head to.") }
+        guard JobNextStep.after(job.status)?.target == "en_route" else {
+            throw Failure(message: "Your next job is already under way. Open it in Thorbis.")
+        }
+        let street = TodaySnapshot.load()?.items.first { $0.id == job.id }?.street
+        let customer = store.customerName(job.customerId)
+        // "to 412 Birchwood Ln", "to Danielle Marlowe's", or "for AC not cooling".
+        let place = street.map { "to \($0)" } ?? (customer == "Customer" ? "for \(job.title)" : "to \(customer)'s")
+        return (job.id, place)
+    }
+
+    /// A control or widget with no step to take: open the job, or the schedule when there is none.
+    static func open(jobID: String) {
+        guard let store else { return }
+        if jobID.isEmpty { store.requestedSchedule += 1 } else { store.requestedJobID = jobID }
+    }
+
     /// The forward steps the card offers; the same requests the job screen sends.
     static func request(for target: String) -> FieldProgressRequest? {
         switch target {

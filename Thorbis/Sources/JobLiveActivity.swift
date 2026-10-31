@@ -9,8 +9,10 @@ enum JobLiveActivity {
     @MainActor private static let lifecycle = JobActivityLifecycle()
 
     @MainActor
+    /// `address` is the street line of the job's own site and `access` the labels of the access
+    /// facts on record there (never the codes); both nil until the job's locations are read.
     static func sync(job: JobRecord, status: String, waitingToSync: Bool, customer: String, address: String?,
-                     isAuthorized: @escaping @MainActor () -> Bool) async {
+                     access: String? = nil, isAuthorized: @escaping @MainActor () -> Bool) async {
         let running = Activity<JobActivityAttributes>.activities
         guard liveStatuses.contains(status) else {
             let matching = running.filter { $0.attributes.jobID == job.id }.map(\.id)
@@ -19,7 +21,9 @@ enum JobLiveActivity {
             return
         }
         let sameJob = running.filter { $0.attributes.jobID == job.id }
-        let current = sameJob.first { !addressNeedsReplacement(existing: $0.attributes.address, desired: address) }
+        let current = sameJob.first {
+            !addressNeedsReplacement(existing: $0.attributes.address, desired: address) && $0.attributes.access == access
+        }
         // Preserve the timer when replacing a stale, inferred address.
         let previous = current ?? sameJob.first
         let kept = previous.flatMap { $0.content.state.status == status ? $0.content.state.since : nil }
@@ -39,7 +43,8 @@ enum JobLiveActivity {
             }
             guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
             let attributes = JobActivityAttributes(jobID: job.id, jobNumber: "JOB-\(job.id.suffix(4).uppercased())",
-                                                   title: job.title, customer: customer, address: address)
+                                                   title: job.title, customer: customer, address: address,
+                                                   access: access, scheduledFor: JobFiltering.date(job.scheduledFor))
             _ = try? Activity.request(attributes: attributes, content: content)
         })
     }

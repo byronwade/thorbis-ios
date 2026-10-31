@@ -5,6 +5,9 @@ import WidgetKit
 struct ThorbisWidgetsBundle: WidgetBundle {
     var body: some Widget {
         TodayJobsWidget()
+        NextStopWidget()
         JobLiveActivityWidget()
+        NextStepControl()
+        NextJobControl()
     }
 }

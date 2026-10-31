@@ -120,7 +120,9 @@ struct JobDetailView: View {
         guard let job else { return "" }
         return [job.id, job.status, outbox.pendingStatus(for: job.id) ?? "",
                 session.generation.uuidString, session.authorityRevision.uuidString,
-                String(session.can("job.view", feature: "jobs"))].joined(separator: "|")
+                String(session.can("job.view", feature: "jobs")),
+                // The card's street and access labels arrive with the job's locations.
+                street(job) ?? "", liveActivityAccess(job) ?? ""].joined(separator: "|")
     }
 
     private var liveMediaCountContext: String? {
@@ -329,7 +331,8 @@ struct JobDetailView: View {
             let generation = session.generation
             let authority = session.authorityRevision
             await JobLiveActivity.sync(job: job, status: pending ?? job.status, waitingToSync: pending != nil,
-                                       customer: store.customerName(job.customerId), address: nil) {
+                                       customer: store.customerName(job.customerId), address: street(job),
+                                       access: liveActivityAccess(job)) {
                 session.generation == generation && session.authorityRevision == authority &&
                 session.activeOrganization?.id == job.organizationId &&
                 session.can("job.view", feature: "jobs")
@@ -501,6 +504,13 @@ struct JobDetailView: View {
     }
 
     private func displayTitle(_ job: JobRecord) -> String { street(job) ?? job.title }
+
+    /// Which access facts the job's own site has on record, for the Lock Screen card. Labels
+    /// only ("Gate code · Dog on site"); the codes stay in the app.
+    private func liveActivityAccess(_ job: JobRecord) -> String? {
+        guard job.locationId != nil else { return nil }
+        return JobPropertyHistory.accessPlace(job: job, locations: customerLocations).flatMap(JobServiceAddressesSection.accessSummary)
+    }
 
     /// The status the screen shows: a queued offline step counts.
     private func shownStatus(_ job: JobRecord) -> String { outbox.pendingStatus(for: job.id) ?? job.status }
