@@ -114,6 +114,17 @@ final class APIClient: ObservableObject {
     private var recentReads: [String: RecentRead] = [:]
     private var mutationEpoch = 0
     private static let recentReadWindow: TimeInterval = 10
+    /// Reads that decide money, a signature, a permission or a price are never answered from the
+    /// recent-read reuse: a re-read there must see the server (a payment taken on the reader or a pay
+    /// link, a customer's approval, a stale document being re-checked, an edited price book item).
+    private static let freshOnlyReadMarkers = ["/invoices", "/estimates", "/payments", "/pay-link", "/refund",
+                                               "/public/", "/billing-schedules", "/closeout", "/price-book",
+                                               "/merchant", "/money-availability", "/permission", "/roles",
+                                               "/role-members", "/features", "/document"]
+    static func reusesRecentRead(_ path: String, query: [URLQueryItem] = []) -> Bool {
+        if path == "/v1/query", query.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }) { return false }
+        return !freshOnlyReadMarkers.contains { path.contains($0) }
+    }
 
     func clearSessionCookies() {
         guard let origin = Self.validatedOrigin(baseURL)?.url,
@@ -400,7 +411,8 @@ final class APIClient: ObservableObject {
         let isJSONRead = isGET && authed && body == nil && accept == "application/json" && !requireFresh
         let readKey = isJSONRead ? SavedCopies.key(origin: requestOrigin, path: path, query: requestQueryItems) : nil
         let epoch = mutationEpoch
-        if let readKey, !SavedCopies.liveOnly, let recent = recentReads[readKey], recent.epoch == epoch,
+        let reuseKey = readKey.flatMap { Self.reusesRecentRead(path, query: requestQueryItems) ? $0 : nil }
+        if let reuseKey, !SavedCopies.liveOnly, let recent = recentReads[reuseKey], recent.epoch == epoch,
            recent.generation == generation, Date().timeIntervalSince(recent.at) < Self.recentReadWindow {
             PerfProbe.request(method, path, note: "reused")
             return recent.response
@@ -471,8 +483,8 @@ final class APIClient: ObservableObject {
             throw Problem(title: "HTTP \(code)", status: code, detail: nil)
         }
         let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"))
-        if let readKey, mutationEpoch == epoch {
-            recentReads[readKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
+        if let reuseKey, mutationEpoch == epoch {
+            recentReads[reuseKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
             if recentReads.count > 200 { recentReads = recentReads.filter { Date().timeIntervalSince($0.value.at) < Self.recentReadWindow } }
         }
         if savedCopyPaths[path] != nil { savedCopyPaths[path] = nil }

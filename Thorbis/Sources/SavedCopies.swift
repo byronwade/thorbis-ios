@@ -163,6 +163,12 @@ extension APIClient {
         return record
     }
 
+    func liveFieldJob(_ id: String) async throws -> JobRecord {
+        let record = try await SavedCopies.$liveOnly.withValue(true) { try await fieldJob(id) }
+        try requireLive("/v1/jobs/\(id)")
+        return record
+    }
+
     private func requireLive(_ path: String) throws {
         guard savedCopyDate(path) == nil else {
             throw Problem(title: "Network error", status: nil, detail: "This needs a connection. Try again when you have signal.")
