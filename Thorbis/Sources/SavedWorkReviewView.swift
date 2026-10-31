@@ -166,11 +166,11 @@ struct SavedWorkReviewView: View {
                     Text(row.title).font(Theme.font(17, weight: .medium))
                     Text(row.state.title).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     if let reason = row.state.reason { Text(reason).font(Theme.font(15)).foregroundStyle(Theme.muted) }
-                    Text(row.date.formatted(date: .abbreviated, time: .shortened)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                    Text(row.date.stampLabel()).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityElement(children: .combine)
-                .accessibilityValue((row.isMedia ? "Captured " : "Saved ") + row.date.formatted(date: .abbreviated, time: .shortened))
+                .accessibilityValue((row.isMedia ? "Captured " : "Saved ") + row.date.stampLabel())
                 if case .rejected = row.state {
                     Group {
                         if typeSize.isAccessibilitySize {

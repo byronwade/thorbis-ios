@@ -14,7 +14,7 @@ struct ThorbisToast: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.toastText)
                 .accessibilityHidden(true)
             Text(message)
@@ -26,7 +26,7 @@ struct ThorbisToast: View {
                 Spacer(minLength: 4)
                 Button(action: action) {
                     Text(actionTitle)
-                        .font(Theme.font(15, weight: .semibold))
+                        .font(Theme.font(15, weight: .medium))
                         .foregroundStyle(Theme.toastText)
                         .padding(.horizontal, 12).frame(minHeight: 30)
                         .background(Theme.toastText.opacity(0.14), in: Capsule())

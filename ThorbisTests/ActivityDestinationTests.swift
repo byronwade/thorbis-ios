@@ -61,7 +61,9 @@ final class ActivityDestinationTests: XCTestCase {
         let raw = "2026-07-01T15:04:00Z"
         let shown = ActivityRecordLabel.noteWhen(raw)
         let date = try XCTUnwrap(JobFiltering.date(raw))
-        XCTAssertEqual(shown, date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
+        // The app's one stamp: the date, then the shared clock ("Jul 1, 2026, 3:04 p.m."), never "PM".
+        XCTAssertEqual(shown, date.stampLabel())
+        XCTAssertTrue(shown.hasSuffix(date.tradeTime), shown)
         XCTAssertNotEqual(shown, raw)
         XCTAssertEqual(ActivityRecordLabel.noteWhen("not-a-date"), "not-a-date")
     }

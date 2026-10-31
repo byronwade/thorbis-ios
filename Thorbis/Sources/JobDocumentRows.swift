@@ -24,7 +24,6 @@ struct JobDocumentRow: View {
         .padding(.vertical, customerFacing ? 16 : 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(grouped ? Color.clear : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay { if !grouped { RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border) } }
         .contentShape(Rectangle())
     }
 
@@ -125,7 +124,7 @@ extension JobDocumentRow {
         status = invoice.status
         amount = paperLinesTotal(invoice.lines).map { money($0, currency: invoice.currency) }
         if invoice.status == "issued", let total = paperLinesTotal(invoice.lines), invoice.amountPaid >= 0, total >= invoice.amountPaid {
-            detail = "\(money(total - invoice.amountPaid, currency: invoice.currency)) due"
+            detail = "\(money(total - invoice.amountPaid, currency: invoice.currency))\u{00A0}due"
         } else {
             detail = nil
         }

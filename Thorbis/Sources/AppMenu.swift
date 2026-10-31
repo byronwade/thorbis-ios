@@ -115,21 +115,6 @@ enum AppMenuContent {
 
 }
 
-/// Shared look for the floating search field and its results: a frosted card with a hairline rim.
-struct FloatingSurface<S: InsettableShape>: ViewModifier {
-    let shape: S
-    func body(content: Content) -> some View {
-        content
-            // The shadow belongs to the surface alone, so rows and pills inside cast none.
-            .background {
-                shape.fill(Theme.card.opacity(0.55))
-                    .background(.regularMaterial, in: shape)
-                    .shadow(color: .black.opacity(0.10), radius: 16, y: 6)
-            }
-            .overlay(shape.strokeBorder(Theme.border, lineWidth: 1))
-    }
-}
-
 /// Helper types the phone shell shares (the floating tab bar they were born in was replaced by
 /// the side drawer on 2026-10-31): a create or shortcut entry, and what the field outbox is doing.
 enum AppBottomBar {
@@ -167,88 +152,6 @@ enum AppBottomBar {
             default: false
             }
         }
-    }
-
-    /// The floating search field's height.
-    static let circle: CGFloat = 56
-    static let gap: CGFloat = 8
-    /// How far the search field sits above the screen's bottom edge, into the home indicator's margin.
-    static let bottomGap: CGFloat = 20
-}
-
-/// Search's field, floating low on the screen while search is open (opened from the drawer's
-/// search circle). Results rise in a card above it; the close circle sits beside it.
-struct FloatingSearchBar: View {
-    var query: Binding<String>
-    let close: () -> Void
-    /// Return in the field: search opens its top hit.
-    let submit: () -> Void
-    @FocusState private var fieldFocused: Bool
-
-    var body: some View {
-        HStack(alignment: .center, spacing: AppBottomBar.gap) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
-                TextField("Street, name, phone or number", text: query)
-                    .font(Theme.font(16))
-                    .focused($fieldFocused)
-                    .submitLabel(.search)
-                    .onSubmit(submit)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                if !query.wrappedValue.isEmpty {
-                    Button { query.wrappedValue = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 17))
-                            .foregroundStyle(Theme.muted)
-                            .frame(width: 32, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .foregroundStyle(Theme.foreground)
-            .padding(.leading, 16)
-            .padding(.trailing, 8)
-            .frame(minHeight: AppBottomBar.circle)
-            .frame(maxWidth: .infinity)
-            .modifier(FloatingSurface(shape: Capsule()))
-            .onAppear { fieldFocused = true }
-            Button(action: close) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Theme.foreground)
-                    .frame(width: AppBottomBar.circle, height: AppBottomBar.circle)
-                    .modifier(FloatingSurface(shape: Circle()))
-                    .contentShape(Circle())
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityLabel("Close search")
-        }
-        .padding(.horizontal, 16)
-    }
-}
-
-/// A short arc that turns while something is under way (saved work going up, a job in progress).
-/// Reduce Motion holds it still.
-struct SpinnerArc: View {
-    var tint: Color = Theme.muted
-    var lineWidth: CGFloat = 2
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var spin = false
-
-    var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.72)
-            .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-            .rotationEffect(.degrees(spin ? 360 : 0))
-            .animation(reduceMotion ? nil : .linear(duration: 1.1).repeatForever(autoreverses: false), value: spin)
-            .onAppear { spin = true }
-            .accessibilityHidden(true)
     }
 }
 
@@ -294,7 +197,6 @@ struct AppMenuEditor: View {
             .padding(.leading, 20)
             .padding(.trailing, 12)
             .padding(.vertical, 8)
-            Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 12)
             list
         }
         .foregroundStyle(Theme.foreground)

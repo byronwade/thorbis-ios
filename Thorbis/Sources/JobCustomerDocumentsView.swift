@@ -221,7 +221,7 @@ struct JobCustomerDocumentsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold))
+                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.muted).accessibilityHidden(true)
                 }
                 .padding(16)

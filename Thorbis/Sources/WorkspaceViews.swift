@@ -25,7 +25,7 @@ struct WorkspaceNoticesView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     // Redesign phase 3: a place's title, 34 semibold like the tab roots.
-                    Text("Inbox").font(Theme.font(34, weight: .semibold)).tracking(-0.8).accessibilityAddTraits(.isHeader)
+                    Text("Inbox").font(Theme.font(34, weight: .medium)).tracking(-0.8).accessibilityAddTraits(.isHeader)
                     Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
@@ -714,8 +714,8 @@ private struct PriceBookItemSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(price).font(Theme.font(34, weight: .semibold)).monospacedDigit()
-                Text(PriceBookPresentation.title(description)).font(Theme.font(20, weight: .semibold))
+                Text(price).font(Theme.font(34, weight: .medium)).monospacedDigit()
+                Text(PriceBookPresentation.title(description)).font(Theme.font(20, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 4)

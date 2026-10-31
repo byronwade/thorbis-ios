@@ -399,7 +399,7 @@ struct OwnerHomeView: View {
                     NavigationLink(value: PaperRoute.homeList(.unpaid)) {
                         needRow(word: "Unpaid", tone: .attention,
                                 title: "\(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")",
-                                subtitle: "\(owed.text) owed\(oldest(unpaid.first?.0.issuedAt, verb: "issued"))", action: "Review")
+                                subtitle: "\(owed.text)\u{00A0}owed\(oldest(unpaid.first?.0.issuedAt, verb: "issued"))", action: "Review")
                     }.buttonStyle(RowPressStyle())
                 }
                 if !stale.isEmpty {
@@ -639,10 +639,11 @@ struct OwnerHomeListView: View {
         } else {
             let canSchedule = session.can("job.assign", feature: "jobs")
             PaperCard {
-                ForEach(rows) { job in
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, job in
                     ScheduleCompactRow(job: job, customer: store.customerName(job.customerId), street: addresses.street(job),
                                        timeStyle: list == .unscheduled ? .age : .time,
                                        pendingStatus: outbox.pendingStatus(for: job.id),
+                                       showsPeriod: TimeColumn.showsPeriod(rows, at: index),
                                        schedule: list == .unscheduled && canSchedule ? { scheduling = job } : nil)
                 }
                 .padding(.vertical, PaperCardMetrics.edge)

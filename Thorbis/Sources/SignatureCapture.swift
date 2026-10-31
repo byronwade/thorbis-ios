@@ -190,7 +190,7 @@ struct SignatureBadge: View {
     let signature: FieldSignatureRecord
     var body: some View {
         Label {
-            Text("\(label) \(signature.signerName)\(JobFiltering.date(signature.signedAt).map { " · " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")")
+            Text("\(label) \(signature.signerName)\(JobFiltering.date(signature.signedAt).map { " · " + $0.stampLabel() } ?? "")")
         } icon: {
             Image(systemName: "signature")
         }

@@ -428,15 +428,15 @@ struct RowPressStyle: ButtonStyle {
 }
 
 extension Date {
-    /// One way to say when a visit is, used on every list and header: "Today 4:00 PM",
-    /// "Tomorrow 9:00 AM", otherwise "Thu, Oct 30, 9:00 AM".
+    /// One way to say when a visit is, used on every list and header: "Today 4:00 p.m.",
+    /// "Tomorrow 9:00 a.m.", otherwise "Thu, Oct 30, 9:00 a.m.".
     func visitLabel(now: Date = .now, calendar: Calendar = .current) -> String {
         let time = tradeTime
         if calendar.isDate(self, inSameDayAs: now) { return "Today \(time)" }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(self, inSameDayAs: tomorrow) {
             return "Tomorrow \(time)"
         }
-        return "\(formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(tradeTime)"
+        return weekdayStampLabel
     }
 }
 

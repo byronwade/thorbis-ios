@@ -19,7 +19,7 @@ enum JobShareText {
         var parts = [title, customer]
         if let date = JobFiltering.date(scheduledFor) {
             // Absolute, never "Today": the message may be read another day.
-            parts.append("\(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(date.tradeTime)")
+            parts.append("\(date.weekdayStampLabel)")
         }
         return parts.joined(separator: " · ")
     }
@@ -800,6 +800,16 @@ private struct ScheduleHero<Commit: View>: View {
     }
 }
 
+/// A list's time column (design.thorbis.com "Time is 7:40. Tabular."): "a.m." / "p.m." shows on
+/// the first timed row and wherever the period changes, so the column reads 10:30, 12:15, 1:00.
+enum TimeColumn {
+    static func showsPeriod(_ jobs: [Job], at index: Int) -> Bool {
+        let period = JobFiltering.date(jobs[index].scheduledFor)?.periodMark
+        guard let previous = jobs[..<index].last(where: { $0.scheduledFor != nil }) else { return true }
+        return JobFiltering.date(previous.scheduledFor)?.periodMark != period
+    }
+}
+
 extension Date {
     /// The Today column's clock (design.thorbis.com "Time is 7:40"): hours and minutes always, so
     /// 7:40 and 11:15 share a tabular column. The period sits apart (`periodMark`).
@@ -913,6 +923,8 @@ struct ScheduleCompactRow: View {
     var street: String? = nil
     var timeStyle: TimeStyle = .time
     var pendingStatus: String? = nil
+    /// Show "a.m." / "p.m." beside the time (the first row, and wherever the period changes).
+    var showsPeriod = true
     /// Set on a row with no time for someone who may schedule: a trailing Schedule button.
     var schedule: (() -> Void)? = nil
     @Environment(\.paperRowInset) private var inset
@@ -921,7 +933,9 @@ struct ScheduleCompactRow: View {
         if timeStyle == .age, let created = JobFiltering.date(job.createdAt) {
             return .text(Self.age(since: created), accessibility: "Waiting since \(created.formatted(date: .abbreviated, time: .omitted))")
         }
-        if let date = JobFiltering.date(job.scheduledFor) { return .text(date.tradeTime) }
+        if let date = JobFiltering.date(job.scheduledFor) {
+            return .clock(date.columnTime, period: showsPeriod ? date.periodMark : nil, accessibility: date.clockTime)
+        }
         return .text("No time")
     }
 

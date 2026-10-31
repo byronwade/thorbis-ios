@@ -59,7 +59,7 @@ struct WrapUpRow: Identifiable, Hashable {
 
     let step: Step
     let title: String
-    /// Short and on the right: a count or an amount ("3", "$480 due").
+    /// Short and on the right: a count or an amount ("3", "$480.00 due").
     var detail: String? = nil
     let done: Bool
 
@@ -137,7 +137,7 @@ enum WrapUpList {
             let paid = invoice.map { $0.status == "paid" || ($0.status == "issued" && due == 0) } ?? false
             let currency = invoice?.currency ?? "USD"
             rows.append(WrapUpRow(step: .payment, title: "Collect payment",
-                                  detail: paid ? "Paid" : owed.flatMap { $0 > 0 ? "\(jobShortMoney($0, currency: currency)) due" : nil },
+                                  detail: paid ? "Paid" : owed.flatMap { $0 > 0 ? "\(jobShortMoney($0, currency: currency))\u{00A0}due" : nil },
                                   done: paid && !blockedSteps.contains(.payment)))
         }
 
@@ -337,7 +337,7 @@ struct JobCloseoutView: View {
         TextField(prompt, text: text, axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
     }
 
@@ -654,7 +654,7 @@ struct JobScheduleView: View {
                     .foregroundStyle(Theme.foreground)
                 Spacer(minLength: 8)
                 if selected {
-                    Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold))
+                    Image(systemName: "checkmark").font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Theme.brandText).accessibilityHidden(true)
                 }
             }
@@ -976,7 +976,7 @@ struct FollowUpBookingSheet: View {
         do {
             let booked = try await api.bookFieldFollowUp(jobID, followUpID: followUp.id, request: request)
             result = booked.outcome == "booked"
-                ? "Booked for \(begins.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
+                ? "Booked for \(begins.weekdayStampLabel)"
                 : "No one is free then, so the office will confirm a time."
             error = nil
         } catch is CancellationError {

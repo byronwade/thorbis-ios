@@ -160,7 +160,7 @@ struct NewCustomerSheet: View {
                 onCreated(existing)
                 dismiss()
             } label: {
-                Text("Use \(existing.name)").font(Theme.font(14, weight: .semibold))
+                Text("Use \(existing.name)").font(Theme.font(14, weight: .medium))
                     .frame(maxWidth: .infinity).frame(minHeight: 44)
                     .foregroundStyle(Theme.foreground)
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))

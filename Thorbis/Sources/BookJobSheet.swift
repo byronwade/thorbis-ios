@@ -348,7 +348,7 @@ struct NewJobSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(typed ? (matches.isEmpty ? "No match" : "Matches") : "Recent customers")
-                    .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
                 if canReadCustomers && !store.customers.isEmpty {
@@ -484,7 +484,7 @@ struct NewJobSheet: View {
                     addingCustomer = false
                     select(existing.id)
                 } label: {
-                    Text("Use \(existing.name)").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                    Text("Use \(existing.name)").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 }
@@ -576,7 +576,7 @@ struct NewJobSheet: View {
                             Button { draft.locationID = chosen ? nil : place.id } label: {
                                 PaperListRow(title: place.address, subtitle: place.label) {
                                     if chosen {
-                                        Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold))
+                                        Image(systemName: "checkmark").font(.system(size: 15, weight: .medium))
                                             .foregroundStyle(Theme.brandText).accessibilityHidden(true)
                                     }
                                 }
@@ -640,7 +640,7 @@ struct NewJobSheet: View {
                                 DatePicker("Other time", selection: $customTime, displayedComponents: .hourAndMinute)
                                     .labelsHidden().datePickerStyle(.compact)
                                     .accessibilityLabel("Choose a start time")
-                                Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold))
+                                Image(systemName: "checkmark").font(.system(size: 15, weight: .medium))
                                     .foregroundStyle(Theme.brandText).accessibilityHidden(true)
                             }
                             .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
@@ -676,7 +676,7 @@ struct NewJobSheet: View {
                 if past { Text("· passed").font(Theme.font(14)).foregroundStyle(Theme.muted) }
                 Spacer()
                 if chosen {
-                    Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold))
+                    Image(systemName: "checkmark").font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Theme.brandText).accessibilityHidden(true)
                 }
             }
@@ -745,7 +745,7 @@ struct NewJobSheet: View {
                         .padding(.horizontal, 8).frame(height: 24).background(Theme.fill, in: Capsule())
                 }
                 if chosen {
-                    Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold))
+                    Image(systemName: "checkmark").font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Theme.brandText).accessibilityHidden(true)
                 }
             }

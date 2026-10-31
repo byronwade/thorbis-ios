@@ -36,7 +36,7 @@ struct LegacyMediaRecoveryView: View {
                                     Image(systemName: "photo").foregroundStyle(Theme.muted)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(candidate.media.filename).font(Theme.font(15, weight: .medium))
-                                        Text(recovered.contains(candidate.id) ? "Recovered to this job" : candidate.media.capturedAt.formatted(date: .abbreviated, time: .shortened))
+                                        Text(recovered.contains(candidate.id) ? "Recovered to this job" : candidate.media.capturedAt.stampLabel())
                                             .font(Theme.font(12)).foregroundStyle(Theme.muted)
                                     }
                                     Spacer()

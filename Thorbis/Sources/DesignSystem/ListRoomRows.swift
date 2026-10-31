@@ -77,7 +77,7 @@ struct JobRoomRow: View {
                 whatLine(stacked: stacked)
                 if !meta.isEmpty {
                     Text(meta).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                        .lineLimit(stacked ? nil : 1)
+                        .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let note, !note.isEmpty {
@@ -93,25 +93,44 @@ struct JobRoomRow: View {
         .contentShape(Rectangle())
     }
 
-    /// The problem, then the customer: two texts so either can be read or found on its own.
+    /// The problem, then the customer: two texts so either can be read or found on its own. When both
+    /// fit on one line they share it ("Leak · Danielle Marlowe"); otherwise the problem may take two
+    /// lines and the customer drops to its own, so the "·" never dangles and a name is never cut to
+    /// make room for the other.
     @ViewBuilder private func whatLine(stacked: Bool) -> some View {
         let problem = street != nil ? job.title : nil
-        if problem != nil || customer != nil {
-            let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                                 : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 4))
-            layout {
-                if let problem {
-                    Text(problem).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                        .lineLimit(stacked ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .layoutPriority(1)
+        let customer = customer.flatMap { $0.isEmpty ? nil : $0 }
+        if let problem, let customer, !stacked {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    problemText(problem, lines: 1)
+                    Text("·").font(Theme.font(14)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    customerText(customer, lines: 1)
                 }
-                if let customer, !customer.isEmpty {
-                    Text(problem == nil || stacked ? customer : "· \(customer)").font(Theme.font(14)).foregroundStyle(Theme.muted)
-                        .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 2) {
+                    problemText(problem, lines: 2)
+                    customerText(customer, lines: 2)
                 }
             }
+        } else if problem != nil || customer != nil {
+            VStack(alignment: .leading, spacing: 2) {
+                if let problem { problemText(problem, lines: stacked ? nil : 2) }
+                if let customer { customerText(customer, lines: stacked ? nil : 2) }
+            }
         }
+    }
+
+    private func problemText(_ text: String, lines: Int?) -> some View {
+        Text(text).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+            .lineLimit(lines)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func customerText(_ text: String, lines: Int?) -> some View {
+        Text(text).font(Theme.font(14)).foregroundStyle(Theme.muted)
+            .lineLimit(lines)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private var statusWord: some View {

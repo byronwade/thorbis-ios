@@ -649,16 +649,25 @@ struct CompanyDetailsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if canEdit, model.profile != nil {
-                Button { Task { await save() } } label: {
-                    HStack(spacing: 8) {
-                        if model.saving { ProgressView().tint(Theme.onInk) }
-                        Text("Save details")
+                VStack(spacing: 6) {
+                    Button { Task { await save() } } label: {
+                        HStack(spacing: 8) {
+                            if model.saving { ProgressView().tint(Theme.onInk) }
+                            Text("Save details")
+                        }
+                        .inkCommit(enabled: model.dirty && !model.saving)
                     }
-                    .inkCommit(enabled: model.dirty && !model.saving)
+                    .buttonStyle(PressStyle())
+                    .disabled(!model.dirty || model.saving)
+                    .accessibilityIdentifier("company-details-save")
+                    .accessibilityHint(model.dirty ? "" : "No changes to save yet.")
+                    // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+                    if !model.dirty && !model.saving {
+                        Text("No changes to save yet.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityHidden(true)
+                    }
                 }
-                .buttonStyle(PressStyle())
-                .disabled(!model.dirty || model.saving)
-                .accessibilityIdentifier("company-details-save")
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
                 .frame(maxWidth: 600)
                 .frame(maxWidth: .infinity)

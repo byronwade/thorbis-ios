@@ -4,7 +4,7 @@ import SwiftUI
 enum ActivityRecordLabel {
     static func noteWhen(_ createdAt: String) -> String {
         guard let date = JobFiltering.date(createdAt) else { return createdAt }
-        return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+        return date.stampLabel()
     }
 }
 
@@ -28,7 +28,7 @@ struct ActivityLink<Content: View>: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             if destination != nil {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.muted)
                     .accessibilityHidden(true)
             }

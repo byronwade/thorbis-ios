@@ -547,8 +547,6 @@ struct RootView: View {
         .environment(\.paperShowMenu, { Task { @MainActor in openDrawer() } })
         .environment(\.paperMenuButton, false)
         .environment(\.paperCreate, headerCreate)
-        .environment(\.paperOpenPlace, { item in Task { @MainActor in open(item) } })
-        .environment(\.paperManageBusinesses, { Task { @MainActor in workspace = true } })
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $search) { PaperGlobalSearch() }
         .sheet(isPresented: $newCustomer) { NewCustomerSheet() }

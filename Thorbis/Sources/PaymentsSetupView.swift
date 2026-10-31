@@ -177,7 +177,6 @@ struct PaymentsSetupView: View {
                 }
                 .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
                 .background(Theme.background)
-                .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
             }
         }
         .refreshable { await load() }

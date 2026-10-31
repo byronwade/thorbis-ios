@@ -979,7 +979,7 @@ struct CustomerDetailView: View {
         if let invoices = visibleRecords?.invoices.first(where: { $0.jobID == job.id })?.items {
             let paid = invoices.filter { $0.amountPaid > 0 && $0.status != "void" }
             if let currency = paid.first?.currency, paid.allSatisfy({ $0.currency == currency }) {
-                parts.append("\(money(paid.reduce(0) { $0 + $1.amountPaid }, currency: currency)) paid")
+                parts.append("\(money(paid.reduce(0) { $0 + $1.amountPaid }, currency: currency))\u{00A0}paid")
             }
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")

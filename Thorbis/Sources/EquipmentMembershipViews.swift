@@ -399,7 +399,7 @@ struct MemberFact: View {
 private struct MemberFactLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 4) {
-            configuration.icon.font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.brandText)
+            configuration.icon.font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.brandText)
             configuration.title
         }
     }

@@ -112,7 +112,7 @@ struct PaperEmptyState: View {
             EmptyGlyph(symbol: symbol, tint: tint, size: mark)
                 .padding(.bottom, 14)
             Text(title)
-                .font(Theme.font(17, weight: .semibold))
+                .font(Theme.font(17, weight: .medium))
                 .foregroundStyle(Theme.foreground)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -127,7 +127,7 @@ struct PaperEmptyState: View {
             if let actionTitle, let action {
                 Button(action: action) {
                     Text(actionTitle)
-                        .font(Theme.font(15, weight: .semibold)).foregroundStyle(prominent ? Theme.onInk : Theme.foreground)
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(prominent ? Theme.onInk : Theme.foreground)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 18).padding(.vertical, 8).frame(minHeight: 40)
@@ -176,7 +176,7 @@ struct BannerGlyph: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.5, weight: .semibold))
+            .font(.system(size: size * 0.5, weight: .medium))
             .foregroundStyle(tint)
             .frame(width: size, height: size)
             .background(tint.opacity(0.14), in: Circle())
@@ -243,7 +243,7 @@ struct ErrorBanner: View {
                 Button {
                     Task { running = true; await action.run(); running = false }
                 } label: {
-                    Text(action.title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                    Text(action.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 12).frame(minHeight: 32)
                         .background(Theme.selectedSegment, in: Capsule())
                         .overlay(Capsule().strokeBorder(Theme.border))

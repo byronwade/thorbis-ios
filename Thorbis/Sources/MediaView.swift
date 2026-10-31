@@ -487,7 +487,7 @@ struct JobMediaView: View {
                     Button("Show all photos") { filter = .all }.frame(minHeight: 44)
                 }
             }
-            .font(.subheadline)
+            .font(Theme.font(14))
             .tint(Theme.brandText)
             .frame(minHeight: 44)
             if hasMore {
@@ -592,7 +592,7 @@ struct JobMediaView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("pending-media-\(media.id)")
-        .accessibilityValue(Text("\(state.word ?? "") · captured \(media.capturedAt.formatted(date: .abbreviated, time: .shortened))"))
+        .accessibilityValue(Text("\(state.word ?? "") · captured \(media.capturedAt.stampLabel())"))
     }
 
     @ViewBuilder private var documentSection: some View {
@@ -614,7 +614,7 @@ struct JobMediaView: View {
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("pending-media-\(media.id)")
-                        .accessibilityValue(Text("Captured \(media.capturedAt.formatted(date: .abbreviated, time: .shortened))"))
+                        .accessibilityValue(Text("Captured \(media.capturedAt.stampLabel())"))
                     }
                     ForEach(documents) { record in
                         Button { open(record) } label: {
@@ -703,6 +703,13 @@ struct JobMediaView: View {
             .buttonStyle(PressStyle())
             .disabled(!tools.camera)
             .accessibilityIdentifier("job-media-take-photo")
+            // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+            if !tools.camera {
+                Text("This device has no camera. Import a photo instead.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

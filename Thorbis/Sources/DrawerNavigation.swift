@@ -280,7 +280,7 @@ struct AppDrawer: View {
                 Text("All places").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.subtle)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.muted)
                     .rotationEffect(.degrees(allPlacesOpen ? 0 : -90))
                     .accessibilityHidden(true)

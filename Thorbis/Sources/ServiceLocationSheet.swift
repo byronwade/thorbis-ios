@@ -45,7 +45,7 @@ struct ServiceLocationSheet: View {
 
             ZStack {
                 Text(isEditing ? "Edit location" : "New location")
-                    .font(Theme.font(17, weight: .semibold))
+                    .font(Theme.font(17, weight: .medium))
                 // MA-16: Cancel leading; the one commit is the ink button at the bottom.
                 HStack {
                     Button("Cancel") { dismiss() }
@@ -112,6 +112,11 @@ struct ServiceLocationSheet: View {
                 }
                 .buttonStyle(PressStyle())
                 .disabled(!canAttemptSave)
+                // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+                if !busy && !canAttemptSave {
+                    Text("Your role can't change addresses. Ask your office.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .padding(.horizontal, 20)
