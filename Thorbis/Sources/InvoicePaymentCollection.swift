@@ -140,6 +140,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
             guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+            // A copy saved on this phone can be read, never collected on: payments wait for a live read.
+            if api.savedCopyDate("/v1/invoices/\(invoiceID)") != nil {
+                loadError = "Saved on this phone. Payments need a connection."
+                return
+            }
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }

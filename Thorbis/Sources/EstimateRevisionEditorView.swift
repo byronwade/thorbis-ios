@@ -432,7 +432,7 @@ struct EstimateRevisionEditorView: View {
         busy = true
         defer { busy = false }
         do {
-            let latest = try await api.fieldEstimate(estimate.id)
+            let latest = try await api.liveFieldEstimate(estimate.id)
             editor = EstimateRevisionEditorState(estimate: latest)
             classifyLines()
             staleRevision = false

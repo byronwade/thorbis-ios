@@ -7,7 +7,7 @@ import Foundation
 /// screens make, so the saved copies (SavedCopies.swift) land under the same keys the screens
 /// ask for: the job, notes, past visits, follow-ups, its estimates and invoices with their
 /// lines, and the customer's record, contacts, addresses, equipment and recent history.
-/// Nothing runs offline or in Low Data Mode; a job read in the last ten minutes is skipped.
+/// Nothing runs offline or in Low Data Mode; an unchanged job is read again at most hourly.
 /// Sign-out or a workspace change cancels it.
 @MainActor
 final class DayPrefetch {
@@ -15,9 +15,12 @@ final class DayPrefetch {
     /// Low Data Mode (set by ConnectivityMonitor): the phone asked apps to hold back.
     var constrained = false
     private var task: Task<Void, Never>?
-    private var readAt: [String: Date] = [:]
+    /// When each job was last read ahead, and the `updatedAt` it had then.
+    private var readAt: [String: (at: Date, updatedAt: String?)] = [:]
     private let maxJobs = 12
-    private let freshFor: TimeInterval = 600
+    /// An unchanged job is read again at most hourly; a job the server changed, after ten minutes.
+    private let unchangedFor: TimeInterval = 3600
+    private let changedFor: TimeInterval = 600
 
     func cancel() {
         task?.cancel()
@@ -34,7 +37,11 @@ final class DayPrefetch {
         var today = JobFiltering.schedule(jobs, range: .today, assignedTo: actor)
         if today.isEmpty { today = JobFiltering.schedule(jobs, range: .today) }
         let now = Date()
-        let due = today.prefix(maxJobs).filter { now.timeIntervalSince(readAt[$0.id] ?? .distantPast) > freshFor }
+        let due = today.prefix(maxJobs).filter { job in
+            guard let last = readAt[job.id] else { return true }
+            let age = now.timeIntervalSince(last.at)
+            return last.updatedAt == job.updatedAt ? age > unchangedFor : age > changedFor
+        }
         guard !due.isEmpty else { return }
         task?.cancel()
         let generation = session.generation
@@ -44,7 +51,7 @@ final class DayPrefetch {
                 for job in due {
                     guard !Task.isCancelled, session.generation == generation, !session.isOffline else { return }
                     await self?.read(job: job, api: api, session: session, customersRead: &customersRead)
-                    self?.readAt[job.id] = Date()
+                    self?.readAt[job.id] = (Date(), job.updatedAt)
                 }
             }
         }

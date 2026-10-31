@@ -147,3 +147,25 @@ extension APIClient {
         return Customer(id: record.id, name: record.name, archived: nil, createdAt: nil)
     }
 }
+
+extension APIClient {
+    /// For reads that feed a customer's signature, a payment or an edit: a copy saved on this phone
+    /// is refused as if there were no signal, so those flows only ever act on a live answer.
+    func liveFieldEstimate(_ id: String) async throws -> EstimateRecord {
+        let record = try await fieldEstimate(id)
+        try requireLive("/v1/estimates/\(id)")
+        return record
+    }
+
+    func liveFieldInvoice(_ id: String) async throws -> InvoiceRecord {
+        let record = try await fieldInvoice(id)
+        try requireLive("/v1/invoices/\(id)")
+        return record
+    }
+
+    private func requireLive(_ path: String) throws {
+        guard savedCopyDate(path) == nil else {
+            throw Problem(title: "Network error", status: nil, detail: "This needs a connection. Try again when you have signal.")
+        }
+    }
+}

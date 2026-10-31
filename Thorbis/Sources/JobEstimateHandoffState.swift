@@ -385,7 +385,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard isCurrent else { return .unknown }
         do {
             let record: EstimateRecord
-            if let supplied { record = supplied } else { record = try await api.fieldEstimate(item.id) }
+            if let supplied { record = supplied } else { record = try await api.liveFieldEstimate(item.id) }
             guard isCurrent else { return .unknown }
             guard scope.contains(record, requestedID: item.id), record.locationId == item.estimate.locationId,
                   record.currentRevisionNumber == item.revision.revisionNumber, record.status == "approved" else { return .unknown }
@@ -399,7 +399,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard isCurrent, let context = contexts[item.key], let link = context.link else { return .unknown }
         do {
             let record: EstimateRecord
-            if let supplied { record = supplied } else { record = try await api.fieldEstimate(item.id) }
+            if let supplied { record = supplied } else { record = try await api.liveFieldEstimate(item.id) }
             guard isCurrent, scope.contains(record, requestedID: item.id), record.locationId == item.estimate.locationId,
                   record.currentRevisionNumber == item.revision.revisionNumber, record.status == "approved" else { return .unknown }
             // Keep a bare approved aggregate visible even if its selected package cannot yet be proved.
@@ -422,7 +422,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard isCurrent, let context = contexts[id], context.outcome == .unknown, !context.running else { return }
         let item = context.reviewed
         do {
-            let record = try await api.fieldEstimate(item.id)
+            let record = try await api.liveFieldEstimate(item.id)
             guard isCurrent, scope.contains(record, requestedID: item.id), record.locationId == item.estimate.locationId else { return }
             if record.status == "approved" {
                 context.report(item.optionID == nil ? await confirm(item, record: record) : await confirmPublic(item, record: record)); return

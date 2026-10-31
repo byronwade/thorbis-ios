@@ -390,8 +390,12 @@ final class FieldOutbox: ObservableObject {
                 case .note(let payload):
                     _ = try await api.addFieldNote(payload.jobId, body: payload.body)
                 case .followUp(let payload):
-                    if entry.attempted == true, await followUpExists(payload, since: entry.createdAt, actorID: entry.actorId, api: api) {
-                        break // An earlier send reached the server; it is done.
+                    if entry.attempted == true {
+                        let earlier = await followUpExists(payload, since: entry.createdAt, actorID: entry.actorId, api: api)
+                        guard current() else { return sent }
+                        // Unknown (no live answer): keep it queued rather than risk sending it twice.
+                        guard let earlier else { return sent }
+                        if earlier { break } // An earlier send reached the server; it is done.
                     }
                     guard current() else { return sent }
                     if let index = entries.firstIndex(where: { $0.id == entry.id }) {
@@ -434,10 +438,12 @@ final class FieldOutbox: ObservableObject {
     }
 
     /// Whether the job already has this follow-up from this person, made around or after it was
-    /// queued (ten minutes of slack for the phone's clock). A failed read answers "no".
-    private func followUpExists(_ payload: OutboxEntry.FollowUpPayload, since queued: Date, actorID: String, api: APIClient) async -> Bool {
-        guard let records = try? await SavedCopies.$liveOnly.withValue(true, operation: { try await api.fieldFollowUps(payload.jobId) })
-        else { return false }
+    /// queued (ten minutes of slack for the phone's clock). Nil when there is no live answer:
+    /// a failed read, or one answered by the copy saved on this phone.
+    private func followUpExists(_ payload: OutboxEntry.FollowUpPayload, since queued: Date, actorID: String, api: APIClient) async -> Bool? {
+        guard let records = try? await SavedCopies.$liveOnly.withValue(true, operation: { try await api.fieldFollowUps(payload.jobId) }),
+              api.savedCopyDate("/v1/jobs/\(payload.jobId)/followups") == nil
+        else { return nil }
         let earliest = queued.addingTimeInterval(-600)
         return records.contains { record in
             record.kind == payload.kind && record.reason == payload.reason && record.nextAction == payload.nextAction &&
