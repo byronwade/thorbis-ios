@@ -1050,6 +1050,9 @@ struct PaperGlobalSearch: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
+    /// Search rows read on one line; at accessibility sizes they wrap instead of cutting the name.
+    private var rowLines: Int? { typeSize.isAccessibilitySize ? nil : 1 }
     @State private var query = ""
     @State private var server: [ServerSearchResult] = []
     @State private var serverQuery = ""
@@ -1143,8 +1146,8 @@ struct PaperGlobalSearch: View {
                 Image(systemName: item.kind == .job ? "briefcase" : "person")
                     .font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                    Text(item.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(item.title).font(Theme.font(15, weight: .medium)).lineLimit(rowLines)
+                    Text(item.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(rowLines)
                 }
                 Spacer(minLength: 8)
             }
@@ -1168,7 +1171,7 @@ struct PaperGlobalSearch: View {
         searchLink(customer) {
             HStack(spacing: 12) {
                 Avatar(name: customer.name, size: 26)
-                Text(customer.name).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                Text(customer.name).font(Theme.font(15, weight: .medium)).lineLimit(rowLines)
                 Spacer(minLength: 8)
             }
             .frame(minHeight: 52).contentShape(Rectangle())
@@ -1181,9 +1184,9 @@ struct PaperGlobalSearch: View {
             HStack(spacing: 12) {
                 StatusRing(status: job.status).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                    Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(rowLines)
                     Text("\(job.shortRef) · \(store.customerName(job.customerId)) · \(job.status.statusLabel)")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(rowLines)
                 }
                 Spacer(minLength: 8)
             }

@@ -659,14 +659,20 @@ struct InvoiceDetailView: View {
 struct CommercialLineView: View {
     let line: FieldLine
     var divider = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        // At accessibility sizes the amount reads under the line, so the description keeps the full width.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        layout {
             VStack(alignment: .leading, spacing: 3) {
                 Text(line.description).font(Theme.font(15, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
                     .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
             }
-            Spacer(minLength: 8)
+            if !stacked { Spacer(minLength: 8) }
             let total = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
             if !total.overflow {
                 Text(money(total.partialValue, currency: line.unitPrice.currency))
@@ -675,7 +681,7 @@ struct CommercialLineView: View {
         }
         .foregroundStyle(Theme.foreground)
         .padding(15)
-        .frame(minHeight: 56)
+        .frame(maxWidth: stacked ? .infinity : nil, minHeight: 56, alignment: .leading)
         .overlay(alignment: .top) {
             if divider { Rectangle().fill(Theme.border).frame(height: 1).padding(.horizontal, 15) }
         }
@@ -829,10 +835,15 @@ struct DocumentLinesSection: View {
 /// "2 × $60.00". The data has one text per line, so the whole of it is shown.
 struct DocumentLineRow: View {
     let line: FieldLine
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            // At accessibility sizes the amount goes under the description; beside it, the
+            // description is squeezed into a column and breaks mid-word.
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                      : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            layout {
                 Text(line.description).font(Theme.font(15, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)

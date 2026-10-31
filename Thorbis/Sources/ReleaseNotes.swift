@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-dark-and-large-text",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Clearer in dark mode and large text",
+                      detail: "Red and blue words read clearly in dark mode, and big text sizes wrap instead of running off the screen.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-job-onsite-redesign",
             date: "2026-10-30",
             highlights: [

@@ -15,6 +15,7 @@ struct WorkspaceNoticesView: View {
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var visible: [StaffNotice] { filter == "Unread" ? items.filter { !$0.read } : items }
 
@@ -50,7 +51,10 @@ struct WorkspaceNoticesView: View {
                         }
                         // Each notice opens the job it is about.
                         NavigationLink(value: PaperRoute.job(notice.jobId)) {
-                        HStack(alignment: .top, spacing: 12) {
+                        // At accessibility sizes "Unread" goes under the notice so the words keep the width.
+                        let rowLayout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                                                                     : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                        rowLayout {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(notice.title).font(Theme.font(15, weight: notice.read ? .regular : .medium))
                                     .foregroundStyle(notice.read ? Theme.muted : Theme.foreground)
@@ -59,12 +63,12 @@ struct WorkspaceNoticesView: View {
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            Spacer(minLength: 0)
+                            if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                             // Unread as a word with the accent dot; read notices need no word.
                             if !notice.read { StatusWord(text: "Unread", tint: Theme.brandText).padding(.top, 2) }
                         }
                         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-                        .frame(minHeight: 60)
+                        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
                         .contentShape(Rectangle())
                         }
                         .buttonStyle(RowPressStyle())

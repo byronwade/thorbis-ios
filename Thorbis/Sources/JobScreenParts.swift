@@ -24,21 +24,28 @@ struct JobPanelLabel: View {
     var actionTitle: String? = nil
     var actionIdentifier: String? = nil
     var action: (() -> Void)? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
+        // At accessibility sizes the action goes under the label; side by side both break mid-word.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+                             : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        layout {
             Text(title)
                 .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 8)
+            if !stacked { Spacer(minLength: 8) }
             if let actionTitle, let action {
                 Button(action: action) {
                     Text(actionTitle)
                         .font(Theme.font(13, weight: .medium))
                         .foregroundStyle(Theme.foreground)
-                        .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(minWidth: 44, minHeight: 44, alignment: stacked ? .leading : .trailing)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
@@ -47,7 +54,7 @@ struct JobPanelLabel: View {
         }
         .padding(.horizontal, 4)
         .frame(minHeight: 30)
-        .padding(.vertical, actionTitle == nil ? 0 : -7)
+        .padding(.vertical, actionTitle == nil || stacked ? 0 : -7)
     }
 }
 
@@ -117,19 +124,25 @@ struct JobPanelFact: View {
     let label: String
     let value: String
     var mono = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
+        // At accessibility sizes the value reads under its label, left aligned, at full width.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 16))
+        layout {
             Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
-            Spacer(minLength: 8)
+                .fixedSize(horizontal: false, vertical: true)
+            if !stacked { Spacer(minLength: 8) }
             Text(value)
                 .font(mono ? Theme.monoFont(15, weight: .medium) : Theme.font(15))
                 .foregroundStyle(Theme.foreground)
-                .multilineTextAlignment(.trailing)
+                .multilineTextAlignment(stacked ? .leading : .trailing)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 16).padding(.vertical, 11)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 }
@@ -195,7 +208,7 @@ struct JobSectionControl: View {
                         .frame(maxWidth: .infinity, minHeight: 36)
                         .background {
                             if isOn {
-                                Capsule().fill(Theme.card)
+                                Capsule().fill(Theme.selectedSegment)
                                     .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
                                     .shadow(color: Color.black.opacity(0.10), radius: 1, y: 1)
                             }

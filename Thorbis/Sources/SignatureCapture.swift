@@ -48,14 +48,14 @@ struct SignatureCaptureSheet: View {
                     pad
                     // A signature line, like the paper form the customer expects.
                     HStack(alignment: .lastTextBaseline, spacing: 6) {
-                        Text("×").font(Theme.font(20)).foregroundStyle(.black.opacity(0.45))
+                        Text("×").font(Theme.font(20)).foregroundStyle(.black.opacity(0.62))
                         Rectangle().fill(.black.opacity(0.2)).frame(height: 1)
                     }
                     .padding(.horizontal, 18).padding(.bottom, 52)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                     HStack {
-                        Text("Sign above the line").font(Theme.font(13)).foregroundStyle(.black.opacity(0.45))
+                        Text("Sign above the line").font(Theme.font(13)).foregroundStyle(.black.opacity(0.62))
                         Spacer()
                         if hasInk {
                             Button("Clear") { strokes = []; uploaded = nil; clientAssetID = UUID().uuidString }

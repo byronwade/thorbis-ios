@@ -179,9 +179,14 @@ struct JobDetailView: View {
                     #if DEBUG
                     // `--paper-preview-scroll-history`: screenshots start at "At this address".
                     .task {
-                        guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-scroll-history") else { return }
+                        guard PaperPreview.enabled else { return }
+                        let args = ProcessInfo.processInfo.arguments
+                        // `--paper-preview-scroll-toolkit`: screenshots start at the on-site toolkit.
+                        let target = args.contains("--paper-preview-scroll-history") ? "job-property-history"
+                            : args.contains("--paper-preview-scroll-toolkit") ? "job-toolkit" : nil
+                        guard let target else { return }
                         try? await Task.sleep(for: .seconds(3))
-                        proxy.scrollTo("job-property-history", anchor: UnitPoint(x: 0.5, y: 0.22))
+                        proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: 0.22))
                     }
                     #endif
                     }
@@ -359,7 +364,7 @@ struct JobDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if job != nil, selectedTab == "Activity", !showsPhotos, session.can("job.note", feature: "jobs") {
                 // JobActivity.dc.html: the composer stays at the bottom, quick notes above it.
-                composer.background(Theme.background)
+                composer.background(Theme.background.ignoresSafeArea(edges: .bottom))
             } else if !typeSize.isAccessibilitySize { primaryAction }
         }
         .sheet(isPresented: $showPause) {
@@ -504,7 +509,10 @@ struct JobDetailView: View {
 
     /// Money and Activity only need to say which job this is: the street (or title) and its status.
     private func compactHeader(_ job: JobRecord) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        // At accessibility sizes the status goes under the street so the street never breaks mid-word.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return layout {
             Text(displayTitle(job))
                 .font(Theme.font(20, weight: .medium))
                 .tracking(-0.3)
@@ -930,7 +938,7 @@ struct JobDetailView: View {
     private func overviewContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 22) {
             if isOnSite {
-                toolkit(job)
+                toolkit(job).id("job-toolkit")
                 wrapUpPanel(job)
                 partsPanel
             }
@@ -1205,8 +1213,10 @@ struct JobDetailView: View {
     /// job's media screen straight into the camera, scanner or measure; the rest open their screens.
     private func toolkit(_ job: JobRecord) -> some View {
         let canCapture = session.can("job.edit", feature: "jobs")
-        let columns = typeSize.isAccessibilitySize ? 2 : 4
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
+        // Four across at standard sizes; three once words like "Return visit" stop fitting a quarter
+        // of the row; two at accessibility sizes so every word stays whole.
+        let columns = typeSize.isAccessibilitySize ? 2 : typeSize >= .xLarge ? 3 : 4
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: columns), spacing: 8) {
             JobToolTile(title: "Photo", symbol: "camera", enabled: canCapture && UIImagePickerController.isSourceTypeAvailable(.camera),
                         hint: "Opens the camera and adds the photo to this job") { openCapture(.camera(stage: nil)) }
             JobToolTile(title: "Note", symbol: "square.and.pencil", enabled: session.can("job.note", feature: "jobs"),
@@ -1620,7 +1630,10 @@ struct JobDetailView: View {
     }
 
     private func timelineRowContent(_ entry: TimelineEntry, showsDay: Bool) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        // At accessibility sizes the time goes under the entry; beside it, it ran off the panel.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                  : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        return layout {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
