@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-estimate-detail", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -171,9 +171,15 @@ enum PaperPreview {
             FieldEstimateOption(id: String(format: "00000000-0000-4000-8000-0000000094%02d", id), title: title, description: text, lines: lines,
                                 totalAmount: paperLinesTotal(lines) ?? 0, currency: "USD")
         }
-        let repair = [line(1, "Run capacitor, 45/5 µF", 1, 14_500), line(2, "Coil cleaning", 2, 12_000), line(3, "Labor, licensed technician", 1, 9_500)]
-        let better = repair + [line(4, "Surge protector, installed", 1, 39_500), line(5, "One-year parts warranty", 1, 151_000)]
-        let replace = [line(6, "3-ton high-efficiency condenser", 1, 690_000), line(7, "Installation and haul-away", 1, 220_000), line(8, "Ten-year warranty registration", 1, 75_000)]
+        // Each line is one description of up to 200 characters, written the way a tech explains it.
+        let repair = [line(1, "Run capacitor, 45/5 µF. The part that helps the compressor and fan start. Yours tested well below its rating.", 1, 14_500),
+                      line(2, "Coil cleaning. Clean the outdoor and indoor coils so the system moves heat efficiently.", 2, 12_000),
+                      line(3, "Labor, licensed technician. Install, test and clean up, with a one-year labor warranty.", 1, 9_500)]
+        let better = repair + [line(4, "Surge protector, installed at the outdoor disconnect so a power spike can't take out the new parts.", 1, 39_500),
+                               line(5, "One-year parts warranty on everything in this visit.", 1, 151_000)]
+        let replace = [line(6, "3-ton high-efficiency condenser matched to your existing furnace and coil.", 1, 690_000),
+                       line(7, "Installation and haul-away of the old unit, permit and an efficiency check after install.", 1, 220_000),
+                       line(8, "Ten-year warranty registration with the manufacturer.", 1, 75_000)]
         return EstimateRecord(id: estimate.id, organizationId: estimate.organizationId, customerId: customerID, createdByUserId: estimate.createdByUserId,
                               locationId: nil, status: "sent", currentRevisionNumber: 2, title: "AC not cooling", lines: [],
                               options: [option(1, "Repair", "Replace the failed capacitor and clean the coil.", repair),
@@ -676,7 +682,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "facts": ["noteCount": 0, "photoCount": 2, "acknowledgedCheckKeys": [], "authorizationTarget": target],
                     "acknowledged": [], "requirements": [photos, notes], "unmet": [notes], "completable": false]
         }
-        if PaperPreview.screen.hasPrefix("present-estimate") {
+        if PaperPreview.screen.hasPrefix("present-estimate") || PaperPreview.screen == "estimate-detail" {
             let record = PaperPreview.optionsEstimate
             if path == "/v1/estimates/\(record.id)" { return jsonObject(record) }
             if path == "/v1/estimates/\(record.id)/revisions/2" {

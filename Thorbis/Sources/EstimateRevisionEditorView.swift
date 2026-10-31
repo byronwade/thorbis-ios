@@ -20,6 +20,7 @@ struct EstimateRevisionEditorView: View {
     @State private var target = EstimateBuilderTarget()
     @State private var added = 0
     @State private var removed: RemovedLine?
+    @State private var memberPricing: MemberPricing?
     @FocusState private var focus: EstimateBuilderFocus?
 
     init(estimate: EstimateRecord, onSaved: @escaping (EstimateRecord) -> Void) {
@@ -102,7 +103,7 @@ struct EstimateRevisionEditorView: View {
                         quantityInCurrentDraft: { id in
                             (target.group.map { targetLines.lines(in: $0) } ?? targetLines).quantity(ofPriceBookItem: id)
                         },
-                        secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom,
+                        secondaryPriceText: { memberPricing?.secondaryPriceText($0) }, addItem: add, addCustomLine: addCustom,
                         retry: { Task { await refreshCatalog(force: true) } }
                     )
                     .disabled(busy)
@@ -188,6 +189,7 @@ struct EstimateRevisionEditorView: View {
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
+            .task(id: estimate.customerId) { memberPricing = try? await api.memberPricing(estimate.customerId) }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
@@ -467,7 +469,7 @@ private struct EstimateRevisionOptionEditor: View {
                 .accessibilityLabel("Remove \(option.title.isEmpty ? "option package" : option.title)")
             }
             TextField("What this package includes", text: $option.description, axis: .vertical)
-                .font(Theme.font(15)).lineLimit(2...4)
+                .font(Theme.font(15)).lineLimit(2...)
                 .accessibilityLabel("Option package description")
             EstimateLineGroupsEditor(lines: $option.lines, disabled: disabled, focus: focus, addTo: addTo, removed: removed)
         }
