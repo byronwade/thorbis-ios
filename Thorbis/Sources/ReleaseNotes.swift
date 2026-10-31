@@ -13,6 +13,30 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-voice-notes",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "mic", title: "Talk or tap to write job notes",
+                      detail: "Dictate a note with the mic, or tap a common phrase like Photos added, then edit before saving.")
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-next-stop",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "car", title: "See your next stop at a glance",
+                      detail: "Schedule opens on where you're headed, the drive time and Directions, On my way and Call in one tap.")
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-before-you-go-in",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "house", title: "Know the place before you go in",
+                      detail: "Jobs show gate codes, pets, equipment and the last three visits there, even offline.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-ux-cleanup-leftovers",
             date: "2026-10-30",
             highlights: [

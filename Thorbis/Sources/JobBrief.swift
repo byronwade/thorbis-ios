@@ -289,51 +289,6 @@ private struct JobContactRow: View {
     }
 }
 
-/// JS-07: the address, then each access fact on its own row; codes in mono, copied with a long press.
-struct JobSiteSection: View {
-    let place: ServiceLocationRecord
-    let showsLabel: Bool
-    /// False where the address already sits just above, so only the access facts follow.
-    var showsAddress = true
-    @Environment(\.openURL) private var openURL
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: "Getting in")
-            if showsAddress { addressRow }
-            if let gate = place.gateCode { code("Gate code", gate) }
-            if let alarm = place.alarmCode { code("Alarm code", alarm) }
-            if let dog = place.dogOnSite { PaperDetailRow("Dog", value: dog) }
-            if let parking = place.parking { PaperDetailRow("Parking", value: parking) }
-            if let notes = place.notes, !notes.isEmpty { PaperDetailRow("Site notes", value: notes) }
-        }
-    }
-
-    private var addressRow: some View {
-        Button {
-            if let url = Directions.url(address: place.address, coordinates: place.coordinates) { openURL(url) }
-        } label: {
-            PaperDetailRow(label: showsLabel ? place.label : "Address") {
-                HStack(spacing: 4) {
-                    Text(place.address).foregroundStyle(Theme.brandText)
-                    Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.brandText)
-                }
-            }
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityHint("Opens driving directions in Maps")
-    }
-
-    private func code(_ label: String, _ value: String) -> some View {
-        PaperDetailRow(label: label) { Text(value).font(Theme.monoFont(15, weight: .medium)) }
-            .contentShape(Rectangle())
-            .contextMenu {
-                Button("Copy \(label.lowercased())", systemImage: "doc.on.doc") { UIPasteboard.general.string = value }
-            }
-            .accessibilityHint("Touch and hold to copy")
-    }
-}
-
 /// JS-09: what's been done on this visit, as counts that open their place.
 struct JobVisitCounts: View {
     let latestNote: String?
@@ -362,44 +317,5 @@ struct JobVisitCounts: View {
             }
             .buttonStyle(RowPressStyle())
         }
-    }
-}
-
-/// JS-10: the customer's other visits, newest first, with what the office wrote.
-struct JobPastVisitsSection: View {
-    let visits: [JobVisitRecord]
-    let currentUserID: String?
-
-    var body: some View {
-        if !visits.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                PaperGroupHeader(title: "Past visits", count: visits.count)
-                ForEach(visits) { visit in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(visit.title).font(Theme.font(15, weight: .medium)).lineLimit(2)
-                            Spacer(minLength: 8)
-                            if let when = visit.when {
-                                Text(when.formatted(.dateTime.month(.abbreviated).day().year()))
-                                    .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                            }
-                        }
-                        Text(byline(visit)).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        if let notes = visit.notes, !notes.isEmpty {
-                            Text(notes).font(Theme.font(13)).foregroundStyle(Theme.foreground).lineLimit(2)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
-    }
-
-    private func byline(_ visit: JobVisitRecord) -> String {
-        var parts = [visit.status.statusLabel]
-        if let assignee = visit.assignedToUserId { parts.append(assignee == currentUserID ? "You" : "Another tech") }
-        return parts.joined(separator: " · ")
     }
 }

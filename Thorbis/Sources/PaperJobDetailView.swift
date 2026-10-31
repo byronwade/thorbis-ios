@@ -11,9 +11,11 @@ struct JobDetailView: View {
         #if DEBUG
         // The old five sections' links land on the three that hold them now: estimates and
         // invoices on Money, photos as Activity's Photos filter.
-        let previewTabs = ["job-invoice": "Money", "job-estimates": "Money", "job-activity": "Activity", "job-media": "Activity", "job-invoice-empty": "Money"]
+        let previewTabs = ["job-invoice": "Money", "job-estimates": "Money", "job-activity": "Activity", "job-notes": "Activity", "job-media": "Activity", "job-invoice-empty": "Money"]
         _selectedTab = State(initialValue: PaperPreview.enabled ? previewTabs[PaperPreview.screen] ?? "Overview" : "Overview")
         if PaperPreview.enabled, PaperPreview.screen == "job-media" { _activityFilter = State(initialValue: "Photos") }
+        // The composer with a quick note already tapped in, ready to edit before saving.
+        if PaperPreview.enabled, PaperPreview.screen == "job-notes" { _note = State(initialValue: NoteDraftText.joined("", QuickNotes.phrases[2])) }
         #endif
     }
     @EnvironmentObject var api: APIClient
@@ -27,6 +29,9 @@ struct JobDetailView: View {
     @State private var documentInvoiceID: String?
     @State private var notes: [JobNoteRecord] = []
     @State private var note = ""
+    /// Speech-to-text into `note`; it only fills the draft, saving still goes through `saveNote`.
+    @StateObject private var dictation = NoteDictation()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var reason = ""
     @State private var nextAction = ""
     @State private var showPause = false
@@ -78,6 +83,8 @@ struct JobDetailView: View {
     @State private var mediaCountContext: String?
     @State private var mediaCountRequest = UUID()
     @State private var visits: [JobVisitRecord] = []
+    /// True once visit history answered for this job, so an unread history is never shown as none.
+    @State private var visitsLoaded = false
     @State private var bookingCall: BookingCallRecord?
     @State private var showAssign = false
     @State private var showFollowUps = false
@@ -128,6 +135,7 @@ struct JobDetailView: View {
                     // At accessibility sizes, the full job header can be taller than the
                     // screen. Keep the section chooser reachable above the scrolling content.
                     if typeSize.isAccessibilitySize { tabBar }
+                    ScrollViewReader { proxy in
                     ScrollView {
                     // The tabs pin under the nav bar, so switching Overview, Invoice or Activity
                     // never means scrolling back to the top first.
@@ -151,6 +159,15 @@ struct JobDetailView: View {
                         if !typeSize.isAccessibilitySize { tabBar.background(Theme.background) }
                     }
                     }
+                    }
+                    #if DEBUG
+                    // `--paper-preview-scroll-history`: screenshots start at "At this address".
+                    .task {
+                        guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-scroll-history") else { return }
+                        try? await Task.sleep(for: .seconds(3))
+                        proxy.scrollTo("job-property-history", anchor: UnitPoint(x: 0.5, y: 0.22))
+                    }
+                    #endif
                     }
                 }
             } else if error == nil {
@@ -288,7 +305,12 @@ struct JobDetailView: View {
             contactsLoaded = false
             contactsFailed = false
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { dictation.stop() }
+        }
+        .onDisappear { dictation.stop() }
         .onChange(of: selectedTab) { previous, tab in
+            if tab != "Activity" { dictation.stop() }
             if tab == "Money" { Task { await loadInvoices() } }
             // Photos added under Activity show in the Overview count straight away (JS-09).
             if previous == "Activity", activityFilter == "Photos" { Task { await loadMediaCount() } }
@@ -815,6 +837,11 @@ struct JobDetailView: View {
                            openFollowUpsScreen: { showFollowUps = true })
             // JS-05: only when the platform recorded the call that booked this job.
             if let bookingCall { JobBookingCallSection(call: bookingCall) }
+            // Before you go in: access facts, equipment and recent visits, here or for the customer.
+            JobPropertyHistorySection(job: job, locations: customerLocations,
+                                      locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
+                                      visits: visits, visitsLoaded: visitsLoaded)
+                .id("job-property-history")
             if session.can("customer.view", feature: "core_crm") {
                 // Who the job is for, how to reach them and where they are, each opening its own record.
                 if let customer = linkedCustomer(job) {
@@ -833,10 +860,7 @@ struct JobDetailView: View {
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
                                            loaded: placesCurrent, failed: locationsFailed) { await loadLocations(job) }
             }
-            // No account location is assumed to be this job's site; keep all equipment visible.
-            CustomerEquipmentSection(customerID: job.customerId, locations: customerLocations)
             CustomerMembershipSection(customerID: job.customerId, editable: false)
-            JobPastVisitsSection(visits: visits, currentUserID: session.user?.id)
             detailsGroup(job)
         }
     }
@@ -1096,14 +1120,20 @@ struct JobDetailView: View {
                 PaperEmptyState(symbol: "clock", title: "No activity yet", message: "Notes and status changes on this job show up here.")
             }
             if session.can("job.note", feature: "jobs") {
+                QuickNotesRow { phrase in note = NoteDraftText.joined(note, phrase) }
+                    .disabled(dictation.isListening)
                 HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Add a note or update…", text: $note, axis: .vertical)
+                    TextField(dictation.isListening ? "Listening…" : "Add a note or update…", text: $note, axis: .vertical)
                         .font(Theme.font(16))
                         .lineLimit(1...6)
                         .padding(.horizontal, 14).padding(.vertical, 11)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.border))
-                    Button { Task { await saveNote() } } label: {
+                    DictateNoteButton(isListening: dictation.isListening) {
+                        if dictation.isListening { dictation.stop(); return }
+                        Task { await dictation.start(draft: note, isOffline: session.isOffline) { note = $0 } }
+                    }
+                    Button { dictation.stop(); Task { await saveNote() } } label: {
                         Group { if busy { ProgressView().tint(Theme.onInk) } else { Image(systemName: "arrow.up").font(.system(size: 17, weight: .medium)) } }
                             .foregroundStyle(Theme.onInk).frame(width: 44, height: 44)
                             .background(Theme.ink.opacity(canSaveNote ? 1 : 0.35), in: Circle())
@@ -1111,6 +1141,18 @@ struct JobDetailView: View {
                     .buttonStyle(PressStyle())
                     .disabled(!canSaveNote || busy)
                     .accessibilityLabel("Save note")
+                }
+                if let problem = dictation.problem {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(problem.message).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if problem == .denied, let url = URL(string: UIApplication.openSettingsURLString) {
+                            Button("Open Settings") { openURL(url) }
+                                .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .buttonStyle(PressStyle()).frame(minHeight: 44)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
@@ -1538,7 +1580,7 @@ struct JobDetailView: View {
         let loadedVisits = try? await api.fieldVisitHistory(jobId)
         let loadedCall = try? await api.fieldBookingCall(jobId)
         guard session.generation == generation else { return }
-        if let loadedVisits { visits = loadedVisits }
+        if let loadedVisits { visits = loadedVisits; visitsLoaded = true }
         if let loadedCall { bookingCall = loadedCall }
     }
 

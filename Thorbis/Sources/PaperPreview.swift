@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "search-customers", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -128,6 +128,11 @@ enum PaperPreview {
         fields.forEach { object[$0.key] = $0.value }
         return try! JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: object))
     }
+    /// `job-history`: the job is at the customer's Home, with past visits there and its equipment.
+    /// `job-history-empty`: nothing on file for the place, so the section stays hidden.
+    static var isPropertyHistoryPreview: Bool { enabled && screen == "job-history" }
+    static var isEmptyPropertyHistoryPreview: Bool { enabled && screen == "job-history-empty" }
+    static let homeLocationID = "00000000-0000-4000-8000-000000007001"
     static var isWorkingJobPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-working-job") }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview }
     static var paymentLinkPreview: FieldInvoicePayLink? {
@@ -1144,6 +1149,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 ]]
             }
             if path == "/v1/jobs/\(id)/visit-history" {
+                if PaperPreview.isEmptyPropertyHistoryPreview { return ["items": []] }
+                if PaperPreview.isPropertyHistoryPreview {
+                    // Past jobs at Home (the list carries their location) and one with no recorded site,
+                    // which "At this address" leaves out.
+                    return ["items": propertyHistoryJobs().map { row in
+                        ["id": row["id"]!, "title": row["title"]!, "status": row["status"]!, "notes": NSNull(),
+                         "assignedToUserId": row["assignedToUserId"] ?? NSNull(), "scheduledFor": row["scheduledFor"]!,
+                         "completedAt": row["status"] as? String == "completed" ? row["scheduledFor"]! : NSNull(),
+                         "canceledAt": row["status"] as? String == "canceled" ? row["scheduledFor"]! : NSNull(),
+                         "createdAt": row["createdAt"]!] as [String: Any]
+                    }]
+                }
                 return ["items": [
                     ["id": "00000000-0000-4000-8000-000000009501", "title": "Spring AC tune-up", "status": "completed",
                      "notes": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit.",
@@ -1169,6 +1186,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 ]]
             }
             if path == "/v1/customers/\(id)/equipment" {
+                if PaperPreview.isEmptyPropertyHistoryPreview { return ["items": []] }
+                if PaperPreview.isPropertyHistoryPreview {
+                    return ["items": [["id": "00000000-0000-4000-8000-000000006101", "organizationId": org, "customerId": id,
+                                       "locationId": PaperPreview.homeLocationID, "name": "3-ton condenser", "kind": "AC",
+                                       "brand": "Carrier", "model": "24ACC636", "installedOn": "2019-06-12",
+                                       "createdAt": now, "updatedAt": now],
+                                      ["id": "00000000-0000-4000-8000-000000006102", "organizationId": org, "customerId": id,
+                                       "locationId": PaperPreview.homeLocationID, "name": "50-gal gas water heater",
+                                       "brand": "Rheem", "model": "XG50T06EC36U1", "installedOn": "2016-02-03",
+                                       "createdAt": now, "updatedAt": now],
+                                      ["id": "00000000-0000-4000-8000-000000006103", "organizationId": org, "customerId": id,
+                                       "locationId": PaperPreview.homeLocationID, "name": "Gas furnace", "brand": "Lennox",
+                                       "model": "ML180", "installedOn": "2021-10-20", "createdAt": now, "updatedAt": now],
+                                      ["id": "00000000-0000-4000-8000-000000006104", "organizationId": org, "customerId": id,
+                                       "locationId": "00000000-0000-4000-8000-000000007002", "name": "Rental unit boiler",
+                                       "createdAt": now, "updatedAt": now]]]
+                }
                 return ["items": [["id": "00000000-0000-4000-8000-000000006101", "organizationId": org, "customerId": id,
                                    "locationId": "00000000-0000-4000-8000-000000007001", "name": "3-ton condenser", "kind": "AC",
                                    "brand": "Carrier", "model": "24ACC636", "serialNumber": "2419E04117", "installedOn": "2019-06-12",
@@ -1210,6 +1244,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                          "kind": "service", "address": "\(index) Test Street", "createdAt": now, "updatedAt": now]
                     }
                     return ["items": locations]
+                }
+                if PaperPreview.isEmptyPropertyHistoryPreview {
+                    return ["items": [["id": PaperPreview.homeLocationID, "organizationId": org, "customerId": id,
+                                       "label": "Home", "kind": "service", "address": address, "createdAt": now, "updatedAt": now]]]
                 }
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
                                     "label": "Home", "kind": "service", "address": address,
@@ -1264,9 +1302,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2214", "0412", arguments.contains("--paper-preview-long-job-title")
                 ? "Diagnose the upstairs air conditioner and replace the damaged compressor at the back of the property"
                 : (arguments.contains("--paper-preview-customer-long-job") ? longTitle : "AC not cooling"),
-             PaperPreview.isWorkingJobPreview ? "in_progress" : "dispatched", 10, 30),
+             PaperPreview.isWorkingJobPreview || PaperPreview.screen == "next-stop-active" ? "in_progress" : "dispatched", 10, 30),
             ("2212", "0413", "Kitchen sink backup — Petrov", "scheduled", 12, 15),
-            ("2209", "0414", "Water heater install — Chen", "in_progress", 13, 0),
+            // Next stop: an earlier visit is finished, so the dispatched 10:30 call leads the day.
+            ("2209", "0414", "Water heater install — Chen", PaperPreview.screen.hasPrefix("next-stop") ? "completed" : "in_progress",
+             PaperPreview.screen.hasPrefix("next-stop") ? 9 : 13, 0),
             ("2218", "0415", "Outlet replacement — Alvarez", "scheduled", 14, 30),
             ("2224", "0416", "AC recheck — Nakamura", "scheduled", 16, 0),
             ("2201", "0412", "Drain cleaning", "completed", 8, 30)
@@ -1279,6 +1319,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
              "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
         }
+        if PaperPreview.isPropertyHistoryPreview {
+            if let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
+                listed[index]["locationId"] = PaperPreview.homeLocationID
+            }
+            listed += propertyHistoryJobs()
+        }
+        // Next stop: each visit is at its customer's "Home" service location, so the card has an address.
+        if PaperPreview.screen.hasPrefix("next-stop") {
+            listed = listed.map { $0.merging(["locationId": "00000000-0000-4000-8000-000000007001"]) { _, new in new } }
+        }
         // Booked work with no time and no tech yet, only where the Unscheduled queue is the subject.
         if PaperPreview.screen == "schedule-unscheduled" {
             listed += [("2231", "0414", "Furnace not igniting — Chen", "2026-10-27T15:00:00Z"),
@@ -1289,6 +1339,22 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         return listed
+    }
+    /// Danielle's earlier jobs for `job-history`: four at Home (newest three show) and one with no site.
+    private static func propertyHistoryJobs() -> [[String: Any]] {
+        let rows: [(String, String, String, String, String?, String?)] = [
+            ("2190", "Spring AC tune-up", "completed", "2026-04-14T16:00:00Z", PaperPreview.homeLocationID, PaperPreview.actorID),
+            ("2181", "Water heater flush", "completed", "2025-11-03T15:00:00Z", PaperPreview.homeLocationID, "00000000-0000-4000-8000-000000008801"),
+            ("2176", "Gutter check at the rental", "completed", "2025-09-02T15:00:00Z", nil, PaperPreview.actorID),
+            ("2170", "Furnace install", "completed", "2021-10-20T15:00:00Z", PaperPreview.homeLocationID, "00000000-0000-4000-8000-000000008801"),
+            ("2160", "Thermostat swap", "canceled", "2021-03-09T15:00:00Z", PaperPreview.homeLocationID, nil)
+        ]
+        return rows.map { ref, title, status, when, location, assignee in
+            ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
+             "customerId": PaperPreview.customerID, "title": title, "status": status,
+             "assignedToUserId": assignee ?? NSNull(), "scheduledFor": when, "locationId": location ?? NSNull(),
+             "createdAt": when, "updatedAt": when, "allowedTransitions": [String]()] as [String: Any]
+        }
     }
     private static func customers() -> [[String: Any]] {
         let shortName = ProcessInfo.processInfo.arguments.contains("--paper-preview-short-customer-name")
