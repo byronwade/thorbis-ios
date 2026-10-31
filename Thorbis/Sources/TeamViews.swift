@@ -201,9 +201,12 @@ struct TeamView: View {
                                 IconTile(symbol: "envelope", tint: Theme.markOlive)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(invitation.email).font(Theme.font(15, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                                    // "Invited" is the state, said as a word.
-                                    Text("Invited · \(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")")
-                                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
+                                    // "Invited" is the state: a word with its mark, then the role and expiry.
+                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                        StatusLabel(tone: .scheduled, word: "Invited", emphasis: .quiet)
+                                        Text("\(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")")
+                                            .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
+                                    }
                                 }
                                 Spacer(minLength: 8)
                                 ThorbisMenu(items: [
@@ -238,8 +241,8 @@ struct TeamView: View {
                 }
                 // Only when there is truly no one; a search with no match has its own state above.
                 if !loading && members.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "person.2", title: "No team members yet",
-                                    message: canInvite ? nil : "Ask an owner to invite your crew.",
+                    PaperEmptyState(symbol: "person.2", title: "No one on the team",
+                                    message: canInvite ? "Bring your techs in. Invite someone." : "Ask an owner to invite your crew.",
                                     actionTitle: canInvite ? "Invite someone" : nil,
                                     action: canInvite ? { inviting = true } as () -> Void : nil)
                 }

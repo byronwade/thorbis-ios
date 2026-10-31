@@ -21,6 +21,9 @@ struct NewCustomerSheet: View {
     @State private var error: String?
     @State private var lookup: CustomerPhoneLookup = .notApplicable
     @FocusState private var focused: Field?
+    @State private var commitPressed = false
+    /// The email is checked once they leave the field or press Save.
+    @State private var emailChecked = false
 
     private enum Field { case name, phone, email, address }
 
@@ -34,31 +37,45 @@ struct NewCustomerSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("New customer").font(Theme.font(24, weight: .medium)).tracking(-0.36)
+                // v2 form: the label stays above, examples as placeholders, help under the field and
+                // the error in its place, related fields clustered by space, optional fields marked.
+                VStack(alignment: .leading, spacing: 32) {
+                    Text("New customer").font(Theme.font(24, weight: .medium)).tracking(-0.3)
                         .accessibilityAddTraits(.isHeader)
-                    field("Name", text: $request.name, prompt: "Danielle Marlowe", focus: .name)
-                        .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
-                    field("Phone", text: $phone, prompt: "(555) 014-2276", focus: .phone)
-                        .textContentType(.telephoneNumber).keyboardType(.phonePad)
-                    if case .found(let existing) = lookup { existingCustomerCard(existing) }
-                    field("Email", text: $email, prompt: "name@example.com", focus: .email)
-                        .textContentType(.emailAddress).keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .submitLabel(.next).onSubmit { focused = .address }
-                    if !emailValid { Text("Check the email address.").font(Theme.font(12)).foregroundStyle(Theme.destructive) }
-                    field("Service address", text: $address, prompt: "412 Birchwood Ln, Sacramento", focus: .address)
-                        .textContentType(.fullStreetAddress).submitLabel(.done)
-                        .onSubmit { if valid { Task { await save() } } }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Commercial")],
-                                         selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 }))
+                    FormCluster(title: "Who") {
+                        FormField(label: "Name", help: "As it goes on the invoice.", error: nameProblem) {
+                            input($request.name, prompt: "Danielle Marlowe", focus: .name, label: "Name")
+                                .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }
+                        }
+                        FormField(label: "Phone", optional: true, help: "Used to call and text about visits.") {
+                            input($phone, prompt: "(916) 555-0142", focus: .phone, label: "Phone")
+                                .textContentType(.telephoneNumber).keyboardType(.phonePad)
+                        }
+                        if case .found(let existing) = lookup { existingCustomerCard(existing) }
+                        FormField(label: "Email", optional: true, help: "Receipts and estimates go here.",
+                                  error: emailChecked && !emailValid ? "Check the email address, like danielle@example.com." : nil) {
+                            input($email, prompt: "danielle@example.com", focus: .email, label: "Email")
+                                .textContentType(.emailAddress).keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .submitLabel(.next).onSubmit { focused = .address }
+                        }
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Prefers").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        ThorbisSegmented(options: [("", "None"), ("phone", "Call"), ("sms", "Text"), ("email", "Email")],
-                                         selection: Binding(get: { request.preferredContact ?? "" }, set: { request.preferredContact = $0.isEmpty ? nil : $0 }))
+                    FormCluster(title: "Where") {
+                        FormField(label: "Service address", optional: true, help: "Where the truck goes. You can add more places later.") {
+                            input($address, prompt: "412 Birchwood Ln, Sacramento", focus: .address, label: "Service address")
+                                .textContentType(.fullStreetAddress).submitLabel(.done)
+                                .onSubmit { Task { await commit() } }
+                        }
+                    }
+                    FormCluster(title: "Account") {
+                        FormField(label: "Type") {
+                            ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Commercial")],
+                                             selection: Binding(get: { request.accountType ?? "residential" }, set: { request.accountType = $0 }))
+                        }
+                        FormField(label: "Prefers", optional: true) {
+                            ThorbisSegmented(options: [("", "None"), ("phone", "Call"), ("sms", "Text"), ("email", "Email")],
+                                             selection: Binding(get: { request.preferredContact ?? "" }, set: { request.preferredContact = $0.isEmpty ? nil : $0 }))
+                        }
                     }
                     if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
                 }
@@ -70,8 +87,10 @@ struct NewCustomerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .safeAreaInset(edge: .bottom) {
+                // Not pre-disabled: pressed with a problem, it says what under the field.
                 PaperActionBar(title: "Save customer", symbol: "person.badge.plus", busy: busy,
-                               disabled: !valid || !session.can("customer.create", feature: "core_crm")) { Task { await save() } }
+                               disabled: !session.can("customer.create", feature: "core_crm"),
+                               disabledReason: session.can("customer.create", feature: "core_crm") ? nil : "Your role can't add customers. Ask your office.") { Task { await commit() } }
             }
             .onAppear {
                 if request.name.isEmpty { request.name = initialName.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -80,20 +99,49 @@ struct NewCustomerSheet: View {
                 focused = .name
             }
             .task(id: CustomerPhoneLookup.digits(phone)) { await checkPhone() }
+            .onChange(of: focused) { old, _ in if old == .email { emailChecked = true } }
+            .onChange(of: email) { _, _ in if focused == .email { emailChecked = false } }
+            #if DEBUG
+            .task {
+                // `--paper-preview-form-errors`: Save pressed with the name blank and a bad email.
+                guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-form-errors") else { return }
+                try? await Task.sleep(for: .milliseconds(300))
+                request.name = ""
+                email = "danielle@"
+                await commit()
+                focused = nil
+            }
+            #endif
             // MA-16: typed details aren't lost to a stray swipe; Cancel still leaves.
             .interactiveDismissDisabled(busy || !trimmedName.isEmpty || !phone.isEmpty || !email.isEmpty || !address.isEmpty)
         }
     }
 
-    private func field(_ label: String, text: Binding<String>, prompt: String, focus: Field) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-            TextField("", text: text, prompt: Text(prompt).foregroundStyle(Theme.subtle))
-                .font(Theme.font(16))
-                .focused($focused, equals: focus)
-                .padding(.horizontal, 14).frame(minHeight: 46)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+    /// A text input in the sunk well (design.thorbis.com Depth: the field sinks).
+    private func input(_ text: Binding<String>, prompt: String, focus: Field, label: String) -> some View {
+        TextField("", text: text, prompt: Text(prompt).foregroundStyle(Theme.subtle))
+            .font(Theme.font(16))
+            .focused($focused, equals: focus)
+            .accessibilityLabel(label)
+            .fieldWell()
+    }
+
+    /// The name's problem, shown once they've pressed Save (validate on commit, not on every key).
+    private var nameProblem: String? {
+        guard commitPressed else { return nil }
+        if trimmedName.isEmpty { return "Add a name, like Danielle Marlowe." }
+        if trimmedName.count > 200 { return "Keep the name to 200 characters." }
+        return nil
+    }
+
+    private func commit() async {
+        commitPressed = true
+        emailChecked = true
+        guard valid else {
+            focused = nameProblem != nil ? .name : (!emailValid ? .email : nil)
+            return
         }
+        await save()
     }
 
     /// Paper's quiet notice: this number already belongs to someone, so offer them instead.
@@ -109,14 +157,13 @@ struct NewCustomerSheet: View {
             } label: {
                 Text("Use \(existing.name)").font(Theme.font(14, weight: .semibold))
                     .frame(maxWidth: .infinity).frame(minHeight: 44)
-                    .foregroundStyle(Theme.brand)
+                    .foregroundStyle(Theme.foreground)
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             }
             .buttonStyle(.plain)
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
+        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 
