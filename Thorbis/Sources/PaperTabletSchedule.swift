@@ -42,7 +42,11 @@ struct PaperTabletSchedule: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let error = store.error { ErrorBanner(message: error) }
                     if !jobs.isEmpty {
-                        VStack(spacing: 0) { ForEach(jobs) { scheduleRow($0) } }
+                        VStack(spacing: 0) {
+                            ForEach(Array(jobs.enumerated()), id: \.element.id) { index, job in
+                                scheduleRow(job, showsPeriod: TimeColumn.showsPeriod(jobs, at: index))
+                            }
+                        }
                             .padding(4)
                             .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
@@ -68,13 +72,17 @@ struct PaperTabletSchedule: View {
 
     /// The phone's row: time column, street first (the job title when there's no place),
     /// status as a word. The chosen job sits on the blue selection fill.
-    private func scheduleRow(_ job: Job) -> some View {
+    private func scheduleRow(_ job: Job, showsPeriod: Bool) -> some View {
         let selected = selectedID == job.id
         let street = addresses.street(job)
         let customer = store.customerName(job.customerId)
-        let time = JobFiltering.date(job.scheduledFor)?.tradeTime ?? "No time"
+        let date = JobFiltering.date(job.scheduledFor)
+        let time = date?.tradeTime ?? "No time"
+        // The column reads 10:30, 12:15, 1:00: the period under the time only where it changes.
+        let leading: PaperRowLeading = date.map { .clock($0.columnTime, period: showsPeriod ? $0.periodMark : nil, accessibility: $0.tradeTime) }
+            ?? .text(time)
         return Button { selectedID = job.id } label: {
-            PaperListRow(leading: .text(time), title: street ?? job.title,
+            PaperListRow(leading: leading, title: street ?? job.title,
                          subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
                          subtitleLines: 2, dimmed: job.status == "completed") {
                 StatusWord(jobStatus: job.status)

@@ -1327,6 +1327,9 @@ extension StatusWord {
 enum PaperRowLeading {
     case none
     case text(String, accessibility: String? = nil)
+    /// A time column ("7:40" over "a.m."): the period sits under the time and only where the
+    /// caller says it changes, so the column stays narrow and tabular.
+    case clock(String, period: String?, accessibility: String)
     case icon(String)
 }
 
@@ -1351,6 +1354,8 @@ struct PaperListRow<Trailing: View>: View {
     @Environment(\.paperRowInset) private var inset
     /// Wide enough for "12:15 p.m." on one line at 14pt (trade-style times are longer than "12:15 PM").
     @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 80
+    /// The clock column: "12:15" with its period under it.
+    @ScaledMetric(relativeTo: .subheadline) private var clockColumn: CGFloat = 50
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
@@ -1394,6 +1399,17 @@ struct PaperListRow<Trailing: View>: View {
                 .lineLimit(2)
                 .frame(width: typeSize.isAccessibilitySize ? nil : column, alignment: .leading)
                 .accessibilityLabel(spoken ?? text)
+        case .clock(let time, let period, let spoken):
+            VStack(alignment: .leading, spacing: 0) {
+                Text(time).font(Theme.font(14, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
+                if let period, !typeSize.isAccessibilitySize {
+                    Text(period).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                }
+            }
+            .frame(width: typeSize.isAccessibilitySize ? nil : clockColumn, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spoken)
         case .icon(let symbol):
             Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Theme.muted)
                 .frame(width: 24).accessibilityHidden(true)

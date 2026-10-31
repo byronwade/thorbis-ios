@@ -643,20 +643,13 @@ struct OwnerHomeListView: View {
                     ScheduleCompactRow(job: job, customer: store.customerName(job.customerId), street: addresses.street(job),
                                        timeStyle: list == .unscheduled ? .age : .time,
                                        pendingStatus: outbox.pendingStatus(for: job.id),
-                                       showsPeriod: Self.periodChanges(rows, at: index),
+                                       showsPeriod: TimeColumn.showsPeriod(rows, at: index),
                                        schedule: list == .unscheduled && canSchedule ? { scheduling = job } : nil)
                 }
                 .padding(.vertical, PaperCardMetrics.edge)
             }
             .paperCardMargin()
         }
-    }
-
-    /// The time column says "a.m." / "p.m." on its first time and wherever the period changes.
-    private static func periodChanges(_ rows: [Job], at index: Int) -> Bool {
-        let period = JobFiltering.date(rows[index].scheduledFor)?.periodMark
-        guard let previous = rows[..<index].last(where: { $0.scheduledFor != nil }) else { return true }
-        return JobFiltering.date(previous.scheduledFor)?.periodMark != period
     }
 
     private var unpaid: [(InvoiceRecord, Int)] { NeedsAttention.unpaid(invoices) }
