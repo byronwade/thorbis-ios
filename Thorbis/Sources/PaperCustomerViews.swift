@@ -634,8 +634,14 @@ struct CustomerDetailView: View {
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium))
                     }
                     .foregroundStyle(Theme.foreground)
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                    // A real 44pt target: the frame alone left VoiceOver and the hit test on the
+                    // ~18pt words, so the shape covers the whole box for both, with room either side.
+                    .padding(.leading, 12)
+                    .frame(minHeight: 44)
+                    .contentShape([.interaction, .accessibility], Rectangle())
                 }
+                .frame(minHeight: 44)
+                .contentShape([.interaction, .accessibility], Rectangle())
                 .accessibilityLabel("Job texts")
                 .accessibilityValue(smsConsentLabel)
                 .accessibilityHint("Record what the customer said about job texts")

@@ -183,13 +183,16 @@ struct JobCircleLabel: View {
     let title: String
     let symbol: String
     var enabled = true
+    /// The glyph and its circle grow with Dynamic Type (never under 44pt, capped so the row still fits).
+    @ScaledMetric(relativeTo: .body) private var glyph: CGFloat = 17
+    @ScaledMetric(relativeTo: .body) private var circle: CGFloat = 44
 
     var body: some View {
         VStack(spacing: 6) {
             Image(systemName: symbol)
-                .font(.system(size: 17, weight: .medium))
+                .font(.system(size: min(glyph, 26), weight: .medium))
                 .foregroundStyle(Theme.foreground)
-                .frame(width: 44, height: 44)
+                .frame(width: min(max(circle, 44), 64), height: min(max(circle, 44), 64))
                 .background(Theme.fill, in: Circle())
                 .overlay(Circle().strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
             Text(title)
@@ -252,20 +255,23 @@ struct JobToolTile: View {
     var hint: String? = nil
     let action: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// OnSite.dc.html: a 22pt glyph that grows with Dynamic Type.
+    @ScaledMetric(relativeTo: .body) private var glyph: CGFloat = 22
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
                 Image(systemName: symbol)
-                    .font(.system(size: 20, weight: .regular))
+                    .font(.system(size: min(glyph, 32), weight: .regular))
                     .foregroundStyle(Theme.foreground)
-                    .frame(height: 24)
+                    .frame(height: min(glyph, 32) + 4)
+                // The word wraps to a second line rather than shrinking (three, then two columns
+                // as text grows keep it whole); at accessibility sizes it takes the lines it needs.
                 Text(title)
                     .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                     .multilineTextAlignment(.center)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                    .minimumScaleFactor(0.85)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 4).padding(.vertical, 10)
