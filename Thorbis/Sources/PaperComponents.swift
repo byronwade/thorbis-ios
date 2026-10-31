@@ -976,19 +976,32 @@ extension EnvironmentValues {
     }
 }
 
+/// Redesign phase 2: screens that opt in (`.environment(\.paperGroupedWells, true)`) draw
+/// `PaperSection` as a semibold `SectionHeader` with its count over a borderless well, and
+/// `PaperCard` as that well. Off by default, so screens not yet redesigned keep their panels.
+private struct PaperGroupedWellsKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var paperGroupedWells: Bool {
+        get { self[PaperGroupedWellsKey.self] }
+        set { self[PaperGroupedWellsKey.self] = newValue }
+    }
+}
+
 /// A planar panel holding a group of rows or one block of content.
 struct PaperCard<Content: View>: View {
     /// Inner padding for free-form content; rows pass 0 and pad themselves by `paperRowInset`.
     var padding: CGFloat = 0
     @ViewBuilder var content: Content
 
+    @Environment(\.paperGroupedWells) private var wells
+
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .circular)
+        let shape = RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: wells ? .continuous : .circular)
         VStack(alignment: .leading, spacing: 0) { content }
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.card, in: shape)
-            .overlay(shape.strokeBorder(Theme.border, lineWidth: 1))
+            .overlay(shape.strokeBorder(wells ? .clear : Theme.border, lineWidth: 1))
             .environment(\.paperRowInset, PaperCardMetrics.inset)
     }
 }
@@ -1404,9 +1417,13 @@ struct PaperSection<Content: View, Accessory: View>: View {
     @ViewBuilder var content: Content
     @ViewBuilder var accessory: Accessory
 
+    @Environment(\.paperGroupedWells) private var wells
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let title {
+            if let title, wells {
+                SectionHeader(title: title, count: count) { accessory }.padding(.bottom, 2)
+            } else if let title {
                 HStack(spacing: 8) {
                     Text(count.map { "\(title) · \($0)" } ?? title)
                         .font(Theme.font(13, weight: .medium)).monospacedDigit()

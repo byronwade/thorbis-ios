@@ -868,6 +868,22 @@ struct ScheduleCompactRow: View {
 }
 
 
+/// The Jobs tab's sections (redesign phase 2), in the order a dispatcher reads the board: under
+/// way, booked with a time, still needing a time, finished, then anything else (cancelled), so no
+/// job disappears. Empty sections are kept here and skipped by the view.
+enum JobsListGroups {
+    static func groups(_ jobs: [Job]) -> [(title: String, jobs: [Job])] {
+        let booked = PaperWorkGroups.scheduled(jobs)
+        let draft: Set<String> = ["draft", "unscheduled"]
+        let other = PaperWorkGroups.other(jobs).filter { !draft.contains($0.status) }
+        return [("In progress", PaperWorkGroups.inProgress(jobs)),
+                ("Scheduled", booked.filter { $0.scheduledFor != nil }),
+                ("Unscheduled", booked.filter { $0.scheduledFor == nil } + jobs.filter { draft.contains($0.status) }),
+                ("Done", PaperWorkGroups.completed(jobs)),
+                (other.allSatisfy { $0.status == "canceled" } ? "Cancelled" : "Other", other)]
+    }
+}
+
 /// Paper 20: every job, grouped by where it stands.
 struct JobsView: View {
     @EnvironmentObject private var api: APIClient
@@ -881,6 +897,10 @@ struct JobsView: View {
     @State private var statusFilter: Set<String> = []
     @State private var showNew = false
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// Street lines for the rows (street first), read per customer like Today.
+    @StateObject private var addresses = JobAddressBook()
+    /// Who each tech is, for the rows' avatars. Never kept on the phone: offline the rows show none.
+    @State private var roster: [String: String] = [:]
 
     /// Statuses offered as filter chips, in lifecycle order.
     private let statusChips = ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused", "completed", "canceled"]
@@ -916,20 +936,17 @@ struct JobsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Jobs", subtitle: subtitle, filter: { showDisplay = true }, filterActive: filterActive, showsCreate: true)
                 OfflineBanner()
-                PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
-                    .padding(.bottom, filterActive ? 0 : 8)
+                PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab, textTabs: true)
+                    .padding(.bottom, filterActive ? 0 : 4)
                 if filterActive { filterBar }
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 0) {
                     if store.loading && store.jobs.isEmpty {
                         SkeletonRows().padding(.horizontal, -PaperCardMetrics.margin)
                     } else if tab == "Recent" {
-                        group("Recently updated", jobs: Array(jobs.prefix(25)), first: true)
+                        group("Recently updated", jobs: Array(jobs.prefix(25)))
                     } else {
-                        let groups = [("In progress", PaperWorkGroups.inProgress(jobs)), ("Scheduled", PaperWorkGroups.scheduled(jobs)),
-                                      ("Done", PaperWorkGroups.completed(jobs)), ("Other", PaperWorkGroups.other(jobs))]
-                        let lead = groups.first { !$0.1.isEmpty }?.0
-                        ForEach(groups, id: \.0) { title, members in group(title, jobs: members, first: title == lead) }
+                        ForEach(groups, id: \.title) { group in self.group(group.title, jobs: group.jobs) }
                     }
                     if MyDayRules.shouldShowEmptyState(isEmpty: jobs.isEmpty, isLoading: store.loading, hasError: store.error != nil) {
                         PaperEmptyState(
@@ -941,7 +958,7 @@ struct JobsView: View {
                         )
                     }
                 }
-                .paperCardMargin().padding(.top, 4)
+                .paperCardMargin()
             }
             .padding(.bottom, 24)
         }
@@ -956,10 +973,22 @@ struct JobsView: View {
         .sheet(isPresented: $showNew) { NewJobSheet() }
         .sheet(isPresented: $showDisplay) { displaySheet }
         .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
+        .task(id: "roster|\(session.generation)|\(session.isOffline)") {
+            guard session.can("job.view", feature: "jobs"), !session.isOffline,
+                  let people = try? await api.fieldAssignees() else { return }
+            roster = Dictionary(people.map { ($0.userId, $0.displayName) }, uniquingKeysWith: { first, _ in first })
+        }
+        .task(id: "addr|\(jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)|\(session.isOffline)") {
+            guard session.can("customer.view", feature: "core_crm") else { return }
+            await addresses.load(jobs, api: api, organizationID: session.activeOrganization?.id,
+                                 identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
+        }
         #if DEBUG
         .onAppear { if PaperPreview.enabled && PaperPreview.screen == "jobs-filters" { showDisplay = true } }
         #endif
     }
+
+    private var groups: [(title: String, jobs: [Job])] { JobsListGroups.groups(jobs) }
 
     /// The active filters in one quiet line under the tabs, with a way back to the whole board.
     private var filterBar: some View {
@@ -1014,44 +1043,49 @@ struct JobsView: View {
         }
     }
 
-    /// Who, then when, then "You" when it is yours on a shared board. The status is the row's
-    /// word on the right; the job number lives on the job, in search and on long-press.
-    private func detail(_ job: Job, customer: String) -> String {
-        var parts = [customer]
-        if let date = JobFiltering.date(job.scheduledFor), !["completed", "canceled"].contains(job.status) {
-            parts.append(date.visitLabel())
-        } else if job.scheduledFor == nil, !["completed", "canceled"].contains(job.status) {
-            parts.append("No time yet")
-        }
-        if tab != "Assigned" && job.assignedToUserId != nil && job.assignedToUserId == session.user?.id { parts.append("You") }
-        return parts.joined(separator: " · ")
+    /// When the visit is ("Today 4 p.m."), "No time yet", or nothing once the work is finished.
+    private func when(_ job: Job) -> String? {
+        guard !["completed", "canceled"].contains(job.status) else { return nil }
+        return JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet"
     }
 
-    /// A titled panel of job rows; New job is the bar's +, or the floating pill on iPad.
-    @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool = false) -> some View {
-        if !jobs.isEmpty {
-            PaperSection(title, count: jobs.count) {
-                PaperCardList(data: jobs) { job in
-                    let customer = store.customerName(job.customerId)
-                    let needsTime = canSchedule && job.scheduledFor == nil && !["completed", "canceled"].contains(job.status)
-                        && !ScheduleLead.activeStatuses.contains(job.status)
-                    HStack(spacing: 0) {
-                        // iPad selects into the detail column beside the list; iPhone pushes.
-                        PaperSplitLink(id: job.id, value: job) {
-                            // MA-11: what, then who and when, the status as a word.
-                            PaperListRow(title: job.title, subtitle: detail(job, customer: customer),
-                                         dimmed: job.status == "completed") {
-                                if !needsTime { StatusWord(jobStatus: job.status) }
-                            }
-                        }
-                        .buttonStyle(RowPressStyle())
-                        .jobContextMenu(job, customer: customer)
-                        // No time yet: book it from the row (beside the link, so each is its own target).
-                        if needsTime {
-                            ScheduleRowButton(job: job) { scheduling = job }.padding(.trailing, PaperCardMetrics.inset)
-                        }
-                    }
-                }
+    /// A booked visit whose time has passed.
+    private func isLate(_ job: Job) -> Bool {
+        guard ["scheduled", "dispatched"].contains(job.status), let date = JobFiltering.date(job.scheduledFor) else { return false }
+        return date < .now
+    }
+
+    /// Grouped by status: the semibold header with its count over one well of rows, each led by its
+    /// status glyph, the street, the problem, who and when, and the tech's avatar. New job is the
+    /// header's +, or the floating pill on iPad.
+    @ViewBuilder private func group(_ title: String, jobs: [Job]) -> some View {
+        WellSection(title: title, count: jobs.count, data: jobs, dividerInset: JobListRowContent.dividerInset) { job in
+            jobRow(job)
+        }
+    }
+
+    private func jobRow(_ job: Job) -> some View {
+        let customer = store.customerName(job.customerId)
+        let needsTime = canSchedule && job.scheduledFor == nil && !["completed", "canceled"].contains(job.status)
+            && !ScheduleLead.activeStatuses.contains(job.status)
+        let mine = job.assignedToUserId != nil && job.assignedToUserId == session.user?.id
+        let assignee = job.assignedToUserId.flatMap { roster[$0] }
+        return HStack(spacing: 0) {
+            // iPad selects into the detail column beside the list; iPhone pushes.
+            PaperSplitLink(id: job.id, value: job) {
+                JobListRowContent(job: job, customer: customer, street: addresses.street(job), when: when(job),
+                                  late: isLate(job),
+                                  // "You" only where the roster can't show your avatar, on a shared board.
+                                  assigneeWord: tab != "Assigned" && mine && assignee == nil ? "You" : nil,
+                                  assignee: needsTime ? nil : assignee)
+            }
+            .buttonStyle(RowPressStyle())
+            .jobContextMenu(job, customer: customer)
+            .accessibilityHint("Opens the job")
+            .accessibilityIdentifier("job-row-\(job.id)")
+            // No time yet: book it from the row (beside the link, so each is its own target).
+            if needsTime {
+                ScheduleRowButton(job: job) { scheduling = job }.padding(.trailing, PaperCardMetrics.inset)
             }
         }
     }
