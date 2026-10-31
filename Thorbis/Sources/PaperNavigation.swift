@@ -33,7 +33,8 @@ struct RootView: View {
     /// How much of a place's root the floating chip and bar cover, above the home indicator. Each
     /// root reserves it as bottom safe area so its last rows scroll clear of them (F9).
     @State private var barReserve: CGFloat = 0
-    @State private var barQuery = ""
+    /// The bar's search: its field and the drawer's results share this.
+    @StateObject private var searchModel = SearchModel()
     @State private var newCustomer = false
     @State private var newEstimate = false
     /// The bar's create menu, and the choice that runs once it has closed.
@@ -229,7 +230,7 @@ struct RootView: View {
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 8).onEnded { if $0.translation.height > 60 { closeBarSearch() } })
                 .accessibilityHidden(true)
-            PaperGlobalSearch(externalQuery: $barQuery, openResult: openSearchResult, focus: .of(place: selectedTab))
+            PaperGlobalSearch(model: searchModel, openResult: openSearchResult, focus: .of(place: selectedTab), actions: searchCommands)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bar-search-results")
@@ -246,13 +247,14 @@ struct RootView: View {
     private func openBarSearch() {
         closeMenu()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        searchModel.opened()
         withAnimation(searchAnimation) { barSearching = true }
     }
 
     private func closeBarSearch() {
         withAnimation(searchAnimation) {
             barSearching = false
-            barQuery = ""
+            searchModel.query = ""
         }
     }
 
@@ -274,6 +276,16 @@ struct RootView: View {
         case PrimaryTab.more.rawValue: morePath.append(value)
         default: customPaths[selectedTab, default: NavigationPath()].append(value)
         }
+    }
+
+    /// What typing in search can start: the + menu's creates, Settings, and every place this
+    /// person can open, from the same lists the bar and menu use. Each closes search first.
+    private var searchCommands: [SearchAction] {
+        SearchAction.standard(
+            creates: createChoices.map { choice in (choice.title, choice.symbol, { closeBarSearch(); choice.run() }) },
+            settings: { closeBarSearch(); showSettings = true },
+            places: menuPlaces,
+            openPlace: { place in closeBarSearch(); open(place) })
     }
 
     /// The places bar pins: the layout's tabs this role can open.
@@ -396,8 +408,9 @@ struct RootView: View {
             searchActions: searchActions,
             newActions: newActions,
             searchActive: barSearching,
-            searchQuery: $barQuery,
-            closeSearch: { closeBarSearch() }
+            searchQuery: $searchModel.query,
+            closeSearch: { closeBarSearch() },
+            submitSearch: { searchModel.submit() }
         )
     }
 
@@ -546,8 +559,40 @@ struct RootView: View {
                 RecentItems.shared.clear()
                 RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
                 RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
-                if PaperPreview.screen == "search-typed" { barQuery = "AC" }
+                if PaperPreview.screen == "search-typed" { searchModel.query = "AC" }
                 barSearching = true
+            case "search-empty", "search-phone", "search-actions", "search-street", "search-offline":
+                // Recent searches and records on the empty field; the typed screens show each kind of match.
+                RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
+                RecentItems.shared.clear()
+                RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
+                RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
+                RecentItems.shared.recordSearch("water heater")
+                RecentItems.shared.recordSearch("INV-2240")
+                RecentItems.shared.recordSearch("Petrov")
+                primaryTab = .jobs
+                if PaperPreview.screen == "search-offline" {
+                    // Search once with signal so the lists are saved on the phone, then lose it.
+                    searchModel.opened()
+                    await searchModel.loadRecords(api: api, session: session, store: store)
+                    api.invalidateRequests()
+                    PaperPreviewProtocol.simulateNoSignal = true
+                    await session.revalidate()
+                }
+                searchModel.opened()
+                barSearching = true
+                switch PaperPreview.screen {
+                case "search-phone": searchModel.query = "555-0413"
+                case "search-actions": searchModel.query = "new"
+                case "search-street": searchModel.query = "birch"
+                case "search-offline": searchModel.query = "chen"
+                default: break
+                }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-search-submit") {
+                    // The same path as Return in the bar's field: the top hit opens.
+                    try? await Task.sleep(for: .seconds(3))
+                    searchModel.submit()
+                }
             case "inbox":
                 primaryTab = .more
                 morePath.append(PaperRoute.inbox)
@@ -695,8 +740,8 @@ struct RootView: View {
         guard let query = store.requestedSearch else { return }
         store.requestedSearch = nil
         if phone {
-            barQuery = query
             if !barSearching { openBarSearch() }
+            searchModel.query = query
         }
     }
 
@@ -837,402 +882,6 @@ struct PaperRouteView: View {
 
 extension View {
     func paperDestinations() -> some View { modifier(PaperDestinations()) }
-}
-
-/// One result from the server's Search Gateway (`GET /v1/search`, packages/query SearchResult).
-struct ServerSearchResult: Decodable, Identifiable, Hashable {
-    let sourceId: String
-    let resultType: String
-    let entityId: String
-    let title: String
-    let subtitle: String?
-    let status: String?
-    var id: String { "\(sourceId):\(entityId)" }
-}
-
-struct ServerSearchPage: Decodable {
-    let items: [ServerSearchResult]
-    let nextCursor: String?
-    let completeness: String?
-}
-
-extension APIClient {
-    /// The Search Gateway pages with `nextCursor`. Keep asking until it stops, and refuse a blank or repeated cursor.
-    func search(_ query: String, limit: Int = 25) async throws -> ServerSearchPage {
-        let generation = requestGeneration
-        var items: [ServerSearchResult] = []
-        var cursor: String?
-        var seen = Set<String>()
-        var completeness: String?
-        let queryItems = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: String(limit))]
-        repeat {
-            try Task.checkCancellation()
-            guard generation == requestGeneration else { throw CancellationError() }
-            let page: ServerSearchPage = try await send("GET", "/v1/search", queryItems: queryItems, cursor: cursor)
-            items.append(contentsOf: page.items)
-            completeness = page.completeness
-            cursor = page.nextCursor
-            if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
-                throw Problem(title: "Pagination cursor loop", status: nil, detail: "Repeated or empty cursor")
-            }
-        } while cursor != nil
-        return ServerSearchPage(items: items, nextCursor: nil, completeness: completeness)
-    }
-}
-
-/// What the bottom search leads with before anything is typed: records of the place showing.
-enum SearchFocus: Equatable {
-    case jobs, customers, none
-
-    /// The bar's current place (a `MenuItem` raw value) to the records it is about.
-    static func of(place: String?) -> SearchFocus {
-        switch place.flatMap(MenuItem.init(rawValue:)) {
-        case .jobs, .schedule, .attention, .home: .jobs
-        case .customers: .customers
-        default: .none
-        }
-    }
-
-    /// Recently opened records split into the place's kind first and everything else after, each
-    /// keeping its newest-first order. With no focus, everything is "rest" in the original order.
-    func split(_ items: [RecentItems.Item]) -> (relevant: [RecentItems.Item], rest: [RecentItems.Item]) {
-        let kind: RecentItems.Item.Kind? = switch self { case .jobs: .job; case .customers: .customer; case .none: nil }
-        guard let kind else { return ([], items) }
-        return (items.filter { $0.kind == kind }, items.filter { $0.kind != kind })
-    }
-}
-
-/// Where a search result leads, for callers that push it themselves.
-enum SearchDestination {
-    case job(Job)
-    case customer(Customer)
-    case route(PaperRoute)
-}
-
-/// Paper 76: one field, results grouped by record type. The server's Search Gateway
-/// searches the whole company; with no signal the phone's saved jobs and customers answer.
-struct PaperGlobalSearch: View {
-    var embedded = false
-    /// Set by the iPhone's bottom search: its field owns the text, and a picked result is handed
-    /// back to push on the current place instead of inside this view.
-    var externalQuery: Binding<String>? = nil
-    var openResult: ((SearchDestination) -> Void)? = nil
-    /// Words to start with, from a Siri or Shortcuts search.
-    var initialQuery = ""
-    /// The place the bottom search opened over; its records lead the empty-query list.
-    var focus: SearchFocus = .none
-    @EnvironmentObject private var api: APIClient
-    @EnvironmentObject private var store: Store
-    @EnvironmentObject private var session: SessionController
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var typeSize
-    /// Search rows read on one line; at accessibility sizes they wrap instead of cutting the name.
-    private var rowLines: Int? { typeSize.isAccessibilitySize ? nil : 1 }
-    @State private var query = ""
-    @State private var server: [ServerSearchResult] = []
-    @State private var serverQuery = ""
-    @State private var serverFailed = false
-    @State private var searching = false
-    /// The sheet opens typing-ready: the field takes focus and the keyboard is up on arrival.
-    @FocusState private var fieldFocused: Bool
-    @ObservedObject private var recents = RecentItems.shared
-    @State private var path = NavigationPath()
-    /// Recent items that still resolve to a record this person can open.
-    private enum RecentTarget { case job(Job), customer(Customer) }
-    /// Every resolvable recent record, filtered before any limit so one kind can't crowd out the other.
-    private var recentlyOpened: [(RecentItems.Item, RecentTarget)] {
-        recents.items.compactMap { item in
-            switch item.kind {
-            case .job:
-                guard session.can("job.view", feature: "jobs"), let job = store.jobs.first(where: { $0.id == item.id }) else { return nil }
-                return (item, .job(job))
-            case .customer:
-                guard session.can("customer.view", feature: "core_crm"),
-                      let customer = store.customers.first(where: { $0.id == item.id }) else { return nil }
-                return (item, .customer(customer))
-            }
-        }
-    }
-    private var trimmed: String { (externalQuery?.wrappedValue ?? query).trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var useServer: Bool { !serverFailed && !session.isOffline && serverQuery == trimmed && !trimmed.isEmpty }
-    private var jobs: [Job] { trimmed.isEmpty ? [] : JobFiltering.jobs(store.jobs, assignedTo: nil, search: trimmed) }
-    private var customers: [Customer] { trimmed.isEmpty ? [] : store.customers.filter { $0.archived != true && $0.name.localizedCaseInsensitiveContains(trimmed) } }
-    private var serverGroups: [(String, [ServerSearchResult])] {
-        let order = ["job", "customer", "estimate", "invoice"]
-        let grouped = Dictionary(grouping: server, by: \.resultType)
-        return grouped.keys.sorted { (order.firstIndex(of: $0) ?? 99, $0) < (order.firstIndex(of: $1) ?? 99, $1) }.map { ($0, grouped[$0] ?? []) }
-    }
-
-    var body: some View {
-        if openResult != nil {
-            results
-                .foregroundStyle(Theme.foreground)
-                .scrollDismissesKeyboard(.interactively)
-        } else {
-            NavigationStack(path: $path) {
-                results
-                    .foregroundStyle(Theme.foreground)
-                    .background(Theme.background)
-                    .navigationTitle("Search")
-                    .navigationBarTitleDisplayMode(.large)
-                    .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Jobs, customers, invoices")
-                    .searchFocused($fieldFocused)
-                    .task {
-                        if query.isEmpty, !initialQuery.isEmpty { query = initialQuery }
-                        if !embedded { fieldFocused = true }
-                    }
-                    .toolbar {
-                        if !embedded {
-                            ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Done") { dismiss() } }
-                        }
-                    }
-                    .paperDestinations()
-            }
-        }
-    }
-
-    private func go(_ destination: SearchDestination) {
-        if let openResult { return openResult(destination) }
-        switch destination {
-        case .job(let job): path.append(job)
-        case .customer(let customer): path.append(customer)
-        case .route(let route): path.append(route)
-        }
-    }
-
-    private func searchLink<L: View>(_ job: Job, @ViewBuilder label: () -> L) -> some View {
-        Button(action: { go(.job(job)) }, label: label)
-    }
-    private func searchLink<L: View>(_ customer: Customer, @ViewBuilder label: () -> L) -> some View {
-        Button(action: { go(.customer(customer)) }, label: label)
-    }
-    private func searchLink<L: View>(_ route: PaperRoute, @ViewBuilder label: () -> L) -> some View {
-        Button(action: { go(.route(route)) }, label: label)
-    }
-
-    private func recentRow(_ item: RecentItems.Item, _ destination: RecentTarget) -> some View {
-        Button {
-            switch destination {
-            case .job(let job): go(.job(job))
-            case .customer(let customer): go(.customer(customer))
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: item.kind == .job ? "briefcase" : "person")
-                    .font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 26)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title).font(Theme.font(15, weight: .medium)).lineLimit(rowLines)
-                    Text(item.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(rowLines)
-                }
-                Spacer(minLength: 8)
-            }
-            .frame(minHeight: 52).contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-    }
-
-    /// Customers of the open jobs, newest job first, once each, skipping archived ones.
-    private func activeCustomers(from jobs: [Job], excluding shown: Set<String>) -> [Customer] {
-        var seen = shown
-        return jobs.compactMap { job in
-            guard let customerID = job.customerId, !seen.contains(customerID),
-                  let customer = store.customers.first(where: { $0.id == customerID && $0.archived != true }) else { return nil }
-            seen.insert(customer.id)
-            return customer
-        }.prefix(5).map { $0 }
-    }
-
-    private func customerRow(_ customer: Customer) -> some View {
-        searchLink(customer) {
-            HStack(spacing: 12) {
-                Avatar(name: customer.name, size: 26)
-                Text(customer.name).font(Theme.font(15, weight: .medium)).lineLimit(rowLines)
-                Spacer(minLength: 8)
-            }
-            .frame(minHeight: 52).contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-    }
-
-    private func openJobRow(_ job: Job) -> some View {
-        searchLink(job) {
-            HStack(spacing: 12) {
-                StatusRing(status: job.status).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(rowLines)
-                    Text("\(job.shortRef) · \(store.customerName(job.customerId)) · \(job.status.statusLabel)")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(rowLines)
-                }
-                Spacer(minLength: 8)
-            }
-            .frame(minHeight: 52).contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-    }
-
-    private var results: some View {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if trimmed.isEmpty {
-                        // Before anything is typed, show what people most often come back to.
-                        let canViewJobs = session.can("job.view", feature: "jobs")
-                        let recent = (canViewJobs ? store.jobs : []).filter { !["completed", "canceled"].contains($0.status) }
-                            .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }.prefix(6)
-                        // The place's own records lead (recent jobs on Jobs, recent customers on
-                        // Customers), then what this person opened last, like Mail and Maps search.
-                        let opened = recentlyOpened
-                        let split = focus.split(opened.map(\.0))
-                        let lead = opened.filter { split.relevant.contains($0.0) }.prefix(5)
-                        let rest = opened.filter { split.rest.contains($0.0) }.prefix(5)
-                        let leadJobIDs = Set(lead.compactMap { if case .job(let job) = $0.1 { job.id } else { nil } })
-                        let openJobs = recent.filter { !leadJobIDs.contains($0.id) }
-                        if !lead.isEmpty {
-                            PaperGroupHeader(title: focus == .customers ? "Recent customers" : "Recent jobs").padding(.top, 8)
-                            ForEach(Array(lead), id: \.0) { item, destination in recentRow(item, destination) }
-                        }
-                        // On Customers, the people with open work follow the ones opened lately.
-                        if focus == .customers && session.can("customer.view", feature: "core_crm") {
-                            let shown = Set(lead.map(\.0.id))
-                            let active = activeCustomers(from: Array(recent), excluding: shown)
-                            if !active.isEmpty {
-                                PaperGroupHeader(title: "Customers with open jobs").padding(.top, lead.isEmpty ? 8 : 16)
-                                ForEach(active) { customer in customerRow(customer) }
-                            }
-                        }
-                        // On Jobs the open jobs are the place's records too, so they follow its recents.
-                        if focus == .jobs && !openJobs.isEmpty {
-                            PaperGroupHeader(title: "Open jobs").padding(.top, lead.isEmpty ? 8 : 16)
-                            ForEach(Array(openJobs)) { job in openJobRow(job) }
-                        }
-                        if !rest.isEmpty {
-                            PaperGroupHeader(title: "Recently opened").padding(.top, lead.isEmpty && (focus != .jobs || openJobs.isEmpty) ? 8 : 16)
-                            ForEach(Array(rest), id: \.0) { item, destination in recentRow(item, destination) }
-                        }
-                        if recent.isEmpty && opened.isEmpty {
-                            PaperEmptyState(symbol: "magnifyingglass", title: "No recent searches",
-                                            message: "Find any job, customer, estimate or invoice.")
-                        } else if focus != .jobs && !openJobs.isEmpty {
-                            PaperGroupHeader(title: "Open jobs").padding(.top, opened.isEmpty ? 8 : 16)
-                            ForEach(Array(openJobs)) { job in openJobRow(job) }
-                        }
-                    } else if useServer {
-                        ForEach(serverGroups, id: \.0) { type, results in
-                            PaperGroupHeader(title: label(type), count: results.count).padding(.top, 8)
-                            ForEach(results) { result in serverRow(result) }
-                        }
-                        if server.isEmpty && !searching { PaperEmptyState.search(trimmed) }
-                        if searching { SkeletonRows(count: 2, inset: 0).padding(.top, 8) }
-                    } else {
-                        if session.isOffline || serverFailed {
-                            Label(session.isOffline ? "Offline · searching what's saved on this phone" : "Company search is unavailable · showing what's on this phone",
-                                  systemImage: "iphone")
-                                .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
-                        }
-                        if session.can("job.view", feature: "jobs"), !jobs.isEmpty {
-                            PaperGroupHeader(title: "Jobs", count: jobs.count).padding(.top, 8)
-                            ForEach(jobs) { job in
-                                searchLink(job) {
-                                    HStack(spacing: 10) {
-                                        StatusRing(status: job.status)
-                                        Text(job.shortRef).font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-                                            .frame(width: 66, alignment: .leading)
-                                        Text(job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                        Spacer(minLength: 0)
-                                    }.frame(minHeight: 46).contentShape(Rectangle())
-                                }.buttonStyle(RowPressStyle())
-                            }
-                        }
-                        if session.can("customer.view", feature: "core_crm"), !customers.isEmpty {
-                            PaperGroupHeader(title: "Customers", count: customers.count).padding(.top, 16)
-                            ForEach(customers) { customer in
-                                searchLink(customer) {
-                                    HStack(spacing: 12) {
-                                        Avatar(name: customer.name, size: 26)
-                                        Text(customer.name).font(Theme.font(15, weight: .medium))
-                                        Spacer(minLength: 0)
-                                    }.frame(minHeight: 46).contentShape(Rectangle())
-                                }.buttonStyle(RowPressStyle())
-                            }
-                        }
-                        if searching { SkeletonRows(count: 3, inset: 0).padding(.top, 8) }
-                        else if jobs.isEmpty && customers.isEmpty { PaperEmptyState.search(trimmed) }
-                    }
-                }
-                .padding(.horizontal, Theme.gutter)
-            }
-            .task(id: trimmed) {
-                guard !trimmed.isEmpty, !session.isOffline else { return }
-                // Wait for a pause in typing before asking the server.
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                guard !Task.isCancelled else { return }
-                searching = true
-                defer { searching = false }
-                do {
-                    let page = try await api.search(trimmed)
-                    guard !Task.isCancelled else { return }
-                    server = page.items
-                    serverQuery = trimmed
-                    serverFailed = false
-                } catch is CancellationError {
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    serverFailed = true
-                }
-            }
-    }
-
-    private func label(_ type: String) -> String {
-        switch type {
-        case "job": "Jobs"
-        case "customer": "Customers"
-        case "estimate": "Estimates"
-        case "invoice": "Invoices"
-        case "billing_schedule": "Billing schedules"
-        case "payment": "Payments"
-        case "location": "Locations"
-        default: type.statusLabel
-        }
-    }
-
-    @ViewBuilder private func serverRow(_ result: ServerSearchResult) -> some View {
-        let row = HStack(spacing: 12) {
-            Image(systemName: icon(result.resultType)).font(.system(size: 15)).foregroundStyle(Theme.muted).frame(width: 26)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(result.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                if let subtitle = result.subtitle { Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1) }
-            }
-            Spacer(minLength: 8)
-            if let status = result.status { Text(status.statusLabel).font(Theme.font(12)).foregroundStyle(Theme.muted) }
-        }
-        .frame(minHeight: 50).contentShape(Rectangle())
-        switch result.resultType {
-        case "job":
-            NavigationLink(value: store.jobs.first { $0.id == result.entityId }
-                           ?? Job(id: result.entityId, customerId: nil, title: result.title, status: result.status ?? "scheduled",
-                                  createdAt: nil, updatedAt: nil, allowedTransitions: nil)) { row }.buttonStyle(RowPressStyle())
-        case "customer":
-            NavigationLink(value: store.customers.first { $0.id == result.entityId }
-                           ?? Customer(id: result.entityId, name: result.title, archived: nil, createdAt: nil)) { row }.buttonStyle(RowPressStyle())
-        case "estimate":
-            NavigationLink(value: PaperRoute.estimate(result.entityId)) { row }.buttonStyle(RowPressStyle())
-        case "invoice":
-            NavigationLink(value: PaperRoute.invoice(result.entityId)) { row }.buttonStyle(RowPressStyle())
-        case "billing_schedule":
-            NavigationLink(value: PaperRoute.billingSchedule(result.entityId)) { row }.buttonStyle(RowPressStyle())
-        default:
-            row.opacity(0.6)
-        }
-    }
-
-    private func icon(_ type: String) -> String {
-        switch type {
-        case "job": "briefcase"
-        case "customer": "person"
-        case "estimate": "doc.text"
-        case "invoice": "doc.plaintext"
-        default: "circle"
-        }
-    }
 }
 
 #if DEBUG
