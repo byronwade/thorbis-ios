@@ -1089,22 +1089,40 @@ struct PaperStatRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        PaperCard { Content(stats: stats) }
+    }
+
+    /// The figures without their panel, for a `PaperSection` that already draws one.
+    struct Content: View {
+        let stats: [Stat]
+        @Environment(\.dynamicTypeSize) private var typeSize
+
+        var body: some View {
         let stacked = typeSize.isAccessibilitySize
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
                              : AnyLayout(HStackLayout(alignment: .top, spacing: 0))
-        PaperCard {
             layout {
                 ForEach(stats) { stat in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(stat.label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                            .lineLimit(stacked ? nil : 1)
-                        Text(stat.value).font(Theme.font(20, weight: .medium)).monospacedDigit()
-                            .foregroundStyle(stat.tint)
+                        // design 2026-10-30: colour only next to a word — a tinted stat puts a dot
+                        // beside its label and keeps the figure in ink.
+                        HStack(spacing: 6) {
+                            if stat.tint != Theme.foreground {
+                                Circle().fill(stat.tint).frame(width: 7, height: 7).accessibilityHidden(true)
+                            }
+                            Text(stat.label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                                .lineLimit(stacked ? nil : 1)
+                        }
+                        Text(stat.value).font(Theme.font(22, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(Theme.foreground)
                             .lineLimit(stacked ? nil : 1).minimumScaleFactor(stacked ? 1 : 0.8)
                         if let detail = stat.detail {
-                            Text(detail).font(Theme.font(12, weight: stat.detailTint == Theme.muted ? .regular : .medium))
-                                .foregroundStyle(stat.detailTint)
-                                .lineLimit(stacked ? nil : 2)
+                            if stat.detailTint == Theme.muted {
+                                Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                    .lineLimit(stacked ? nil : 2)
+                            } else {
+                                StatusWord(text: detail, tint: stat.detailTint)
+                            }
                         }
                     }
                     .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)

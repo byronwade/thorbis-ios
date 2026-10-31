@@ -44,23 +44,35 @@ struct ThorbisSheetScaffold<Content: View>: View {
 
 // MARK: - Grouped rows
 
-/// A rounded card that holds a run of sheet rows. Put a `ThorbisSheetDivider()` between rows.
+/// One white panel that holds a run of sheet rows (design 2026-10-30: rows on one panel per
+/// section, no rules between them). Put an optional 13pt label above it with `ThorbisSheetLabel`.
 struct ThorbisSheetGroup<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
-        VStack(spacing: 0) { content() }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+        PaperCard {
+            VStack(spacing: 0) { content() }
+                .padding(.vertical, PaperCardMetrics.edge)
+        }
     }
 }
 
-/// The hairline between rows in a `ThorbisSheetGroup`, inset past the label.
+/// Kept so existing sheets compile: rows on a panel are separated by space, never a line.
 struct ThorbisSheetDivider: View {
-    var body: some View { Divider().overlay(Theme.border).padding(.leading, 14) }
+    var body: some View { EmptyView() }
 }
 
-/// A row that shows a value and a `chevron.up.chevron.down`. Tap opens a `ThorbisMenu` of
-/// `options`; the chosen one calls `onSelect`. This is the reference sheet's Grouping/Ordering row.
+/// The 13pt marker label above a sheet panel.
+struct ThorbisSheetLabel: View {
+    let title: String
+    var body: some View {
+        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, 4).padding(.bottom, -10)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A row that shows its current value; tap opens a `ThorbisMenu` of `options` and the chosen one
+/// calls `onSelect`. The value reads as the answer — no chevron, the row is the target.
 struct ThorbisSheetRow: View {
     let label: String
     let value: String
@@ -76,13 +88,11 @@ struct ThorbisSheetRow: View {
             accessibilityLabel: "\(label), \(value)"
         ) {
             HStack(spacing: 8) {
-                Text(label).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                Text(label).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                 Spacer(minLength: 8)
                 Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.muted)
             }
-            .padding(.horizontal, 14).frame(minHeight: 48).contentShape(Rectangle())
+            .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52).contentShape(Rectangle())
         }
     }
 }
@@ -94,10 +104,10 @@ struct ThorbisSheetToggleRow: View {
     @Binding var isOn: Bool
     var body: some View {
         Toggle(isOn: $isOn) {
-            Text(label).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+            Text(label).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
         }
         .tint(Theme.brand)
-        .padding(.horizontal, 14).frame(minHeight: 48)
+        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
     }
 }
 
@@ -196,7 +206,7 @@ struct DisplayOptions: Equatable {
                     ThorbisSheetDivider()
                     ThorbisSheetToggleRow(label: "Show completed", isOn: $opts.showCompleted)
                 }
-                Text("Row properties").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                ThorbisSheetLabel(title: "Row properties")
                 ThorbisChipGroup(data: allFields, id: \.self, isOn: { fields.contains($0) }, label: { $0 }) { field in
                     if fields.contains(field) { fields.remove(field) } else { fields.insert(field) }
                 }

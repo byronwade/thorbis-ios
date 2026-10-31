@@ -269,22 +269,18 @@ struct WorkspaceRevenueView: View {
         .accessibilityHint("Opens invoices")
         .padding(.bottom, 18)
 
-        PaperGroupHeader(title: "By month", count: months.count)
-        PaperCardList(data: Array(months.reversed())) { month in
-            // Month and what was invoiced on the left, what came in on the right: one amount per side.
-            HStack(alignment: .center, spacing: 12) {
-                IconTile(symbol: "calendar")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(monthName(month.month, long: true)).font(Theme.font(15, weight: .medium))
-                    Text("Invoiced \(money(month.revenue, currency: "USD"))")
-                        .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+        // design 2026-10-30: plain rows on one panel, no calendar tiles.
+        PaperSection("By month", count: months.count) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(months.reversed())) { month in
+                    // Month and what was invoiced on the left, what came in on the right: one amount per side.
+                    PaperListRow(title: monthName(month.month, long: true),
+                                 subtitle: "Invoiced \(money(month.revenue, currency: "USD"))",
+                                 amount: money(month.collected, currency: "USD"))
+                        .accessibilityElement(children: .combine)
                 }
-                Spacer(minLength: 12)
-                Text(money(month.collected, currency: "USD")).moneyStyle(.row)
             }
-            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
-            .frame(minHeight: 60)
-            .accessibilityElement(children: .combine)
+            .padding(.vertical, PaperCardMetrics.edge)
         }
     }
 
