@@ -224,39 +224,69 @@ struct LocalWorkspaceView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                Text("On this device · Not synced")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if let error = actionError ?? model.error { Text(error).foregroundStyle(.red) }
-            if model.actorID == actorID && model.organizationID == organizationID {
-                let rows = model.rows(section)
-                Section(section.title) {
-                    ForEach(rows) { row in
-                        Button { if let draft = model.draft(section, id: row.id) { present(draft) } } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(row.title).foregroundStyle(.primary)
-                                if !row.subtitle.isEmpty { Text(row.subtitle).font(.caption).foregroundStyle(.secondary) }
+        // design 2026-10-30: the list system — header, rows on one panel, edits in each row's •••
+        // (swipe-to-delete moved there), the one ink commit at the bottom.
+        let bound = model.actorID == actorID && model.organizationID == organizationID
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(section.title).font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("On this device · Not synced").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                if let error = actionError ?? model.error {
+                    Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                }
+                if bound {
+                    let rows = model.rows(section)
+                    PaperSection(section.title, count: rows.isEmpty ? nil : rows.count) {
+                        if rows.isEmpty {
+                            Text("No records on this device").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                        } else {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(rows) { row in
+                                    HStack(spacing: 0) {
+                                        Button { if let draft = model.draft(section, id: row.id) { present(draft) } } label: {
+                                            PaperListRow(title: row.title, subtitle: row.subtitle.isEmpty ? nil : row.subtitle, subtitleLines: 2)
+                                        }
+                                        .buttonStyle(RowPressStyle())
+                                        ThorbisMenu(items: [
+                                            ThorbisMenuItem("Edit", icon: "pencil") { if let draft = model.draft(section, id: row.id) { present(draft) } },
+                                            ThorbisMenuItem("Remove", icon: "trash", role: .destructive) {
+                                                do { try model.remove(row.id, section: section); actionError = nil }
+                                                catch { actionError = error.localizedDescription }
+                                            },
+                                        ], accessibilityLabel: "Options for \(row.title)") {
+                                            Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                                                .frame(width: 44, height: 44).contentShape(Rectangle())
+                                        }
+                                        .padding(.trailing, 4)
+                                    }
+                                }
                             }
+                            .padding(.vertical, PaperCardMetrics.edge)
                         }
                     }
-                    .onDelete { offsets in
-                        do {
-                            for offset in offsets { try model.remove(rows[offset].id, section: section) }
-                            actionError = nil
-                        } catch { actionError = error.localizedDescription }
-                    }
-                    if rows.isEmpty { Text("No records on this device").foregroundStyle(.secondary) }
+                    .id(model.revision)
+                } else if model.error == nil {
+                    SkeletonRows(count: 3, leading: false, inset: 0)
                 }
-                .id(model.revision)
-            } else if model.error == nil { ProgressView("Opening device book…") }
+                Text("These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+            }
+            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
         }
-        .navigationTitle(section.title)
-        .toolbar { Button("Add", systemImage: "plus") { present(LocalWorkspaceDraft()) }
-            .disabled(model.actorID != actorID || model.organizationID != organizationID) }
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            PaperActionBar(title: "Add to \(section.title.lowercased())", symbol: "plus", disabled: !bound) {
+                present(LocalWorkspaceDraft())
+            }
+        }
         .task(id: identityKey) {
             editor = nil
             editorOwner = nil
@@ -288,37 +318,47 @@ private struct LocalWorkspaceEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("On this device") {
+            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("On this device · Not synced").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                     if section == .agreements {
-                        ThorbisSelect(options: [(LocalAgreementRecord.Kind.maintenance, "Maintenance"),
-                                                (LocalAgreementRecord.Kind.membership, "Membership")],
-                                      selection: $draft.kind, label: "Kind")
+                        PaperFormField("Kind") {
+                            ThorbisSelect(options: [(LocalAgreementRecord.Kind.maintenance, "Maintenance"),
+                                                    (LocalAgreementRecord.Kind.membership, "Membership")],
+                                          selection: $draft.kind, label: "Kind").fieldWell()
+                        }
                     }
                     ForEach(section.fields.indices, id: \.self) { index in
                         let field = section.fields[index]
-                        TextField(field.label, text: Binding(
-                            get: { draft.value(field.key) },
-                            set: { draft.values[field.key] = $0 }
-                        ), axis: field.key == "notes" ? .vertical : .horizontal)
+                        PaperFormField(field.label, note: field.required ? nil : "Optional") {
+                            TextField(field.label, text: Binding(
+                                get: { draft.value(field.key) },
+                                set: { draft.values[field.key] = $0 }
+                            ), axis: field.key == "notes" ? .vertical : .horizontal)
+                            .font(Theme.font(16)).fieldWell()
+                        }
                     }
+                    if section == .fleet {
+                        Text("Values and maintenance dates are written as entered. Market value is your estimate; no live valuation is connected.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                    if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
                 }
-                if section == .fleet {
-                    Text("Values and maintenance dates are written as entered. Market value is your estimate; no live valuation is connected.")
-                        .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.background)
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                PaperActionBar(title: "Save", disabled: section.fields.filter { $0.required }.contains { draft.required($0.key).isEmpty }) {
+                    do { try onSave(draft); dismiss() }
+                    catch { self.error = error.localizedDescription }
                 }
-                if let error { Text(error).foregroundStyle(.red) }
             }
             .navigationTitle(draft.values.isEmpty ? "New \(section.title)" : "Edit \(section.title)")
             .toolbar {
                 ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
-                    Button("Save") {
-                        do { try onSave(draft); dismiss() }
-                        catch { self.error = error.localizedDescription }
-                    }
-                    .disabled(section.fields.filter { $0.required }.contains { draft.required($0.key).isEmpty })
-                }
             }
         }
     }

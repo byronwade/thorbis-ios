@@ -234,7 +234,7 @@ private struct CustomerEstimateBookPage: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(issued?.title ?? estimate.title).font(Theme.font(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
-                    if fresh { PaperStatusChip(status: estimate.status) }
+                    if fresh { CustomerStatusWord(status: estimate.status, type: type) }
                     else { Text("Status needs refresh").font(Theme.font(type.body)).foregroundStyle(Theme.muted) }
                     if !fresh {
                         Text("This copy needs a refresh before you can decide.").font(Theme.font(type.body))
@@ -271,8 +271,8 @@ private struct CustomerEstimateBookPage: View {
 
     @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String) -> some View {
         if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
-            CustomerLinesCard(lines: lines, currency: currency, type: type,
-                rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess)
+            CustomerIncludedLabel(type: type)
+                    CustomerIncludedLines(lines: lines, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                 .font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
@@ -329,7 +329,7 @@ private struct CustomerInvoiceBookPage: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(invoice.origin == "estimate_deposit" ? "Deposit invoice" : "Invoice")
                         .font(Theme.font(type.heading, weight: .medium)).accessibilityIdentifier("customer-invoice-summary")
-                    if fresh { PaperStatusChip(status: invoice.status) }
+                    if fresh { CustomerStatusWord(status: invoice.status, type: type) }
                     else { Text("Status needs refresh").font(Theme.font(type.body)).foregroundStyle(Theme.muted) }
                     if signed, let authorization = invoice.customerAuthorization {
                         Label("Signed by \(authorization.signerName)", systemImage: "signature")
@@ -342,10 +342,10 @@ private struct CustomerInvoiceBookPage: View {
                             .font(Theme.font(type.body)).foregroundStyle(Theme.muted)
                         if let headlineAmount = balance.amount {
                             Text(money(headlineAmount, currency: invoice.currency))
-                                .font(Theme.monoFont(type.total, weight: .medium))
+                                .font(Theme.font(type.total, weight: .medium)).monospacedDigit()
                         }
-                        CustomerLinesCard(lines: invoice.lines, currency: invoice.currency, type: type,
-                            rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"), readingAccess: readingAccess)
+                        CustomerIncludedLabel(type: type)
+                    CustomerIncludedLines(lines: invoice.lines, type: type, rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"), readingAccess: readingAccess)
                     } else {
                         Text("These amounts couldn't be verified. Hand the device back to your technician.").font(Theme.font(type.body))
                     }
@@ -386,7 +386,7 @@ private struct CustomerInvoiceBookPage: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(payment.method == "ach" ? "Bank transfer" : FieldPaymentMethod(rawValue: payment.method)?.displayName ?? "Payment")
                         Spacer(minLength: 8)
-                        Text(money(payment.amount.amount, currency: payment.amount.currency)).font(Theme.monoFont(type.body))
+                        Text(money(payment.amount.amount, currency: payment.amount.currency)).font(Theme.font(type.body)).monospacedDigit()
                     }
                     Text(customerPaymentDate(payment.recordedAt)).font(Theme.font(type.small)).foregroundStyle(Theme.muted)
                     let refunded = payment.refundedAmount ?? (payment.status == .refunded ? payment.amount.amount : 0)

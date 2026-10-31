@@ -66,7 +66,7 @@ struct JobAssignmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Assign technician").font(Theme.font(24, weight: .medium)).tracking(-0.36)
+                Text("Assign tech").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
                 if !session.can("job.assign", feature: "jobs") {
                     PaperEmptyState(symbol: "person.crop.circle.badge.xmark", title: "Assignment unavailable", message: "Your role can't assign jobs in this workspace.")
@@ -74,29 +74,45 @@ struct JobAssignmentView: View {
                     if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
                     if loading { SkeletonRows(count: 4, inset: 0) }
                     if isCurrent, let job {
-                        PaperDetailRow("Assigned now", value: job.assignedToUserId.map { current in
-                            assignees.first(where: { $0.userId == current })?.displayName ?? "Someone outside your roster"
-                        } ?? "Unassigned")
-                        PaperGroupHeader(title: "Assign to", count: assignees.count).padding(.top, 12)
-                        if assignees.isEmpty {
-                            Text("No one can be assigned right now.").font(Theme.font(14)).foregroundStyle(Theme.muted).frame(minHeight: 44)
-                        }
-                        ForEach(assignees.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }) { person in
-                            Button { selectedUserID = person.userId } label: {
-                                HStack(spacing: 12) {
-                                    Avatar(name: person.displayName, size: 32)
-                                    Text(person.displayName).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    Spacer()
-                                    Image(systemName: selectedUserID == person.userId ? "checkmark.circle.fill" : "circle")
-                                        .font(.system(size: 20))
-                                        .foregroundStyle(selectedUserID == person.userId ? Theme.brandText : Theme.muted)
-                                        .accessibilityHidden(true)
-                                }
-                                .frame(minHeight: 52).contentShape(Rectangle())
+                        // design 2026-10-30: who has it now, then the roster on one panel; the
+                        // chosen tech carries the one accent check, nobody else gets an empty ring.
+                        VStack(alignment: .leading, spacing: 22) {
+                            PaperSection("Assigned now") {
+                                PaperListRow(title: job.assignedToUserId.map { current in
+                                    assignees.first(where: { $0.userId == current })?.displayName ?? "Someone outside your roster"
+                                } ?? "Unassigned")
+                                .padding(.vertical, PaperCardMetrics.edge)
                             }
-                            .buttonStyle(RowPressStyle())
-                            .accessibilityAddTraits(selectedUserID == person.userId ? .isSelected : [])
+                            PaperSection("Assign to", count: assignees.count) {
+                                if assignees.isEmpty {
+                                    Text("No one can be assigned right now.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                                } else {
+                                    VStack(spacing: 0) {
+                                        ForEach(assignees.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }) { person in
+                                            let chosen = selectedUserID == person.userId
+                                            Button { selectedUserID = person.userId } label: {
+                                                HStack(spacing: 12) {
+                                                    Avatar(name: person.displayName, size: 32)
+                                                    Text(person.displayName).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                                    Spacer(minLength: 8)
+                                                    if chosen {
+                                                        Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold))
+                                                            .foregroundStyle(Theme.brandText).accessibilityHidden(true)
+                                                    }
+                                                }
+                                                .padding(.horizontal, PaperCardMetrics.inset)
+                                                .frame(minHeight: 52).contentShape(Rectangle())
+                                            }
+                                            .buttonStyle(RowPressStyle())
+                                            .accessibilityAddTraits(chosen ? .isSelected : [])
+                                        }
+                                    }
+                                    .padding(.vertical, PaperCardMetrics.edge)
+                                }
+                            }
                         }
+                        .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
                     }
                 }
             }
@@ -107,7 +123,7 @@ struct JobAssignmentView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if isCurrent, let job {
-                PaperActionBar(title: "Save assignment", symbol: "person.crop.circle.badge.checkmark", busy: saving,
+                PaperActionBar(title: "Save assignment", symbol: nil, busy: saving,
                                disabled: selectedUserID == nil || selectedUserID == job.assignedToUserId) { Task { await save() } }
             }
         }

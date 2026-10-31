@@ -1050,6 +1050,8 @@ struct CustomerIncludedLines: View {
     let lines: [FieldLine]
     let type: CustomerType
     let rows: [CustomerAmountRow]
+    /// Consent screens read each description through the protected reader.
+    var readingAccess: DocumentDescriptionAccess? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -1071,7 +1073,7 @@ struct CustomerIncludedLines: View {
                         .font(Theme.font(type.small)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, 18).padding(.vertical, 16)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
             }
             if lines.isEmpty {
                 Text("Nothing listed yet.").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
@@ -1093,16 +1095,48 @@ struct CustomerIncludedLines: View {
         .documentPanel()
     }
 
-    private func description(_ line: FieldLine) -> some View {
-        Text(line.description).font(Theme.font(type.body))
-            .lineSpacing(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    @ViewBuilder private func description(_ line: FieldLine) -> some View {
+        if let readingAccess {
+            ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(line.description).font(Theme.font(type.body))
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func amount(_ line: FieldLine) -> some View {
         Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
             .font(Theme.font(type.body, weight: .medium)).monospacedDigit()
+    }
+}
+
+/// A document's status as a word at customer size: a small dot carries the hue, the word stays ink.
+struct CustomerStatusWord: View {
+    let status: String
+    let type: CustomerType
+
+    var body: some View {
+        let tint = StatusWord.documentTint(status)
+        HStack(spacing: 8) {
+            if let tint { Circle().fill(tint).frame(width: 9, height: 9).accessibilityHidden(true) }
+            Text(status == "issued" ? "Unpaid" : status.statusLabel).font(Theme.font(type.small, weight: .medium))
+                .foregroundStyle(tint == nil ? Theme.muted : Theme.foreground)
+        }
+        .fixedSize()
+    }
+}
+
+/// "What's included" above a customer document's lines.
+struct CustomerIncludedLabel: View {
+    let type: CustomerType
+    var title = "What’s included"
+    var body: some View {
+        Text(title).font(Theme.font(type.small, weight: .medium)).foregroundStyle(Theme.muted)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.bottom, -10)
     }
 }
 

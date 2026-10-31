@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-redesign-remaining-screens",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "square.grid.2x2", title: "Every screen in the new look",
+                      detail: "Settings, reports, forms, price book, follow-ups and the iPad schedule now match the job screen.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-job-onsite-redesign",
             date: "2026-10-30",
             highlights: [
