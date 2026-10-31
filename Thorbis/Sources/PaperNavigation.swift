@@ -606,7 +606,11 @@ struct RootView: View {
         .background(Theme.background)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
-        .onChange(of: store.requestedSchedule) { schedulePath = NavigationPath(); primaryTab = .schedule }
+        .onChange(of: store.requestedSchedule) {
+            if drawerOpen { closeDrawer() }
+            schedulePath = NavigationPath()
+            primaryTab = .schedule
+        }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord(phone: true) }
         .sheet(isPresented: $workspace) { WorkspaceSelectionView() }
         .sheet(isPresented: $createJob) { NewJobSheet() }
@@ -866,7 +870,7 @@ struct RootView: View {
             tabRoot(item)
         } else if id.hasPrefix("local-"), let section = LocalWorkspaceSection(rawValue: String(id.dropFirst(6))) {
             NavigationStack(path: customPath(id)) {
-                PaperRouteView(route: .local(section)).modifier(DrawerToolbarCircle()).paperDestinations()
+                PaperRouteView(route: .local(section)).modifier(DrawerCircleInBar()).paperDestinations()
             }
         } else {
             tabRoot(.schedule)
@@ -881,9 +885,10 @@ struct RootView: View {
         default:
             NavigationStack(path: customPath(item.rawValue)) {
                 if let route = item.route {
-                    // Places whose screen has no Paper header carry the menu circle in the bar.
+                    // Places whose root shows a navigation bar carry the menu circle there, and
+                    // their Paper header (Estimates, Invoices) then leaves it out.
                     PaperRouteView(route: route)
-                        .modifier(DrawerToolbarCircle(enabled: !item.hasPaperHeader))
+                        .modifier(DrawerCircleInBar(enabled: !item.drawerCircleInHeader))
                         .paperDestinations()
                 }
             }
@@ -897,6 +902,7 @@ struct RootView: View {
         else { return }
         store.requestedJobID = nil
         if phone {
+            if drawerOpen { closeDrawer() }
             let tabs = layout.visibleTabs(session)
             if tabs.contains(.schedule) || !tabs.contains(.jobs) {
                 primaryTab = .schedule
@@ -973,17 +979,20 @@ struct RootView: View {
 
 }
 
-/// The menu circle in the navigation bar, for place roots whose screen has no Paper header (Inbox,
-/// Reports, Team, …). Shows only while the shell offers the drawer, so pushed screens keep Back.
-private struct DrawerToolbarCircle: ViewModifier {
+/// The menu circle in the navigation bar, for place roots that show one (Inbox, Estimates, Reports,
+/// Team, …). The screen inside then gets no drawer of its own, so a Paper header there draws no
+/// second circle. Shows only while the shell offers the drawer, so pushed screens keep Back.
+private struct DrawerCircleInBar: ViewModifier {
     var enabled = true
     @Environment(\.paperDrawer) private var drawer
 
     func body(content: Content) -> some View {
         if enabled, let drawer {
-            content.toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) { DrawerMenuCircle(control: drawer) }
-            }
+            content
+                .environment(\.paperDrawer, nil)
+                .toolbar {
+                    ThorbisToolbarItem(placement: .topBarLeading) { DrawerMenuCircle(control: drawer) }
+                }
         } else {
             content
         }

@@ -20,7 +20,7 @@ mobile app. Later passes must not undo them:
 - **Navigation (phone):** a side drawer (`AppDrawer`, `../DrawerNavigation.swift`) after the Claude
   and ChatGPT iOS apps. Each place root shows `DrawerMenuCircle` top left — `PaperHeader` draws it
   when the shell sets `\.paperDrawer` (roots only, never pushed screens); roots without a Paper
-  header get it in the bar (`DrawerToolbarCircle`). Edge swipe opens it on roots. The drawer:
+  header or with a visible navigation bar get it in the bar (`DrawerCircleInBar`). Edge swipe opens it on roots. The drawer:
   business name + search circle, the Now row, pinned places, Places, Edit menu, Recents; rows are an
   outline icon + 17pt label, ≥50pt, no wells; section labels semibold primary; `DrawerDot` (brand)
   for unread / needs attention. Bottom: ink New job capsule left, gear circle right. New also stays

@@ -41,9 +41,9 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// Places whose root screen leads with `PaperHeader`, which carries the drawer's menu circle;
-    /// the others get it in the navigation bar.
-    var hasPaperHeader: Bool { [.home, .schedule, .jobs, .customers, .estimates, .invoices, .priceBook].contains(self) }
+    /// Places whose root hides the navigation bar and leads with `PaperHeader`, which carries the
+    /// drawer's menu circle. The others (a visible bar: Inbox, Estimates, Reports, …) carry it in the bar.
+    var drawerCircleInHeader: Bool { [.home, .schedule, .jobs, .customers, .priceBook].contains(self) }
 
     /// The drawer's word: the schedule reads as the day's work, everything else by its name.
     var drawerTitle: String { self == .schedule ? "Today" : title }

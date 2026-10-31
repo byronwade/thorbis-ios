@@ -87,10 +87,10 @@ struct AppDrawer: View {
                     header
                     if let now { nowRow(now.job, customer: now.customer) }
                     if let savedWork { savedWorkRow(savedWork) }
-                    VStack(alignment: .leading, spacing: 0) {
+                    if !pinned.isEmpty {
+                        sectionLabel("Pinned")
                         ForEach(pinned) { placeRow($0) }
                     }
-                    .padding(.top, 8)
                     if !places.isEmpty || !local.isEmpty {
                         sectionLabel("Places")
                         ForEach(places) { placeRow($0) }
@@ -152,7 +152,11 @@ struct AppDrawer: View {
     /// The job this person is on now (the in-app twin of the Live Activity).
     private func nowRow(_ job: Job, customer: String) -> some View {
         Button(action: openNow) {
-            HStack(alignment: .center, spacing: 14) {
+            // At accessibility sizes the glyph sits above the words so they keep the width.
+            let stack = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 14))
+            HStack(alignment: .center, spacing: 8) {
+              stack {
                 StatusGlyph(jobStatus: job.status)
                     .frame(width: iconColumn)
                 VStack(alignment: .leading, spacing: 2) {
@@ -165,7 +169,8 @@ struct AppDrawer: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Spacer(minLength: 8)
+              }
+                Spacer(minLength: 0)
                 PaperDisclosure()
             }
             .padding(.horizontal, 14).padding(.vertical, 10)

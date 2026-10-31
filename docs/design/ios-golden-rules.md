@@ -55,8 +55,8 @@ source evidence; verify platform/API/version claims before relying on them.
    only, so pushed screens keep the system back swipe. The drawer pushes the place
    right as a rounded card (tap or drag it to close; Reduce Motion fades instead).
    It lists, on its own ground with no wells: the business name and a search
-   circle; the job on now; the person's pinned places (Edit menu, up to four; role
-   and company layouts still apply); every other permitted place and the records
+   circle; the job on now; Pinned — the person’s pinned places (Edit menu, up to four; role
+   and company layouts still apply); Places — every other permitted place and the records
    kept on this phone; Edit menu; and Recents (jobs with their `StatusGlyph`,
    customers as words). Section labels are semibold in the primary colour. A small
    brand dot marks unread Inbox, Needs attention with items, a recent that changed
