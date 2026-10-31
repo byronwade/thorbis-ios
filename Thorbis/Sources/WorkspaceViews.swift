@@ -215,7 +215,7 @@ struct WorkspaceRevenueView: View {
     @ViewBuilder private var sections: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !available {
-                PaperEmptyState(symbol: "chart.bar.xaxis", title: "Money reports are off for your role", message: "Ask your office for access to invoices and payments.")
+                PaperEmptyState(symbol: "chart.bar.xaxis", title: "You can't see money reports", message: "Your role doesn't include invoices and payments. Ask an owner for access.")
             } else if let error {
                 ErrorBanner(message: error).padding(.horizontal, -Theme.gutter)
             } else if let report {
@@ -243,7 +243,8 @@ struct WorkspaceRevenueView: View {
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(money(current?.collected ?? 0, currency: "USD"))
-                    .moneyStyle(.hero)
+                    .font(Theme.moneyHeroFont).tracking(-0.6)
+                    .lineLimit(1).minimumScaleFactor(0.6)
                 if let current, let previous, previous.collected > 0 {
                     let change = Double(current.collected - previous.collected) / Double(previous.collected) * 100
                     Label("\(abs(Int(change.rounded())))% vs \(monthName(previous.month, long: false))", systemImage: change >= 0 ? "arrow.up" : "arrow.down")
@@ -256,19 +257,26 @@ struct WorkspaceRevenueView: View {
         }
         .padding(.bottom, 18)
 
-        // The tiles open the invoices behind the numbers, so nobody has to go looking for them.
-        NavigationLink(value: PaperRoute.invoices) {
-            PaperStatRow(stats: [
-                .init(label: "Outstanding", value: money(report.receivable.balance, currency: "USD"),
-                      detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")"),
-                .init(label: "Overdue", value: money(report.receivable.overdueBalance, currency: "USD"),
-                      detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
-                      detailTint: report.receivable.overdueInvoices > 0 ? Theme.destructive : Theme.muted),
-            ])
+        // v2: what's due as two quiet rows, not a pair of equal tiles. Each opens the invoices behind it.
+        PaperSection("Due") {
+            VStack(spacing: 0) {
+                NavigationLink(value: PaperRoute.invoices) {
+                    dueRow(word: "Outstanding", tone: .scheduled,
+                           detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")",
+                           amount: money(report.receivable.balance, currency: "USD"))
+                }
+                .buttonStyle(RowPressStyle())
+                NavigationLink(value: PaperRoute.invoices) {
+                    dueRow(word: "Overdue", tone: report.receivable.overdueInvoices > 0 ? .attention : .done,
+                           detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
+                           amount: money(report.receivable.overdueBalance, currency: "USD"))
+                }
+                .buttonStyle(RowPressStyle())
+            }
+            .padding(.vertical, PaperCardMetrics.edge)
         }
-        .buttonStyle(RowPressStyle())
         .accessibilityHint("Opens invoices")
-        .padding(.bottom, 18)
+        .padding(.bottom, 24)
 
         // design 2026-10-30: plain rows on one panel, no calendar tiles.
         PaperSection("By month", count: months.count) {
@@ -283,6 +291,23 @@ struct WorkspaceRevenueView: View {
             }
             .padding(.vertical, PaperCardMetrics.edge)
         }
+    }
+
+    /// A receivable as a row: its word with its mark, how many invoices, the amount in the tabular column.
+    private func dueRow(word: String, tone: StatusTone, detail: String, amount: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                StatusLabel(tone: tone, word: word, size: 15)
+                Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            }
+            Spacer(minLength: 8)
+            Text(amount).font(Theme.rowAmountFont(15)).foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private func bars(_ months: [RevenueReport.Month]) -> some View {
@@ -364,6 +389,13 @@ struct WorkspacePriceBookView: View {
         ["All"] + Array(Set(currentItems.map { $0.kind.capitalized })).sorted()
     }
 
+    /// The first group with rows on screen; its label sits closer to the search field.
+    private var firstVisibleGroup: String? {
+        categories.first { name in
+            name != "All" && (category == "All" || category == name) && visibleItems.contains { $0.kind.capitalized == name }
+        }
+    }
+
     private var visibleItems: [PriceBookListItem] {
         currentItems.filter { item in
             (category == "All" || item.kind.capitalized == category) &&
@@ -376,8 +408,8 @@ struct WorkspacePriceBookView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !canList || localScope == nil {
-                PaperEmptyState(symbol: "book.closed", title: "Price book is off for your role",
-                                message: "Viewing prices needs the price book permission. An owner can turn it on in Team.")
+                PaperEmptyState(symbol: "book.closed", title: "You can't see the price book",
+                                message: "Your role doesn't have the price book permission. An owner can turn it on in Team.")
             } else {
                 // design 2026-10-30: one selector per screen — the category chips moved behind the
                 // header's filter circle; the count and the chosen category read in the subtitle.
@@ -395,8 +427,8 @@ struct WorkspacePriceBookView: View {
                     .environment(\.paperMenuButton, false)
                 PaperSearchField(text: $search, prompt: "Search price book")
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() }.padding(.horizontal, -PaperCardMetrics.margin) }
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() } }
                         if showingPreviousItems {
                             HStack {
                                 Text("Showing previously loaded items. Refresh to update.")
@@ -404,29 +436,24 @@ struct WorkspacePriceBookView: View {
                                 Spacer()
                                 Button("Refresh") { Task { await refresh() } }
                                     .disabled(loading)
-                            }.frame(minHeight: 44).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                            }.frame(minHeight: 44).padding(.horizontal, ListRoom.gutter)
                         }
-                        if (loading || !hasCurrentOwner) && currentItems.isEmpty && error == nil { SkeletonList(count: 6) }
+                        if (loading || !hasCurrentOwner) && currentItems.isEmpty && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
                         ForEach(categories.filter { $0 != "All" && (category == "All" || category == $0) }, id: \.self) { groupName in
                             let grouped = visibleItems.filter { $0.kind.capitalized == groupName }
                             if !grouped.isEmpty {
+                                // v2 List room, like Jobs and Customers: the group's 13 Medium label with
+                                // its count on the canvas (it folds the group), then the rows, no panel.
                                 Button {
                                     if collapsedGroups.contains(groupName) { collapsedGroups.remove(groupName) }
                                     else { collapsedGroups.insert(groupName) }
                                 } label: {
-                                    // Redesign phase 3: the semibold section header with its count.
-                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                        Text(groupName).font(Theme.font(15, weight: .semibold))
-                                        Text("\(grouped.count)\(currentCursor == nil ? "" : " loaded")")
-                                            .font(Theme.font(15)).monospacedDigit()
+                                    ListGroupLabel(title: groupName, count: grouped.count, first: groupName == firstVisibleGroup) {
                                         Image(systemName: collapsedGroups.contains(groupName) ? "chevron.right" : "chevron.down")
-                                            .font(.system(size: 11, weight: .semibold))
-                                        Spacer()
+                                            .font(.system(size: 10, weight: .medium))
                                     }
-                                    .foregroundStyle(Theme.muted).frame(minHeight: 36).contentShape(Rectangle())
-                                    .padding(.horizontal, 4)
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(.bottom, -10)
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("\(groupName), \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
                                 .accessibilityValue(collapsedGroups.contains(groupName) ? "Collapsed" : "Expanded")
@@ -449,7 +476,7 @@ struct WorkspacePriceBookView: View {
                                                     } label: { row(item) }.buttonStyle(RowPressStyle())
                                                 }
                                             }
-                                            .wellSlice(first: index == 0, last: index == grouped.count - 1)
+                                            .environment(\.paperRowInset, ListRoom.gutter)
                                         }
                                     }
                                 }
@@ -465,13 +492,13 @@ struct WorkspacePriceBookView: View {
                                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
                                 .buttonStyle(PressStyle())
                                 .disabled(loading)
+                                .padding(.horizontal, ListRoom.gutter).padding(.top, 16)
                         }
                         if hasCurrentOwner && visibleItems.isEmpty && !loading && error == nil {
                             if currentItems.isEmpty {
-                                PaperEmptyState(symbol: "book.closed", title: "No price book items yet",
-                                                message: "Services, parts and fees you add here show up when building estimates and invoices.",
-                                                actionTitle: canEdit ? "Add an item" : nil, tint: Theme.markBurnt, prominent: true,
-                                                action: canEdit ? { creating = true } : nil)
+                                ListRoomEmpty(title: "No price book items.",
+                                              message: canEdit ? "Services, parts and fees you add here fill estimates and invoices." : "Services, parts and fees your office adds show up here.",
+                                              actionTitle: canEdit ? "Add an item" : nil, action: { creating = true })
                             } else {
                                 PaperEmptyState(symbol: "magnifyingglass", title: "No matching items",
                                                 message: showingPreviousItems ? "No previously loaded items match. Refresh to search the current price book." : (currentCursor == nil ? "Nothing in \(category == "All" ? "the price book" : category.lowercased()) matches that search." : "No loaded items match. Load more items to search the rest."),
@@ -479,7 +506,7 @@ struct WorkspacePriceBookView: View {
                             }
                         }
                     }
-                    .paperCardMargin().padding(.top, 8).padding(.bottom, 100)
+                    .padding(.top, 0).padding(.bottom, 100)
                 }
                 .refreshable { await refresh() }
                 .task(id: localScope) {
@@ -548,7 +575,7 @@ struct WorkspacePriceBookView: View {
                     }
                     itemPrice(item).fixedSize(horizontal: true, vertical: false)
                 }
-                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                .padding(.horizontal, ListRoom.gutter).padding(.vertical, 12)
             } else {
                 PaperListRow(title: PriceBookPresentation.title(item.description), subtitle: unit) {
                     itemPrice(item).fixedSize(horizontal: true, vertical: false)
@@ -569,14 +596,14 @@ struct WorkspacePriceBookView: View {
 
     private func itemTitle(_ item: PriceBookListItem, showFullDescription: Bool) -> some View {
         Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
-            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
             .lineLimit(showFullDescription || dynamicTypeSize.isAccessibilitySize ? nil : 2)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func itemPrice(_ item: PriceBookListItem) -> some View {
         Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-            .font(Theme.amountFont(17)).lineLimit(1).minimumScaleFactor(0.7)
+            .font(Theme.rowAmountFont(15)).lineLimit(1).minimumScaleFactor(0.7)
             .foregroundStyle(Theme.foreground)
     }
 

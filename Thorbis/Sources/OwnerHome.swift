@@ -218,35 +218,29 @@ struct OwnerHomeView: View {
         PaperSection("Today", count: day.isEmpty ? nil : day.count) {
             VStack(alignment: .leading, spacing: 0) {
                 progress(done: counts[.done] ?? 0, total: day.count)
-                WellDivider()
-                if typeSize.isAccessibilitySize {
-                    VStack(spacing: 0) {
-                        ForEach(Array(HomeJobState.allCases.enumerated()), id: \.element) { index, state in
-                            let count = counts[state] ?? 0
-                            NavigationLink(value: PaperRoute.homeList(.jobs(state))) {
-                                PaperListRow(title: state.title) {
-                                    Text("\(count)").font(Theme.font(20, weight: .semibold)).monospacedDigit()
-                                        .foregroundStyle(count == 0 ? Theme.muted : Theme.foreground)
-                                }
+                // v2: not a grid of equal tiles. Each state is a quiet row: its word with its mark,
+                // then the count in a tabular column. Each opens the jobs behind it.
+                VStack(spacing: 0) {
+                    ForEach(HomeJobState.allCases, id: \.self) { state in
+                        let count = counts[state] ?? 0
+                        NavigationLink(value: PaperRoute.homeList(.jobs(state))) {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                StatusLabel(tone: state.tone, word: state.title, emphasis: count == 0 ? .quiet : .strong, size: 15)
+                                Spacer(minLength: 8)
+                                Text("\(count)").font(Theme.monoFont(15, weight: .medium))
+                                    .foregroundStyle(count == 0 ? Theme.muted : Theme.foreground)
                             }
-                            .buttonStyle(RowPressStyle())
-                            .accessibilityLabel("\(state.title), \(count) job\(count == 1 ? "" : "s") today")
-                            if index < HomeJobState.allCases.count - 1 { WellDivider() }
+                            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(state.title), \(count) job\(count == 1 ? "" : "s") today")
+                        .accessibilityHint("Lists them")
                     }
-                } else {
-                    Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                        GridRow {
-                            glanceCell(.scheduled, counts)
-                            glanceCell(.onTheWay, counts)
-                        }
-                        GridRow {
-                            glanceCell(.onSite, counts)
-                            glanceCell(.done, counts)
-                        }
-                    }
-                    .padding(PaperCardMetrics.edge)
                 }
+                .padding(.bottom, 6)
             }
         }
         .accessibilityIdentifier("home-glance")
@@ -257,7 +251,7 @@ struct OwnerHomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(total == 0 ? "No visits booked today" : "\(done) of \(total) done")
-                    .font(Theme.font(17, weight: .semibold)).monospacedDigit()
+                    .font(Theme.font(17, weight: .medium)).monospacedDigit()
                 Spacer(minLength: 8)
                 if total > 0 {
                     Text("\(Int((Double(done) / Double(total) * 100).rounded()))%")
@@ -279,29 +273,6 @@ struct OwnerHomeView: View {
         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("home-progress")
-    }
-
-    private func glanceCell(_ state: HomeJobState, _ counts: [HomeJobState: Int]) -> some View {
-        let count = counts[state] ?? 0
-        return NavigationLink(value: PaperRoute.homeList(.jobs(state))) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("\(count)").font(Theme.font(30, weight: .semibold)).monospacedDigit().tracking(-0.6)
-                    .foregroundStyle(count == 0 ? Theme.muted : Theme.foreground)
-                HStack(spacing: 6) {
-                    StatusMark(tone: state.tone)
-                    Text(state.title).font(Theme.font(13, weight: .medium))
-                        .foregroundStyle(count == 0 ? Theme.muted : state.tone.text)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, PaperCardMetrics.inset - PaperCardMetrics.edge).padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(state.title), \(count) job\(count == 1 ? "" : "s") today")
-        .accessibilityHint("Lists them")
     }
 
     // MARK: Money
@@ -338,14 +309,14 @@ struct OwnerHomeView: View {
                 if loaded && canInvoices {
                     if collected != nil { WellDivider(leading: Self.moneyDivider) }
                     NavigationLink(value: PaperRoute.homeList(.unpaid)) {
-                        moneyRow(symbol: "exclamationmark.circle", tint: unpaid.isEmpty ? Theme.markGrey : Theme.markRed,
+                        moneyRow(symbol: "exclamationmark.circle", tint: unpaid.isEmpty ? Theme.markGrey : Theme.markBurnt,
                                  title: "Unpaid",
                                  subtitle: unpaid.isEmpty ? "Every sent invoice is paid" : "\(unpaid.count) invoice\(unpaid.count == 1 ? "" : "s") with a balance",
                                  amount: owed.isEmpty ? money(0, currency: "USD") : owed.text)
                     }.buttonStyle(RowPressStyle())
                     WellDivider(leading: Self.moneyDivider)
                     NavigationLink(value: PaperRoute.homeList(.invoicedToday)) {
-                        moneyRow(symbol: "doc.plaintext", tint: Theme.markTeal,
+                        moneyRow(symbol: "doc.plaintext", tint: Theme.markOlive,
                                  title: "Invoiced today",
                                  subtitle: issuedToday.isEmpty ? "No invoices sent yet today" : "\(issuedToday.count) invoice\(issuedToday.count == 1 ? "" : "s")",
                                  amount: invoiced.isEmpty ? money(0, currency: "USD") : invoiced.text)
@@ -354,7 +325,7 @@ struct OwnerHomeView: View {
                 if loaded && canEstimates {
                     if canInvoices || collected != nil { WellDivider(leading: Self.moneyDivider) }
                     NavigationLink(value: PaperRoute.homeList(.estimatesWaiting(staleOnly: false))) {
-                        moneyRow(symbol: "doc.text", tint: Theme.markAccent,
+                        moneyRow(symbol: "doc.text", tint: Theme.markPumpkin,
                                  title: "Estimates waiting",
                                  subtitle: sent.isEmpty ? "No estimates out with customers" : "\(sent.count) sent, not answered yet",
                                  amount: waiting.isEmpty ? money(0, currency: "USD") : waiting.text)
@@ -374,7 +345,7 @@ struct OwnerHomeView: View {
         HStack(alignment: .center, spacing: 12) {
             PlaceMark(symbol: symbol, tint: tint)
             PaperListRow(title: title, subtitle: subtitle, subtitleLines: 2) {
-                Text(amount).font(Theme.amountFont(17)).foregroundStyle(Theme.foreground)
+                Text(amount).font(Theme.rowAmountFont(15)).foregroundStyle(Theme.foreground)
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
             .environment(\.paperRowInset, 0)
@@ -416,8 +387,9 @@ struct OwnerHomeView: View {
             VStack(spacing: 0) {
                 if syncProblem, let work {
                     Button { reviewScope = SavedWorkScope.capture(session: session, api: api, media: media, outbox: outbox) } label: {
-                        needRow(title: work.hasListingWarning ? "Saved work needs checking" : "\(work.attentionCount) change\(work.attentionCount == 1 ? "" : "s") did not sync",
-                                subtitle: "Saved on this phone, not on the server yet", action: "Review", tint: Theme.warning)
+                        needRow(word: "Not synced", tone: .inProgress,
+                                title: work.hasListingWarning ? "Saved work needs checking" : "\(work.attentionCount) change\(work.attentionCount == 1 ? "" : "s") did not sync",
+                                subtitle: "Saved on this phone, not on the server yet", action: "Review")
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityIdentifier("home-needs-sync")
@@ -425,19 +397,22 @@ struct OwnerHomeView: View {
                 if !unpaid.isEmpty {
                     let owed = unpaid.reduce(into: HomeAmounts()) { $0.add($1.1, $1.0.currency) }
                     NavigationLink(value: PaperRoute.homeList(.unpaid)) {
-                        needRow(title: "\(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")",
+                        needRow(word: "Unpaid", tone: .attention,
+                                title: "\(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")",
                                 subtitle: "\(owed.text) owed\(oldest(unpaid.first?.0.issuedAt, verb: "issued"))", action: "Review")
                     }.buttonStyle(RowPressStyle())
                 }
                 if !stale.isEmpty {
                     NavigationLink(value: PaperRoute.homeList(.estimatesWaiting(staleOnly: true))) {
-                        needRow(title: "\(stale.count) estimate\(stale.count == 1 ? "" : "s") waiting on the customer",
+                        needRow(word: "Waiting", tone: .scheduled,
+                                title: "\(stale.count) estimate\(stale.count == 1 ? "" : "s") waiting on the customer",
                                 subtitle: "Sent a week or more ago\(oldest(stale.first?.sentAt, verb: "sent"))", action: "Follow up")
                     }.buttonStyle(RowPressStyle())
                 }
                 if !unscheduled.isEmpty {
                     NavigationLink(value: PaperRoute.homeList(.unscheduled)) {
-                        needRow(title: "\(unscheduled.count) job\(unscheduled.count == 1 ? "" : "s") without a time",
+                        needRow(word: "No time", tone: .unscheduled,
+                                title: "\(unscheduled.count) job\(unscheduled.count == 1 ? "" : "s") without a time",
                                 subtitle: "Booked, not on the schedule yet", action: session.can("job.assign", feature: "jobs") ? "Schedule" : "Review")
                     }.buttonStyle(RowPressStyle())
                 }
@@ -457,20 +432,22 @@ struct OwnerHomeView: View {
         .accessibilityIdentifier("home-needs-you")
     }
 
-    /// Something that needs the owner: a red attention glyph (amber for unsynced work on this
-    /// phone), what it is and how old, and the next step as a word.
-    private func needRow(title: String, subtitle: String, action: String, tint: Color? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            StatusGlyph(tone: tint == nil ? .attention : .inProgress, label: title)
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-                .accessibilityHidden(true)
-            PaperListRow(title: title, subtitle: subtitle, subtitleLines: 2) {
-                Text(action).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .fixedSize()
+    /// Something that needs the owner (v2): what it is, then its status word with its mark and how
+    /// old, never a lone mark. The next step is spoken to VoiceOver; the row itself opens it, so the
+    /// view keeps one action (the header's New) instead of a column of equal buttons.
+    private func needRow(word: String, tone: StatusTone, title: String, subtitle: String, action: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                StatusLabel(tone: tone, word: word)
+                Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .environment(\.paperRowInset, 0)
         }
-        .padding(.horizontal, PaperCardMetrics.inset)
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint(action)
