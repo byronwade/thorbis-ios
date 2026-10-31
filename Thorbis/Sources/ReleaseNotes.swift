@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-first-run-states",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "rectangle.and.text.magnifyingglass", title: "Clearer sign-in, empty and error screens",
+                      detail: "Every empty list says what to do next, and every error says what went wrong and how to fix it.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-book-job-board",
             date: "2026-10-31",
             highlights: [

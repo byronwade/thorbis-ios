@@ -135,7 +135,7 @@ struct ThorbisApp: App {
         } else {
             switch session.phase {
             case .restoring:
-                ProgressView("Opening your workspace…")
+                SessionLoadingView(message: session.signingOut ? String(localized: "Signing out…") : String(localized: "Opening your workspace…"))
             case .signedOut, .failed:
                 LoginView()
                     .onAppear { whatsNew.signedInThisLaunch = true }
@@ -400,7 +400,7 @@ final class Store: ObservableObject {
                 self.error = nil
                 return .failed
             } else {
-                self.error = error.localizedDescription
+                self.error = error.plainMessage(subject: "your jobs")
                 return .failed
             }
             return .superseded
@@ -466,40 +466,5 @@ struct PrimaryTabAccess {
         case .customers: "Your role does not allow access to customers."
         case .more, .search: ""
         }
-    }
-}
-
-/// MA-15: errors name the exit. The words stay body colour, only the mark is tinted, and
-/// when the screen can try again it offers one "Try again".
-struct ErrorBanner: View {
-    let message: String
-    var retry: (() async -> Void)? = nil
-    @State private var retrying = false
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
-                .accessibilityHidden(true)
-            Text(message).foregroundStyle(Theme.foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let retry {
-                Button {
-                    Task { retrying = true; await retry(); retrying = false }
-                } label: {
-                    Text("Try again").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 12).frame(minHeight: 32)
-                        .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
-                        .frame(minHeight: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(retrying)
-            }
-        }
-        .font(Theme.font(13))
-        .padding(.horizontal, 12).padding(.vertical, retry == nil ? 12 : 0)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-        .padding(.horizontal, Theme.gutter).padding(.top, 8)
-        .accessibilityElement(children: .contain)
     }
 }

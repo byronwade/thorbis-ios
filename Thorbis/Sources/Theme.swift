@@ -282,35 +282,6 @@ struct RowPressStyle: ButtonStyle {
     }
 }
 
-/// MA-13: the shape of what is coming. Rows the size of the real ones, static (no shimmer),
-/// so Reduce Motion needs nothing different; VoiceOver hears one "Loading" instead.
-struct SkeletonRows: View {
-    var count = 6
-    var leading = true
-    /// Zero when the parent already pads to the gutter.
-    var inset: CGFloat = Theme.gutter
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(0..<count, id: \.self) { index in
-                HStack(spacing: 12) {
-                    if leading { Circle().fill(Theme.fill).frame(width: 22, height: 22) }
-                    VStack(alignment: .leading, spacing: 7) {
-                        Capsule().fill(Theme.fill).frame(width: index.isMultiple(of: 2) ? 190 : 150, height: 12)
-                        Capsule().fill(Theme.fill.opacity(0.7)).frame(width: index.isMultiple(of: 3) ? 120 : 170, height: 10)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(minHeight: 52)
-            }
-        }
-        .padding(.horizontal, inset)
-        .padding(.top, 8)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Loading")
-    }
-}
-
 extension Date {
     /// One way to say when a visit is, used on every list and header: "Today 4:00 PM",
     /// "Tomorrow 9:00 AM", otherwise "Thu, Oct 30, 9:00 AM".
