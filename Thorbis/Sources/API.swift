@@ -87,7 +87,33 @@ final class APIClient: ObservableObject {
     @Published private(set) var requestGeneration = UUID()
     var onUnauthorized: (() -> Void)?
 
-    func invalidateRequests() { requestGeneration = UUID() }
+    func invalidateRequests() {
+        requestGeneration = UUID()
+        recentReads = [:]
+        if !savedCopyPaths.isEmpty { savedCopyPaths = [:] }
+    }
+
+    // MARK: Saved copies and repeat reads (offline + performance pass)
+
+    /// The verified actor and workspace whose saved copies this client reads and writes; nil
+    /// while signed out, which turns saved copies off entirely.
+    var savedCopyScope: String?
+    /// Set while the session knows there is no signal: kept reads answer from the phone at once
+    /// instead of waiting on a request that cannot finish.
+    var knownOffline = false
+    /// Reads whose answer on screen came from this phone, keyed by path, with when it was saved.
+    /// Published only when it changes, so live reads never re-render the app.
+    @Published private(set) var savedCopyPaths: [String: Date] = [:]
+    /// Called when a saved copy answered for lack of signal, so the session can re-check.
+    var onSavedCopyServed: (() -> Void)?
+    func savedCopyDate(_ path: String) -> Date? { savedCopyPaths[path] }
+
+    /// The same GET answered moments ago is reused instead of sent again (switching tabs or
+    /// returning to a screen re-runs its loads). Any change sent to the server clears it.
+    private struct RecentRead { let response: DataResponse; let at: Date; let epoch: Int; let generation: UUID }
+    private var recentReads: [String: RecentRead] = [:]
+    private var mutationEpoch = 0
+    private static let recentReadWindow: TimeInterval = 10
 
     func clearSessionCookies() {
         guard let origin = Self.validatedOrigin(baseURL)?.url,
@@ -364,6 +390,35 @@ final class APIClient: ObservableObject {
         var req = URLRequest(url: url, cachePolicy: requireFresh ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
         if requireFresh { req.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
         req.httpMethod = method
+        let isGET = method.uppercased() == "GET"
+        if !isGET, !["HEAD", "OPTIONS"].contains(method.uppercased()) {
+            // Anything sent to the server may change what a read returns.
+            mutationEpoch += 1
+            recentReads = [:]
+        }
+        let pageQuery = requestQueryItems.filter { $0.name != "cursor" }
+        let isJSONRead = isGET && authed && body == nil && accept == "application/json" && !requireFresh
+        let readKey = isJSONRead ? SavedCopies.key(origin: requestOrigin, path: path, query: requestQueryItems) : nil
+        let epoch = mutationEpoch
+        if let readKey, !SavedCopies.liveOnly, let recent = recentReads[readKey], recent.epoch == epoch,
+           recent.generation == generation, Date().timeIntervalSince(recent.at) < Self.recentReadWindow {
+            PerfProbe.request(method, path, note: "reused")
+            return recent.response
+        }
+        let copyScope = savedCopyScope
+        let keptKey = isJSONRead && copyScope != nil && SavedCopies.isKept(path, query: pageQuery) ? readKey : nil
+        func savedCopy() -> DataResponse? {
+            guard let copyScope, let keptKey, generation == requestGeneration, savedCopyScope == copyScope,
+                  let copy = SavedCopyStore.shared.read(scope: copyScope, key: keptKey) else { return nil }
+            if savedCopyPaths[path] != copy.savedAt { savedCopyPaths[path] = copy.savedAt }
+            PerfProbe.request(method, path, note: "saved copy")
+            return DataResponse(data: copy.data, status: 200, contentType: "application/json")
+        }
+        if keptKey != nil, knownOffline, !SavedCopies.liveOnly, let copy = savedCopy() { return copy }
+        if let copyScope, let keptKey, SavedCopyStore.shared.exists(scope: copyScope, key: keptKey) {
+            // A weak signal should not hold the screen for a minute when a copy is on the phone.
+            req.timeoutInterval = 15
+        }
         req.httpShouldHandleCookies = handleCookies
         req.setValue(accept, forHTTPHeaderField: "accept")
         // URLSession does not supply the browser Origin required for cookie-backed mutations.
@@ -381,6 +436,7 @@ final class APIClient: ObservableObject {
             req.setValue(roles, forHTTPHeaderField: "x-thorbis-roles")
         }
         #endif
+        PerfProbe.request(method, path)
         let (data, resp): (Data, URLResponse)
         do { (data, resp) = try await session.data(for: req) }
         catch is CancellationError { throw CancellationError() }
@@ -388,8 +444,14 @@ final class APIClient: ObservableObject {
         catch {
             let offline: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost,
                                                .cannotConnectToHost, .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff]
+            if let urlError = error as? URLError, offline.contains(urlError.code), keptKey != nil, let copy = savedCopy() {
+                onSavedCopyServed?()
+                return copy
+            }
+            // A change says plainly that it needs signal; changes that can wait are kept by their
+            // screens (FieldOutbox, PendingMediaStore) before this message is ever shown.
             let detail = (error as? URLError).map { offline.contains($0.code) } == true
-                ? "No connection. Check your signal and try again."
+                ? (isGET ? "No connection. Check your signal and try again." : "This needs a connection. Try again when you have signal.")
                 : error.localizedDescription
             throw Problem(title: "Network error", status: nil, detail: detail)
         }
@@ -408,7 +470,17 @@ final class APIClient: ObservableObject {
             }
             throw Problem(title: "HTTP \(code)", status: code, detail: nil)
         }
-        return DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"))
+        let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"))
+        if let readKey, mutationEpoch == epoch {
+            recentReads[readKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
+            if recentReads.count > 200 { recentReads = recentReads.filter { Date().timeIntervalSince($0.value.at) < Self.recentReadWindow } }
+        }
+        if savedCopyPaths[path] != nil { savedCopyPaths[path] = nil }
+        if let copyScope, let keptKey, savedCopyScope == copyScope, code == 200,
+           response.contentType?.lowercased().hasPrefix("application/json") != false {
+            SavedCopyStore.shared.write(data, scope: copyScope, key: keptKey)
+        }
+        return response
     }
 }
 
@@ -421,9 +493,7 @@ extension String {
 }
 
 func relativeDay(_ iso: String?) -> String {
-    guard let iso else { return "" }
-    let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    guard let d = f.date(from: iso) else { return "" }
+    guard let iso, let d = JobFiltering.isoFractional.date(from: iso) else { return "" }
     let r = RelativeDateTimeFormatter(); r.unitsStyle = .short
     return r.localizedString(for: d, relativeTo: Date())
 }

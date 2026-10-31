@@ -11,6 +11,7 @@ struct SignatureCaptureSheet: View {
     /// Runs the approval or authorization with the uploaded signature; returns an error message on failure.
     let submit: (FieldSignatureInput) async -> String?
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var strokes: [[CGPoint]] = []
@@ -23,12 +24,15 @@ struct SignatureCaptureSheet: View {
     private var hasInk: Bool { SignatureInk.hasInk(strokes) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var blockedReason: String? {
+        // A signature authorizes charges or approves work, so it is never kept to send later:
+        // say so before the customer signs, not after.
+        if session.isOffline { return "Signing needs a connection. The customer can sign once you have signal." }
         if trimmedName.isEmpty { return "Add the customer's name to continue." }
         if trimmedName.count > 120 { return "Shorten the name to 120 characters." }
         if !hasInk { return "Have the customer sign above the line." }
         return nil
     }
-    private var canSubmit: Bool { hasInk && !trimmedName.isEmpty && trimmedName.count <= 120 && !busy }
+    private var canSubmit: Bool { hasInk && !trimmedName.isEmpty && trimmedName.count <= 120 && !busy && !session.isOffline }
 
     var body: some View {
         NavigationStack {

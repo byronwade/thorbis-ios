@@ -121,7 +121,11 @@ struct SavedWorkSnapshot: Equatable {
             case .rejected(let reason): .rejected(reason)
             case .held: .held
             }
-            let symbol: String = if case .note = entry.action { "note.text" } else { "arrow.triangle.2.circlepath" }
+            let symbol: String = switch entry.action {
+            case .note: "note.text"
+            case .followUp: "bell"
+            case .progress: "arrow.triangle.2.circlepath"
+            }
             rowsByJob[entry.jobID, default: []].append(.init(id: "command:\(entry.id)", originalID: entry.id,
                 title: entry.summary, date: entry.createdAt, state: state, isMedia: false, symbol: symbol))
         }

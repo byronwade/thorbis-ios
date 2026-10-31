@@ -484,15 +484,46 @@ struct RootView: View {
             await store.refresh(api)
             #if DEBUG
             guard PaperPreview.enabled else { return }
+            if ProcessInfo.processInfo.arguments.contains("--perf-tab-cycle") {
+                // Scripted tab switching for the request-count measurement (PerfProbe).
+                for tab in [PrimaryTab.customers, .schedule, .customers, .schedule, .customers] {
+                    try? await Task.sleep(for: .seconds(2))
+                    print("[perf] tab -> \(tab.rawValue)")
+                    primaryTab = tab
+                }
+                return
+            }
             if PaperPreview.screen == "new-estimate" { previewNewEstimate = true; return }
-            if PaperPreview.screen == "offline" || PaperPreview.screen == "offline-job" {
+            if PaperPreview.screen == "offline" || PaperPreview.screen.hasPrefix("offline-") {
+                // The day was opened with signal: let today's read-ahead finish, then lose signal.
+                await DayPrefetch.shared.waitUntilIdle()
+                // Forget reads from moments ago, as if the tech walked into the basement later.
+                api.invalidateRequests()
                 PaperPreviewProtocol.simulateNoSignal = true
                 await session.revalidate()
                 outbox.enqueue(.progress(.init(jobId: PaperPreview.jobID, to: "en_route", etaMinutes: 15)), policyVersion: session.policyVersion ?? 1)
                 outbox.enqueue(.note(.init(jobId: PaperPreview.jobID, body: "Gate code 4417 — dog in the back yard.")), policyVersion: session.policyVersion ?? 1)
-                if PaperPreview.screen == "offline-job", let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
+                let job = store.jobs.first(where: { $0.id == PaperPreview.jobID })
+                switch PaperPreview.screen {
+                case "offline-job", "offline-job-money":
+                    if let job { primaryTab = .jobs; jobsPath.append(job) }
+                case "offline-followups":
+                    outbox.enqueue(.followUp(.init(jobId: PaperPreview.jobID, kind: FieldFollowUpRequest.Kind.notifyOffice.rawValue,
+                                                   reason: "Compressor on order, customer away until Friday",
+                                                   nextAction: "Call the customer to book the fit")), policyVersion: session.policyVersion ?? 1)
                     primaryTab = .jobs
-                    jobsPath.append(job)
+                    jobsPath.append(PaperRoute.followUps(jobID: PaperPreview.jobID))
+                case "offline-estimate":
+                    primaryTab = .jobs; jobsPath.append(PaperRoute.estimate(PaperPreview.estimate.id))
+                case "offline-invoice":
+                    primaryTab = .jobs; jobsPath.append(PaperRoute.invoice(PaperPreview.invoice.id))
+                case "offline-customer":
+                    if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
+                        primaryTab = .customers
+                        customersPath.append(customer)
+                    }
+                case "offline-customers": primaryTab = .customers
+                default: break
                 }
                 return
             }

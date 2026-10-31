@@ -82,7 +82,7 @@ extension APIClient {
         let generation = requestGeneration
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard let number = expected.currentRevisionNumber, number > 0 else { throw customerReviewUnavailable() }
-        let current = try await fieldEstimate(expected.id)
+        let current = try await liveFieldEstimate(expected.id)
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard current.id == expected.id, current.organizationId == expected.organizationId,
               current.customerId == expected.customerId, current.locationId == expected.locationId,

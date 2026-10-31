@@ -603,10 +603,13 @@ struct JobFollowUpsView: View {
     }
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @State private var records: [FieldFollowUpRecord] = []
     @State private var loading = true
     @State private var busy = false
     @State private var error: String?
+    /// Said after a follow-up was kept on the phone for lack of signal.
+    @State private var savedNote: String?
     @State private var reason = ""
     @State private var nextAction = ""
     @State private var kind: FieldFollowUpRequest.Kind = .notifyOffice
@@ -615,9 +618,32 @@ struct JobFollowUpsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                OfflineBanner().padding(.horizontal, -Theme.gutter)
                 Text("Follow-ups").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
                 if let error { ErrorBanner(message: error, retry: records.isEmpty ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
+                if let savedNote {
+                    Text(savedNote).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.bottom, 10)
+                }
+                let waiting = outbox.pendingFollowUps(for: jobID)
+                if !waiting.isEmpty {
+                    PaperSection("Waiting to send", count: waiting.count) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(waiting) { entry in
+                                if case .followUp(let payload) = entry.action {
+                                    PaperListRow(title: payload.reason, subtitle: "Next: \(payload.nextAction)",
+                                                 meta: entry.summary, subtitleLines: 3) {
+                                        StatusWord(text: entry.state == .pending ? "Saved on this phone" : "Needs review",
+                                                   tint: entry.state == .pending ? Theme.muted : Theme.warning)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
+                    }
+                    .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
+                    .padding(.bottom, 14)
+                }
                 if loading && records.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 // design 2026-10-30: follow-ups as rows on one panel, the state as a word; Book the
                 // return visit and Resolve moved into each row's ••• menu.
@@ -713,12 +739,32 @@ struct JobFollowUpsView: View {
     private func create() async {
         busy = true
         defer { busy = false }
+        savedNote = nil
+        let payload = OutboxEntry.FollowUpPayload(jobId: jobID, kind: kind.rawValue,
+                                                  reason: reason.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                  nextAction: nextAction.trimmingCharacters(in: .whitespacesAndNewlines))
+        // No signal: keep it on the phone; it is sent in order when signal returns (FieldOutbox).
+        func keep(attempted: Bool) {
+            guard outbox.enqueue(.followUp(payload), policyVersion: session.policyVersion ?? 0, attempted: attempted) != nil else {
+                error = "This follow-up couldn't be saved on this phone. Try again when you have signal."
+                return
+            }
+            reason = ""
+            nextAction = ""
+            error = nil
+            savedNote = "Saved on this phone · sends to the office when you’re back online."
+        }
+        if session.isOffline { keep(attempted: false); return }
         do {
-            _ = try await api.requestFieldFollowUp(jobID, request: .init(kind: kind, reason: reason.trimmingCharacters(in: .whitespacesAndNewlines), nextAction: nextAction.trimmingCharacters(in: .whitespacesAndNewlines)))
+            _ = try await api.requestFieldFollowUp(jobID, request: .init(kind: kind, reason: payload.reason, nextAction: payload.nextAction))
             reason = ""
             nextAction = ""
             await load()
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {} catch {
+            // The request may have reached the server before the signal dropped, so the resend
+            // checks the job's follow-ups first.
+            if error.isConnectivityFailure { keep(attempted: true) } else { self.error = error.localizedDescription }
+        }
     }
     private func resolve(_ id: String) async {
         busy = true

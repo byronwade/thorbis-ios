@@ -460,7 +460,7 @@ struct InvoiceLineEditorView: View {
         busy = true
         defer { busy = false }
         do {
-            let current = try await api.fieldInvoice(invoice.id)
+            let current = try await api.liveFieldInvoice(invoice.id)
             addedLineSelection = nil
             editor = InvoiceLineEditorState(invoice: current)
             staleRevision = false

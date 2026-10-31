@@ -7,6 +7,10 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     enum Action: Codable, Equatable {
         case progress(ProgressPayload)
         case note(NotePayload)
+        /// A follow-up for the office (`POST /v1/jobs/{id}/followups`). That route takes no
+        /// idempotency key and the command endpoint has no such command, so it is sent through
+        /// REST only, and any resend first checks the job's follow-ups for one already made.
+        case followUp(FollowUpPayload)
     }
 
     /// `jobs.progress` input (domains/jobs progressJobInputSchema, a strict object).
@@ -22,6 +26,14 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     struct NotePayload: Codable, Equatable {
         let jobId: String
         let body: String
+    }
+
+    /// `POST /v1/jobs/{id}/followups` input (FieldFollowUpRequest), kind as its wire value.
+    struct FollowUpPayload: Codable, Equatable {
+        let jobId: String
+        let kind: String
+        let reason: String
+        let nextAction: String
     }
 
     enum State: Codable, Equatable {
@@ -43,11 +55,15 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     /// Set when the command endpoint answered policy_superseded: the change is resent
     /// through the REST route, which authorizes against current policy itself.
     var restOnly: Bool? = nil
+    /// Set before a send that may have reached the server without an answer; the next send of
+    /// a follow-up then checks the server first, since that route cannot dedupe on its own.
+    var attempted: Bool? = nil
 
     var jobID: String {
         switch action {
         case .progress(let payload): payload.jobId
         case .note(let payload): payload.jobId
+        case .followUp(let payload): payload.jobId
         }
     }
 
@@ -55,6 +71,8 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         switch action {
         case .progress: "jobs.progress"
         case .note: "jobs.addNote"
+        // Never sent to /v1/commands (restOnly); named for the review list only.
+        case .followUp: "jobs.requestFollowUp"
         }
     }
 
@@ -68,6 +86,8 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
             default: "Status → \(payload.to.statusLabel)"
             }
         case .note: "Note"
+        case .followUp(let payload): payload.kind == FieldFollowUpRequest.Kind.officeScheduling.rawValue
+            ? "Follow-up for scheduling" : "Notify office"
         }
     }
 }
@@ -193,11 +213,15 @@ final class FieldOutbox: ObservableObject {
     }
 
     @discardableResult
-    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int) -> OutboxEntry? {
+    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, attempted: Bool = false) -> OutboxEntry? {
         guard let identity else { return nil }
-        let entry = OutboxEntry(id: UUID().uuidString.lowercased(), deviceId: deviceID, actorId: identity.actorID,
+        var entry = OutboxEntry(id: UUID().uuidString.lowercased(), deviceId: deviceID, actorId: identity.actorID,
                                 organizationId: identity.organizationID, policyVersion: policyVersion,
                                 createdAt: Date(), action: action)
+        if case .followUp = action {
+            entry.restOnly = true
+            entry.attempted = attempted ? true : nil
+        }
         entries.append(entry)
         persist()
         return entry
@@ -294,6 +318,7 @@ final class FieldOutbox: ObservableObject {
                 switch action {
                 case .progress(let payload): try payload.encode(to: encoder)
                 case .note(let payload): try payload.encode(to: encoder)
+                case .followUp(let payload): try payload.encode(to: encoder)
                 }
             }
         }
@@ -364,6 +389,26 @@ final class FieldOutbox: ObservableObject {
                     _ = try await api.progressFieldJob(payload.jobId, request: request)
                 case .note(let payload):
                     _ = try await api.addFieldNote(payload.jobId, body: payload.body)
+                case .followUp(let payload):
+                    if entry.attempted == true {
+                        let earlier = await followUpExists(payload, since: entry.createdAt, actorID: entry.actorId, api: api)
+                        guard current() else { return sent }
+                        // Unknown (no live answer): keep it queued rather than risk sending it twice.
+                        guard let earlier else { return sent }
+                        if earlier { break } // An earlier send reached the server; it is done.
+                    }
+                    guard current() else { return sent }
+                    if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                        entries[index].attempted = true
+                        persist()
+                    }
+                    guard let kind = FieldFollowUpRequest.Kind(rawValue: payload.kind) else {
+                        reject(entry.id, reason: "This follow-up type is not supported.")
+                        persist()
+                        continue
+                    }
+                    _ = try await api.requestFieldFollowUp(payload.jobId, request: .init(kind: kind, reason: payload.reason,
+                                                                                       nextAction: payload.nextAction))
                 }
                 guard current() else { return sent }
                 entries.removeAll { $0.id == entry.id }
@@ -390,6 +435,24 @@ final class FieldOutbox: ObservableObject {
             }
         }
         return sent
+    }
+
+    /// Whether the job already has this follow-up from this person, made around or after it was
+    /// queued (ten minutes of slack for the phone's clock). Nil when there is no live answer:
+    /// a failed read, or one answered by the copy saved on this phone.
+    private func followUpExists(_ payload: OutboxEntry.FollowUpPayload, since queued: Date, actorID: String, api: APIClient) async -> Bool? {
+        guard let records = try? await SavedCopies.$liveOnly.withValue(true, operation: { try await api.fieldFollowUps(payload.jobId) }),
+              api.savedCopyDate("/v1/jobs/\(payload.jobId)/followups") == nil
+        else { return nil }
+        let earliest = queued.addingTimeInterval(-600)
+        return records.contains { record in
+            record.kind == payload.kind && record.reason == payload.reason && record.nextAction == payload.nextAction &&
+                record.createdByUserId == actorID && (JobFiltering.date(record.createdAt).map { $0 >= earliest } ?? true)
+        }
+    }
+
+    func pendingFollowUps(for jobID: String) -> [OutboxEntry] {
+        entries.filter { $0.jobID == jobID && { if case .followUp = $0.action { true } else { false } }($0) }
     }
 
     #if DEBUG

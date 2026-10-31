@@ -11,7 +11,9 @@ final class ConnectivityMonitor: ObservableObject {
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
             let connected = path.status == .satisfied
+            let constrained = path.isConstrained
             Task { @MainActor in
+                DayPrefetch.shared.constrained = constrained
                 guard let self, self.isConnected != connected else { return }
                 self.isConnected = connected
                 if connected { self.onReconnect?() }

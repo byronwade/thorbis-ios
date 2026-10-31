@@ -368,7 +368,7 @@ struct JobCustomerDocumentsView: View {
         defer { openingID = nil }
         let generation = session.generation
         do {
-            let invoice = try await api.fieldInvoice(id)
+            let invoice = try await api.liveFieldInvoice(id)
             guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
             guard invoice.id == id, scope.contains(invoice) else {
                 throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)

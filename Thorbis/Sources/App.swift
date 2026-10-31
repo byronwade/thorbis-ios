@@ -16,6 +16,7 @@ struct ThorbisApp: App {
     @StateObject private var menuLayout = MenuLayout()
     @StateObject private var whatsNew: WhatsNew
     @State private var publicEstimateToken: String?
+    @State private var lastSavedCopyCheck = Date.distantPast
     @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
 
     init() {
@@ -42,12 +43,16 @@ struct ThorbisApp: App {
             return try await Store.fetchAuthorized(api: api, session: session)
         }
         session.onInvalidate = { [weak store, weak pendingMedia] in
+            DayPrefetch.shared.cancel()
             store?.invalidate()
             pendingMedia?.bind(nil)
             JobLiveActivity.retire()
         }
         session.onJobAuthorityRevoked = { JobLiveActivity.retire() }
-        session.onSignedOut = { [weak store, weak outbox, weak pendingMedia] in
+        session.onSignedOut = { [weak store, weak outbox, weak pendingMedia, weak api] in
+            DayPrefetch.shared.cancel()
+            api?.savedCopyScope = nil
+            SavedCopyStore.shared.clearAll()
             store?.cache.clearAll()
             outbox?.clearAll()
             pendingMedia?.clearAll()
@@ -65,6 +70,14 @@ struct ThorbisApp: App {
                 inboxBoard?.clear()
             }
             store?.bindCache(actorID: actorID, organizationID: organizationID)
+            if let actorID, let organizationID {
+                let scope = SavedCopies.scope(actorID: actorID, organizationID: organizationID)
+                if api?.savedCopyScope != scope { SavedCopyStore.shared.prune(scope: scope) }
+                api?.savedCopyScope = scope
+            } else {
+                DayPrefetch.shared.cancel()
+                api?.savedCopyScope = nil
+            }
             PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
             if let actorID, let organizationID, let origin = api?.normalizedOrigin {
@@ -75,8 +88,9 @@ struct ThorbisApp: App {
                 SpotlightIndex.shared.bind(actorID: actorID, organizationID: organizationID)
             }
         }
-        store.onRefreshed = { [weak session] jobs, customers in
+        store.onRefreshed = { [weak session, weak api] jobs, customers in
             guard let session, session.phase == .ready else { return }
+            if let api { DayPrefetch.shared.start(jobs: jobs, api: api, session: session) }
             SpotlightIndex.shared.replace(jobs: jobs, customers: customers,
                                           includeJobs: session.can("job.view", feature: "jobs"),
                                           includeCustomers: session.can("customer.view", feature: "core_crm"))
@@ -94,6 +108,7 @@ struct ThorbisApp: App {
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
         #if DEBUG
+        PerfProbe.runDateBenchmark()
         _whatsNew = StateObject(wrappedValue: PaperPreview.enabled ? WhatsNew(defaults: PaperPreview.defaults()) : WhatsNew())
         #else
         _whatsNew = StateObject(wrappedValue: WhatsNew())
@@ -183,6 +198,13 @@ struct ThorbisApp: App {
             #endif
             .task {
                 connectivity.onReconnect = { Task { await resync() } }
+                api.onSavedCopyServed = {
+                    // A read fell back to the phone's copy: let the session confirm it is offline,
+                    // so the banner says so. At most once a minute.
+                    guard !session.isOffline, Date().timeIntervalSince(lastSavedCopyCheck) > 60 else { return }
+                    lastSavedCopyCheck = Date()
+                    Task { await session.revalidate() }
+                }
                 store.onServerReached = {
                     // Any answer from the server (including pull to refresh) ends offline mode.
                     guard session.isOffline else { return }
@@ -191,6 +213,8 @@ struct ThorbisApp: App {
                 await session.restore()
             }
             .task(id: session.isOffline) {
+                // Kept reads answer from the phone at once while the session knows it is offline.
+                api.knownOffline = session.isOffline
                 // While offline, keep checking with backoff in case no network event fires
                 // (captive Wi-Fi, a server outage, a cellular hand-off).
                 var delay: UInt64 = 15
@@ -305,11 +329,10 @@ final class Store: ObservableObject {
         // assigned job, so fill in the names their jobs need one by one.
         if session.can("customer.view", feature: "core_crm") {
             let known = Set(customers.map(\.id))
-            let missing = Array(Set(jobs.compactMap(\.customerId)).subtracting(known)).sorted().prefix(40)
-            for id in missing {
-                guard let record = try? await api.fieldCustomer(id) else { continue }
-                customers.append(Customer(id: record.id, name: record.name, archived: nil, createdAt: nil))
-            }
+            let missing = Array(Array(Set(jobs.compactMap(\.customerId)).subtracting(known)).sorted().prefix(40))
+            // Six at a time instead of one after another: up to 40 round trips on every refresh.
+            let found = await api.customerNames(missing)
+            customers += missing.compactMap { found[$0] }
             guard session.generation == identity, session.phase == .ready else { throw CancellationError() }
         }
         return (jobs, customers)
@@ -349,7 +372,10 @@ final class Store: ObservableObject {
         loading = true
         defer { if refreshID == requestID { loading = false } }
         do {
-            let (newJobs, newCustomers) = try await fetch(api)
+            // The schedule's own refresh always asks the server (never a read from moments ago).
+            let (newJobs, newCustomers) = try await PerfProbe.measure("store-refresh") {
+                try await SavedCopies.$liveOnly.withValue(true) { try await fetch(api) }
+            }
             guard generation == currentGeneration, refreshID == requestID else { return .superseded }
             jobs = newJobs
             customers = newCustomers

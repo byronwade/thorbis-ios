@@ -98,6 +98,8 @@ struct EstimateDetailView: View {
     private var scrollContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                OfflineBanner().padding(.horizontal, -Theme.gutter)
+                SavedCopyNote(savedAt: api.savedCopyDate("/v1/estimates/\(id)")).padding(.horizontal, -Theme.gutter)
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
                     let currency = record.lines.first?.unitPrice.currency ?? record.options?.first?.currency ?? "USD"
@@ -209,7 +211,7 @@ struct EstimateDetailView: View {
             }
         }
         .task { await loadAndMaybePresent() }
-        .refreshable { await load() }
+        .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
         .fullScreenCover(isPresented: $showToCustomer) {
             if let record { customerMode(record) }
         }
@@ -429,6 +431,8 @@ struct InvoiceDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                OfflineBanner().padding(.horizontal, -Theme.gutter)
+                SavedCopyNote(savedAt: api.savedCopyDate("/v1/invoices/\(id)")).padding(.horizontal, -Theme.gutter)
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
                     // Who it's for and what's owed come first; the line revision is bookkeeping, not for people.
@@ -577,7 +581,7 @@ struct InvoiceDetailView: View {
             }
             #endif
         }
-        .refreshable { await load() }
+        .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
     }
     /// On a job, the invoice opens in that job's Customer view, with its payments and balance beside
     /// the job's other documents. Without a verified job it stays a single document.

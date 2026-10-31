@@ -140,6 +140,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
             guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+            // A copy saved on this phone can be read, never collected on: payments wait for a live read.
+            if api.savedCopyDate("/v1/invoices/\(invoiceID)") != nil {
+                loadError = "Saved on this phone. Payments need a connection."
+                return
+            }
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
@@ -1318,7 +1323,7 @@ private func paymentDetail(_ label: String, _ value: String) -> some View {
 }
 
 private func paymentDate(_ value: String) -> String {
-    guard let date = ISO8601DateFormatter().date(from: value) else { return value }
+    guard let date = JobFiltering.date(value) else { return value }
     return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
 }
 
