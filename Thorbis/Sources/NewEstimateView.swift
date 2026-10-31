@@ -23,6 +23,7 @@ struct NewEstimateView: View {
     @FocusState private var focus: EstimateBuilderFocus?
     /// Set once the server created the estimate, so a retry only links it and never creates a duplicate.
     @State private var created: EstimateRecord?
+    @State private var memberPricing: MemberPricing?
     private let jobID: String?
     private let onCreated: (EstimateRecord) -> Void
 
@@ -56,7 +57,7 @@ struct NewEstimateView: View {
                         quantityInCurrentDraft: { id in
                             (addGroup.map { lines.lines(in: $0) } ?? lines).quantity(ofPriceBookItem: id)
                         },
-                        secondaryPriceText: { _ in nil }, addItem: add, addCustomLine: addCustom, retry: { Task { await refreshCatalog(force: true) } }
+                        secondaryPriceText: { memberPricing?.secondaryPriceText($0) }, addItem: add, addCustomLine: addCustom, retry: { Task { await refreshCatalog(force: true) } }
                     )
                 } else {
                     builder
@@ -91,6 +92,12 @@ struct NewEstimateView: View {
                     }
                     if !searching {
                         EstimateBuilderTotal(total: total)
+                        if let memberLine {
+                            Text(memberLine).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.subtle)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .padding(.horizontal, Theme.gutter).padding(.top, 2)
+                                .background(Theme.background)
+                        }
                         PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
                                        disabled: !valid || !session.can("estimate.create", feature: "estimates")) { Task { await save() } }
                     }
@@ -99,12 +106,32 @@ struct NewEstimateView: View {
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
+            .task(id: customerID) {
+                memberPricing = nil
+                guard !customerID.isEmpty else { return }
+                let expected = customerID
+                let pricing = try? await api.memberPricing(customerID)
+                guard !Task.isCancelled, customerID == expected else { return }
+                memberPricing = pricing
+            }
             .task {
                 guard lines.isEmpty else { return }
                 try? await Task.sleep(for: .milliseconds(450))
                 if lines.isEmpty, !customerID.isEmpty { focus = .search }
             }
         }
+    }
+
+    /// MF-05: what a member would pay, under the total. The saved prices stay the price book's.
+    private var memberLine: String? {
+        guard let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0, !lines.isEmpty else { return nil }
+        var sum = 0
+        for line in lines {
+            guard let cents = EstimateRevisionEditorState.parsePrice(line.unitPrice),
+                  let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+            sum += quantity * memberPricing.memberPrice(cents)
+        }
+        return "Member price \(money(sum, currency: "USD")) · \(memberPricing.discountPercent)% off"
     }
 
     private var commitTitle: String {

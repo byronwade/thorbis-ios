@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "customer-jobs", "customer-money"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -136,6 +136,8 @@ enum PaperPreview {
     static var isEmptyPropertyHistoryPreview: Bool { enabled && screen == "job-history-empty" }
     static let homeLocationID = "00000000-0000-4000-8000-000000007001"
     static var isWorkingJobPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-working-job") }
+    /// `job`, `job-onsite`, `job-activity`: the redesigned job screen, at its Home site with photos.
+    static var isJobScreenPreview: Bool { enabled && ["job", "job-onsite", "job-activity"].contains(screen) }
     static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview }
     static var paymentLinkPreview: FieldInvoicePayLink? {
         let args = ProcessInfo.processInfo.arguments
@@ -173,9 +175,15 @@ enum PaperPreview {
             FieldEstimateOption(id: String(format: "00000000-0000-4000-8000-0000000094%02d", id), title: title, description: text, lines: lines,
                                 totalAmount: paperLinesTotal(lines) ?? 0, currency: "USD")
         }
-        let repair = [line(1, "Run capacitor, 45/5 µF", 1, 14_500), line(2, "Coil cleaning", 2, 12_000), line(3, "Labor, licensed technician", 1, 9_500)]
-        let better = repair + [line(4, "Surge protector, installed", 1, 39_500), line(5, "One-year parts warranty", 1, 151_000)]
-        let replace = [line(6, "3-ton high-efficiency condenser", 1, 690_000), line(7, "Installation and haul-away", 1, 220_000), line(8, "Ten-year warranty registration", 1, 75_000)]
+        // Each line is one description of up to 200 characters, written the way a tech explains it.
+        let repair = [line(1, "Run capacitor, 45/5 µF. The part that helps the compressor and fan start. Yours tested well below its rating.", 1, 14_500),
+                      line(2, "Coil cleaning. Clean the outdoor and indoor coils so the system moves heat efficiently.", 2, 12_000),
+                      line(3, "Labor, licensed technician. Install, test and clean up, with a one-year labor warranty.", 1, 9_500)]
+        let better = repair + [line(4, "Surge protector, installed at the outdoor disconnect so a power spike can't take out the new parts.", 1, 39_500),
+                               line(5, "One-year parts warranty on everything in this visit.", 1, 151_000)]
+        let replace = [line(6, "3-ton high-efficiency condenser matched to your existing furnace and coil.", 1, 690_000),
+                       line(7, "Installation and haul-away of the old unit, permit and an efficiency check after install.", 1, 220_000),
+                       line(8, "Ten-year warranty registration with the manufacturer.", 1, 75_000)]
         return EstimateRecord(id: estimate.id, organizationId: estimate.organizationId, customerId: customerID, createdByUserId: estimate.createdByUserId,
                               locationId: nil, status: "sent", currentRevisionNumber: 2, title: "AC not cooling", lines: [],
                               options: [option(1, "Repair", "Replace the failed capacitor and clean the coil.", repair),
@@ -678,7 +686,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "facts": ["noteCount": 0, "photoCount": 2, "acknowledgedCheckKeys": [], "authorizationTarget": target],
                     "acknowledged": [], "requirements": [photos, notes], "unmet": [notes], "completable": false]
         }
-        if PaperPreview.screen.hasPrefix("present-estimate") {
+        if PaperPreview.screen.hasPrefix("present-estimate") || PaperPreview.screen == "estimate-detail" {
             let record = PaperPreview.optionsEstimate
             if path == "/v1/estimates/\(record.id)" { return jsonObject(record) }
             if path == "/v1/estimates/\(record.id)/revisions/2" {
@@ -926,6 +934,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
+            if PaperPreview.screen == "job-onsite" { capabilities += ["job.complete", "invoice.create"] }
             if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
@@ -1128,6 +1137,21 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 invalid["tags"] = []
                 return ["items": [earlier, invalid, newest]]
             }
+            if path == "/v1/jobs/\(id)/media", PaperPreview.isJobScreenPreview, id == PaperPreview.jobID {
+                // Six photos from this visit: three Before this morning, the rest untagged.
+                let shots: [(String, String, [String])] = [("Outdoor unit", "09:12", ["Before"]), ("Coil", "09:13", ["Before"]),
+                                                            ("Unit tag", "09:14", ["Before"]), ("Capacitor", "10:05", []),
+                                                            ("Breaker panel", "10:20", []), ("Thermostat", "10:41", [])]
+                return ["items": Array(shots.enumerated().map { offset, shot in
+                    let parts = shot.1.split(separator: ":").compactMap { Int($0) }
+                    return ["id": String(format: "00000000-0000-4000-8000-%012d", 9311 + offset), "organizationId": org, "jobId": id,
+                            "uploaderUserId": actor, "kind": "photo", "mime": "image/jpeg", "sizeBytes": 120_000,
+                            "originalFilename": "\(shot.0.lowercased().replacingOccurrences(of: " ", with: "-")).jpg", "contentHash": "preview",
+                            "storageKey": "preview/\(offset).jpg", "uploadState": "stored", "tags": shot.2, "caption": shot.0, "archived": false,
+                            "capturedAt": today(hour: parts[0], minute: parts[1]),
+                            "createdAt": today(hour: parts[0], minute: parts[1]), "updatedAt": now] as [String: Any]
+                }.reversed())]
+            }
             if path == "/v1/jobs/\(id)/photos" || path == "/v1/jobs/\(id)/media" { return ["items": []] }
             if path == "/v1/jobs/\(id)/estimates" { return ["items": []] }
             if path == "/v1/jobs/\(id)/booking-call" {
@@ -1304,7 +1328,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2214", "0412", arguments.contains("--paper-preview-long-job-title")
                 ? "Diagnose the upstairs air conditioner and replace the damaged compressor at the back of the property"
                 : (arguments.contains("--paper-preview-customer-long-job") ? longTitle : "AC not cooling"),
-             PaperPreview.isWorkingJobPreview || PaperPreview.screen == "next-stop-active" ? "in_progress" : "dispatched", 10, 30),
+             PaperPreview.isWorkingJobPreview || PaperPreview.screen == "next-stop-active" || PaperPreview.screen == "job-onsite" ? "in_progress" : "dispatched", 10, 30),
             ("2212", "0413", "Kitchen sink backup — Petrov", "scheduled", 12, 15),
             // Next stop: an earlier visit is finished, so the dispatched 10:30 call leads the day.
             ("2209", "0414", "Water heater install — Chen", PaperPreview.screen.hasPrefix("next-stop") ? "completed" : "in_progress",
@@ -1320,6 +1344,19 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "createdAt": "2026-07-20T12:00:00Z", "updatedAt": today(hour: 9, minute: 0),
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
              "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
+        }
+        if PaperPreview.isJobScreenPreview, let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
+            listed[index]["locationId"] = PaperPreview.homeLocationID
+            if PaperPreview.screen == "job-onsite" {
+                // Arrived 42 minutes ago, working since: the on-site clock reads from these taps.
+                let arrived = Date().addingTimeInterval(-42 * 60)
+                let formatter = ISO8601DateFormatter()
+                listed[index]["dispatchedAt"] = formatter.string(from: arrived.addingTimeInterval(-90 * 60))
+                listed[index]["enRouteAt"] = formatter.string(from: arrived.addingTimeInterval(-24 * 60))
+                listed[index]["arrivedAt"] = formatter.string(from: arrived)
+                listed[index]["startedAt"] = formatter.string(from: arrived.addingTimeInterval(3 * 60))
+                listed[index]["allowedTransitions"] = ["paused"]
+            }
         }
         if PaperPreview.screen == "customer-jobs" { listed += propertyHistoryJobs() }
         if PaperPreview.isPropertyHistoryPreview {

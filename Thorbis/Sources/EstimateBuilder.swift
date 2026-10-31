@@ -605,8 +605,9 @@ struct EstimateBuilderLineRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    // The customer reads this line in full, so it's edited in full: it grows with the text.
                     TextField("Description", text: $line.description, axis: .vertical)
-                        .font(Theme.font(17)).lineLimit(1...4)
+                        .font(Theme.font(17)).lineLimit(1...)
                         .focused(focus, equals: .description(line.id))
                         .accessibilityLabel("Line description")
                     Text(line.lineTotal.map { money($0, currency: "USD") } ?? "—")
@@ -686,6 +687,17 @@ struct EstimateBuilderLineRow: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .accessibilityLabel(label)
+    }
+}
+
+// MARK: - Member pricing
+
+extension MemberPricing {
+    /// "Member $123.00" beside a price book result, as the invoice editor shows it. Informational:
+    /// the line keeps the price book price; the server owns what a member is charged.
+    func secondaryPriceText(_ item: PriceBookListItem) -> String? {
+        guard isMember, discountPercent > 0 else { return nil }
+        return "Member \(money(memberPrice(item.sellPrice.amount), currency: item.sellPrice.currency))"
     }
 }
 

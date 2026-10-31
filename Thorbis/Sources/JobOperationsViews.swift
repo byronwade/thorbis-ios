@@ -1,5 +1,45 @@
 import SwiftUI
 
+/// "Before you close": the server's closeout requirements, then the acknowledgement checks its
+/// policy asks for. One source for the checklist screen and the job's on-site panel, so their
+/// "x of y" always agree. Nothing here invents a requirement.
+struct CloseoutChecklistItem: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let done: Bool
+    /// The requirement's kind ("notes", "photos", ...) or "acknowledgement" for a check.
+    let kind: String
+    /// The server's next action for a blocked requirement, e.g. "add_job_photo".
+    let nextAction: String?
+    /// Set for an acknowledgement check, confirmed on the checklist screen.
+    let checkKey: String?
+}
+
+enum CloseoutChecklist {
+    static func acknowledgementChecks(_ closeout: FieldCloseout) -> [FieldCloseoutCheckDefinition] {
+        closeout.policy.requiredChecks.filter { $0.kind == nil || $0.kind == "acknowledgement" }
+    }
+
+    static func items(_ closeout: FieldCloseout) -> [CloseoutChecklistItem] {
+        let requirements = closeout.requirements.enumerated().map { offset, requirement in
+            CloseoutChecklistItem(id: "requirement-\(offset)-\(requirement.requirement)", title: requirement.detail,
+                                  done: requirement.outcome != "blocked", kind: requirement.kind,
+                                  nextAction: requirement.outcome == "blocked" ? requirement.nextAction : nil, checkKey: nil)
+        }
+        let checks = acknowledgementChecks(closeout).map { check in
+            CloseoutChecklistItem(id: "check-\(check.key)", title: check.label,
+                                  done: closeout.facts.acknowledgedCheckKeys.contains(check.key),
+                                  kind: "acknowledgement", nextAction: nil, checkKey: check.key)
+        }
+        return requirements + checks
+    }
+
+    static func progress(_ closeout: FieldCloseout) -> (done: Int, total: Int) {
+        let all = items(closeout)
+        return (all.filter(\.done).count, all.count)
+    }
+}
+
 struct JobCloseoutView: View {
     let jobID: String
     @EnvironmentObject var api: APIClient
@@ -43,11 +83,10 @@ struct JobCloseoutView: View {
                 .padding(.bottom, 14)
                 if let error { ErrorBanner(message: error, retry: closeout == nil ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
                 if let closeout {
-                    let checks = closeout.policy.requiredChecks.filter { $0.kind == nil || $0.kind == "acknowledgement" }
-                    let done = closeout.requirements.filter { $0.outcome != "blocked" }.count
-                        + checks.filter { closeout.facts.acknowledgedCheckKeys.contains($0.key) }.count
+                    let checks = CloseoutChecklist.acknowledgementChecks(closeout)
+                    let progress = CloseoutChecklist.progress(closeout)
                     PaperGroupHeader(title: "Before you close") {
-                        Text("\(done) of \(closeout.requirements.count + checks.count)").font(Theme.monoFont(12))
+                        Text("\(progress.done) of \(progress.total)").font(Theme.monoFont(12))
                     }
                     ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
                         let step = CloseoutNextStep(requirement)
@@ -563,6 +602,11 @@ struct JobScheduleView: View {
 
 struct JobFollowUpsView: View {
     let jobID: String
+    /// The job screen's Return visit tool opens the form already on "Schedule a return visit".
+    init(jobID: String, initialKind: FieldFollowUpRequest.Kind = .notifyOffice) {
+        self.jobID = jobID
+        _kind = State(initialValue: initialKind)
+    }
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @State private var records: [FieldFollowUpRecord] = []

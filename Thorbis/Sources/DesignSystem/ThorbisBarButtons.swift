@@ -106,6 +106,7 @@ struct ThorbisToolbarItem<Content: View>: ToolbarContent {
 
     private var styled: some View {
         content().buttonStyle(ThorbisBarButtonStyle(prominent: prominent, customerFacing: customerFacing))
+            .fixedSize()
     }
 }
 
@@ -135,6 +136,8 @@ struct ThorbisBarButtonStyle: ButtonStyle {
         configuration.label
             .font(Theme.font(customerFacing ? 17 : 15, weight: prominent ? .semibold : .medium))
             .lineLimit(1)
+            // iOS 26 bars propose a circle-sized width to items; keep the whole word ("Cancel", not "C").
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(prominent ? Theme.onInk : Theme.foreground)
             .padding(.horizontal, 14)
             .frame(minWidth: customerFacing ? 48 : 36, minHeight: customerFacing ? 48 : 36)

@@ -3,6 +3,7 @@ import PhotosUI
 import QuickLook
 import UniformTypeIdentifiers
 import VisionKit
+import AVFoundation
 
 private struct JobMediaReadScope: Hashable {
     let actor: String
@@ -30,8 +31,19 @@ enum JobMediaPageIntegrity {
     }
 }
 
+/// A capture the job screen's toolkit asked for (Photo, Scan, Measure). The media screen opens it
+/// once, as soon as its capture context is ready, then clears the request.
+enum JobMediaLaunch: Equatable {
+    /// The camera, filing the photo under this stage ("Before", "After") when given.
+    case camera(stage: String?)
+    case scan
+    case measure
+}
+
 struct JobMediaView: View {
     let jobID: String
+    /// One-shot capture request from the job screen; nil leaves the screen as it opens today.
+    var launch: Binding<JobMediaLaunch?> = .constant(nil)
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var pendingMedia: PendingMediaStore
@@ -74,6 +86,9 @@ struct JobMediaView: View {
     /// The bounded JPEG just saved from the camera or library, offered for markup.
     @State private var justCaptured: PhotoMarkupTarget?
     @State private var showMeasure = false
+    /// A short clip (60 s at most) recorded with the system camera, filed under Documents.
+    @State private var showVideo = false
+    @State private var videoNotice: String?
     /// Paper 21C: the stage a new photo is filed under (server tags "Before" / "After").
     @State private var stage = "Before"
     @State private var filter = "All"
@@ -244,7 +259,7 @@ struct JobMediaView: View {
                     }
                     ForEach(waiting) { photo in
                         HStack(spacing: 12) {
-                            Image(systemName: pendingMedia.errors[photo.id] != nil ? "exclamationmark.triangle" : photo.kind == "document" ? "doc" : "clock.arrow.circlepath").foregroundStyle(Theme.warning)
+                            Image(systemName: pendingMedia.errors[photo.id] != nil ? "exclamationmark.triangle" : photo.kind == "document" ? "doc" : photo.kind == "video" ? "video" : "clock.arrow.circlepath").foregroundStyle(Theme.warning)
                                 .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(photo.title).font(Theme.font(15, weight: .medium))
@@ -262,7 +277,7 @@ struct JobMediaView: View {
                 // One empty state for the whole tab instead of two empty sections.
                 if allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && (currentPendingContext == nil || (pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil)) && !loading && !hasMore && pageError == nil && readScope == sourceScope && readScope != nil {
                     PaperEmptyState(symbol: "camera", title: "No photos yet",
-                                    message: canAdd ? "Take a before photo when you arrive. Photos and PDFs up to 8 MB." : "Photos and documents added to this job show here.")
+                                    message: canAdd ? "Take a before photo when you arrive. Photos, PDFs and video clips up to 8 MB." : "Photos and documents added to this job show here.")
                 }
                 if !photos.isEmpty { PaperGroupHeader(title: hasMore ? "Photos loaded" : "Photos", count: photos.count) }
                 if !photos.isEmpty {
@@ -331,11 +346,11 @@ struct JobMediaView: View {
                 ForEach(documents) { record in
                     Button { open(record) } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "doc").font(.system(size: 15)).foregroundStyle(Theme.muted)
+                            Image(systemName: record.kind == "video" ? "video" : "doc").font(.system(size: 15)).foregroundStyle(Theme.muted)
                                 .frame(width: 32, height: 32).background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(record.originalFilename).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                Text(record.uploadState == "stored" ? "PDF" : record.uploadState.statusLabel)
+                                Text(record.uploadState == "stored" ? (record.kind == "video" ? "Video" : "PDF") : record.uploadState.statusLabel)
                                     .font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
                             }
                             Spacer()
@@ -357,7 +372,7 @@ struct JobMediaView: View {
                     }
                 }
                 if canAdd && !(photos.isEmpty && documents.isEmpty) {
-                    Text("Photos and PDFs up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
+                    Text(videoNotice ?? "Photos, PDFs and video clips up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
@@ -386,6 +401,14 @@ struct JobMediaView: View {
             }
             .ignoresSafeArea()
         }
+        .fullScreenCover(isPresented: $showVideo) {
+            VideoCapture { url in
+                showVideo = false
+                guard let url else { return }
+                Task { await addVideo(url) }
+            }
+            .ignoresSafeArea()
+        }
         .fullScreenCover(isPresented: $showCamera) {
             CameraCapture { image in
                 showCamera = false
@@ -401,9 +424,11 @@ struct JobMediaView: View {
                 captureOrigin = api.normalizedOrigin
             }
             pendingMedia.reload()
+            consumeLaunch()
             await load()
             if readScope != nil && !waiting.isEmpty { await retryWaiting() }
         }
+        .onChange(of: launch.wrappedValue) { _, _ in consumeLaunch() }
         .refreshable { thumbnailAttempt += 1; await load() }
         .onChange(of: selection) { _, item in
             Task {
@@ -470,9 +495,25 @@ struct JobMediaView: View {
         .onChange(of: records) { _, _ in if !previewIsCurrent { preview.clear(); previewScope = nil; previewRecord = nil } }
         .onDisappear { selectedData = nil; justCaptured = nil; preview.clear() }
     }
+    /// Opens what the job screen's toolkit asked for, with the same checks as the buttons below.
+    private func consumeLaunch() {
+        guard let request = launch.wrappedValue, captureContext != nil else { return }
+        launch.wrappedValue = nil
+        guard canAdd, readScope != nil, !busy else { return }
+        switch request {
+        case .camera(let requested):
+            if let requested, ["Before", "After", "Other"].contains(requested) { stage = requested }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) { showCamera = true }
+        case .scan:
+            if VNDocumentCameraViewController.isSupported { showScanner = true } else { importDocument = true }
+        case .measure:
+            if SiteMeasure.isSupported { showMeasure = true }
+        }
+    }
+
     private func select(_ data: Data, mime: String, filename: String) throws {
         guard !data.isEmpty, data.count <= 8 * 1024 * 1024 else { throw MediaSelectionError.tooLarge }
-        guard ["image/jpeg", "image/png", "image/heic", "image/webp", "application/pdf"].contains(mime) else { throw MediaSelectionError.unsupported }
+        guard ["image/jpeg", "image/png", "image/heic", "image/webp", "application/pdf", "video/mp4"].contains(mime) else { throw MediaSelectionError.unsupported }
         selectedData = data
         selectedMime = mime
         selectedFilename = filename
@@ -531,8 +572,9 @@ struct JobMediaView: View {
                 }
                 ThorbisMenu(items: (VNDocumentCameraViewController.isSupported
                     ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }]
-                    : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }],
-                            title: "Add a document", accessibilityLabel: "Add a document") {
+                    : []) + [ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true }]
+                    + (VideoCapture.isAvailable ? [ThorbisMenuItem("Record a video clip", icon: "video") { showVideo = true }] : []),
+                            title: "Add a document or clip", accessibilityLabel: "Add a document or video clip") {
                     Image(systemName: "doc.badge.plus").font(.system(size: 17)).foregroundStyle(Theme.foreground)
                         .frame(width: 46, height: 46)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -635,9 +677,10 @@ struct JobMediaView: View {
             error = "Your workspace changed. Return to the original job before adding media."
             return
         }
+        let kind = selectedMime == "application/pdf" ? "document" : selectedMime.hasPrefix("video/") ? "video" : "photo"
         let media = PendingMedia(id: clientAssetID, jobID: jobID, filename: selectedFilename,
-            tags: selectedMime == "application/pdf" ? [] : stageTags, capturedAt: selectedCapturedAt,
-            kind: selectedMime == "application/pdf" ? "document" : "photo", mime: selectedMime)
+            tags: kind == "photo" ? stageTags : [], capturedAt: selectedCapturedAt,
+            kind: kind, mime: selectedMime, caption: kind == "video" ? "Video clip" : nil)
         do {
             try pendingMedia.save(media, data: selectedData, context: captureContext)
             self.selectedData = nil
@@ -648,6 +691,23 @@ struct JobMediaView: View {
         } catch { self.error = error.localizedDescription }
     }
     private var stageTags: [String] { stage == "Other" ? [] : [stage] }
+
+    /// Re-encodes a recorded clip to MP4 under the 8 MB single-upload limit, then queues it like a
+    /// photo. A clip too long for the limit keeps its first part, and the screen says so.
+    private func addVideo(_ source: URL) async {
+        guard canAdd else { return }
+        busy = true
+        defer { busy = false; try? FileManager.default.removeItem(at: source) }
+        do {
+            let clip = try await VideoCapture.exportMP4(source)
+            defer { try? FileManager.default.removeItem(at: clip.url) }
+            let data = try Data(contentsOf: clip.url)
+            let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
+            try select(data, mime: "video/mp4", filename: "clip-\(stamp).mp4")
+            enqueueSelection()
+            videoNotice = clip.trimmedTo.map { "Video clips are limited to 8 MB, so the first \(Int($0)) seconds were kept." }
+        } catch { self.error = error.localizedDescription }
+    }
 
     /// Save original bounded JPEG bytes before the first network request.
     private func uploadImage(_ image: UIImage) {
@@ -773,7 +833,7 @@ private enum MediaSelectionError: LocalizedError {
         switch self {
         case .workspaceChanged: return "Your workspace changed. Return to the original job before adding media."
         case .tooLarge: return "Choose a nonempty file no larger than 8 MB."
-        case .unsupported: return "Choose a JPEG, PNG, HEIC, WebP photo or a PDF."
+        case .unsupported: return "Choose a JPEG, PNG, HEIC, WebP photo, a PDF or a video clip."
         }
     }
 }
@@ -792,6 +852,73 @@ struct NativeDocumentPreview: UIViewControllerRepresentable {
         init(url: URL) { self.url = url }
         func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem { url as NSURL }
+    }
+}
+
+/// System camera in video mode: up to 60 seconds, returns the recorded file or nil when cancelled.
+/// The file is the camera's temporary copy; the caller deletes it once it has been re-encoded.
+struct VideoCapture: UIViewControllerRepresentable {
+    let onFinish: (URL?) -> Void
+
+    /// Media uploads are a single PUT of at most 8 MB until multipart confirmation is wired.
+    static let byteLimit: Int64 = 8 * 1024 * 1024 - 64 * 1024
+    static var isAvailable: Bool {
+        UIImagePickerController.isSourceTypeAvailable(.camera)
+            && (UIImagePickerController.availableMediaTypes(for: .camera) ?? []).contains(UTType.movie.identifier)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.mediaTypes = [UTType.movie.identifier]
+        picker.cameraCaptureMode = .video
+        picker.videoMaximumDuration = 60
+        picker.videoQuality = .typeMedium
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onFinish: (URL?) -> Void
+        init(onFinish: @escaping (URL?) -> Void) { self.onFinish = onFinish }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            onFinish(info[.mediaURL] as? URL)
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onFinish(nil) }
+    }
+
+    struct Clip {
+        let url: URL
+        /// Seconds kept when the 8 MB limit cut the end off; nil when the whole clip fit.
+        let trimmedTo: Double?
+    }
+
+    enum ExportError: LocalizedError {
+        case failed
+        var errorDescription: String? { "This video couldn’t be prepared for upload. Try a shorter clip." }
+    }
+
+    static func exportMP4(_ source: URL) async throws -> Clip {
+        let asset = AVURLAsset(url: source)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetMediumQuality) else { throw ExportError.failed }
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(UUID().uuidString).mp4")
+        export.fileLengthLimit = byteLimit
+        export.shouldOptimizeForNetworkUse = true
+        try await export.export(to: output, as: .mp4)
+        let original = try await asset.load(.duration).seconds
+        let kept = try await AVURLAsset(url: output).load(.duration).seconds
+        let size = (try? output.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size > 0, size <= 8 * 1024 * 1024 else {
+            try? FileManager.default.removeItem(at: output)
+            throw ExportError.failed
+        }
+        return Clip(url: output, trimmedTo: kept + 0.5 < original ? kept : nil)
     }
 }
 

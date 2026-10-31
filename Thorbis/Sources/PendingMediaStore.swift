@@ -19,7 +19,7 @@ struct PendingMedia: Codable, Identifiable, Hashable, Sendable {
     /// Sent with registration, e.g. "Marked up" or a site measurement. Absent on older saves.
     var caption: String? = nil
 
-    var title: String { kind == "document" ? filename : caption ?? tags.first.map { "\($0) photo" } ?? "Photo" }
+    var title: String { kind == "document" ? filename : caption ?? (kind == "video" ? "Video clip" : tags.first.map { "\($0) photo" } ?? "Photo") }
 }
 
 /// Metadata is observable; original bytes stay on disk until matching server confirmation.
@@ -120,7 +120,8 @@ final class PendingMediaStore: ObservableObject {
         guard context.scope == scope, context.binding == binding else { throw StorageError.unbound }
         guard UUID(uuidString: media.jobID) != nil, !data.isEmpty, data.count <= 8 * 1024 * 1024,
               ((media.kind == "photo" && ["image/jpeg", "image/png", "image/heic", "image/webp"].contains(media.mime)) ||
-               (media.kind == "document" && media.mime == "application/pdf")) else { throw StorageError.invalid }
+               (media.kind == "document" && media.mime == "application/pdf") ||
+               (media.kind == "video" && ["video/mp4", "video/quicktime"].contains(media.mime))) else { throw StorageError.invalid }
         let destination = try unit(media, scope: scope)
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw StorageError.existing }
         let staging = destination.deletingLastPathComponent().appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)

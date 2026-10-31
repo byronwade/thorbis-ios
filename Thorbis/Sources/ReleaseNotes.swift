@@ -13,6 +13,32 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-30-job-onsite-redesign",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "wrench.and.screwdriver", title: "Everything for the visit in one place",
+                      detail: "Once you arrive, the job shows your tools, gate codes and what's left before you wrap up.")
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-onsite-tools",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "barcode.viewfinder", title: "Scan equipment tags and run checklists",
+                      detail: "Read the model and serial off a tag into the job's notes, and tick off checklists with readings."),
+                .init(symbol: "video", title: "Record short video clips on a job",
+                      detail: "Add a clip of up to a minute to the job's documents. It uploads when you have signal.")
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-read-every-line",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "doc.text.magnifyingglass", title: "Read every line before you sign",
+                      detail: "Estimates show each line's full description, and customers see what's included before they approve.")
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-30-cleaner-lists",
             date: "2026-10-30",
             highlights: [

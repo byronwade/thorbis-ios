@@ -151,44 +151,6 @@ enum JobContacts {
     }
 }
 
-/// JS-04: the dispatch summary, quoted, with the pause reason above it when paused.
-struct JobOfficeNote: View {
-    let notes: String?
-    let pauseReason: String?
-    let pauseNextAction: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if pauseReason != nil || pauseNextAction != nil {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Paused", systemImage: "pause.circle")
-                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.warning)
-                    if let pauseReason { Text(pauseReason).font(Theme.font(15)) }
-                    if let pauseNextAction {
-                        Text("Next: \(pauseNextAction)").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-                .accessibilityElement(children: .combine)
-            }
-            if let notes, !notes.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    PaperGroupHeader(title: "From the office")
-                    Text(notes)
-                        .font(Theme.font(15)).lineSpacing(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .padding(14)
-                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
-                }
-            }
-        }
-    }
-}
-
 /// JS-06: every contact with its own Call, Text and Email.
 struct JobContactsSection: View {
     let people: [JobContacts.Person]
@@ -286,36 +248,5 @@ private struct JobContactRow: View {
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(label)
-    }
-}
-
-/// JS-09: what's been done on this visit, as counts that open their place.
-struct JobVisitCounts: View {
-    let latestNote: String?
-    let noteCount: Int
-    let photoCount: String?
-    let openFollowUps: Int?
-    let openNotes: () -> Void
-    let openPhotos: () -> Void
-    let openFollowUpsScreen: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: "On this visit")
-            Button(action: openNotes) {
-                PaperMenuRow("Notes", symbol: "text.bubble", subtitle: latestNote.map { "“\($0)”" }, value: "\(noteCount)")
-            }
-            .buttonStyle(RowPressStyle())
-            Button(action: openPhotos) {
-                PaperMenuRow("Photos", symbol: "photo.on.rectangle", value: photoCount)
-            }
-            .buttonStyle(RowPressStyle())
-            Button(action: openFollowUpsScreen) {
-                PaperMenuRow("Follow-ups", symbol: "list.bullet",
-                             subtitle: (openFollowUps ?? 0) > 0 ? "Waiting on the office" : nil,
-                             value: openFollowUps.map(String.init))
-            }
-            .buttonStyle(RowPressStyle())
-        }
     }
 }

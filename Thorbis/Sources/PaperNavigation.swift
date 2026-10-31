@@ -185,7 +185,7 @@ struct RootView: View {
                 case "my-day": tab = .schedule
                 case "customers": tab = .customers
                 case "menu", "more": settings = true
-                case "job", "job-invoice", "job-history", "job-history-empty": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
+                case "job", "job-invoice", "job-history", "job-history-empty", "job-onsite": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
                 case "customer", "customer-activity", "customer-records", "customer-jobs", "customer-money": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
                 default: break
                 }
@@ -633,7 +633,7 @@ struct RootView: View {
             case "new-customer": primaryTab = .customers; previewNewCustomer = true
             case "revenue": primaryTab = .more; morePath.append(PaperRoute.revenue)
             case "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
-                 "job-history", "job-history-empty",
+                 "job-history", "job-history-empty", "job-onsite",
                  "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details":
                 if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                     primaryTab = .jobs
