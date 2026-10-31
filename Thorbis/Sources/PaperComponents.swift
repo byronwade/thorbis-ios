@@ -446,6 +446,7 @@ struct PaperMenuRow<Trailing: View>: View {
     /// Inside a card the mark sits in an `IconTile` well, like every other card row.
     var filled = false
     @ViewBuilder var trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         HStack(spacing: filled ? 12 : 14) {
@@ -467,7 +468,7 @@ struct PaperMenuRow<Trailing: View>: View {
                 Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(tint)
                 if let subtitle {
                     Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .lineLimit(filled ? 2 : nil)
+                        .lineLimit(filled && !typeSize.isAccessibilitySize ? 2 : nil)
                 }
             }
             Spacer(minLength: 8)
@@ -607,6 +608,7 @@ struct OfflineBanner: View {
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var media: PendingMediaStore
     @Environment(\.savedWorkReviewReturnToRoot) private var returnToReview
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var reviewScope: SavedWorkScope?
 
     private var scope: SavedWorkScope? { .capture(session: session, api: api, media: media, outbox: outbox) }
@@ -653,9 +655,14 @@ struct OfflineBanner: View {
     private func banner(symbol: String, tint: Color, text: String, trailing: String?) -> some View {
         HStack(spacing: 10) {
             Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(tint).accessibilityHidden(true)
-            Text(text).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            if let trailing { Text(trailing).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+            // At accessibility sizes the count reads under the words, which then keep the width.
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                                      : AnyLayout(HStackLayout(spacing: 10))
+            layout {
+                Text(text).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
+                if let trailing { Text(trailing).font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))

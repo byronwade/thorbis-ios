@@ -1154,18 +1154,23 @@ struct JobDetailView: View {
     }
 
     private func moneyLine(_ label: String, amount: String?, word: String, tint: Color) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        // At accessibility sizes the amount and word read under the label; side by side the fixed
+        // amount ran past the panel's edge.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return layout {
             Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
+            if !stacked { Spacer(minLength: 8) }
             HStack(spacing: 0) {
                 if let amount { Text("\(amount) · ").font(Theme.monoFont(15)).foregroundStyle(Theme.foreground) }
                 Text(word).font(Theme.font(15)).foregroundStyle(tint)
             }
-            .fixedSize()
+            .fixedSize(horizontal: !stacked, vertical: true)
         }
         .padding(.horizontal, 16).padding(.vertical, 11)
-        .frame(minHeight: 44)
+        .frame(maxWidth: stacked ? .infinity : nil, minHeight: 44, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
@@ -1381,7 +1386,10 @@ struct JobDetailView: View {
             if !session.can("estimate.view", feature: "estimates") {
                 PaperEmptyState(symbol: "doc.text", title: "Estimates unavailable", message: "Your role cannot view estimates.")
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                // At accessibility sizes "Add estimate" goes under the label so neither breaks mid-word.
+                let headerLayout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+                                                                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+                headerLayout {
                     PaperGroupHeader(title: "Estimates", count: jobEstimates.count + (estimateRead?.unavailableIDs.count ?? 0))
                     if canBuildEstimate {
                         Button(action: buildEstimate) {
