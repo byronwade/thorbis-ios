@@ -132,7 +132,9 @@ struct EstimateDetailView: View {
             .padding(.top, 12)
             .padding(.bottom, 28)
         }
+        #if DEBUG
         .modifier(PaperPreviewScrollAnchor())
+        #endif
     }
 
     /// v2 Evidence: "Estimate 4F2A" and its status word, the estimate's own name under it, then the
@@ -520,7 +522,9 @@ struct InvoiceDetailView: View {
             .padding(.top, 12)
             .padding(.bottom, 28)
         }
+        #if DEBUG
         .modifier(PaperPreviewScrollAnchor())
+        #endif
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")

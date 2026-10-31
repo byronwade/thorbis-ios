@@ -141,7 +141,9 @@ struct SettingsView: View {
                 // Redesign phase 3: semibold section headers over grouped wells.
                 .environment(\.paperGroupedWells, true)
             }
+            #if DEBUG
             .modifier(PaperPreviewScrollAnchor())
+            #endif
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Settings")
