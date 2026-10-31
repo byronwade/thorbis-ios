@@ -14,7 +14,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "customer-jobs", "customer-money"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
@@ -131,6 +131,8 @@ enum PaperPreview {
     /// `job-history`: the job is at the customer's Home, with past visits there and its equipment.
     /// `job-history-empty`: nothing on file for the place, so the section stays hidden.
     static var isPropertyHistoryPreview: Bool { enabled && screen == "job-history" }
+    /// The customer page's Jobs / Money segments read the same compiled records as Records did.
+    static var isCustomerRecordsPreview: Bool { ["customer-records", "customer-jobs", "customer-money"].contains(screen) }
     static var isEmptyPropertyHistoryPreview: Bool { enabled && screen == "job-history-empty" }
     static let homeLocationID = "00000000-0000-4000-8000-000000007001"
     static var isWorkingJobPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-working-job") }
@@ -1061,7 +1063,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if path == "/v1/jobs/\(id)/notes" {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
-            if path == "/v1/jobs/\(id)/media", PaperPreview.screen == "customer-records",
+            if path == "/v1/jobs/\(id)/media", PaperPreview.isCustomerRecordsPreview,
                (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-photo-rollup") ||
                 ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup")) {
                 let mixed = ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup")
@@ -1079,7 +1081,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }
                 return ["items": items]
             }
-            if path == "/v1/jobs/\(id)/photos", PaperPreview.screen == "customer-records",
+            if path == "/v1/jobs/\(id)/photos", PaperPreview.isCustomerRecordsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup") {
                 let isFirst = id.hasSuffix("2214")
                 let photoID = isFirst ? "00000000-0000-4000-8000-000000033000" : "00000000-0000-4000-8000-000000033001"
@@ -1319,6 +1321,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
              "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
         }
+        if PaperPreview.screen == "customer-jobs" { listed += propertyHistoryJobs() }
         if PaperPreview.isPropertyHistoryPreview {
             if let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
                 listed[index]["locationId"] = PaperPreview.homeLocationID
@@ -1328,6 +1331,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         // Next stop: each visit is at its customer's "Home" service location, so the card has an address.
         if PaperPreview.screen.hasPrefix("next-stop") {
             listed = listed.map { $0.merging(["locationId": "00000000-0000-4000-8000-000000007001"]) { _, new in new } }
+        }
+        // Today's rows lead with the street (design 2026-10-30); one visit has no site, so its row
+        // shows the fallback to the job title (BYR-1593).
+        if ["my-day", "schedule", "schedule-week"].contains(PaperPreview.screen) {
+            listed = listed.map { row in
+                (row["id"] as? String)?.hasSuffix("2224") == true ? row
+                    : row.merging(["locationId": "00000000-0000-4000-8000-000000007001"]) { _, new in new }
+            }
         }
         // Booked work with no time and no tech yet, only where the Unscheduled queue is the subject.
         if PaperPreview.screen == "schedule-unscheduled" {
@@ -1349,10 +1360,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             ("2170", "Furnace install", "completed", "2021-10-20T15:00:00Z", PaperPreview.homeLocationID, "00000000-0000-4000-8000-000000008801"),
             ("2160", "Thermostat swap", "canceled", "2021-03-09T15:00:00Z", PaperPreview.homeLocationID, nil)
         ]
+        let notes = ["2190": "Coil cleaned, capacitor reading low. Quoted a replacement for next visit.",
+                     "2181": "Sediment heavy. Anode rod due next year.", "2170": "Passed inspection. Replaced filter."]
         return rows.map { ref, title, status, when, location, assignee in
             ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID,
              "customerId": PaperPreview.customerID, "title": title, "status": status,
              "assignedToUserId": assignee ?? NSNull(), "scheduledFor": when, "locationId": location ?? NSNull(),
+             "notes": notes[ref] ?? NSNull(),
              "createdAt": when, "updatedAt": when, "allowedTransitions": [String]()] as [String: Any]
         }
     }

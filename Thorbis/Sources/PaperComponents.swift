@@ -30,6 +30,10 @@ struct PaperHeader: View {
     let subtitle: String
     /// Opens this list's real filters (status, ordering). Never a search: that is the bar's Search.
     var filter: (() -> Void)? = nil
+    /// Secondary filters as a menu behind the same circle (one selector row per screen).
+    var filterMenu: [ThorbisMenuItem]? = nil
+    /// Shows the circle as on while a filter narrows the screen.
+    var filterActive = false
     @EnvironmentObject private var session: SessionController
     @Environment(\.paperShowMenu) private var openAccount
     @Environment(\.paperMenuButton) private var showsMenuButton
@@ -65,8 +69,17 @@ struct PaperHeader: View {
 
     /// Filters this list; the bar's Search finds anything. Different glyphs, different jobs.
     @ViewBuilder private var filterButton: some View {
-        if let filter {
-            PaperCircleButton(symbol: "line.3.horizontal.decrease", label: "Filter \(title.lowercased())", action: filter)
+        let symbol = "line.3.horizontal.decrease"
+        if let filterMenu, !filterMenu.isEmpty {
+            ThorbisMenu(items: filterMenu, title: "Show", accessibilityLabel: "Filter \(title.lowercased())") {
+                PaperCircleLabel(symbol: symbol, size: 44, fill: filterActive ? Theme.brandSurface : Theme.fill, bordered: true)
+            }
+            .accessibilityValue(filterActive ? "Filtered" : "")
+            .accessibilityIdentifier("header-filter")
+        } else if let filter {
+            PaperCircleButton(symbol: symbol, label: "Filter \(title.lowercased())", size: 44,
+                              fill: filterActive ? Theme.brandSurface : Theme.fill, bordered: true, action: filter)
+                .accessibilityValue(filterActive ? "Filtered" : "")
         }
     }
 }
@@ -104,8 +117,8 @@ struct PaperCircleLabel: View {
             .foregroundStyle(Theme.foreground)
             .frame(width: size, height: size)
             .background(fill, in: Circle())
-            .overlay { if bordered { Circle().strokeBorder(Theme.border, lineWidth: 1) } }
-            .frame(width: 44, height: 44).contentShape(Rectangle())
+            .overlay { if bordered { Circle().strokeBorder(Theme.border.opacity(0.6), lineWidth: 1) } }
+            .frame(width: max(44, size), height: max(44, size)).contentShape(Rectangle())
     }
 }
 
@@ -128,7 +141,7 @@ struct PaperTabs: View {
     /// tighter ones on a 402pt phone; a cut-off "Acti" reads as a bug. The tightest is only for
     /// callers that would otherwise wrap; each tab keeps its 44-point minimum and full label.
     private var candidates: [(padding: CGFloat, inset: CGFloat)] {
-        var all: [(padding: CGFloat, inset: CGFloat)] = [(12, Theme.gutter - 4), (8, Theme.gutter - 8), (6, Theme.gutter - 6)]
+        var all: [(padding: CGFloat, inset: CGFloat)] = [(12, Theme.gutter), (8, Theme.gutter), (6, Theme.gutter - 6)]
         if wrapOverflow { all.append((3, Theme.gutter - 6)) }
         return all
     }
@@ -141,7 +154,8 @@ struct PaperTabs: View {
         guard available > 0, options.allSatisfy({ labelWidths[$0] != nil }) else { return candidates.first }
         return candidates.first { candidate in
             let tabs = options.reduce(CGFloat(0)) { $0 + max(44, (labelWidths[$1] ?? 0) + candidate.padding * 2) }
-            return tabs + CGFloat(max(0, options.count - 1)) * 2 + candidate.inset * 2 <= available + 0.5
+            // The segmented track adds 3 on each side.
+            return tabs + CGFloat(max(0, options.count - 1)) * 2 + 6 + candidate.inset * 2 <= available + 0.5
         }
     }
 
@@ -150,7 +164,12 @@ struct PaperTabs: View {
         // the scrolling fallback and its trailing fade.
         Group {
             if let fit = fittingCandidate {
-                row(padding: fit.padding).padding(.horizontal, fit.inset)
+                // design 2026-10-30: one selector style everywhere, the segmented pill. A field
+                // track, the chosen segment raised as a white pill, every segment the same width.
+                row(padding: fit.padding, tracked: true)
+                    .padding(3)
+                    .background(Theme.fill, in: Capsule())
+                    .padding(.horizontal, fit.inset)
             } else if wrapOverflow {
                 FlowRow(spacing: 2, lineSpacing: 0) {
                     ForEach(options, id: \.self) { option in
@@ -216,23 +235,37 @@ struct PaperTabs: View {
         .accessibilityHidden(true)
     }
 
-    private func row(padding: CGFloat) -> some View {
+    private func row(padding: CGFloat, tracked: Bool = false) -> some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { option in
-                tab(option, padding: padding)
+                tab(option, padding: padding, tracked: tracked)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func tab(_ option: String, padding: CGFloat) -> some View {
-        Button { selection = option } label: {
-            Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
-                .foregroundStyle(selection == option ? Theme.foreground : Theme.muted)
-                .padding(.horizontal, padding).padding(.vertical, 6)
-                .frame(minHeight: Theme.chipHeight + 4)
-                .background(selection == option ? Theme.fill : .clear, in: Capsule())
-                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+    private func tab(_ option: String, padding: CGFloat, tracked: Bool = false) -> some View {
+        let on = selection == option
+        return Button { selection = option } label: {
+            if tracked {
+                Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
+                    .foregroundStyle(on ? Theme.foreground : Theme.muted)
+                    .padding(.horizontal, padding)
+                    .frame(maxWidth: .infinity, minHeight: 38)
+                    .background {
+                        if on {
+                            Capsule().fill(Theme.card).shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
+                        }
+                    }
+                    .contentShape(Capsule())
+            } else {
+                Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
+                    .foregroundStyle(on ? Theme.foreground : Theme.muted)
+                    .padding(.horizontal, padding).padding(.vertical, 6)
+                    .frame(minHeight: Theme.chipHeight + 4)
+                    .background(on ? Theme.fill : .clear, in: Capsule())
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+            }
         }
         .buttonStyle(PressStyle())
         .id(option)
@@ -266,8 +299,9 @@ struct PaperGroupHeader<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(title).font(Theme.font(13, weight: .medium))
-            if let count, count > 0 { Text("\(count)").font(Theme.monoFont(12)) }
+            // "Later today · 3": one label, the count in the same voice.
+            Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
+                .font(Theme.font(13, weight: .medium)).monospacedDigit()
             Spacer(minLength: 0)
             trailing
         }
@@ -381,7 +415,11 @@ struct PaperMenuRow<Trailing: View>: View {
     var body: some View {
         HStack(spacing: filled ? 12 : 14) {
             if filled {
-                IconTile(symbol: symbol, tint: tile ?? (tint == Theme.foreground ? Theme.foreground : tint))
+                // design 2026-10-30: a neutral glyph, never a coloured tile.
+                Image(systemName: symbol).font(.system(size: 17))
+                    .foregroundStyle(tint == Theme.foreground ? Theme.muted : tint)
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
             } else if let tile {
                 // D-020 outline mark at rest; quiet hue on the mark only, never a filled tile.
                 Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(tile)
@@ -400,18 +438,17 @@ struct PaperMenuRow<Trailing: View>: View {
             Spacer(minLength: 8)
             trailing
         }
-        .padding(.horizontal, filled ? PaperCardMetrics.inset : 0).padding(.vertical, filled ? 8 : 0)
-        .frame(minHeight: filled ? 60 : 48).contentShape(Rectangle())
+        .padding(.horizontal, filled ? PaperCardMetrics.inset : 0).padding(.vertical, filled ? 10 : 0)
+        .frame(minHeight: filled ? 52 : 48).contentShape(Rectangle())
     }
 }
 
 extension PaperMenuRow where Trailing == AnyView {
-    /// A navigable row with a chevron.
+    /// A navigable row. design 2026-10-30: no chevron on every row; the row itself is the target.
     init(_ title: String, symbol: String, subtitle: String? = nil, value: String? = nil, tile: Color? = nil, filled: Bool = false) {
         self.init(title: title, symbol: symbol, subtitle: subtitle, tile: tile, filled: filled) {
             AnyView(HStack(spacing: 6) {
-                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted) }
-                PaperDisclosure()
+                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).monospacedDigit() }
             })
         }
     }
@@ -1074,5 +1111,215 @@ struct PaperStatRow: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Redesign 2026-10-30: one row, one panel, one status word
+//
+// The list system (Main.dc.html, Customer.dc.html): rows on one white panel per section, the
+// section's label above it, no tiles, no rings, no chevrons, no rules. A row is an optional
+// leading time or date column (or a neutral glyph), a 16/500 title and one supporting line, and
+// on the right either a status word with a small dot or an amount.
+
+/// A status as a word. The dot carries the hue; the word stays body so it reads the same in
+/// light, dark and for colour-blind people. Neutral states ("Scheduled", "Draft") have no dot.
+struct StatusWord: View {
+    let text: String
+    /// Nil leaves the word alone with no dot.
+    var tint: Color? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let tint {
+                Circle().fill(tint).frame(width: 7, height: 7).accessibilityHidden(true)
+            }
+            Text(text).font(Theme.font(13, weight: .medium))
+                .foregroundStyle(tint == nil ? Theme.muted : Theme.foreground)
+                .lineLimit(1)
+        }
+        .fixedSize()
+    }
+}
+
+extension StatusWord {
+    /// A job's status. `pending` is a step saved on this phone and waiting to sync.
+    init(jobStatus status: String, pending: Bool = false) {
+        self.init(text: pending ? "\(status.statusLabel) · waiting to sync" : status.statusLabel,
+                  tint: pending ? Theme.warning : StatusWord.jobTint(status))
+    }
+
+    /// An estimate's or invoice's status ("Unpaid" for an issued invoice).
+    init(documentStatus status: String) {
+        self.init(text: status == "issued" ? "Unpaid" : status.statusLabel, tint: StatusWord.documentTint(status))
+    }
+
+    static func jobTint(_ status: String) -> Color? {
+        switch status {
+        case "completed": Theme.success
+        case "in_progress", "arrived", "paused": Theme.warning
+        case "en_route", "dispatched": Theme.brandText
+        default: nil
+        }
+    }
+
+    static func documentTint(_ status: String) -> Color? {
+        switch status {
+        case "approved", "paid", "completed": Theme.success
+        case "sent", "issued", "open": Theme.warning
+        case "declined", "void", "canceled": Theme.destructive
+        default: nil
+        }
+    }
+}
+
+/// What leads a list row: a time ("10:30 AM"), a date ("Apr 14"), a neutral glyph, or nothing.
+enum PaperRowLeading {
+    case none
+    case text(String, accessibility: String? = nil)
+    case icon(String)
+}
+
+/// The one list row. Title 16/500, one supporting line, an optional third meta line, and a
+/// trailing view (a `StatusWord`, an amount, or a small action). Pads to `paperRowInset`.
+struct PaperListRow<Trailing: View>: View {
+    var leading: PaperRowLeading = .none
+    let title: String
+    var subtitle: String? = nil
+    /// A quieter third line (tech · photos · paid).
+    var meta: String? = nil
+    var subtitleLines = 1
+    /// Finished work reads quieter.
+    var dimmed = false
+    @ViewBuilder var trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.paperRowInset) private var inset
+    @ScaledMetric(relativeTo: .subheadline) private var column: CGFloat = 70
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 14))
+        layout {
+            leadingView
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Theme.font(16, weight: .medium))
+                    .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
+                    .lineLimit(stacked ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .lineLimit(stacked ? nil : subtitleLines)
+                }
+                if let meta, !meta.isEmpty {
+                    Text(meta).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .lineLimit(stacked ? nil : 2)
+                        .padding(.top, 1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            trailing
+        }
+        .padding(.horizontal, inset).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder private var leadingView: some View {
+        switch leading {
+        case .none: EmptyView()
+        case .text(let text, let spoken):
+            Text(text).font(Theme.font(15, weight: .medium)).monospacedDigit()
+                .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
+                .lineLimit(2)
+                .frame(width: typeSize.isAccessibilitySize ? nil : column, alignment: .leading)
+                .accessibilityLabel(spoken ?? text)
+        case .icon(let symbol):
+            Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Theme.muted)
+                .frame(width: 24).accessibilityHidden(true)
+        }
+    }
+}
+
+extension PaperListRow where Trailing == EmptyView {
+    init(leading: PaperRowLeading = .none, title: String, subtitle: String? = nil, meta: String? = nil,
+         subtitleLines: Int = 1, dimmed: Bool = false) {
+        self.init(leading: leading, title: title, subtitle: subtitle, meta: meta, subtitleLines: subtitleLines,
+                  dimmed: dimmed) { EmptyView() }
+    }
+}
+
+extension PaperListRow where Trailing == StatusWord {
+    init(leading: PaperRowLeading = .none, title: String, subtitle: String? = nil, meta: String? = nil,
+         subtitleLines: Int = 1, dimmed: Bool = false, status: StatusWord) {
+        self.init(leading: leading, title: title, subtitle: subtitle, meta: meta, subtitleLines: subtitleLines,
+                  dimmed: dimmed) { status }
+    }
+}
+
+extension PaperListRow where Trailing == Text {
+    /// A row ending in an amount (MF-02 row size, tabular).
+    init(leading: PaperRowLeading = .none, title: String, subtitle: String? = nil, meta: String? = nil,
+         dimmed: Bool = false, amount: String) {
+        self.init(leading: leading, title: title, subtitle: subtitle, meta: meta, dimmed: dimmed) {
+            Text(amount).font(Theme.moneyFont(.line, regular: false)).foregroundStyle(Theme.foreground)
+        }
+    }
+}
+
+/// One section: a 13/500 label (with " · count") above one white panel of rows.
+struct PaperSection<Content: View, Accessory: View>: View {
+    let title: String?
+    var count: Int? = nil
+    @ViewBuilder var content: Content
+    @ViewBuilder var accessory: Accessory
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let title {
+                HStack(spacing: 8) {
+                    Text(count.map { "\(title) · \($0)" } ?? title)
+                        .font(Theme.font(13, weight: .medium)).monospacedDigit()
+                        .foregroundStyle(Theme.muted)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 0)
+                    accessory
+                }
+                .frame(minHeight: 28)
+                .padding(.horizontal, 4).padding(.bottom, 4)
+            }
+            PaperCard { content }
+        }
+    }
+}
+
+extension PaperSection where Accessory == EmptyView {
+    init(_ title: String?, count: Int? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title: title, count: count, content: content) { EmptyView() }
+    }
+}
+
+/// A labelled quiet circle (Call, Text, Email, Directions): the 44pt field circle with its word under it.
+struct PaperLabeledCircle: View {
+    let symbol: String
+    let title: String
+    var accessibilityLabel: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Theme.foreground)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.fill, in: Circle())
+                    .overlay(Circle().strokeBorder(Theme.border.opacity(0.6), lineWidth: 1))
+                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(accessibilityLabel ?? title)
     }
 }

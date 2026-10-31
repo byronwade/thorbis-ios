@@ -3,10 +3,17 @@ import UIKit
 
 /// The customer's photos, notes, documents, estimates, invoices, and activity,
 /// each list still grouped under the job it came from.
+/// Which parts of the compiled records a screen shows. The customer page splits them across its
+/// Jobs (photos, notes, documents, job activity) and Money (estimates, invoices) segments.
+enum CustomerRecordsPart: CaseIterable {
+    case photos, notes, documents, estimates, invoices, activity
+}
+
 struct CustomerRecordsView: View {
     let compilation: CustomerJobCompilation
     let customerID: String
     var retryMedia: () async -> Void = {}
+    var parts: Set<CustomerRecordsPart> = Set(CustomerRecordsPart.allCases)
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var openedLegacy: LegacyCustomerPhoto?
 
@@ -21,30 +28,36 @@ struct CustomerRecordsView: View {
                 ErrorBanner(message: "Some customer records could not be verified. Please try again.") { await retryMedia() }
             }
             if compilation.jobsAccessible {
-                photosSection
-                textSection("Notes", total: compilation.noteCount, groups: compilation.notes, symbol: "note.text") { $0.body }
-                mediaSection("Documents", total: compilation.documentCount, groups: compilation.documents, symbol: "doc",
-                             incomplete: !compilation.documentIncompleteJobIDs.isEmpty || compilation.identityIncomplete)
-            } else {
+                if parts.contains(.photos) { photosSection }
+                if parts.contains(.notes) {
+                    textSection("Notes", total: compilation.noteCount, groups: compilation.notes, symbol: "note.text") { $0.body }
+                }
+                if parts.contains(.documents) {
+                    mediaSection("Documents", total: compilation.documentCount, groups: compilation.documents, symbol: "doc",
+                                 incomplete: !compilation.documentIncompleteJobIDs.isEmpty || compilation.identityIncomplete)
+                }
+            } else if !parts.isDisjoint(with: [.photos, .notes, .documents]) {
                 Label("Job photos, notes, and documents are unavailable with your current access.", systemImage: "lock")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .accessibilityIdentifier("customer-job-records-unavailable")
             }
-            if compilation.estimatesAccessible {
+            if !parts.contains(.estimates) {
+            } else if compilation.estimatesAccessible {
                 linkedSection("Estimates", total: compilation.estimateCount, groups: compilation.estimates, symbol: "doc.text", incomplete: compilation.estimatesIncomplete || compilation.identityIncomplete, extra: compilation.estimatesOffJob.map { ($0.title, PaperRoute.estimate($0.id)) }) { estimate in
                     (estimate.title, PaperRoute.estimate(estimate.id))
                 }
             } else {
                 unavailable("Estimates")
             }
-            if compilation.invoicesAccessible {
+            if !parts.contains(.invoices) {
+            } else if compilation.invoicesAccessible {
                 linkedSection("Invoices", total: compilation.invoiceCount, groups: compilation.invoices, symbol: "doc.plaintext", incomplete: compilation.invoicesIncomplete || compilation.identityIncomplete, extra: compilation.invoicesOffJob.map { (CustomerRecordLabel.invoice($0), PaperRoute.invoice($0.id)) }) { invoice in
                     (CustomerRecordLabel.invoice(invoice), PaperRoute.invoice(invoice.id))
                 }
             } else {
                 unavailable("Invoices")
             }
-            activitySection
+            if parts.contains(.activity) { activitySection }
         }
         .thorbisDestination(item: $openedLegacy) { photo in
             LegacyCustomerPhotoDetail(photo: photo)
@@ -149,17 +162,21 @@ struct CustomerRecordsView: View {
             } else if groups.isEmpty && extra.isEmpty {
                 Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
-            ForEach(groups, id: \.jobID) { group in
-                jobHeading(group.title, jobID: group.jobID, count: group.count)
-                ForEach(group.items) { item in
-                    let pair = row(item)
-                    NavigationLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
-                }
-            }
-            if !extra.isEmpty {
-                Text("Not on a job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
-                ForEach(Array(extra.enumerated()), id: \.offset) { _, pair in
-                    NavigationLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
+            if !groups.isEmpty || !extra.isEmpty {
+                panel {
+                    ForEach(groups, id: \.jobID) { group in
+                        jobHeading(group.title, jobID: group.jobID, count: group.count)
+                        ForEach(group.items) { item in
+                            let pair = row(item)
+                            NavigationLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
+                        }
+                    }
+                    if !extra.isEmpty {
+                        Text("Not on a job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
+                        ForEach(Array(extra.enumerated()), id: \.offset) { _, pair in
+                            NavigationLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
+                        }
+                    }
                 }
             }
         }
@@ -175,10 +192,14 @@ struct CustomerRecordsView: View {
             } else if groups.isEmpty {
                 Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
-            ForEach(groups, id: \.jobID) { group in
-                jobHeading(group.title, jobID: group.jobID, count: group.count)
-                ForEach(Array(group.items.enumerated()), id: \.offset) { _, item in
-                    row(item).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            if !groups.isEmpty {
+                panel {
+                    ForEach(groups, id: \.jobID) { group in
+                        jobHeading(group.title, jobID: group.jobID, count: group.count)
+                        ForEach(Array(group.items.enumerated()), id: \.offset) { _, item in
+                            row(item).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }
+                    }
                 }
             }
         }
@@ -198,31 +219,43 @@ struct CustomerRecordsView: View {
             } else if compilation.activity.isEmpty && compilation.accountActivity.isEmpty {
                 Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
-            ForEach(compilation.activity, id: \.jobID) { group in
-                jobHeading(group.title, jobID: group.jobID, count: group.count)
-                ForEach(group.items) { entry in
-                    ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
-                        Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+            if !compilation.activity.isEmpty || !compilation.accountActivity.isEmpty {
+                panel {
+                    ForEach(compilation.activity, id: \.jobID) { group in
+                        jobHeading(group.title, jobID: group.jobID, count: group.count)
+                        ForEach(group.items) { entry in
+                            ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
+                                Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                            }
+                        }
                     }
-                }
-            }
-            if !compilation.accountActivity.isEmpty {
-                Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
-                ForEach(compilation.accountActivity) { entry in
-                    ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
-                        Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                    if !compilation.accountActivity.isEmpty {
+                        Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
+                        ForEach(compilation.accountActivity) { entry in
+                            ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
+                                Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
+    /// design 2026-10-30: the section label above its panel ("Estimates · 2"), no glyph.
     private func heading(_ title: String, count: Int, symbol: String, incomplete: Bool = false) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol).font(.system(size: 13)).foregroundStyle(Theme.muted)
-            Text(title).font(Theme.font(13, weight: .medium))
-            Text(incomplete ? "Partial" : "\(count)").font(Theme.font(12))
-        }.foregroundStyle(Theme.muted).accessibilityAddTraits(.isHeader)
+        Text(incomplete ? "\(title) · partial" : "\(title) · \(count)")
+            .font(Theme.font(13, weight: .medium)).monospacedDigit()
+            .foregroundStyle(Theme.muted).padding(.horizontal, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// One white panel per section; rows pad to the panel's inset.
+    private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        PaperCard {
+            VStack(alignment: .leading, spacing: 0) { content() }
+                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 6)
+        }
     }
 
     private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false) -> some View {

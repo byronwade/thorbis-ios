@@ -380,8 +380,9 @@ private struct SyncRing: View {
     }
 }
 
-/// The job this person is on right now, floating above the bar (the in-app twin of the Live
-/// Activity). A soft pulse marks it live; a tap opens the job.
+/// The job this person is on right now, docked on the bar (the in-app twin of the Live Activity).
+/// The title, then the status as a word with a soft live pulse on its dot, then who. A tap opens
+/// the job. It sits on `BarGround`, so it never floats over a list's rows.
 struct CurrentJobChip: View {
     let job: Job
     let customer: String
@@ -390,16 +391,17 @@ struct CurrentJobChip: View {
     @State private var pulse = false
 
     var body: some View {
+        let tint = StatusWord.jobTint(job.status) ?? Theme.muted
         Button(action: open) {
             HStack(spacing: 12) {
                 ZStack {
-                    Circle().fill(Theme.success.opacity(0.25))
-                        .frame(width: 22, height: 22)
-                        .scaleEffect(pulse ? 1 : 0.5)
+                    Circle().fill(tint.opacity(0.3))
+                        .frame(width: 18, height: 18)
+                        .scaleEffect(pulse ? 1 : 0.4)
                         .opacity(pulse ? 0 : 1)
-                    StatusRing(status: job.status)
+                    Circle().fill(tint).frame(width: 8, height: 8)
                 }
-                .frame(width: 24, height: 24)
+                .frame(width: 18, height: 18)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(job.title)
@@ -411,15 +413,14 @@ struct CurrentJobChip: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.muted)
+                Text("Open").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
             }
             .foregroundStyle(Theme.foreground)
-            .padding(.leading, 14)
-            .padding(.trailing, 16)
+            .padding(.leading, 16)
+            .padding(.trailing, 18)
             .frame(minHeight: 52)
-            .modifier(FloatingSurface(shape: Capsule()))
+            .background(Theme.card, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
             .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
@@ -430,6 +431,23 @@ struct CurrentJobChip: View {
             guard !reduceMotion else { return }
             withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { pulse = true }
         }
+    }
+}
+
+/// The ground under the bar while the current-job chip rides on it: the cream canvas with a short
+/// fade at the top, reaching the screen's bottom edge. Rows scroll under it like under a toolbar,
+/// never under a floating card, and each place's root reserves its height (`barReserve`).
+struct BarGround: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [Theme.background.opacity(0), Theme.background], startPoint: .top, endPoint: .bottom)
+                .frame(height: 16)
+            Theme.background
+        }
+        .padding(.top, -16)
+        .padding(.bottom, -(AppBottomBar.bottomGap + 40))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

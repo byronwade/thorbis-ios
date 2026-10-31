@@ -186,7 +186,7 @@ struct RootView: View {
                 case "customers": tab = .customers
                 case "menu", "more": settings = true
                 case "job", "job-invoice", "job-history", "job-history-empty": if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) { path.append(job) }
-                case "customer", "customer-activity", "customer-records": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
+                case "customer", "customer-activity", "customer-records", "customer-jobs", "customer-money": if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) { path.append(customer) }
                 default: break
                 }
             }
@@ -259,6 +259,8 @@ struct RootView: View {
                             guard !barSearching, !menuOpen else { return }
                             barReserve = max(0, height + AppBottomBar.bottomGap - geometry.safeAreaInsets.bottom)
                         }
+                        // With the chip up, chip and bar sit on one ground so nothing floats over rows.
+                        .background { if currentJob != nil && !barSearching && !menuOpen { BarGround() } }
                         .padding(.bottom, AppBottomBar.bottomGap)
                         .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85), value: currentJob?.id)
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: barSync)
@@ -640,7 +642,7 @@ struct RootView: View {
                     if PaperPreview.screen == "job-assign" { jobsPath.append(PaperRoute.assign(jobID: job.id)) }
                     if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
                 }
-            case "customer", "customer-activity", "customer-records":
+            case "customer", "customer-activity", "customer-records", "customer-jobs", "customer-money":
                 if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
                     primaryTab = .customers
                     customersPath.append(customer)
