@@ -19,7 +19,7 @@ mobile app. Later passes must not undo them:
   between rows are allowed. Avatars and property chips are allowed.
 - **In-between states (phase 4):** empty states are a soft tinted glyph (`EmptyGlyph`, the place's
   mark colour via `PaperEmptyState(tint:)`), a semibold title, one secondary sentence and one ink
-  capsule action. Loading is `SkeletonList` / `SkeletonRows` (status-glyph circle + two bars on a
+  capsule action on a place's root list (a quiet capsule inside a record, `prominent:`). Loading is `SkeletonList` / `SkeletonRows` (status-glyph circle + two bars on a
   well, breathing; still under Reduce Motion), never a spinner. Offline / waiting-to-sync and
   failed reads are calm strips (`BannerGlyph` in a tinted circle on a rounded `fill` ground).
   Toasts are `ThorbisToast` (dark capsule + glyph, at most one action) and only confirm what the
@@ -27,8 +27,16 @@ mobile app. Later passes must not undo them:
   status picker); sheet groups are wells with inset hairlines. Pills and segments settle with
   `Theme.selectionSpring(reduceMotion:)`. Status glyph hues hold 3:1 non-text contrast
   (`contrast.py` counts it).
-- **Navigation:** floating labeled tab bar (pinned places + More), Search a separate circle, New in
-  the tab root header's + (`PaperHeader(showsCreate: true)`), More lists every other place. **No stock SwiftUI controls** in app screens:
+- **Navigation (phone):** a side drawer (`AppDrawer`, `../DrawerNavigation.swift`) after the Claude
+  and ChatGPT iOS apps. Each place root shows `DrawerMenuCircle` top left — `PaperHeader` draws it
+  when the shell sets `\.paperDrawer` (roots only, never pushed screens); roots without a Paper
+  header or with a visible navigation bar get it in the bar (`DrawerCircleInBar`). Edge swipe opens it on roots. The drawer:
+  business name + search circle, the Now row, pinned places, Places, Edit menu, Recents; rows are an
+  outline icon + 17pt label, ≥50pt, no wells; section labels semibold primary; `DrawerDot` (brand)
+  for unread / needs attention. Bottom: ink New job capsule left, gear circle right. New also stays
+  in the root header's + (`PaperHeader(showsCreate: true)`). UI tests: `drawer-menu`, then
+  `drawer-<id>` rows (`openDrawer()` / `openFromDrawer(_:)` in `ThorbisUITests`). iPad keeps its
+  sidebar. **No stock SwiftUI controls** in app screens:
 no `Menu {}`, `Picker`, `confirmationDialog`, `.buttonStyle(.bordered*)`, or `.borderedProminent`.
 Everything is built from `Theme` tokens (see `../Theme.swift`) so it looks the same everywhere,
 in light and dark, and scales with Dynamic Type.
@@ -38,6 +46,7 @@ in light and dark, and scales with Dynamic Type.
 | Need | Use | Where |
 |------|-----|-------|
 | Round icon button (36–40pt, 44pt hit) | `PaperCircleButton` | `../PaperComponents.swift` |
+| Phone drawer, its menu circle and dot | `AppDrawer`, `DrawerMenuCircle`, `DrawerDot` | `../DrawerNavigation.swift` |
 | Rimmed square button beside a commit | `PaperSquareButton` | `../PaperComponents.swift` |
 | The screen's one primary action | `PrimaryButton` / `.inkCommit()` / `PaperActionBar` | `../Theme.swift`, `../PaperComponents.swift` |
 | Pill segmented tabs | `PaperTabs` | `../PaperComponents.swift` |

@@ -433,10 +433,10 @@ enum TabletSection: Hashable {
     case local(LocalWorkspaceSection)
 }
 
-/// iPhone tab bar: Paper's technician dock as native destinations (HIG-005).
-/// Search uses the system search tab role.
+/// The phone's three built-in place roots (Schedule reads as Today in the drawer). Every other
+/// place opens from the drawer as a root of its own; search opens from the drawer's search circle.
 enum PrimaryTab: String, CaseIterable, Identifiable {
-    case schedule, jobs, customers, more, search
+    case schedule, jobs, customers
 
     static let initial: PrimaryTab = .schedule
 
@@ -448,8 +448,6 @@ enum PrimaryTab: String, CaseIterable, Identifiable {
         case .schedule: "calendar"
         case .jobs: "briefcase"
         case .customers: "person.2"
-        case .more: "ellipsis"
-        case .search: "magnifyingglass"
         }
     }
 }
@@ -462,7 +460,6 @@ struct PrimaryTabAccess {
         switch tab {
         case .schedule, .jobs: canViewJobs
         case .customers: canViewCustomers
-        case .more, .search: true
         }
     }
 
@@ -470,7 +467,6 @@ struct PrimaryTabAccess {
         switch tab {
         case .schedule, .jobs: "Your role does not allow access to jobs."
         case .customers: "Your role does not allow access to customers."
-        case .more, .search: ""
         }
     }
 }

@@ -96,14 +96,14 @@ final class RecentItems: ObservableObject {
     }
 }
 
-/// Places in the phone menu: bar places first, then every other permitted place.
+/// Places in the phone drawer: pinned places first, then every other permitted place.
 enum AppMenuContent {
     static func places(tabs: [MenuItem], hidden: Set<MenuItem>, order: [MenuItem] = [],
                        permitted: (MenuItem) -> Bool) -> [MenuItem] {
         tabs + menu(tabs: tabs, hidden: hidden, order: order, permitted: permitted)
     }
 
-    /// The places below the bar's, in the person's order, then any they have not placed yet.
+    /// The places below the pinned ones, in the person's order, then any they have not placed yet.
     static func menu(tabs: [MenuItem], hidden: Set<MenuItem>, order: [MenuItem],
                      permitted: (MenuItem) -> Bool) -> [MenuItem] {
         (order + MenuItem.allCases).reduce(into: [MenuItem]()) { list, item in
@@ -115,7 +115,7 @@ enum AppMenuContent {
 
 }
 
-/// Shared look for the floating bar, its action button and the menu: a frosted card with a hairline rim.
+/// Shared look for the floating search field and its results: a frosted card with a hairline rim.
 struct FloatingSurface<S: InsettableShape>: ViewModifier {
     let shape: S
     func body(content: Content) -> some View {
@@ -130,14 +130,10 @@ struct FloatingSurface<S: InsettableShape>: ViewModifier {
     }
 }
 
-/// The phone's only navigation (redesign 2026-10-31): a floating labeled tab bar, like Linear and
-/// Jobber. The person's pinned places (Today · Jobs · Customers by default; owners and office staff
-/// get their role's bar, and anyone can rearrange it) then a fixed More, each an icon over an 11pt
-/// label. The tab showing sits on a brand-tinted pill with icon and label in brand. Search stays a
-/// separate round button to the right. New moved to the screen headers' + circle. More is a real
-/// screen listing every other place, so nothing hides behind a switcher.
-struct AppBottomBar: View {
-    /// One entry in a round button's long-press menu.
+/// Helper types the phone shell shares (the floating tab bar they were born in was replaced by
+/// the side drawer on 2026-10-31): a create or shortcut entry, and what the field outbox is doing.
+enum AppBottomBar {
+    /// One entry in a create menu or a long-press menu.
     struct QuickAction: Identifiable {
         let title: String
         let symbol: String
@@ -146,79 +142,83 @@ struct AppBottomBar: View {
         var id: String { title }
     }
 
-    /// What the field outbox is doing, worn by the Search button so a tech can see a change went through.
+    /// What the field outbox is doing, worn by the menu circle and the drawer's saved-work row so a
+    /// tech can see a change went through.
     enum Sync: Equatable {
         case syncing(Int)
         case waiting(Int)
         case needsReview(Int)
         case needsChecking
+
+        /// The words, for VoiceOver and the drawer row.
+        var words: String {
+            switch self {
+            case .syncing(let count): count == 0 ? "Syncing saved work" : "Syncing \(count) saved item\(count == 1 ? "" : "s")"
+            case .waiting(let count): "\(count) saved item\(count == 1 ? "" : "s") waiting to sync"
+            case .needsReview(let count): "\(count) saved item\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") attention"
+            case .needsChecking: "Saved work needs checking"
+            }
+        }
+
+        /// Refused or unreadable work needs the person, so it raises the drawer's dot.
+        var needsPerson: Bool {
+            switch self {
+            case .needsReview, .needsChecking: true
+            default: false
+            }
+        }
     }
 
-    let pinned: [MenuItem]
-    /// The place showing right now (a MenuItem id or "more").
-    let current: String
-    let select: (MenuItem) -> Void
-    /// Opens More (also where any place not pinned lives).
-    let openMore: () -> Void
-    let search: () -> Void
-    var sync: Sync?
-    /// Long-press Search: recent records, and the outbox when it holds anything.
-    var searchActions: [[QuickAction]] = []
-    /// Search lives in the bar: when active the tabs give way to a field and a close button.
-    var searchActive = false
-    var searchQuery: Binding<String> = .constant("")
-    var closeSearch: () -> Void = {}
-    /// Return in the field: search opens its top hit.
-    var submitSearch: () -> Void = {}
-    @FocusState private var fieldFocused: Bool
-    @Namespace private var pill
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Bumped per place on each tap, so only the tapped icon bounces.
-    @State private var taps: [String: Int] = [:]
+    /// The floating search field's height.
+    static let circle: CGFloat = 56
+    static let gap: CGFloat = 8
+    /// How far the search field sits above the screen's bottom edge, into the home indicator's margin.
+    static let bottomGap: CGFloat = 20
+}
 
-    static let moreID = "more"
+/// Search's field, floating low on the screen while search is open (opened from the drawer's
+/// search circle). Results rise in a card above it; the close circle sits beside it.
+struct FloatingSearchBar: View {
+    var query: Binding<String>
+    let close: () -> Void
+    /// Return in the field: search opens its top hit.
+    let submit: () -> Void
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        Group {
-            if searchActive { searchRow } else { tabsRow }
-        }
-        .padding(.horizontal, 16)
-    }
-
-    /// The Search circle widens into this field; the close button takes the circle's place.
-    private var searchRow: some View {
         HStack(alignment: .center, spacing: AppBottomBar.gap) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(Theme.muted)
-                TextField("Street, name, phone or number", text: searchQuery)
+                    .accessibilityHidden(true)
+                TextField("Street, name, phone or number", text: query)
                     .font(Theme.font(16))
                     .focused($fieldFocused)
                     .submitLabel(.search)
-                    .onSubmit(submitSearch)
+                    .onSubmit(submit)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
-                if !searchQuery.wrappedValue.isEmpty {
-                    Button { searchQuery.wrappedValue = "" } label: {
+                if !query.wrappedValue.isEmpty {
+                    Button { query.wrappedValue = "" } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 17))
                             .foregroundStyle(Theme.muted)
                             .frame(width: 32, height: 44)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressStyle())
                     .accessibilityLabel("Clear search")
                 }
             }
             .foregroundStyle(Theme.foreground)
             .padding(.leading, 16)
             .padding(.trailing, 8)
-            .frame(height: AppBottomBar.circle)
+            .frame(minHeight: AppBottomBar.circle)
             .frame(maxWidth: .infinity)
             .modifier(FloatingSurface(shape: Capsule()))
             .onAppear { fieldFocused = true }
-            Button(action: closeSearch) {
+            Button(action: close) {
                 Image(systemName: "xmark")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(Theme.foreground)
@@ -227,262 +227,35 @@ struct AppBottomBar: View {
                     .contentShape(Circle())
             }
             .buttonStyle(PressStyle())
-            .matchedGeometryEffect(id: "search", in: pill)
             .accessibilityLabel("Close search")
         }
-    }
-
-    private var tabsRow: some View {
-        HStack(alignment: .center, spacing: AppBottomBar.gap) {
-            HStack(spacing: 0) {
-                ForEach(pinned) { item in
-                    tab(id: item.rawValue, title: item.tabTitle, symbol: item.symbol) { tap(item) }
-                }
-                tab(id: Self.moreID, title: "More", symbol: "ellipsis.circle", here: moreHere) {
-                    if !moreHere { UISelectionFeedbackGenerator().selectionChanged() }
-                    if !reduceMotion { taps[Self.moreID, default: 0] += 1 }
-                    openMore()
-                }
-            }
-            .padding(4)
-            // The selection pill glides to the new tab instead of jumping.
-            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.82), value: current)
-            .frame(maxWidth: .infinity)
-            .modifier(FloatingSurface(shape: Capsule()))
-            searchCircle
-                .accessibilityIdentifier("bottom-bar-search")
-                .overlay { syncRing }
-                .overlay(alignment: .topTrailing) { syncBadge }
-                .matchedGeometryEffect(id: "search", in: pill)
-        }
-        // The bar's words stay one size so five tabs fit; the large content viewer shows them big.
-        .dynamicTypeSize(...DynamicTypeSize.large)
-    }
-
-    /// More is selected on its own list and on any place that is not pinned.
-    private var moreHere: Bool { !pinned.contains { $0.rawValue == current } }
-
-    /// The bar's height: the capsule (4 + 48 + 4) and the Search circle line up.
-    static let circle: CGFloat = 56
-    static let gap: CGFloat = 8
-    /// How far the bar sits above the screen's bottom edge, into the home indicator's margin.
-    static let bottomGap: CGFloat = 20
-
-    private var searchCircle: some View {
-        Button(action: search) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(Theme.foreground)
-                .frame(width: AppBottomBar.circle, height: AppBottomBar.circle)
-                .modifier(FloatingSurface(shape: Circle()))
-                .contentShape(.contextMenuPreview, Circle())
-                .contentShape(Circle())
-        }
-        .buttonStyle(PressStyle())
-        .contextMenu {
-            ForEach(searchActions.indices, id: \.self) { index in
-                Section {
-                    ForEach(searchActions[index]) { item in
-                        Button(action: item.run) { Label(item.title, systemImage: item.symbol) }
-                            .disabled(!item.enabled)
-                    }
-                }
-            }
-        }
-        .accessibilityLabel(searchLabel)
-        .accessibilityShowsLargeContentViewer { Label("Search", systemImage: "magnifyingglass") }
-    }
-
-    private var searchLabel: String {
-        switch sync {
-        case .syncing(let count): count == 0 ? "Search. Syncing saved work" : "Search. Syncing \(count) saved item\(count == 1 ? "" : "s")"
-        case .waiting(let count): "Search. \(count) saved item\(count == 1 ? "" : "s") waiting to sync"
-        case .needsReview(let count): "Search. \(count) saved item\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") attention"
-        case .needsChecking: "Search. Saved work needs checking"
-        case nil: "Search"
-        }
-    }
-
-    /// A green arc that runs around Search while changes are going up.
-    @ViewBuilder private var syncRing: some View {
-        if case .syncing = sync {
-            SyncRing(reduceMotion: reduceMotion)
-                .frame(width: AppBottomBar.circle + 4, height: AppBottomBar.circle + 4)
-                .allowsHitTesting(false)
-        }
-    }
-
-    /// How many changes are still on this phone; red when the server refused some.
-    @ViewBuilder private var syncBadge: some View {
-        switch sync {
-        case .waiting(let count), .needsReview(let count):
-            let refused = { if case .needsReview = sync { true } else { false } }()
-            Text("\(count)")
-                .font(Theme.monoFont(12, weight: .semibold))
-                .foregroundStyle(refused ? Color.white : Theme.foreground)
-                .frame(minWidth: 20, minHeight: 20)
-                .padding(.horizontal, count > 9 ? 4 : 0)
-                .background(refused ? Theme.destructiveFill : Theme.warningSurface, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.background, lineWidth: 2))
-                .offset(x: 4, y: -4)
-                .transition(.scale.combined(with: .opacity))
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        case .needsChecking:
-            Image(systemName: "exclamationmark")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.white)
-                .frame(width: 20, height: 20)
-                .background(Theme.destructiveFill, in: Circle())
-                .overlay(Circle().strokeBorder(Theme.background, lineWidth: 2))
-                .offset(x: 4, y: -4)
-                .transition(.scale.combined(with: .opacity))
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        default:
-            EmptyView()
-        }
-    }
-
-    private func tap(_ item: MenuItem) {
-        if current != item.rawValue {
-            UISelectionFeedbackGenerator().selectionChanged()
-            if !reduceMotion { taps[item.rawValue, default: 0] += 1 }
-        }
-        select(item)
-    }
-
-    /// One labeled tab: icon over word. The showing tab sits on the brand-tinted pill in brand.
-    private func tab(id: String, title: String, symbol: String, here explicit: Bool? = nil,
-                     action: @escaping () -> Void) -> some View {
-        let here = explicit ?? (current == id)
-        return Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: symbol)
-                    .symbolVariant(here ? .fill : .none)
-                    .font(.system(size: 18, weight: .medium))
-                    .symbolEffect(.bounce.down, value: taps[id] ?? 0)
-                    .frame(height: 22)
-                Text(title)
-                    .font(Theme.font(12, weight: here ? .semibold : .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            .foregroundStyle(here ? Theme.brandText : Theme.muted)
-            .padding(.horizontal, 2)
-            .frame(maxWidth: .infinity).frame(height: AppBottomBar.circle - 8)
-            .background { if here { selectionPill } }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(PressStyle())
-        // One element per tab: the word is the label, so tests and VoiceOver see one "Jobs", not two.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(here ? [.isButton, .isSelected] : .isButton)
-        .accessibilityShowsLargeContentViewer { Label(title, systemImage: symbol) }
-        .accessibilityIdentifier("bottom-bar-\(id)")
-    }
-
-    /// One pill shared by every tab, so selection slides between them.
-    private var selectionPill: some View {
-        Capsule().fill(Theme.brandSurface).matchedGeometryEffect(id: "selection", in: pill)
+        .padding(.horizontal, 16)
     }
 }
 
-/// An arc that circles the Search button while the outbox sends. Reduce Motion holds it still.
-private struct SyncRing: View {
-    let reduceMotion: Bool
+/// A short arc that turns while something is under way (saved work going up, a job in progress).
+/// Reduce Motion holds it still.
+struct SpinnerArc: View {
+    var tint: Color = Theme.muted
+    var lineWidth: CGFloat = 2
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spin = false
 
     var body: some View {
         Circle()
-            .trim(from: 0, to: 0.28)
-            .stroke(Theme.success, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+            .trim(from: 0, to: 0.72)
+            .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             .rotationEffect(.degrees(spin ? 360 : 0))
             .animation(reduceMotion ? nil : .linear(duration: 1.1).repeatForever(autoreverses: false), value: spin)
             .onAppear { spin = true }
+            .accessibilityHidden(true)
     }
 }
 
-/// The job this person is on right now, docked on the bar (the in-app twin of the Live Activity).
-/// The title, then the status as a word with a soft live pulse on its dot, then who. A tap opens
-/// the job. It sits on `BarGround`, so it never floats over a list's rows.
-struct CurrentJobChip: View {
-    let job: Job
-    let customer: String
-    let open: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
-
-    var body: some View {
-        let tint = StatusWord.jobTint(job.status) ?? Theme.muted
-        Button(action: open) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(tint.opacity(0.3))
-                        .frame(width: 18, height: 18)
-                        .scaleEffect(pulse ? 1 : 0.4)
-                        .opacity(pulse ? 0 : 1)
-                    Circle().fill(tint).frame(width: 8, height: 8)
-                }
-                .frame(width: 18, height: 18)
-                .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(job.title)
-                        .font(Theme.font(15, weight: .medium))
-                        .lineLimit(2)
-                    Text("\(job.status.statusLabel) · \(customer)")
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(2)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                Text("Open").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-            }
-            .foregroundStyle(Theme.foreground)
-            .padding(.leading, 16)
-            .padding(.trailing, 18)
-            .padding(.vertical, 6)
-            .frame(minHeight: 52)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        }
-        .buttonStyle(PressStyle())
-        // Docked above the bar: past the first accessibility size it would take a third of the
-        // screen, so it stops growing there and wraps to two lines instead of cutting words.
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .padding(.horizontal, 16)
-        .accessibilityLabel("Current job, \(job.title), \(job.status.statusLabel), \(customer)")
-        .accessibilityHint("Opens the job")
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { pulse = true }
-        }
-    }
-}
-
-/// The ground under the bar while the current-job chip rides on it: the cream canvas with a short
-/// fade at the top, reaching the screen's bottom edge. Rows scroll under it like under a toolbar,
-/// never under a floating card, and each place's root reserves its height (`barReserve`).
-struct BarGround: View {
-    var body: some View {
-        VStack(spacing: 0) {
-            LinearGradient(colors: [Theme.background.opacity(0), Theme.background], startPoint: .top, endPoint: .bottom)
-                .frame(height: 16)
-            Theme.background
-        }
-        .padding(.top, -16)
-        .padding(.bottom, -(AppBottomBar.bottomGap + 40))
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-/// Arranging the bar and the menu in place. One list: the bar's places, a divider, then the menu's.
-/// Drag a place across the divider to move it between the bar and the menu, or tap its pin.
-/// Every change is saved as it happens, so the bar behind already shows it.
+/// Arranging the drawer in place. One list: the pinned places that lead the drawer, a divider, then
+/// the rest. Drag a place across the divider to pin or unpin it, or tap its pin. Every change is
+/// saved as it happens, so the drawer behind already shows it. (The layout's `tabs` are the pinned
+/// places; the name stays so saved and company layouts keep working.)
 struct AppMenuEditor: View {
     let done: () -> Void
     @EnvironmentObject private var layout: MenuLayout
@@ -535,7 +308,7 @@ struct AppMenuEditor: View {
                         if editable { move(from: source, to: destination) }
                     }
             } header: {
-                caption("Bottom bar · up to \(MenuLayout.maxTabs)")
+                caption("Pinned to the top · up to \(MenuLayout.maxTabs)")
             } footer: {
                 if !editable { caption(lockedNote) }
             }
@@ -565,7 +338,7 @@ struct AppMenuEditor: View {
     }
 
     private var divider: some View {
-        caption("In the menu")
+        caption("Places")
             .padding(.top, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .listRowBackground(Color.clear)
@@ -595,7 +368,7 @@ struct AppMenuEditor: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(!canPin)
-                .accessibilityLabel(inBar ? "Move \(item.title) to the menu" : "Add \(item.title) to the bar")
+                .accessibilityLabel(inBar ? "Unpin \(item.title)" : "Pin \(item.title) to the top")
             }
         }
         .frame(minHeight: 44)
