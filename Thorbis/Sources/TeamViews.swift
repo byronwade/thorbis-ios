@@ -149,9 +149,8 @@ struct TeamView: View {
                 if let error { ErrorBanner(message: error) { await load() } }
                 if loading && members.isEmpty { SkeletonRows(count: 6) }
                 if visible.isEmpty && !members.isEmpty {
-                    PaperEmptyState(symbol: "magnifyingglass", title: "No one matches",
-                                    message: "Nobody on the team matches that search or role.",
-                                    actionTitle: "Clear filters") { search = ""; filter = "All" }
+                    PaperEmptyState(symbol: "magnifyingglass", title: "No one on the team matches",
+                                    actionTitle: "Clear search") { search = ""; filter = "All" }
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
@@ -237,8 +236,12 @@ struct TeamView: View {
                     }
                     .paperCardMargin().padding(.top, 16)
                 }
-                if !loading && visible.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "person.2", title: search.isEmpty ? "No team members" : "No matches", message: "Invite people with the invite button above.")
+                // Only when there is truly no one; a search with no match has its own state above.
+                if !loading && members.isEmpty && error == nil {
+                    PaperEmptyState(symbol: "person.2", title: "No team members yet",
+                                    message: canInvite ? nil : "Ask an owner to invite your crew.",
+                                    actionTitle: canInvite ? "Invite someone" : nil,
+                                    action: canInvite ? { inviting = true } as () -> Void : nil)
                 }
                 Text(canManage ? "Tap a person to change their role or what they can do." : "Ask an owner to change roles.")
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)

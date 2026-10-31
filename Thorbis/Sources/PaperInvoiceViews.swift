@@ -145,12 +145,8 @@ struct PaperJobInvoiceContent: View {
                             .fixedSize()
                     }
                     .frame(minHeight: 44)
-                    if index < displayedInvoice.lines.count - 1 {
-                        Divider().overlay(Theme.border)
-                    }
                 }
 
-                Divider().overlay(Theme.border)
                 HStack {
                     Text("Total")
                         .font(Theme.font(15, weight: .medium))
@@ -189,7 +185,7 @@ struct PaperJobInvoiceContent: View {
                                 .font(Theme.font(13))
                                 .foregroundStyle(Theme.muted)
                             if let date = event.date {
-                                Text(date.formatted(date: .omitted, time: .shortened))
+                                Text(date.tradeTime)
                                     .font(Theme.monoFont(12))
                                     .foregroundStyle(Theme.subtle)
                             }

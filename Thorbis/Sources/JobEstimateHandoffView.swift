@@ -52,8 +52,11 @@ struct JobEstimateHandoffView: View {
                 Text("You can review these estimates. Your current access doesn't allow approvals.").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
             }
             if model.hasResults { results }
-            if let error = model.error { ErrorBanner(message: error) { await model.refresh() } }
-            if model.loading { ProgressView("Opening current job estimates…").font(Theme.font(type.body)) }
+            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.refresh() } }
+            if model.loading {
+                if model.records.isEmpty { CustomerSkeleton(caption: "Opening current job estimates…", lines: 2) }
+                else { Text("Opening current job estimates…").font(Theme.font(type.small)).foregroundStyle(Theme.muted) }
+            }
             ForEach(model.records) { record in estimateCard(record) }
             ForEach(model.unavailableIDs, id: \.self) { id in
                 VStack(alignment: .leading, spacing: 8) {

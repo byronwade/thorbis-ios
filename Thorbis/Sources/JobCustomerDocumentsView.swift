@@ -58,9 +58,10 @@ struct JobCustomerDocumentsView: View {
                             Text("JOB-\(scope.jobID.suffix(4).uppercased()) · \(customerName)")
                                 .font(Theme.font(17)).foregroundStyle(Theme.muted)
                         }
-                        if let error { ErrorBanner(message: error) { await refresh() } }
-                        if estimates?.isComplete == false || invoices?.isComplete == false {
-                            ErrorBanner(message: "Some documents couldn't be refreshed. Please try again to see everything.") { await refresh() }
+                        if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await refresh() } }
+                        else if estimates?.isComplete == false || invoices?.isComplete == false {
+                            CustomerProblemBanner(message: "Some documents couldn't be refreshed. Try again to see everything.",
+                                                  actionTitle: "Try again") { await refresh() }
                         }
                         if canViewEstimates { estimateRows }
                         if canViewInvoices { invoiceRows }
@@ -72,8 +73,7 @@ struct JobCustomerDocumentsView: View {
                 .accessibilityIdentifier("customer-job-documents-list")
                 .refreshable { await refresh() }
             } else {
-                Text("Hand the device back to your technician to reload this job.")
-                    .font(Theme.font(20)).padding(Theme.gutter)
+                customerHandBackState(withAction: false)
             }
         }
         .navigationTitle("Customer view")
@@ -121,8 +121,7 @@ struct JobCustomerDocumentsView: View {
                         }
                     }
             } else {
-                Text("Hand the device back to your technician to reload this job.")
-                    .font(Theme.font(20)).padding(Theme.gutter)
+                customerHandBackState(withAction: true)
             }
         }
         .thorbisDestination(isPresented: $approving) {
@@ -131,8 +130,7 @@ struct JobCustomerDocumentsView: View {
                 JobEstimateHandoffView(model: handoff, handBack: beginHandBack)
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             } else {
-                Text("Hand the device back to your technician to reload this job.")
-                    .font(Theme.font(20)).padding(Theme.gutter)
+                customerHandBackState(withAction: true)
             }
         }
         .thorbisDestination(isPresented: $editingDetails) {
@@ -141,8 +139,7 @@ struct JobCustomerDocumentsView: View {
                     .navigationTitle("Your details")
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             } else {
-                Text("Hand the device back to your technician to reload this job.")
-                    .font(Theme.font(20)).padding(Theme.gutter)
+                customerHandBackState(withAction: true)
             }
         }
         .task(id: session.generation) {
@@ -308,6 +305,18 @@ struct JobCustomerDocumentsView: View {
         handBack()
     }
 
+    /// The session or workspace changed under the customer: only the technician can reopen it.
+    /// On the home the pinned "Hand back to the technician" is the one action, so the state is
+    /// words only; pushed pages have no pinned bar and carry it themselves.
+    private func customerHandBackState(withAction: Bool) -> some View {
+        let handBack: (() -> Void)? = withAction ? { beginHandBack() } : nil
+        return CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
+                             message: "Your technician needs to reload this job.",
+                             actionTitle: withAction ? "Hand back to the technician" : nil,
+                             action: handBack)
+            .padding(.horizontal, Theme.gutter)
+    }
+
     private func empty(_ text: String) -> some View {
         Text(text).font(Theme.font(18)).foregroundStyle(Theme.muted).padding(.vertical, 8)
     }
@@ -355,7 +364,7 @@ struct JobCustomerDocumentsView: View {
         }
         guard session.generation == generation, currentWorkspace, published, let read = estimates else { return }
         guard read.freshIDs.contains(id), let estimate = read.records.first(where: { $0.id == id }) else {
-            error = "This estimate couldn't be refreshed. Please try again."
+            error = "This estimate couldn't be refreshed. Try again in a moment."
             return
         }
         if decision { paper = .estimate(estimate) }
@@ -393,7 +402,7 @@ struct JobCustomerDocumentsView: View {
                 paymentModel = nil
                 throw Problem(title: model.loadError ?? "This invoice couldn't be refreshed", status: nil, detail: nil)
             }
-        } catch is CancellationError { } catch { self.error = error.localizedDescription }
+        } catch is CancellationError { } catch { self.error = error.customerSentence(.openInvoice) }
     }
 
     private func pay(_ invoiceID: String) async {

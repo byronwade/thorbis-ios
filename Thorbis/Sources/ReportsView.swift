@@ -91,7 +91,7 @@ struct ReportsView: View {
                 if let error { ErrorBanner(message: error) }
                 Group {
                     if tabs.isEmpty {
-                        PaperEmptyState(symbol: "chart.bar", title: "Reports unavailable", message: "Your role can't view estimate, job or payment reports.")
+                        PaperEmptyState(symbol: "chart.bar", title: "Reports are off for your role", message: "Ask your office for access to reports.")
                     } else if (tabs.contains(tab) ? tab : tabs[0]) == "Revenue" {
                         // Rebuilt on pull to refresh, so its figures reload with the rest.
                         WorkspaceRevenueView(api: api, available: true, embedded: true).id(refreshes)
@@ -241,8 +241,8 @@ struct ReportsView: View {
     }
 
     private var incomplete: some View {
-        PaperEmptyState(symbol: "exclamationmark.triangle", title: "Report incomplete",
-                        message: "The server reached its scan limit, so these counts would understate the totals. Open the report on the web.")
+        PaperEmptyState(symbol: "exclamationmark.triangle", title: "This report is too big for the phone",
+                        message: "These counts would come up short. Open the full report on the web.")
     }
 
     private func stat(_ label: String, _ value: Int, alert: Bool = false) -> PaperStatRow.Stat {

@@ -258,7 +258,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             guard isCurrent, !context.submissionStarted, case .retryable? = context.outcome else { return }
             context.report(customerEstimatePreparationCanRetry(error)
                 ? .retryable("Preparing this approval was interrupted. Try again when connected.")
-                : .needsReview(error.localizedDescription))
+                : .needsReview(error.customerSentence(.approve)))
         }
     }
     func refresh() async {
@@ -351,7 +351,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             }
         } catch is CancellationError {} catch {
             guard isCurrent else { return }
-            reviewed = []; reviewedGeneration = nil; self.error = error.localizedDescription
+            reviewed = []; reviewedGeneration = nil; self.error = error.customerSentence(.openEstimate)
         }
     }
     private func approvalAllowed(_ item: JobEstimateReviewedItem) -> Bool {

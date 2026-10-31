@@ -110,8 +110,8 @@ struct BillingSchedulesView: View {
                     }
                 }
                 if !loading && schedules.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "list.bullet.rectangle", title: "No billing schedules",
-                                    message: "A schedule appears when a job is billed in stages or takes a deposit.")
+                    PaperEmptyState(symbol: "list.bullet.rectangle", title: "No billing schedules yet",
+                                    message: "A schedule starts when a job is billed in stages or takes a deposit.")
                 }
             }
             .paperCardMargin().padding(.bottom, 24)

@@ -40,8 +40,7 @@ struct PublicEstimateActionView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     if model.isLoading && model.action == nil {
-                        ProgressView("Opening estimate…")
-                            .frame(maxWidth: .infinity, minHeight: 220)
+                        CustomerSkeleton(caption: "Opening your estimate…")
                     } else if let message = model.unavailableMessage {
                         unavailableState(message)
                     } else if let message = model.loadError {
@@ -49,7 +48,9 @@ struct PublicEstimateActionView: View {
                     } else if let action = model.action {
                         estimateContent(action)
                     } else {
-                        ContentUnavailableView("Estimate unavailable", systemImage: "doc.text.magnifyingglass", description: Text("This link could not be opened."))
+                        CustomerStateMessage(symbol: "doc.text.magnifyingglass", title: "This estimate isn’t available",
+                                             message: "This link couldn’t be opened. Ask the company for a new link.",
+                                             actionTitle: "Close", action: onClose)
                     }
                 }
                 .frame(maxWidth: 640, alignment: .leading)
@@ -162,12 +163,8 @@ struct PublicEstimateActionView: View {
         }
 
         if let message = model.actionError {
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(Theme.font(13))
-                .foregroundStyle(Theme.warning)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 12))
+            // The server's own words are for staff; a homeowner reads what happened and what to do.
+            CustomerProblemBanner(message: model.actionFailure?.customerSentence(.approve, handBack: false) ?? message)
         }
 
         if let preview = action.html {
@@ -392,24 +389,19 @@ struct PublicEstimateActionView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The link itself has ended: nothing here can fix it, so the one action is Close.
     private func unavailableState(_ message: String) -> some View {
-        ContentUnavailableView {
-            Label("Estimate approval unavailable", systemImage: "link.badge.exclamationmark")
-        } description: {
-            Text(message)
-        }
+        CustomerStateMessage(symbol: "link.badge.exclamationmark", title: "This estimate link has ended",
+                             message: message, actionTitle: "Close", action: onClose)
     }
 
     private func loadFailureState(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            ContentUnavailableView("Couldn’t load estimate", systemImage: "wifi.exclamationmark", description: Text(message))
-            Button("Try again") { Task { await model.load(api: api, token: token) } }
-                .font(Theme.font(14, weight: .semibold))
-                .frame(minWidth: 120, minHeight: 44)
-                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 10))
-                .disabled(model.isLoading)
-        }
-        .frame(maxWidth: .infinity, minHeight: 240)
+        CustomerStateMessage(symbol: (model.loadFailure.map { ProblemKind($0) } ?? .other).symbol,
+                             title: "We couldn’t open this estimate",
+                             message: model.loadFailure?.customerSentence(.openEstimate, handBack: false)
+                                ?? "Opening your estimate didn’t work. Try again in a moment.",
+                             actionTitle: "Try again") { Task { await model.load(api: api, token: token) } }
+            .disabled(model.isLoading)
     }
 
     private func sectionTitle(_ value: String) -> some View {

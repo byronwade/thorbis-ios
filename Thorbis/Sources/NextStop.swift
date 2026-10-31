@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import MapKit
+import SwiftUI
 
 // Next stop (technician home): the Schedule's lead card says where the tech is going, how long
 // the drive is and how to get there. The address is the job's own service location only; a
@@ -127,6 +128,9 @@ final class JobAddressBook: ObservableObject {
 @MainActor
 final class NextStopETA: ObservableObject {
     @Published private(set) var minutes: Int?
+    /// Location is denied or restricted for Thorbis, so there is no drive time to show. Never set
+    /// while the permission is still undecided (the system prompt is about to ask).
+    @Published private(set) var locationOff = false
     private var key: String?
 
     func update(to destination: FieldCoordinates?, key: String, enabled: Bool) async {
@@ -137,14 +141,22 @@ final class NextStopETA: ObservableObject {
         if PaperPreview.enabled {
             // Fixture: no screenshot ever depends on a permission prompt or the network (a fresh
             // simulator would otherwise cover every screen with the location alert).
-            minutes = PaperPreview.screen.hasPrefix("next-stop") && enabled && destination != nil ? 18 : nil
+            // `--paper-preview-location-off` shows the card as it is with location turned off.
+            locationOff = ProcessInfo.processInfo.arguments.contains("--paper-preview-location-off")
+            minutes = PaperPreview.screen.hasPrefix("next-stop") && enabled && destination != nil && !locationOff ? 18 : nil
             return
         }
         #endif
         guard enabled, let destination else { return }
         let status = CLLocationManager().authorizationStatus
-        guard status != .denied, status != .restricted else { return }
-        guard let here = await Self.currentLocation(), !Task.isCancelled else { return }
+        locationOff = status == .denied || status == .restricted
+        guard !locationOff else { return }
+        guard let here = await Self.currentLocation(), !Task.isCancelled else {
+            // The person may have just said no to the prompt.
+            let after = CLLocationManager().authorizationStatus
+            if after == .denied || after == .restricted { locationOff = true }
+            return
+        }
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: here.coordinate))
         request.destination = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(
@@ -177,5 +189,47 @@ final class NextStopETA: ObservableObject {
             group.cancelAll()
             return first
         }
+    }
+}
+
+/// The Next stop card's one quiet line when Location is off: the drive time is missing because
+/// of a setting, and here is the way to it. Shown once per launch until dismissed; it never
+/// blocks the card or its commit.
+struct NextStopLocationNotice: View {
+    let dismiss: () -> Void
+    @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// Dismissed for the rest of this launch, on every Schedule that shows the card.
+    @MainActor static var dismissedThisLaunch = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "location.slash").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                .accessibilityHidden(true)
+            // The words are the way to Settings, so the notice stays one line.
+            Button { if let url = DevicePermission.location.settingsURL { openURL(url) } } label: {
+                Text("Turn on location to see drive time").font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                    .underline()
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1).minimumScaleFactor(0.85)
+                    .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Turn on location to see drive time")
+            .accessibilityHint("Opens Settings to turn on Location for Thorbis")
+            Spacer(minLength: 0)
+            Button(action: dismiss) {
+                Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Dismiss")
+            .accessibilityHint("Hides this until Thorbis is opened again")
+        }
+        .padding(.leading, 12)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("next-stop-location-off")
     }
 }

@@ -55,11 +55,17 @@ struct CustomerJobDocumentBook: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let actionError { ErrorBanner(message: actionError) { await refresh() }.padding(.horizontal, Theme.gutter) }
+            if let actionError {
+                CustomerProblemBanner(message: actionError, actionTitle: "Try again") { await refresh() }
+                    .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+            }
             pagingControls
             if selection.selected == nil {
-                ContentUnavailableView("Document no longer available", systemImage: "doc.text.magnifyingglass",
-                    description: Text("Return to Documents or choose another document above."))
+                ScrollView {
+                    CustomerStateMessage(symbol: "doc.text.magnifyingglass", title: "This document isn’t available any more",
+                                         message: "Choose another document above, or go back to your job documents.")
+                        .padding(.horizontal, Theme.gutter)
+                }
             } else {
                 TabView(selection: Binding(get: { selection.selected }, set: { if let id = $0 { selection.select(id) } })) {
                     ForEach(selection.ids) { id in
@@ -97,7 +103,6 @@ struct CustomerJobDocumentBook: View {
         }
         .font(Theme.font(17)).buttonStyle(.plain)
         .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
     private var regularControls: some View {
@@ -181,11 +186,12 @@ struct CustomerJobDocumentBook: View {
                 CustomerEstimateBookPage(scope: scope, sourceGeneration: sourceGeneration, estimate: effectiveRecord, fresh: effectiveFresh, active: selection.selected == id,
                     refresh: refresh, review: { reviewEstimate(value) })
             } else {
-                VStack(spacing: 16) {
-                    Text("Estimate unavailable").font(Theme.font(24, weight: .medium))
-                    Text("Refresh to see this estimate. Your other job documents are still available.").font(Theme.font(20))
-                    Button("Refresh documents") { Task { await refresh() } }.frame(minHeight: 56)
-                }.padding(Theme.gutter)
+                ScrollView {
+                    CustomerStateMessage(symbol: "arrow.clockwise", title: "This estimate needs a refresh",
+                                         message: "Refresh to see it. Your other job documents are still here.",
+                                         actionTitle: "Refresh documents") { Task { await refresh() } }
+                        .padding(.horizontal, Theme.gutter)
+                }
             }
         case .invoice(let value):
             if let record = invoices.first(where: { $0.id == value }) {
@@ -238,8 +244,8 @@ private struct CustomerEstimateBookPage: View {
                     else { Text("Status needs refresh").font(Theme.font(type.body)).foregroundStyle(Theme.muted) }
                     if !fresh {
                         Text("This copy needs a refresh before you can decide.").font(Theme.font(type.body))
-                    } else if loading { ProgressView("Opening current estimate…").font(Theme.font(type.body)) }
-                    if let error { ErrorBanner(message: error) { await load() } }
+                    } else if loading { CustomerSkeleton(caption: "Opening the current estimate…", heading: false) }
+                    if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() } }
                     if estimate.status != "sent" || issued != nil {
                         if options.isEmpty {
                             estimateLines(lines, currency: currency)
@@ -287,7 +293,7 @@ private struct CustomerEstimateBookPage: View {
             let revision = try await api.customerIssuedEstimateRevision(for: estimate)
             try Task.checkCancellation()
             issued = revision
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch is CancellationError {} catch { self.error = error.customerSentence(.openEstimate) }
     }
 }
 
@@ -350,14 +356,17 @@ private struct CustomerInvoiceBookPage: View {
                         Text("These amounts couldn't be verified. Hand the device back to your technician.").font(Theme.font(type.body))
                     }
                     if !fresh { Text("This copy needs a refresh.").font(Theme.font(type.body)) }
-                    if model.isLoading { ProgressView("Opening payments…") }
-                    else if !model.historyComplete {
-                        ErrorBanner(message: "Payments couldn't be loaded. The invoice's paid amount is shown above.") { await model.load() }
+                    if model.isLoading {
+                        SkeletonRows(count: 2, leading: false, inset: 0)
+                            .accessibilityLabel("Loading your payments")
+                    } else if !model.historyComplete {
+                        CustomerProblemBanner(message: "Payments couldn't be loaded. The invoice's paid amount is shown above.",
+                                              actionTitle: "Try again") { await model.load() }
                     } else {
                         paymentHistory
                         if model.paymentTotalCents != invoice.amountPaid {
-                            Text("Payments are still updating. Refresh to confirm the balance.").font(Theme.font(type.body))
-                            Button("Refresh payments") { Task { await model.load() } }.frame(minHeight: 56)
+                            CustomerProblemBanner(message: "Payments are still updating. Refresh to confirm the balance.",
+                                                  symbol: "arrow.clockwise", actionTitle: "Refresh payments") { await model.load() }
                         }
                     }
                 }
@@ -398,7 +407,6 @@ private struct CustomerInvoiceBookPage: View {
                     }
                 }
                 .font(Theme.font(type.body)).padding(.vertical, 14).accessibilityElement(children: .combine)
-                Rectangle().fill(Theme.border).frame(height: 1)
             }
         } label: {
             HStack {

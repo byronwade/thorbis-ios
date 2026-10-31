@@ -17,6 +17,7 @@ struct StatesPreview: View {
             case "state-empty": NavigationStack { EmptyStatesGallery() }
             case "state-errors": NavigationStack { ErrorStatesGallery() }
             case "state-loading": NavigationStack { LoadingStatesGallery() }
+            case "state-customer": NavigationStack { CustomerStatesGallery() }
             case "state-workspaces":
                 if forced { WorkspaceGateView() } else { SessionLoadingView(message: "Opening your workspace…") }
             default:
@@ -97,6 +98,47 @@ private struct ErrorStatesGallery: View {
     private func label(_ text: String) -> some View {
         Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
             .padding(.horizontal, Theme.gutter + 4).padding(.top, 14)
+    }
+}
+
+/// The customer-facing states (2026-10-31 leftovers), with the copy their call sites use.
+private struct CustomerStatesGallery: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                label("Loading an estimate")
+                CustomerSkeleton(caption: "Opening your estimate…", lines: 2)
+                label("No signal while opening")
+                CustomerStateMessage(symbol: "wifi.slash", title: "We couldn’t open your estimate",
+                                     message: Problem(title: "Network error", status: nil, detail: nil)
+                                        .customerSentence(.openEstimate))
+                label("Changed under the customer")
+                CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
+                                     message: "Your technician needs to reload this job.",
+                                     actionTitle: "Hand back to the technician") {}
+                label("Public link ended")
+                CustomerStateMessage(symbol: "link.badge.exclamationmark", title: "This estimate link has ended",
+                                     message: "This estimate link is expired, replaced, or no longer current. Ask the company for a new link.",
+                                     actionTitle: "Close") {}
+                label("Inside a document")
+                CustomerProblemBanner(message: "Payments couldn't be loaded. The invoice's paid amount is shown above.",
+                                      actionTitle: "Try again") {}
+                CustomerProblemBanner(message: Problem(title: "HTTP 503", status: 503, detail: nil).customerSentence(.openInvoice),
+                                      actionTitle: "Try again") {}
+                label("Your details")
+                CustomerStateMessage(symbol: "person.crop.circle.badge.exclamationmark", title: "We couldn’t open your details",
+                                     message: Problem(title: "Unexpected", status: 422, detail: "decode failure").customerSentence(.openDetails),
+                                     actionTitle: "Try again") {}
+            }
+            .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
+        }
+        .background(Theme.background)
+        .navigationTitle("Customer states")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 18)
     }
 }
 

@@ -134,7 +134,7 @@ struct WhatsNewSheet: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaInset(edge: .bottom) {
-            PrimaryButton(title: "Continue", action: onContinue)
+            PrimaryButton(title: "Got it", action: onContinue)
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 8)
                 .background(Theme.background)
         }

@@ -90,7 +90,7 @@ struct NeedsAttentionView: View {
                 }
                 if loaded && unpaid.isEmpty && waiting.isEmpty && unscheduled.isEmpty {
                     PaperEmptyState(symbol: "checkmark.circle", title: "Nothing needs attention",
-                                    message: "Unpaid invoices, estimates waiting more than a week and jobs without a time show up here.")
+                                    message: "Unpaid invoices, estimates waiting over a week and jobs with no time show up here.")
                 }
             }
             .padding(.bottom, 24)

@@ -117,8 +117,8 @@ struct SavedCopyNote: View {
 
     static func label(_ date: Date) -> String {
         Calendar.current.isDateInToday(date)
-            ? date.formatted(date: .omitted, time: .shortened)
-            : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+            ? date.tradeTime
+            : "\(date.formatted(.dateTime.weekday(.abbreviated))) \(date.tradeTime)"
     }
 }
 
