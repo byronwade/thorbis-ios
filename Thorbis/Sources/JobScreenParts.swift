@@ -196,6 +196,7 @@ struct JobSectionControl: View {
                         .background {
                             if isOn {
                                 Capsule().fill(Theme.card)
+                                    .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
                                     .shadow(color: Color.black.opacity(0.10), radius: 1, y: 1)
                             }
                         }

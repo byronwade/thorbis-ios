@@ -95,7 +95,9 @@ struct JobDetailView: View {
     /// The server's closeout checklist, read while on site for "Before you wrap up". Nil hides it.
     @State private var closeout: FieldCloseout?
     /// The workspace's business phone, when this role can read it, for the on-site call circle.
-    @State private var officePhone: String?
+    @State private var officeContact: OfficeContact?
+    @State private var showScan = false
+    @State private var showChecklist = false
     @State private var memberPricing: MemberPricing?
     /// A capture the toolkit asked the media screen to open (camera, scan, measure).
     @State private var mediaLaunch: JobMediaLaunch?
@@ -226,6 +228,12 @@ struct JobDetailView: View {
         .thorbisDestination(item: $openEstimate) { opened in
             EstimateDetailView(id: opened.id, jobID: jobId, presentsOnOpen: opened.present)
                 .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices() } } }
+        }
+        .sheet(isPresented: $showScan) {
+            if let job { DataPlateScannerSheet(job: job) { showScan = false; Task { await load() } } }
+        }
+        .sheet(isPresented: $showChecklist) {
+            if let job { JobChecklistSheet(job: job) { showChecklist = false; Task { await load() } } }
         }
         .thorbisDestination(isPresented: $showWrapUp) {
             JobCloseoutView(jobID: jobId).onDisappear { Task { await loadCloseout() } }
@@ -869,7 +877,7 @@ struct JobDetailView: View {
 
     /// Calls the office when the workspace has a business phone this role can read, else the customer.
     @ViewBuilder private var callCircle: some View {
-        let office = officePhone.flatMap { JobReach(phone: $0, email: nil).call }
+        let office = officeContact?.callURL
         let customer = job.flatMap { customerContext($0) == contactsContext ? customerPhone : nil }
             .flatMap { JobReach(phone: $0, email: nil).call }
         if let url = office ?? customer {
@@ -1058,10 +1066,13 @@ struct JobDetailView: View {
                     }
                     if showsMore {
                         Button { openPhotos() } label: {
-                            Text(mediaHasMore ? "More" : "+\(photos.count - shown.count)")
-                                .font(Theme.monoFont(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fit)
-                                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            Theme.fill
+                                .aspectRatio(1, contentMode: .fit)
+                                .overlay {
+                                    Text(mediaHasMore ? "More" : "+\(photos.count - shown.count)")
+                                        .font(Theme.monoFont(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityLabel("All photos")
@@ -1202,11 +1213,10 @@ struct JobDetailView: View {
                         hint: "Type or dictate a note") { openNoteTool() }
             JobToolTile(title: "Measure", symbol: "ruler", enabled: canCapture && SiteMeasure.isSupported,
                         hint: "Measure with the camera and add it as a photo") { openCapture(.measure) }
-            // TODO: DataPlateScanner (equipment data-plate scanning) isn't on this branch; once it
-            // lands, Scan should offer it beside the document scanner.
-            JobToolTile(title: "Scan", symbol: "doc.viewfinder", enabled: canCapture,
-                        hint: "Scan a document onto this job") { openCapture(.scan) }
-            JobToolTile(title: "Checklist", symbol: "checklist", hint: "Opens the wrap-up checklist") { showWrapUp = true }
+            // The equipment data plate; the document scanner stays in Photos' add-a-document menu.
+            JobToolTile(title: "Scan tag", symbol: "barcode.viewfinder", enabled: canCapture,
+                        hint: "Reads the equipment's data plate into the customer's equipment") { showScan = true }
+            JobToolTile(title: "Checklist", symbol: "checklist", hint: "Opens this visit's checklist") { showChecklist = true }
             JobToolTile(title: "Add part", symbol: "shippingbox", enabled: canAddPart,
                         hint: "Adds price book items to the job's draft invoice") { Task { await addPart() } }
             JobToolTile(title: "Estimate", symbol: "doc.text",
@@ -1225,7 +1235,8 @@ struct JobDetailView: View {
         if let closeout {
             let items = CloseoutChecklist.items(closeout)
             let progress = CloseoutChecklist.progress(closeout)
-            JobPanelSection(title: items.isEmpty ? "Before you wrap up" : "Before you wrap up · \(progress.done) of \(progress.total)") {
+            JobPanelSection(title: items.isEmpty ? "Before you wrap up" : "Before you wrap up · \(progress.done) of \(progress.total)",
+                            actionTitle: "Wrap up", actionIdentifier: "job-wrap-up-open", action: { showWrapUp = true }) {
                 if items.isEmpty {
                     JobPanelRow(title: "Nothing else is required before closing.", titleSize: 15)
                 }
@@ -1598,7 +1609,11 @@ struct JobDetailView: View {
                 .buttonStyle(RowPressStyle())
                 .accessibilityHint("Opens the job's photos")
         } else {
-            ActivityLink(destination: ActivityDestinationMapping.destination(for: entry.subject)) {
+            // Opens what the entry is about; the row style rule leaves out a chevron on every row.
+            if let destination = ActivityDestinationMapping.destination(for: entry.subject) {
+                NavigationLink(value: destination.route) { timelineRowContent(entry, showsDay: showsDay) }
+                    .buttonStyle(RowPressStyle())
+            } else {
                 timelineRowContent(entry, showsDay: showsDay)
             }
         }
@@ -1615,16 +1630,18 @@ struct JobDetailView: View {
                 }
                 if !entry.photos.isEmpty {
                     HStack(spacing: 6) {
-                        ForEach(entry.photos.prefix(4)) { photo in
+                        ForEach(entry.photos.prefix(3)) { photo in
                             Color.clear.frame(width: 64, height: 64)
                                 .overlay(MediaThumbnail(record: photo))
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
                     }
                     .padding(.top, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(-1)
             Text(timeLabel(entry.date, showsDay: showsDay))
                 .font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
                 .fixedSize()
@@ -2150,7 +2167,10 @@ struct JobDetailView: View {
         if let job, let pricing = try? await api.memberPricing(job.customerId), session.generation == generation,
            self.job?.customerId == job.customerId { memberPricing = pricing }
         await loadCloseout()
-        await loadOfficePhone()
+        if isOnSite, officeContact == nil {
+            let contact = await OfficeContact.load(api: api, session: session)
+            if session.generation == generation { officeContact = contact }
+        }
     }
 
     /// "Before you wrap up" reads the server's closeout while on site. Quiet: a failed read hides
