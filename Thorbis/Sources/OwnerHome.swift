@@ -26,6 +26,16 @@ enum HomeJobState: String, CaseIterable, Hashable {
         }
     }
 
+    /// The job glyph's tone for this state (redesign phase 3): ring, quarter, half, check.
+    var tone: StatusTone {
+        switch self {
+        case .scheduled: .scheduled
+        case .onTheWay: .dispatched
+        case .onSite: .inProgress
+        case .done: .done
+        }
+    }
+
     init(status: String) {
         switch status {
         case "en_route": self = .onTheWay
@@ -151,6 +161,8 @@ struct OwnerHomeView: View {
                     techs(day).id("home-techs")
                 }
                 .paperCardMargin()
+                // Redesign phase 3: every section is a semibold header with its count over one well.
+                .environment(\.paperGroupedWells, true)
             }
             .padding(.bottom, 24)
         }
@@ -199,45 +211,88 @@ struct OwnerHomeView: View {
 
     // MARK: Today at a glance
 
+    /// Today's progress, Linear style: "4 of 14 done" over a thin bar, then the four states as
+    /// counts led by their status glyph. Each count opens the jobs behind it.
     @ViewBuilder private func glance(_ day: [Job]) -> some View {
         let counts = Dictionary(grouping: day) { HomeJobState(status: $0.status) }.mapValues(\.count)
-        PaperSection("Today at a glance") {
-            if typeSize.isAccessibilitySize {
-                VStack(spacing: 0) {
-                    ForEach(HomeJobState.allCases, id: \.self) { state in
-                        NavigationLink(value: PaperRoute.homeList(.jobs(state))) {
-                            PaperListRow(title: state.title) {
-                                Text("\(counts[state] ?? 0)").font(Theme.font(20, weight: .medium)).monospacedDigit()
+        PaperSection("Today", count: day.isEmpty ? nil : day.count) {
+            VStack(alignment: .leading, spacing: 0) {
+                progress(done: counts[.done] ?? 0, total: day.count)
+                WellDivider()
+                if typeSize.isAccessibilitySize {
+                    VStack(spacing: 0) {
+                        ForEach(Array(HomeJobState.allCases.enumerated()), id: \.element) { index, state in
+                            let count = counts[state] ?? 0
+                            NavigationLink(value: PaperRoute.homeList(.jobs(state))) {
+                                PaperListRow(title: state.title) {
+                                    Text("\(count)").font(Theme.font(20, weight: .semibold)).monospacedDigit()
+                                        .foregroundStyle(count == 0 ? Theme.muted : Theme.foreground)
+                                }
                             }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityLabel("\(state.title), \(count) job\(count == 1 ? "" : "s") today")
+                            if index < HomeJobState.allCases.count - 1 { WellDivider() }
                         }
-                        .buttonStyle(RowPressStyle())
                     }
+                } else {
+                    Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                        GridRow {
+                            glanceCell(.scheduled, counts)
+                            glanceCell(.onTheWay, counts)
+                        }
+                        GridRow {
+                            glanceCell(.onSite, counts)
+                            glanceCell(.done, counts)
+                        }
+                    }
+                    .padding(PaperCardMetrics.edge)
                 }
-                .padding(.vertical, PaperCardMetrics.edge)
-            } else {
-                Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                    GridRow {
-                        glanceCell(.scheduled, counts)
-                        glanceCell(.onTheWay, counts)
-                    }
-                    GridRow {
-                        glanceCell(.onSite, counts)
-                        glanceCell(.done, counts)
-                    }
-                }
-                .padding(PaperCardMetrics.edge)
             }
         }
         .accessibilityIdentifier("home-glance")
     }
 
+    /// "4 of 14 done" and a thin bar in the done green; an empty day says so instead of 0 of 0.
+    private func progress(done: Int, total: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(total == 0 ? "No visits booked today" : "\(done) of \(total) done")
+                    .font(Theme.font(17, weight: .semibold)).monospacedDigit()
+                Spacer(minLength: 8)
+                if total > 0 {
+                    Text("\(Int((Double(done) / Double(total) * 100).rounded()))%")
+                        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                }
+            }
+            if total > 0 {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.fill)
+                        Capsule().fill(Theme.statusDone)
+                            .frame(width: max(done == 0 ? 0 : 6, proxy.size.width * CGFloat(done) / CGFloat(total)))
+                    }
+                }
+                .frame(height: 6)
+                .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home-progress")
+    }
+
     private func glanceCell(_ state: HomeJobState, _ counts: [HomeJobState: Int]) -> some View {
         let count = counts[state] ?? 0
         return NavigationLink(value: PaperRoute.homeList(.jobs(state))) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(count)").font(Theme.font(30, weight: .medium)).monospacedDigit().tracking(-0.6)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(count)").font(Theme.font(30, weight: .semibold)).monospacedDigit().tracking(-0.6)
                     .foregroundStyle(count == 0 ? Theme.muted : Theme.foreground)
-                StatusWord(text: state.title, tint: count == 0 ? nil : state.tint)
+                HStack(spacing: 6) {
+                    StatusGlyph(tone: state.tone, label: state.title).accessibilityHidden(true)
+                    Text(state.title).font(Theme.font(13, weight: .medium))
+                        .foregroundStyle(count == 0 ? Theme.muted : state.tone.text)
+                        .lineLimit(1)
+                }
             }
             .padding(.horizontal, PaperCardMetrics.inset - PaperCardMetrics.edge).padding(.vertical, 12)
             .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
@@ -264,42 +319,69 @@ struct OwnerHomeView: View {
         let waiting = sent.reduce(into: HomeAmounts()) {
             $0.add(paperLinesTotal($1.lines) ?? 0, $1.lines.first?.unitPrice.currency ?? "USD")
         }
+        // Collected first when the report has it (money in), then what's due: unpaid and waiting.
+        let collected = revenue.flatMap { report in report.truncated ? nil : report.months.last }
         PaperSection("Money") {
             VStack(spacing: 0) {
                 if !loaded {
                     PaperListRow(title: "Reading invoices and estimates…")
                 }
-                if loaded && canInvoices {
-                    NavigationLink(value: PaperRoute.homeList(.invoicedToday)) {
-                        PaperListRow(title: "Invoiced today",
-                                     subtitle: issuedToday.isEmpty ? "No invoices sent yet today" : "\(issuedToday.count) invoice\(issuedToday.count == 1 ? "" : "s")",
-                                     amount: invoiced.isEmpty ? money(0, currency: "USD") : invoiced.text)
+                if let month = collected {
+                    // The server reports whole months (UTC); the label names its month, never "today".
+                    NavigationLink(value: PaperRoute.revenue) {
+                        moneyRow(symbol: "arrow.down.circle", tint: Theme.markForest,
+                                 title: "Collected in \(Self.monthName(month.month))",
+                                 subtitle: "Month so far · from Reports",
+                                 amount: money(month.collected, currency: "USD"))
                     }.buttonStyle(RowPressStyle())
+                }
+                if loaded && canInvoices {
+                    if collected != nil { WellDivider(leading: Self.moneyDivider) }
                     NavigationLink(value: PaperRoute.homeList(.unpaid)) {
-                        PaperListRow(title: "Unpaid",
-                                     subtitle: unpaid.isEmpty ? "Every sent invoice is paid" : "\(unpaid.count) invoice\(unpaid.count == 1 ? "" : "s") with a balance",
-                                     amount: owed.isEmpty ? money(0, currency: "USD") : owed.text)
+                        moneyRow(symbol: "exclamationmark.circle", tint: unpaid.isEmpty ? Theme.markGrey : Theme.markRed,
+                                 title: "Unpaid",
+                                 subtitle: unpaid.isEmpty ? "Every sent invoice is paid" : "\(unpaid.count) invoice\(unpaid.count == 1 ? "" : "s") with a balance",
+                                 amount: owed.isEmpty ? money(0, currency: "USD") : owed.text)
+                    }.buttonStyle(RowPressStyle())
+                    WellDivider(leading: Self.moneyDivider)
+                    NavigationLink(value: PaperRoute.homeList(.invoicedToday)) {
+                        moneyRow(symbol: "doc.plaintext", tint: Theme.markTeal,
+                                 title: "Invoiced today",
+                                 subtitle: issuedToday.isEmpty ? "No invoices sent yet today" : "\(issuedToday.count) invoice\(issuedToday.count == 1 ? "" : "s")",
+                                 amount: invoiced.isEmpty ? money(0, currency: "USD") : invoiced.text)
                     }.buttonStyle(RowPressStyle())
                 }
                 if loaded && canEstimates {
+                    if canInvoices || collected != nil { WellDivider(leading: Self.moneyDivider) }
                     NavigationLink(value: PaperRoute.homeList(.estimatesWaiting(staleOnly: false))) {
-                        PaperListRow(title: "Estimates waiting",
-                                     subtitle: sent.isEmpty ? "No estimates out with customers" : "\(sent.count) sent, not answered yet",
-                                     amount: waiting.isEmpty ? money(0, currency: "USD") : waiting.text)
-                    }.buttonStyle(RowPressStyle())
-                }
-                if let revenue, !revenue.truncated, let month = revenue.months.last {
-                    // The server reports whole months (UTC); the label names its month, never "today".
-                    NavigationLink(value: PaperRoute.revenue) {
-                        PaperListRow(title: "Collected in \(Self.monthName(month.month))",
-                                     subtitle: "Month so far · from Reports",
-                                     amount: money(month.collected, currency: "USD"))
+                        moneyRow(symbol: "doc.text", tint: Theme.markAccent,
+                                 title: "Estimates waiting",
+                                 subtitle: sent.isEmpty ? "No estimates out with customers" : "\(sent.count) sent, not answered yet",
+                                 amount: waiting.isEmpty ? money(0, currency: "USD") : waiting.text)
                     }.buttonStyle(RowPressStyle())
                 }
             }
             .padding(.vertical, PaperCardMetrics.edge)
         }
         .accessibilityIdentifier("home-money")
+    }
+
+    /// The hairline under a money row starts past its place mark.
+    private static let moneyDivider: CGFloat = PaperCardMetrics.inset + 26 + 12
+
+    /// A money figure as a row: the place mark, what it is and how many, the amount in semibold.
+    private func moneyRow(symbol: String, tint: Color, title: String, subtitle: String, amount: String) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            PlaceMark(symbol: symbol, tint: tint)
+            PaperListRow(title: title, subtitle: subtitle, subtitleLines: 2) {
+                Text(amount).font(Theme.amountFont(17)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .environment(\.paperRowInset, 0)
+        }
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private static func monthName(_ key: String) -> String {
@@ -365,6 +447,7 @@ struct OwnerHomeView: View {
                                  subtitleLines: 3)
                 }
                 // The full list, item by item, stays one tap away.
+                WellDivider()
                 NavigationLink(value: PaperRoute.attention) {
                     PaperListRow(title: "Everything in Needs attention", subtitle: "Each invoice, estimate and job, one by one")
                 }.buttonStyle(RowPressStyle())
@@ -374,14 +457,21 @@ struct OwnerHomeView: View {
         .accessibilityIdentifier("home-needs-you")
     }
 
+    /// Something that needs the owner: a red attention glyph (amber for unsynced work on this
+    /// phone), what it is and how old, and the next step as a word.
     private func needRow(title: String, subtitle: String, action: String, tint: Color? = nil) -> some View {
-        PaperListRow(title: title, subtitle: subtitle, subtitleLines: 2) {
-            HStack(spacing: 6) {
-                if let tint { Circle().fill(tint).frame(width: 7, height: 7).accessibilityHidden(true) }
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            StatusGlyph(tone: tint == nil ? .attention : .inProgress, label: title)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
+                .accessibilityHidden(true)
+            PaperListRow(title: title, subtitle: subtitle, subtitleLines: 2) {
                 Text(action).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize()
             }
-            .fixedSize()
+            .environment(\.paperRowInset, 0)
         }
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint(action)
     }

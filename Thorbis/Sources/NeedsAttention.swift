@@ -45,49 +45,46 @@ struct NeedsAttentionView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 // Pushed screen: system Back only, so no second menu button under it (MA-05).
+                // Redesign phase 3: the 30pt semibold title, then one grouped well per kind with its
+                // count; rows lead with their status glyph and amounts are semibold tabular.
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Needs attention").font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                    Text("Needs attention").font(Theme.font(30, weight: .semibold)).tracking(-0.6)
                         .accessibilityAddTraits(.isHeader)
                     Text(loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking…")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .foregroundStyle(Theme.foreground)
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                .padding(.horizontal, Theme.gutter).padding(.bottom, 4)
                 if let error { ErrorBanner(message: error) }
                 // Each row names its state in words ("Unpaid", "Sent 9 days ago", "No time").
-                if !unpaid.isEmpty {
-                    PaperGroupHeader(title: "Unpaid invoices", count: unpaid.count).padding(.horizontal, Theme.gutter).padding(.top, 8)
-                    VStack(spacing: 0) {
-                        PaperCardList(data: unpaid.map { AttentionInvoice(invoice: $0.0, balance: $0.1) }) { item in
-                            NavigationLink(value: PaperRoute.invoice(item.invoice.id)) {
-                                PaperListRow(title: store.customerName(item.invoice.customerId), subtitle: "Unpaid · \(since("Issued", item.invoice.issuedAt))",
-                                             amount: money(item.balance, currency: item.invoice.currency))
-                            }.buttonStyle(RowPressStyle())
-                        }
-                    }.paperCardMargin()
+                VStack(alignment: .leading, spacing: 0) {
+                    WellSection(title: "Unpaid invoices", count: unpaid.count,
+                                data: unpaid.map { AttentionInvoice(invoice: $0.0, balance: $0.1) },
+                                dividerInset: DocumentListRowContent.dividerInset) { item in
+                        NavigationLink(value: PaperRoute.invoice(item.invoice.id)) {
+                            DocumentListRowContent(status: DocumentStatus(invoice: item.invoice),
+                                                   title: store.customerName(item.invoice.customerId),
+                                                   subtitle: "Unpaid · \(since("Issued", item.invoice.issuedAt))",
+                                                   amount: money(item.balance, currency: item.invoice.currency))
+                        }.buttonStyle(RowPressStyle())
+                    }
+                    WellSection(title: "Estimates waiting on the customer", count: waiting.count, data: waiting,
+                                dividerInset: DocumentListRowContent.dividerInset) { estimate in
+                        NavigationLink(value: PaperRoute.estimate(estimate.id)) {
+                            DocumentListRowContent(status: DocumentStatus(estimateStatus: estimate.status), title: estimate.title,
+                                                   subtitle: "\(since("Sent", estimate.sentAt)) · \(store.customerName(estimate.customerId))",
+                                                   amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") })
+                        }.buttonStyle(RowPressStyle())
+                    }
+                    WellSection(title: "Jobs without a time", count: unscheduled.count, data: unscheduled,
+                                dividerInset: JobListRowContent.dividerInset) { job in
+                        NavigationLink(value: job) {
+                            JobListRowContent(job: job, customer: store.customerName(job.customerId),
+                                              place: job.shortRef, when: "No time")
+                        }.buttonStyle(RowPressStyle())
+                    }
                 }
-                if !waiting.isEmpty {
-                    PaperGroupHeader(title: "Estimates waiting on the customer", count: waiting.count).padding(.horizontal, Theme.gutter).padding(.top, 18)
-                    VStack(spacing: 0) {
-                        PaperCardList(data: waiting) { estimate in
-                            NavigationLink(value: PaperRoute.estimate(estimate.id)) {
-                                PaperListRow(title: estimate.title, subtitle: "\(since("Sent", estimate.sentAt)) · \(store.customerName(estimate.customerId))",
-                                             amount: paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } ?? "")
-                            }.buttonStyle(RowPressStyle())
-                        }
-                    }.paperCardMargin()
-                }
-                if !unscheduled.isEmpty {
-                    PaperGroupHeader(title: "Jobs without a time", count: unscheduled.count).padding(.horizontal, Theme.gutter).padding(.top, 18)
-                    VStack(spacing: 0) {
-                        PaperCardList(data: unscheduled) { job in
-                            NavigationLink(value: job) {
-                                PaperListRow(title: job.title, subtitle: "\(store.customerName(job.customerId)) · \(job.shortRef)",
-                                             status: StatusWord(text: "No time", tint: Theme.warning))
-                            }.buttonStyle(RowPressStyle())
-                        }
-                    }.paperCardMargin()
-                }
+                .paperCardMargin()
                 if loaded && unpaid.isEmpty && waiting.isEmpty && unscheduled.isEmpty {
                     PaperEmptyState(symbol: "checkmark.circle", title: "Nothing needs attention",
                                     message: "Unpaid invoices, estimates waiting over a week and jobs with no time show up here.")

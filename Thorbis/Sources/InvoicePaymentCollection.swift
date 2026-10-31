@@ -295,20 +295,13 @@ struct InvoicePaymentsSection: View {
     @State private var didOpenRefundPreview = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                // Same header grammar as "Line items" and "Activity" above and below it.
-                HStack(spacing: 6) {
-                    Text("Payments").font(Theme.font(13, weight: .medium))
-                    if !model.payments.isEmpty { Text("\(model.payments.count)").font(Theme.monoFont(12)) }
-                }
-                .foregroundStyle(Theme.muted)
-                .padding(.horizontal, 2)
-                Spacer()
-                // Collect payment lives in the bottom bar; one entry point, not two.
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            // Same header grammar as "Line items" above it (redesign: semibold header and count).
+            // Collect payment lives in the bottom bar; one entry point, not two.
+            SectionHeader(title: "Payments", count: model.payments.isEmpty ? nil : model.payments.count)
+                .padding(.bottom, 2)
 
-            VStack(spacing: 0) {
+            Well {
                 if let loadError = model.loadError {
                     VStack(alignment: .leading, spacing: 8) {
                         ErrorBanner(message: loadError) { await model.load() }
@@ -331,20 +324,20 @@ struct InvoicePaymentsSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(15)
                 } else {
-                    ForEach(model.payments, id: \.id) { payment in
+                    ForEach(Array(model.payments.enumerated()), id: \.element.id) { index, payment in
                         Button { selectedPayment = payment } label: {
                             paymentRow(payment)
                         }
                         .buttonStyle(.plain)
-                        .padding(.horizontal, 15)
+                        .padding(.horizontal, PaperCardMetrics.inset)
                         .frame(minHeight: 60)
+                        if index < model.payments.count - 1 { WellDivider(leading: PaperCardMetrics.inset + 16 + 12) }
                     }
                 }
             }
-            .documentPanel()
 
             if let modelError = model.paymentError {
-                ErrorBanner(message: modelError)
+                ErrorBanner(message: modelError).padding(.top, 12)
             }
             if !model.isLoading, model.loadError == nil, model.historyComplete,
                model.paymentTotalCents != invoice.amountPaid {
@@ -352,6 +345,7 @@ struct InvoicePaymentsSection: View {
                     .font(Theme.font(12))
                     .foregroundStyle(Theme.warning)
                     .padding(.horizontal, 2)
+                    .padding(.top, 10)
             }
         }
         .onChange(of: model.invoice?.amountPaid) { _, _ in
@@ -382,6 +376,10 @@ struct InvoicePaymentsSection: View {
 
     private func paymentRow(_ payment: FieldPaymentRecord) -> some View {
         HStack(spacing: 12) {
+            // Received reads as done (check), refunded as cancelled (×); the word stays beside the amount.
+            StatusGlyph(tone: payment.status == .refunded ? .cancelled : .done,
+                        label: payment.status == .refunded ? "Refunded" : "Received")
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(FieldPaymentMethod(rawValue: payment.method)?.displayName ?? payment.method.capitalized)
                     .font(Theme.font(15, weight: .medium))
@@ -394,15 +392,12 @@ struct InvoicePaymentsSection: View {
             VStack(alignment: .trailing, spacing: 4) {
                 let amount = payment.netAmount ?? payment.amount
                 Text(money(amount.amount, currency: amount.currency))
-                    .moneyStyle(.row)
+                    .font(Theme.amountFont(17))
+                    .lineLimit(1).minimumScaleFactor(0.7)
                     .foregroundStyle(Theme.foreground)
-                // Status is a word with its dot beside it, never a coloured icon.
-                HStack(spacing: 5) {
-                    Circle().fill(payment.status == .refunded ? Theme.warning : Theme.success).frame(width: 6, height: 6)
-                        .accessibilityHidden(true)
-                    Text(payment.status == .refunded ? "Refunded" : "Received").font(Theme.font(12, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                }
+                // Status is a word; the glyph on the left reinforces it.
+                Text(payment.status == .refunded ? "Refunded" : "Received").font(Theme.font(12, weight: .medium))
+                    .foregroundStyle(payment.status == .refunded ? Theme.muted : Theme.statusDoneText)
             }
         }
         .contentShape(Rectangle())
@@ -932,18 +927,21 @@ struct InvoicePaymentCollectionSheet: View {
         }
     }
 
+    /// Redesign phase 3: the amount being collected in semibold tabular figures (staff screen only).
+    private static let heroFont = Font.custom("Inter-Regular", size: 34, relativeTo: .largeTitle).weight(.semibold).monospacedDigit()
+
     private var amountHero: some View {
         VStack(spacing: 7) {
             PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
             HStack(spacing: 3) {
                 // MF-01: the amount being collected is the screen.
                 Text("$")
-                    .font(Theme.moneyFont(.hero))
+                    .font(Self.heroFont)
                     .foregroundStyle(Theme.muted)
                 TextField("0.00", text: $amountText)
                     .keyboardType(.decimalPad)
                     .focused($amountFocused)
-                    .font(Theme.moneyFont(.hero))
+                    .font(Self.heroFont)
                     .monospacedDigit()
                     .tracking(-0.7)
                     .multilineTextAlignment(.leading)
@@ -963,7 +961,8 @@ struct InvoicePaymentCollectionSheet: View {
                                                              : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
             balanceLayout {
                 Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                Text(money(model.outstandingCents ?? 0, currency: invoice.currency)).moneyStyle(.row).foregroundStyle(Theme.foreground)
+                Text(money(model.outstandingCents ?? 0, currency: invoice.currency)).font(Theme.amountFont(17))
+                    .lineLimit(1).minimumScaleFactor(0.7).foregroundStyle(Theme.foreground)
             }
             .accessibilityElement(children: .combine)
             if amountCents == nil {
@@ -1046,11 +1045,10 @@ struct InvoicePaymentCollectionSheet: View {
     }
 
     private var paymentOptions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("How is the customer paying?")
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .padding(.horizontal, 2)
+        VStack(alignment: .leading, spacing: 2) {
+            // Redesign phase 3: a semibold section header over one well of choices.
+            SectionHeader(title: "How is the customer paying?")
+                .fixedSize(horizontal: false, vertical: true)
             VStack(spacing: 0) {
                 optionRow(title: "Card · send payment link", subtitle: "Text or email a secure card checkout", icon: "link",
                           selected: option == .paymentLink, busy: isCreatingPayLink) {
@@ -1058,16 +1056,19 @@ struct InvoicePaymentCollectionSheet: View {
                     option = .paymentLink
                     amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
                 }
+                WellDivider(leading: 34)
                 optionRow(title: "Check", subtitle: "Record a check already received", icon: "doc.text.viewfinder",
                           selected: option == .check) {
                     guard !hasLockedIntent && !model.waitingForProjection else { return }
                     option = .check
                 }
+                WellDivider(leading: 34)
                 optionRow(title: "Cash", subtitle: "Record cash received", icon: "banknote",
                           selected: option == .cash) {
                     guard !hasLockedIntent && !model.waitingForProjection else { return }
                     option = .cash
                 }
+                WellDivider(leading: 34)
                 ThorbisMenu(items: [
                     ThorbisMenuItem("Bank transfer (ACH) received", icon: "building.columns") { option = .bankTransfer },
                     ThorbisMenuItem("Card collected elsewhere", icon: "creditcard") { option = .externalCard }
@@ -1082,7 +1083,7 @@ struct InvoicePaymentCollectionSheet: View {
 
             }
             .padding(.horizontal, 14).padding(.vertical, 4)
-            .documentPanel()
+            .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .disabled(hasLockedIntent || model.waitingForProjection)
         }
     }

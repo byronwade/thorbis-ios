@@ -19,25 +19,25 @@ struct EstimatesView: View {
         }
     }
 
+    /// Redesign phase 3: the 34pt title with the one line an office reads first, then one grouped
+    /// well per status (Draft, Sent, Approved, Declined) with its count, each row led by its glyph.
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                PaperHeader(title: "Estimates", subtitle: records.isEmpty && loading ? "Loading…" : estimatesSummary(records))
+                    .environment(\.paperMenuButton, false)
+                    .padding(.horizontal, -PaperCardMetrics.margin)
                 if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
-                if !records.isEmpty { summaryLine(estimates: records).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status.statusLabel, count: group.count).padding(.top, 14)
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                    PaperCardList(data: group) { record in
+                    WellSection(title: DocumentStatus(estimateStatus: status).word, count: group.count, data: group,
+                                dividerInset: DocumentListRowContent.dividerInset) { record in
                         PaperSplitDestinationLink(id: record.id, value: PaperRoute.estimate(record.id)) {
                             EstimateDetailView(id: record.id).thorbisBackButton()
                         } label: {
-                            // The status is a word on every row; the tile's colour only reinforces it.
-                            PaperDocumentRow(kind: .estimate, reference: "EST-\(record.id.suffix(4).uppercased())", title: record.title,
-                                             subtitle: store.customerName(record.customerId), status: record.status,
-                                             amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") },
-                                             // The group's label already names the status.
-                                             showsStatus: false)
+                            DocumentListRowContent(status: DocumentStatus(estimateStatus: record.status), title: record.title,
+                                                   subtitle: "\(store.customerName(record.customerId)) · EST-\(record.id.suffix(4).uppercased())",
+                                                   amount: paperLinesTotal(record.lines).map { money($0, currency: record.lines.first?.unitPrice.currency ?? "USD") })
                         }.buttonStyle(RowPressStyle())
                     }
                 }
@@ -52,8 +52,8 @@ struct EstimatesView: View {
             .paperCardMargin().padding(.bottom, 24)
         }
         .background(Theme.background)
-        .navigationTitle("Estimates")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Title, customer or EST number")
         .task { await load() }
         .refreshable { await load() }
@@ -103,9 +103,7 @@ struct EstimateDetailView: View {
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
                     let currency = record.lines.first?.unitPrice.currency ?? record.options?.first?.currency ?? "USD"
-                    DocumentHeading(eyebrow: "Estimate EST-\(record.id.suffix(4).uppercased()) · \(store.customerName(record.customerId))",
-                                    title: record.title, status: record.status, statusWord: record.status.statusLabel,
-                                    date: estimateStatusDate(record))
+                    estimateHeader(record, currency: currency)
                     if let signature = record.approvalSignature { SignatureBadge(label: "Approved by", signature: signature) }
                     // The estimate's own lines. With options they are listed apart and honestly labelled;
                     // the customer approves an option's lines, not these.
@@ -121,15 +119,57 @@ struct EstimateDetailView: View {
                                              total: option.totalAmount, currency: option.currency,
                                              memberLine: memberLine(option.lines, currency: option.currency))
                     }
-                    if let revision = record.currentRevisionNumber {
-                        Text("Revision \(revision)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 4)
-                    }
                 } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
             .padding(.bottom, 28)
+        }
+    }
+
+    /// Kind and reference, the title, then the chips: status, customer (opens them), the job it was
+    /// opened from, when it was sent or answered, the total (or how many options) and the revision.
+    private func estimateHeader(_ record: EstimateRecord, currency: String) -> some View {
+        let status = DocumentStatus(estimateStatus: record.status)
+        let customerName = store.customerName(record.customerId)
+        let customer = session.can("customer.view", feature: "core_crm") ? store.customers.first(where: { $0.id == record.customerId }) : nil
+        let job = jobID.flatMap { id in store.jobs.first(where: { $0.id == id }) }
+        let options = record.options ?? []
+        let total = options.isEmpty ? paperLinesTotal(record.lines) : nil
+        return DocumentHeader(eyebrow: "Estimate · EST-\(record.id.suffix(4).uppercased())", title: record.title) {
+            WrappingPropertyChip(document: status)
+                .accessibilityLabel("Status, \(status.word)")
+                .accessibilityIdentifier("estimate-chip-status")
+            WrappingPropertyChip(text: customerName, action: customer.map { found in { openCustomer = found } }) {
+                InitialsAvatar(name: customerName, size: 18).accessibilityHidden(true)
+            }
+            .accessibilityLabel("Customer, \(customerName)")
+            .accessibilityHint(customer == nil ? "" : "Opens the customer")
+            if let job {
+                WrappingPropertyChip(job.title, symbol: "wrench.and.screwdriver")
+                    .accessibilityLabel("Job, \(job.title)")
+            }
+            if let date = documentDateChipText(estimateDateVerb(record.status), estimateStatusDate(record)) {
+                WrappingPropertyChip(date, symbol: "calendar")
+            }
+            if let total {
+                WrappingPropertyChip(money(total, currency: currency), symbol: "dollarsign.circle")
+                    .accessibilityLabel("Total, \(money(total, currency: currency))")
+            } else if !options.isEmpty {
+                WrappingPropertyChip("\(options.count) option\(options.count == 1 ? "" : "s")", symbol: "square.stack")
+            }
+            if let revision = record.currentRevisionNumber {
+                WrappingPropertyChip("Revision \(revision)", textColor: Theme.muted)
+            }
+        }
+    }
+
+    private func estimateDateVerb(_ status: String) -> String {
+        switch status {
+        case "sent": "Sent"
+        case "approved": "Approved"
+        case "declined": "Declined"
+        default: "Created"
         }
     }
 
@@ -337,28 +377,31 @@ struct InvoicesView: View {
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
+    /// Redesign phase 3: the 34pt title with what's owed, then grouped wells by status (Draft,
+    /// Awaiting payment, Paid, Void) with counts. Each row is led by its glyph (part paid reads half
+    /// filled), the customer in semibold, and what's owed now in semibold tabular figures.
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                PaperHeader(title: "Invoices", subtitle: records.isEmpty && loading ? "Loading…" : invoicesSummary(records))
+                    .environment(\.paperMenuButton, false)
+                    .padding(.horizontal, -PaperCardMetrics.margin)
                 if let error { ErrorBanner(message: error) { await load() } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
-                if !records.isEmpty { summaryLine(invoices: records).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count).padding(.top, 14)
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                    // The subtitle carries the status as a word ("Balance due", "Paid").
-                    PaperCardList(data: group) { record in
+                    WellSection(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count, data: group,
+                                dividerInset: DocumentListRowContent.dividerInset) { record in
                         PaperSplitDestinationLink(id: record.id, value: PaperRoute.invoice(record.id)) {
                             InvoiceDetailView(id: record.id).thorbisBackButton()
                         } label: {
                             let total = paperLinesTotal(record.lines)
                             let due = total.map { max(0, $0 - record.amountPaid) }
-                            PaperDocumentRow(kind: .invoice, reference: "INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
-                                             subtitle: record.status == "issued" ? (record.amountPaid > 0 ? "Balance due · part paid" : "Balance due") : record.status == "paid" ? "Paid" : record.status.statusLabel,
-                                             status: record.status,
-                                             // MF-04: an unpaid invoice's row shows what's owed now.
-                                             amount: (record.status == "issued" ? due : total).map { money($0, currency: record.currency) },
-                                             showsStatus: false)
+                            let state = DocumentStatus(invoice: record)
+                            DocumentListRowContent(status: state, title: store.customerName(record.customerId),
+                                                   subtitle: "INV-\(record.id.suffix(4).uppercased())",
+                                                   // MF-04: an unpaid invoice's row shows what's owed now.
+                                                   amount: (record.status == "issued" ? due : total).map { money($0, currency: record.currency) },
+                                                   amountNote: record.status == "issued" ? (record.amountPaid > 0 ? "Balance due · part paid" : "Balance due") : state.word)
                         }.buttonStyle(RowPressStyle())
                     }
                 }
@@ -372,8 +415,8 @@ struct InvoicesView: View {
             .paperCardMargin().padding(.bottom, 24)
         }
         .background(Theme.background)
-        .navigationTitle("Invoices")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Customer or INV number")
         .task { await load() }
         .refreshable { await load() }
@@ -436,14 +479,12 @@ struct InvoiceDetailView: View {
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
                     // Who it's for and what's owed come first; the line revision is bookkeeping, not for people.
-                    DocumentHeading(eyebrow: "Invoice INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId),
-                                    status: record.status, statusWord: record.status == "issued" ? "Unpaid" : record.status.statusLabel,
-                                    date: record.paidAt ?? record.issuedAt ?? record.createdAt)
+                    invoiceHeader(record)
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                     let due = max(total - record.amountPaid, 0)
                     // MF-04: what's owed now is the largest thing on the invoice; Total and Paid sit in the lines.
                     MoneyFigure(label: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
-                                cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency)
+                                cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency, strong: true)
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
                     } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
@@ -583,6 +624,31 @@ struct InvoiceDetailView: View {
         }
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
     }
+    /// Kind and reference, who it's for, then the chips: status (Unpaid, Part paid, Paid…), the job it
+    /// bills, when it was issued or paid, and the total. There is no due date on an invoice record, so
+    /// no due chip and no "overdue" is worked out here.
+    private func invoiceHeader(_ record: InvoiceRecord) -> some View {
+        let status = DocumentStatus(invoice: record)
+        let job = record.jobId.flatMap { id in store.jobs.first(where: { $0.id == id }) }
+        let date: String? = record.status == "paid" ? documentDateChipText("Paid", record.paidAt)
+            : record.status == "void" ? documentDateChipText("Voided", record.voidedAt)
+            : documentDateChipText(record.issuedAt == nil ? "Created" : "Issued", record.issuedAt ?? record.createdAt)
+        let total = paperLinesTotal(record.lines)
+        return DocumentHeader(eyebrow: "Invoice · INV-\(record.id.suffix(4).uppercased())", title: store.customerName(record.customerId)) {
+            WrappingPropertyChip(document: status)
+                .accessibilityLabel("Status, \(status.word)")
+                .accessibilityIdentifier("invoice-chip-status")
+            if let job {
+                WrappingPropertyChip(job.title, symbol: "wrench.and.screwdriver")
+                    .accessibilityLabel("Job, \(job.title)")
+            }
+            if let date { WrappingPropertyChip(date, symbol: "calendar") }
+            if let total, record.status != "draft" {
+                WrappingPropertyChip("Total \(money(total, currency: record.currency))", symbol: "dollarsign.circle")
+            }
+        }
+    }
+
     /// On a job, the invoice opens in that job's Customer view, with its payments and balance beside
     /// the job's other documents. Without a verified job it stays a single document.
     private func presentToCustomer() async {
@@ -702,14 +768,26 @@ struct MoneyFigure: View {
     let label: String
     let cents: Int
     let currency: String
+    /// Redesign phase 3: the staff document screens set the figure in semibold.
+    var strong = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
             // MF-06: a recorded payment rolls the balance down instead of swapping it.
-            Text(money(cents, currency: currency)).moneyStyle(.hero).tracking(-0.5)
-                .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
-                .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: cents)
+            Group {
+                if strong {
+                    Text(money(cents, currency: currency))
+                        .font(Font.custom("Inter-Regular", size: 34, relativeTo: .largeTitle).weight(.semibold).monospacedDigit())
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .contentTransition(.numericText())
+                } else {
+                    Text(money(cents, currency: currency)).moneyStyle(.hero)
+                }
+            }
+            .tracking(-0.5)
+            .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: cents)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -719,34 +797,33 @@ struct MoneyFigure: View {
 
 // MARK: - Document pieces (estimate and invoice detail)
 
-/// The record line, the title and the status as a dot and a word with its date.
-struct DocumentHeading: View {
+/// Redesign phase 3: a document's header in Linear's grammar — the kind and reference as a quiet
+/// eyebrow, the title at 30 semibold, then property chips that wrap (status with its glyph, who,
+/// the job, the date, the amount). Chips with something to open are buttons; the rest are labels.
+struct DocumentHeader<Chips: View>: View {
     let eyebrow: String
     let title: String
-    let status: String
-    let statusWord: String
-    let date: String?
+    @ViewBuilder var chips: Chips
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(eyebrow).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            Text(eyebrow).font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(title).font(Theme.font(26, weight: .medium)).tracking(-0.5)
+            Text(title).font(Theme.font(30, weight: .semibold)).tracking(-0.6)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 6)
+                .padding(.top, 4)
                 .accessibilityAddTraits(.isHeader)
-            HStack(spacing: 0) {
-                Circle().fill(documentStatusTint(status)).frame(width: 7, height: 7).padding(.trailing, 6).accessibilityHidden(true)
-                Text(statusWord).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                if let date = JobFiltering.date(date) {
-                    Text(" · " + documentDate(date)).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
-                }
-            }
-            .padding(.top, 8)
-            .accessibilityElement(children: .combine)
+            FlowRow(spacing: 6, lineSpacing: 6) { chips }
+                .padding(.top, 14)
+                .accessibilityElement(children: .contain)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// "Sent Jul 18" for a document's date chip; nil when the date doesn't parse.
+func documentDateChipText(_ verb: String, _ raw: String?) -> String? {
+    JobFiltering.date(raw).map { "\(verb) \(documentDate($0))" }
 }
 
 /// "Jul 18", with the year only when it isn't this year.
@@ -787,55 +864,45 @@ struct DocumentLinesSection: View {
     var extraRows: [(String, String)] = []
     var memberLine: String? = nil
 
+    /// Redesign phase 3: the label as a semibold section header with the line count, the lines on
+    /// one well with inset hairlines, then the totals on the same well, the last one in semibold.
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+        VStack(alignment: .leading, spacing: 0) {
+            SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 4)
-                .accessibilityAddTraits(.isHeader)
-            VStack(alignment: .leading, spacing: 0) {
+                .padding(.bottom, 2)
+            Well {
                 if !note.isEmpty {
                     Text(note).font(Theme.font(15)).foregroundStyle(Theme.subtle)
                         .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 14).padding(.bottom, 4)
+                    if !lines.isEmpty { WellDivider() }
                 }
-                ForEach(lines) { DocumentLineRow(line: $0) }
+                ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+                    DocumentLineRow(line: line)
+                    if index < lines.count - 1 { WellDivider() }
+                }
                 if lines.isEmpty {
                     Text("No line items yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(PaperCardMetrics.inset)
                 }
                 if let total, !lines.isEmpty {
-                    VStack(spacing: 0) {
-                        totalRow(totalLabel, money(total, currency: currency), strong: extraRows.isEmpty)
-                        ForEach(Array(extraRows.enumerated()), id: \.offset) { index, row in
-                            totalRow(row.0, row.1, strong: index == extraRows.count - 1)
-                        }
+                    Rectangle().fill(Theme.hairline).frame(height: 1).accessibilityHidden(true)
+                    WellAmountRow(label: totalLabel, value: money(total, currency: currency), strong: extraRows.isEmpty)
+                    ForEach(Array(extraRows.enumerated()), id: \.offset) { index, row in
+                        WellDivider()
+                        WellAmountRow(label: row.0, value: row.1, strong: index == extraRows.count - 1)
                     }
-                    .background(Theme.background.opacity(0.6))
                 }
             }
-            .documentPanel()
             if let memberLine {
                 Text(memberLine).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, 4).padding(.top, 8)
             }
         }
-    }
-
-    private func totalRow(_ label: String, _ amount: String, strong: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label).font(Theme.font(16, weight: strong ? .medium : .regular))
-                .foregroundStyle(strong ? Theme.foreground : Theme.subtle)
-            Spacer(minLength: 12)
-            Text(amount).font(Theme.font(16, weight: strong ? .medium : .regular)).monospacedDigit()
-                .foregroundStyle(strong ? Theme.foreground : Theme.subtle)
-                .lineLimit(1).minimumScaleFactor(0.7)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 13)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -858,7 +925,7 @@ struct DocumentLineRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let total = paperLinesTotal([line]) {
                     Text(money(total, currency: line.unitPrice.currency))
-                        .font(Theme.font(15, weight: .medium)).monospacedDigit()
+                        .font(Theme.amountFont(15))
                         .lineLimit(1).fixedSize()
                 }
             }
@@ -872,7 +939,7 @@ struct DocumentLineRow: View {
                 .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
         }
         .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, 16).padding(.vertical, 13)
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 13)
         .accessibilityElement(children: .combine)
     }
 }
@@ -990,21 +1057,17 @@ func money(_ cents: Int, currency: String) -> String {
     (Decimal(cents) / 100).formatted(.currency(code: currency))
 }
 
-/// The one line an office reads first on a document list: what's outstanding and how much.
-@MainActor @ViewBuilder func summaryLine(estimates: [EstimateRecord]) -> some View {
+/// The Estimates header's subtitle: what's waiting on customers and how much.
+func estimatesSummary(_ estimates: [EstimateRecord]) -> String {
     let waiting = estimates.filter { $0.status == "sent" }
     let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
-    // MF-03: the amount is a figure, the words label it.
-    // One line, said once: the rows carry each amount, so no hero figure repeats them.
-    Text(waiting.isEmpty ? "Nothing waiting on customers"
-         : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))")
-        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted).padding(.bottom, 6)
+    return waiting.isEmpty ? "Nothing waiting on customers" : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))"
 }
 
-@MainActor @ViewBuilder func summaryLine(invoices: [InvoiceRecord]) -> some View {
+/// The Invoices header's subtitle: what's owed and on how many invoices.
+func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
     let unpaid = invoices.filter { $0.status == "issued" }
     let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
-    Text(unpaid.isEmpty ? "Everything is paid"
-         : "\(money(owed, currency: "USD")) owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")")
-        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted).padding(.bottom, 6)
+    return unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD")) owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
 }
+
