@@ -48,6 +48,9 @@ struct EstimateRevisionEditorView: View {
         session.can("pricebook.view", feature: "price_book")
     }
 
+    /// EB-13: the workspace stores line groups and the materials switch.
+    private var storesLineGroups: Bool { session.isFeatureOn("estimate_line_groups") }
+
     private var searching: Bool { focus == .search || !query.isEmpty }
 
     private var targetLines: [EstimateRevisionLineDraft] {
@@ -174,6 +177,7 @@ struct EstimateRevisionEditorView: View {
             .sensoryFeedback(.success, trigger: added)
             .animation(EstimateLineGroupsEditor.spring, value: searching)
             .task { await refreshCatalog() }
+            .task(id: storesLineGroups) { editor.storesLineGroups = storesLineGroups }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
@@ -221,6 +225,7 @@ struct EstimateRevisionEditorView: View {
                 lines: editableLines,
                 disabled: busy || !canEdit || editor.hasUnsupportedLineSources,
                 focus: $focus,
+                materialsSwitch: storesLineGroups,
                 addTo: { group in startAdding(optionID: nil, group: group) },
                 removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
             )
@@ -254,6 +259,7 @@ struct EstimateRevisionEditorView: View {
                     option: $option,
                     disabled: busy || !canEdit || !optionsFeatureEnabled || editor.hasUnsupportedLineSources,
                     focus: $focus,
+                    materialsSwitch: storesLineGroups,
                     addTo: { group in startAdding(optionID: option.id, group: group) },
                     removeOption: { editor.removeOption(id: option.id) },
                     removed: { line, index in
@@ -406,6 +412,7 @@ struct EstimateRevisionEditorView: View {
         do {
             let latest = try await api.fieldEstimate(estimate.id)
             editor = EstimateRevisionEditorState(estimate: latest)
+            editor.storesLineGroups = storesLineGroups
             classifyLines()
             staleRevision = false
             error = nil
@@ -420,6 +427,7 @@ private struct EstimateRevisionOptionEditor: View {
     @Binding var option: EstimateRevisionOptionDraft
     let disabled: Bool
     let focus: FocusState<EstimateBuilderFocus?>.Binding
+    let materialsSwitch: Bool
     let addTo: (EstimateLineGroup) -> Void
     let removeOption: () -> Void
     let removed: (EstimateRevisionLineDraft, Int) -> Void
@@ -443,7 +451,8 @@ private struct EstimateRevisionOptionEditor: View {
             TextField("What this package includes", text: $option.description, axis: .vertical)
                 .font(Theme.font(15)).lineLimit(2...4)
                 .accessibilityLabel("Option package description")
-            EstimateLineGroupsEditor(lines: $option.lines, disabled: disabled, focus: focus, addTo: addTo, removed: removed)
+            EstimateLineGroupsEditor(lines: $option.lines, disabled: disabled, focus: focus,
+                                     materialsSwitch: materialsSwitch, addTo: addTo, removed: removed)
         }
         .disabled(disabled)
         .padding(14)

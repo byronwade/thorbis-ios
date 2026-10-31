@@ -8,6 +8,8 @@ struct CustomerEquipmentSection: View {
     /// Job view: only the units at this location, read-only.
     var onlyLocationID: String? = nil
     var editable = true
+    /// Job view: read through the job so assigned technicians see the units too.
+    var jobID: String? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @State private var items: [EquipmentRecord] = []
@@ -74,7 +76,14 @@ struct CustomerEquipmentSection: View {
     }
 
     private func load() async {
+        if let jobID, let context = try? await JobServiceContextLoader.load(jobID, api: api) {
+            items = context.equipmentRecords
+            available = true
+            error = nil
+            return
+        }
         do {
+            // An older server without the job read, or a failed request: the customer read still serves office staff.
             items = try await api.customerEquipment(customerID)
             available = true
             error = nil
@@ -210,6 +219,8 @@ struct CustomerMembershipSection: View {
     let customerID: String
     /// The job reads the membership; selling and cancelling stay on the customer (JS-01).
     var editable = true
+    /// Job view: read through the job so assigned technicians see member pricing too.
+    var jobID: String? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @State private var memberships: [MembershipRecord] = []
@@ -305,6 +316,12 @@ struct CustomerMembershipSection: View {
     }
 
     private func load() async {
+        if let jobID, let context = try? await JobServiceContextLoader.load(jobID, api: api) {
+            memberships = context.memberships
+            plans = []
+            available = true
+            return
+        }
         do {
             memberships = try await api.customerMemberships(customerID)
             plans = (try? await api.membershipPlans()) ?? []

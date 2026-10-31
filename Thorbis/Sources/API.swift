@@ -232,6 +232,17 @@ final class APIClient: ObservableObject {
         return response.data
     }
 
+    /// A server-rendered Excel workbook (`/v1/reports/*.xlsx`), checked to be a zip before it is saved.
+    func spreadsheetData(_ path: String) async throws -> Data {
+        let mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        let response = try await sendData("GET", path, body: Optional<String>.none, accept: mime)
+        guard response.contentType?.lowercased().split(separator: ";").first.map(String.init) == mime,
+              response.data.starts(with: Data("PK".utf8)), response.data.count <= 50 * 1024 * 1024 else {
+            throw Problem(title: "Invalid spreadsheet", status: response.status, detail: "The server did not return an Excel file.")
+        }
+        return response.data
+    }
+
     /// A call recording (JS-05): only the server's own calls route, only audio, at most 50 MB.
     func audioData(_ path: String) async throws -> Data {
         guard path.range(of: #"^/v1/calls/[0-9A-Fa-f-]{36}/recording$"#, options: .regularExpression) != nil else {
@@ -245,13 +256,32 @@ final class APIClient: ObservableObject {
         return response.data
     }
 
+    /// Uploads the company logo as the raw image body (`POST /v1/organization/logo`).
+    func uploadLogo(_ image: Data, contentType: String) async throws {
+        _ = try await sendData("POST", "/v1/organization/logo", body: Optional<String>.none, raw: (image, contentType))
+    }
+
+    /// The company logo's bytes: only an image, at most 1 MB. nil when none was uploaded.
+    func logoData() async throws -> Data? {
+        do {
+            let response = try await sendData("GET", "/v1/organization/logo", body: Optional<String>.none, accept: "image/*")
+            guard response.contentType?.lowercased().hasPrefix("image/") == true, !response.data.isEmpty,
+                  response.data.count <= 1024 * 1024 else {
+                throw Problem(title: "Invalid logo", status: response.status, detail: "The server did not return an image.")
+            }
+            return response.data
+        } catch let problem as Problem where problem.status == 404 {
+            return nil
+        }
+    }
+
     private struct DataResponse {
         let data: Data
         let status: Int
         let contentType: String?
     }
 
-    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true) async throws -> DataResponse {
+    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, raw: (data: Data, contentType: String)? = nil) async throws -> DataResponse {
         let generation = requestGeneration
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
@@ -272,7 +302,10 @@ final class APIClient: ObservableObject {
         if !["GET", "HEAD", "OPTIONS"].contains(method.uppercased()) {
             req.setValue(requestOrigin, forHTTPHeaderField: "Origin")
         }
-        if let body {
+        if let raw {
+            req.setValue(raw.contentType, forHTTPHeaderField: "content-type")
+            req.httpBody = raw.data
+        } else if let body {
             req.setValue("application/json", forHTTPHeaderField: "content-type")
             req.httpBody = try JSONEncoder().encode(body)
         }

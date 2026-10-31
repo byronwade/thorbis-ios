@@ -27,6 +27,29 @@ extension Array where Element == EstimateRevisionLineDraft {
         filter { $0.group == group }
     }
 
+    /// EB-13: whether the customer sees each material line. One hidden material hides them all,
+    /// so a material added while the switch is off is folded in too.
+    var showsMaterials: Bool { !contains { $0.group == .material && !$0.showToCustomer } }
+
+    mutating func setShowsMaterials(_ shown: Bool) {
+        for index in indices where self[index].group == .material { self[index].showToCustomer = shown }
+    }
+
+    /// Puts a line in at `index` following the switch, so a material added while it is off stays
+    /// hidden even after the other hidden materials are removed.
+    private mutating func insertFollowingSwitch(_ line: EstimateRevisionLineDraft, at index: Int, shown: Bool? = nil) {
+        var line = line
+        line.showToCustomer = shown ?? showsMaterials
+        insert(line, at: index)
+    }
+
+    /// The saved `group` and `showToCustomer` of one line, or nil for both while the workspace
+    /// doesn't store groups yet (`estimate_line_groups`).
+    func storedPresentation(of line: EstimateRevisionLineDraft, storesGroups: Bool) -> (group: String?, showToCustomer: Bool?) {
+        guard storesGroups else { return (nil, nil) }
+        return (line.group.rawValue, line.group == .material && !showsMaterials ? false : nil)
+    }
+
     /// Sum of qty × each in cents, or nil while any line's price or quantity is unreadable.
     func subtotal(_ group: EstimateLineGroup? = nil) -> Int? {
         var sum = 0
@@ -71,7 +94,7 @@ extension Array where Element == EstimateRevisionLineDraft {
             group: group ?? .forKind(item.kind),
             priceBookOriginal: PriceBookLineOriginal(description: item.description, unitPrice: price)
         )
-        insert(line, at: insertionIndex(for: line.group))
+        insertFollowingSwitch(line, at: insertionIndex(for: line.group))
         return line.id
     }
 
@@ -81,7 +104,7 @@ extension Array where Element == EstimateRevisionLineDraft {
         guard count < Self.maximumLines else { return nil }
         let trimmed = String(description.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
         let line = EstimateRevisionLineDraft(description: trimmed, quantity: "1", unitPrice: "", source: .manual, group: group)
-        insert(line, at: insertionIndex(for: group))
+        insertFollowingSwitch(line, at: insertionIndex(for: group))
         return line.id
     }
 
@@ -92,7 +115,7 @@ extension Array where Element == EstimateRevisionLineDraft {
         let copy = EstimateRevisionLineDraft(description: line.description, quantity: line.quantity,
                                              unitPrice: line.unitPrice, source: line.source, group: line.group,
                                              priceBookOriginal: line.priceBookOriginal)
-        insert(copy, at: index + 1)
+        insertFollowingSwitch(copy, at: index + 1)
         return copy.id
     }
 
@@ -104,7 +127,7 @@ extension Array where Element == EstimateRevisionLineDraft {
 
     mutating func restoreLine(_ line: EstimateRevisionLineDraft, at index: Int) {
         guard count < Self.maximumLines, !contains(where: { $0.id == line.id }) else { return }
-        insert(line, at: Swift.min(Swift.max(0, index), count))
+        insertFollowingSwitch(line, at: Swift.min(Swift.max(0, index), count))
         normalizeGroups()
     }
 
@@ -121,13 +144,15 @@ extension Array where Element == EstimateRevisionLineDraft {
     /// `target` is nil. Dropping into the other group moves the line to that group.
     mutating func moveLine(id: UUID, before target: UUID?, group: EstimateLineGroup) {
         guard id != target, let index = firstIndex(where: { $0.id == id }) else { return }
+        let shown = showsMaterials
         var line = remove(at: index)
         line.group = group
         line.groupSettled = true
+        line.movedByPerson = true
         if let target, let targetIndex = firstIndex(where: { $0.id == target }), self[targetIndex].group == group {
-            insert(line, at: targetIndex)
+            insertFollowingSwitch(line, at: targetIndex, shown: shown)
         } else {
-            insert(line, at: insertionIndex(for: group))
+            insertFollowingSwitch(line, at: insertionIndex(for: group), shown: shown)
         }
     }
 
@@ -411,6 +436,8 @@ struct EstimateLineGroupsEditor: View {
     @Binding var lines: [EstimateRevisionLineDraft]
     let disabled: Bool
     let focus: FocusState<EstimateBuilderFocus?>.Binding
+    /// EB-13: "Show on estimate" on Materials, once the workspace stores it.
+    var materialsSwitch = false
     let addTo: (EstimateLineGroup) -> Void
     let removed: (EstimateRevisionLineDraft, Int) -> Void
 
@@ -437,6 +464,8 @@ struct EstimateLineGroupsEditor: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             .dropDestination(for: String.self) { ids, _ in drop(ids, before: groupLines.first?.id, group: group) }
+
+            if group == .material && materialsSwitch && !groupLines.isEmpty { materialsVisibility }
 
             VStack(spacing: 0) {
                 ForEach(groupLines) { line in
@@ -472,6 +501,23 @@ struct EstimateLineGroupsEditor: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
         }
         .disabled(disabled)
+    }
+
+    /// EB-13: on by default; off, the customer sees one "Materials" line with the same sum.
+    private var materialsVisibility: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(isOn: Binding(get: { lines.showsMaterials },
+                                 set: { shown in withAnimation(Self.spring) { lines.setShowsMaterials(shown) } })) {
+                Text("Show on estimate").font(Theme.font(15)).foregroundStyle(Theme.foreground)
+            }
+            .tint(Theme.brand)
+            .frame(minHeight: 44)
+            if !lines.showsMaterials {
+                Text("The customer sees one Materials line\(lines.subtotal(.material).map { " · " + money($0, currency: "USD") } ?? "").")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .transition(.opacity)
+            }
+        }
     }
 
     static let spring = Animation.spring(response: 0.3, dampingFraction: 1)

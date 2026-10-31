@@ -690,6 +690,10 @@ struct FieldLine: Codable, Identifiable, Hashable {
     let quantity: Int
     let unitPrice: FieldMoney
     let source: FieldLineSource?
+    /// Builder group, "work" or "material" (EB-09); missing on lines saved before groups were stored.
+    var group: String? = nil
+    /// EB-13: false folds this material into one customer "Materials" line. Missing reads as true.
+    var showToCustomer: Bool? = nil
 }
 
 struct FieldEstimateOption: Codable, Identifiable, Hashable {
@@ -792,13 +796,18 @@ struct FieldEstimateLineInput: Encodable {
     let quantity: Int
     let unitPrice: FieldMoney
     let source: FieldEstimateLineSourceInput?
+    /// Sent only when the workspace stores line groups (`estimate_line_groups`).
+    let group: String?
+    let showToCustomer: Bool?
 
     init(description: String, quantity: Int, unitPrice: FieldMoney,
-         source: FieldEstimateLineSourceInput? = nil) {
+         source: FieldEstimateLineSourceInput? = nil, group: String? = nil, showToCustomer: Bool? = nil) {
         self.description = description
         self.quantity = quantity
         self.unitPrice = unitPrice
         self.source = source
+        self.group = group
+        self.showToCustomer = showToCustomer
     }
 }
 
