@@ -443,11 +443,8 @@ struct QuickScheduleSheet: View {
             }
             .padding(20)
             .frame(maxHeight: .infinity, alignment: .top)
-            .background(Theme.background)
-            .presentationDetents([.height(520), .large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(Theme.cardRadius)
-            .presentationBackground(Theme.background)
+            .background(Theme.surface)
+            .thorbisSheetPresentation([.height(560), .large])
             .task { await load() }
         }
     }
@@ -483,6 +480,7 @@ struct JobScheduleView: View {
     @State private var error: String?
     @State private var showsCalendar = false
     @State private var showsCustomTime = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private let invalidLocalTimeMessage = "That local time does not exist on this date. Choose another date or time."
     private let timeOptions: [(hour: Int, minute: Int)] = [
@@ -514,7 +512,7 @@ struct JobScheduleView: View {
                         }
                     }
                     PaperFormField("Arrival", note: "2 hr window") {
-                        PaperCard {
+                        ThorbisSheetGroup {
                             VStack(spacing: 0) {
                                 ForEach(timeOptions, id: \.hour) { option in
                                     timeRow(hour: option.hour, minute: option.minute)
@@ -558,6 +556,13 @@ struct JobScheduleView: View {
                 VStack(spacing: 4) {
                     PrimaryButton(title: saved ? "Schedule saved" : "Save schedule", busy: busy) { Task { await save() } }
                         .disabled(busy || saved || !session.can("job.assign", feature: "jobs"))
+                    if !session.can("job.assign", feature: "jobs") {
+                        // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+                        Text("Your role can't schedule jobs. Ask your office to set the time.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Button("Cancel") { dismiss() }
                         .font(Theme.font(15, weight: .medium))
                         .foregroundStyle(Theme.muted)
@@ -567,42 +572,18 @@ struct JobScheduleView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
                     .padding(.bottom, 8)
-                    .background(Theme.background)
+                    .background(Theme.surface)
             }
         }
-        .background(Theme.background)
+        .background(Theme.surface)
         .foregroundStyle(Theme.foreground)
-        .presentationDetents([.height(520), .large])
-        .presentationDragIndicator(.visible)
-        .presentationCornerRadius(Theme.cardRadius)
-        .presentationBackground(Theme.background)
+        .thorbisSheetPresentation(typeSize.isAccessibilitySize ? [.large] : [.height(560), .large])
         .interactiveDismissDisabled(busy)
     }
 
     private var header: some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: 44, height: 44)
-                .accessibilityHidden(true)
-            Spacer(minLength: 0)
-            Text("Schedule")
-                .font(Theme.font(17, weight: .semibold))
-                .tracking(-0.17)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 0)
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 30, height: 30)
-                    .background(Theme.fill, in: Circle())
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityLabel("Close schedule picker")
-            .disabled(busy)
-        }
-        .frame(minHeight: 44)
-        .padding(.horizontal, 20)
+        ThorbisSheetHeader(title: job.scheduledFor == nil ? "Schedule" : "Reschedule",
+                           closeLabel: "Close schedule picker", onClose: busy ? nil : { dismiss() })
     }
 
     /// Today, Tomorrow or a picked date, as the one segmented selector.

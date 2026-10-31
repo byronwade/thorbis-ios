@@ -95,10 +95,11 @@ struct StatusGlyph: View {
     var pending = false
     @ScaledMetric(relativeTo: .body) private var size: CGFloat = 16
 
-    init(tone: StatusTone, label: String, pending: Bool = false) {
+    init(tone: StatusTone, label: String, pending: Bool = false, size: CGFloat = 16) {
         self.tone = tone
         self.label = label
         self.pending = pending
+        _size = ScaledMetric(wrappedValue: size, relativeTo: .body)
     }
 
     /// A job's status string, with whether it has a time (booked without one reads as Unscheduled).
@@ -138,6 +139,60 @@ struct StatusGlyph: View {
         }
         .accessibilityElement()
         .accessibilityLabel(pending ? "\(label), waiting to sync" : label)
+    }
+}
+
+/// v2 (design.thorbis.com "Status is a word"): the status word with its small mark beside it, in
+/// the status hue. Color sits with the word and never stands alone: use this wherever a status leads
+/// or ends a row. `StatusGlyph` stays the mark. VoiceOver reads the word once.
+struct StatusLabel: View {
+    let tone: StatusTone
+    let word: String
+    var pending = false
+    /// `.quiet` sets the word in the marker grey for a row's trailing edge; `.strong` in the type colour.
+    var emphasis: Emphasis = .strong
+    var size: CGFloat = 13
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    enum Emphasis { case strong, quiet }
+
+    init(tone: StatusTone, word: String, pending: Bool = false, emphasis: Emphasis = .strong, size: CGFloat = 13) {
+        self.tone = tone
+        self.word = word
+        self.pending = pending
+        self.emphasis = emphasis
+        self.size = size
+    }
+
+    /// A job's status string, with whether it has a time (booked without one reads as Unscheduled).
+    init(jobStatus status: String, hasTime: Bool = true, pending: Bool = false, emphasis: Emphasis = .strong, size: CGFloat = 13) {
+        self.init(tone: StatusTone(jobStatus: status, hasTime: hasTime), word: status.statusLabel,
+                  pending: pending, emphasis: emphasis, size: size)
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            StatusMark(tone: tone, pending: pending)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + size * 0.32 }
+            Text(word)
+                .font(Theme.font(size, weight: .medium))
+                .foregroundStyle(emphasis == .strong ? Theme.foreground : Theme.muted)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(pending ? "\(word), waiting to sync" : word)
+    }
+}
+
+/// The small mark a `StatusLabel` sets before its word: the status ring at 12pt (scales with
+/// Dynamic Type). Decorative; the word beside it is what is read.
+struct StatusMark: View {
+    let tone: StatusTone
+    var pending = false
+    var body: some View {
+        StatusGlyph(tone: tone, label: "", pending: pending, size: 12)
+            .accessibilityHidden(true)
     }
 }
 
@@ -184,6 +239,8 @@ struct PropertyChip<Leading: View>: View {
         .padding(.horizontal, 10).padding(.vertical, 5)
         .frame(minHeight: Theme.chipHeight)
         .background(tint, in: Capsule())
+        // v2: a chip is a pill with a 1px rim that follows the curve.
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
         .contentShape(Capsule())
     }
 }
@@ -202,12 +259,13 @@ extension PropertyChip where Leading == AnyView {
         }
     }
 
-    /// A job's status as a tinted chip led by its glyph.
+    /// A job's status as a chip: the word, with its small mark in the status hue (v2: the pill stays
+    /// neutral; colour sits with the word).
     init(jobStatus status: String, hasTime: Bool = true, pending: Bool = false, action: (() -> Void)? = nil) {
         let tone = StatusTone(jobStatus: status, hasTime: hasTime)
         self.init(text: pending ? "\(status.statusLabel) · waiting to sync" : status.statusLabel,
-                  tint: tone.surface, textColor: tone.text, action: action) {
-            AnyView(StatusGlyph(tone: tone, label: status.statusLabel, pending: pending).accessibilityHidden(true))
+                  tint: Theme.fill, textColor: Theme.foreground, action: action) {
+            AnyView(StatusMark(tone: tone, pending: pending))
         }
     }
 }
@@ -218,8 +276,9 @@ struct InitialsAvatar: View {
     let name: String
     var size: CGFloat = 24
 
-    /// Fixed in both themes, each at least 4.5:1 under white.
-    static let hues: [Color] = [0x4A55BD, 0x0B6B67, 0x2457DB, 0x17703A, 0x895400, 0xB3262D, 0x6B4FBB].map { Color(hex: $0) }
+    /// Fixed in both themes, each at least 4.5:1 under white: the place-mark family (olive, forest,
+    /// pumpkin, burnt, the accent mixed down, a cool grey), never candy.
+    static let hues: [Color] = [0x5C6140, 0x2F4A32, 0xA4501A, 0xA33B24, 0x4A62A0, 0x5E6369].map { Color(hex: $0) }
 
     static func hue(for name: String) -> Color {
         let sum = name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
@@ -228,7 +287,7 @@ struct InitialsAvatar: View {
 
     var body: some View {
         Text(initials(name))
-            .font(.system(size: size * 0.4, weight: .semibold))
+            .font(.system(size: size * 0.4, weight: .medium))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(Self.hue(for: name), in: Circle())
@@ -237,27 +296,29 @@ struct InitialsAvatar: View {
     }
 }
 
-/// A place's mark in menus and section headers: a small tinted rounded square with a white glyph,
-/// like Linear's project icons. Decorative; the word beside it carries the meaning.
+/// A place's mark in menus, section headers and search rows (design.thorbis.com "Quiet marks"): the
+/// symbol in a soft place hue, outlined at rest and filled when this is the place. No tinted tile;
+/// the word beside it stays cream or body. Decorative; the word carries the meaning.
 struct PlaceMark: View {
     let symbol: String
     var tint: Color = Theme.markGrey
-    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 26
+    /// True when this is the place being shown: the symbol fills.
+    var filled = false
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 24
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.5, weight: .semibold))
-            .symbolVariant(.fill)
-            .foregroundStyle(.white)
+            .font(.system(size: size * 0.72, weight: .regular))
+            .symbolVariant(filled ? .fill : .none)
+            .foregroundStyle(tint)
             .frame(width: size, height: size)
-            .background(tint, in: RoundedRectangle(cornerRadius: size * 0.27, style: .continuous))
             .accessibilityHidden(true)
     }
 }
 
-/// A grouped well (redesign): rows sit on one #F4F4F5 rounded surface (radius 14), separated by
-/// inset hairlines. Use `Well { ... }` for hand-built content and `WellDivider` between rows, or
-/// `WellList` for a collection.
+/// A grouped panel (v2): rows sit on one panel (radius 14). Tone, type and space separate rows;
+/// there is no line between them and no box around the group. Use `Well { ... }` for hand-built
+/// content (with `WellDivider` where rows used to take a hairline), or `WellList` for a collection.
 struct Well<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -269,17 +330,16 @@ struct Well<Content: View>: View {
     }
 }
 
-/// The inset hairline between rows in a well. `leading` lines it up with the row's text.
+/// Where rows of a panel meet. v2 (design.thorbis.com: "never a line between two jobs"): it draws
+/// nothing and keeps the rows' own padding as the pause. `leading` is kept so call sites compile.
 struct WellDivider: View {
     var leading: CGFloat = PaperCardMetrics.inset
     var body: some View {
-        Rectangle().fill(Theme.hairline).frame(height: 1 / UIScreen.main.scale)
-            .padding(.leading, leading)
-            .accessibilityHidden(true)
+        Color.clear.frame(height: 0).accessibilityHidden(true)
     }
 }
 
-/// A collection on one well, with inset hairlines between rows.
+/// A collection on one panel; space, not lines, between rows.
 struct WellList<Data: RandomAccessCollection, Row: View>: View where Data.Element: Identifiable {
     let data: Data
     var dividerInset: CGFloat = PaperCardMetrics.inset

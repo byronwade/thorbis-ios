@@ -610,6 +610,7 @@ struct InvoiceDetailView: View {
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
+                    .presentationBackground(Theme.surface)
                     .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }

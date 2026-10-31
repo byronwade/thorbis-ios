@@ -205,7 +205,7 @@ struct AppDrawer: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
-                .font(Theme.font(22, weight: .semibold)).tracking(-0.3)
+                .font(Theme.font(20, weight: .medium)).tracking(-0.2)
                 .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                 .truncationMode(.tail)
                 .accessibilityAddTraits(.isHeader)
@@ -224,8 +224,8 @@ struct AppDrawer: View {
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
-            .font(Theme.font(15, weight: .semibold))
-            .foregroundStyle(Theme.foreground)
+            .font(Theme.font(13, weight: .medium))
+            .foregroundStyle(Theme.muted)
             .padding(.horizontal, 12)
             .padding(.top, 28).padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
@@ -233,8 +233,8 @@ struct AppDrawer: View {
 
     // MARK: Rows
 
-    /// A primary place: a 22pt outline icon and a 17pt label, about 48pt tall. The place showing
-    /// sits on a soft well.
+    /// A primary place (v2): its mark in a soft place hue, outlined at rest and filled when this is
+    /// the place; the word stays cream or body and lifts to full type when here. No wash on the row.
     private func placeRow(_ item: MenuItem) -> some View {
         let here = current == item.rawValue
         let dot = item == .inbox && inboxUnread
@@ -243,17 +243,19 @@ struct AppDrawer: View {
             HStack(alignment: .center, spacing: 14) {
                 Image(systemName: item.symbol)
                     .font(.system(size: iconSize, weight: .regular))
+                    .symbolVariant(here ? .fill : .none)
+                    .foregroundStyle(item.tint)
                     .frame(width: iconColumn)
                     .accessibilityHidden(true)
                 Text(title)
-                    .font(Theme.font(17))
+                    .font(Theme.font(17, weight: .medium))
+                    .foregroundStyle(here ? Theme.foreground : Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 if dot { DrawerDot() }
             }
-            .padding(.horizontal, 12).padding(.vertical, 4)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background { if here { RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.fill) } }
+            .padding(.horizontal, 12).padding(.vertical, 2)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -267,14 +269,15 @@ struct AppDrawer: View {
     /// The last primary row: folds every other place in and out, in place.
     private var allPlacesRow: some View {
         Button {
-            withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.28)) { allPlacesOpen.toggle() }
+            withAnimation(.easeOut(duration: 0.12)) { allPlacesOpen.toggle() }
         } label: {
             HStack(alignment: .center, spacing: 14) {
                 Image(systemName: "square.grid.2x2")
                     .font(.system(size: iconSize, weight: .regular))
+                    .foregroundStyle(Theme.markGrey)
                     .frame(width: iconColumn)
                     .accessibilityHidden(true)
-                Text("All places").font(Theme.font(17))
+                Text("All places").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.subtle)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 13, weight: .semibold))
@@ -282,8 +285,8 @@ struct AppDrawer: View {
                     .rotationEffect(.degrees(allPlacesOpen ? 0 : -90))
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 12).padding(.vertical, 4)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, 2)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -299,15 +302,14 @@ struct AppDrawer: View {
     private func plainRow(id: String, title: String, here: Bool, dot: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Text(title).font(Theme.font(16))
-                    .foregroundStyle(here ? Theme.foreground : Theme.foreground.opacity(0.86))
+                Text(title).font(Theme.font(16, weight: here ? .medium : .regular))
+                    .foregroundStyle(here ? Theme.foreground : Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 if dot { DrawerDot() }
             }
-            .padding(.leading, textInset).padding(.trailing, 12).padding(.vertical, 4)
+            .padding(.leading, textInset).padding(.trailing, 12).padding(.vertical, 2)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background { if here { RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.fill) } }
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -327,7 +329,7 @@ struct AppDrawer: View {
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                     .fixedSize(horizontal: false, vertical: typeSize.isAccessibilitySize)
                 Spacer(minLength: 8)
-                if recent.inProgress, let status = recent.status { StatusGlyph(jobStatus: status) }
+                if recent.inProgress, let status = recent.status { StatusLabel(jobStatus: status, emphasis: .quiet).fixedSize() }
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -359,7 +361,6 @@ struct AppDrawer: View {
                     .overlay(alignment: .topTrailing) {
                         if savedWork?.needsPerson == true { DrawerDot().offset(x: -3, y: 3) }
                     }
-                    .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
                     .contentShape(Circle())
             }
             .accessibilityValue(savedWork?.words ?? "")
@@ -387,7 +388,8 @@ struct AppDrawer: View {
             .padding(.horizontal, 18)
             .frame(minHeight: 48)
             .background(Theme.ink, in: Capsule())
-            .shadow(color: .black.opacity(0.12), radius: 10, y: 3)
+            .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+            .shadow(color: .black.opacity(0.28), radius: 0, y: 1)
             .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())

@@ -47,8 +47,9 @@ struct ThorbisSelect<Value: Hashable>: View {
                     chevron
                 }
                 .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+                // v2: a select is a well, the same sink as a text field.
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
             }
         }
     }
@@ -105,8 +106,7 @@ struct ThorbisSegmented<Value: Hashable>: View {
                     .background {
                         if isOn {
                             RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Theme.selectedSegment)
-                                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(Theme.border))
-                                .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+                                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }
@@ -135,8 +135,10 @@ struct ThorbisConfirmAction: Identifiable {
     }
 }
 
-/// The confirm card: title, optional message, the action buttons, and Cancel. Drawn ourselves so
-/// there is no system action-sheet chrome.
+/// The confirm modal (v2, design.thorbis.com "Cancel job is a modal"): a clean system sheet on the
+/// panel, the question as a 17pt Medium title with the consequence under it, then the commit(s)
+/// inside the sheet's padding (a destructive one in the danger tone, the word naming the
+/// consequence) and a quiet Keep/Cancel. No floating card, no glass.
 struct ThorbisConfirmCard: View {
     let title: String
     var message: String? = nil
@@ -149,63 +151,53 @@ struct ThorbisConfirmCard: View {
     var body: some View {
         // Only the words scroll. The choices stay pinned under them, so at an accessibility size a
         // long title or message can never push Cancel or the action below the screen.
-        VStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             ScrollView {
-            VStack(spacing: 6) {
-                Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let message {
-                    Text(message).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                        .multilineTextAlignment(.center)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    if let message {
+                        Text(message).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 22)
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 ForEach(actions) { action in
                     Button { onChoose(action) } label: {
-                        Text(action.title).font(Theme.font(17, weight: .medium))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity).frame(minHeight: 50).padding(.vertical, 6)
-                            .foregroundStyle(Theme.onInk)
-                            .background(action.role == .destructive ? Theme.destructive : Theme.ink,
-                                        in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        if action.role == .destructive {
+                            Text(action.title).dangerCommit()
+                        } else {
+                            Text(action.title).inkCommit()
+                        }
                     }
                     .buttonStyle(PressStyle())
                 }
                 Button(action: onCancel) {
                     Text("Cancel").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity).frame(minHeight: 50)
-                        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        .frame(maxWidth: .infinity).frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
             }
         }
-        .padding(16)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.border))
-        .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: 460)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .padding(.bottom, 10)
+        .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+        .background(Theme.surface)
         // Fitted height, biased up for Dynamic Type; `.large` is the escape hatch so a long
         // title/message at an AX size can't clip the buttons.
-        .presentationDetents(typeSize.isAccessibilitySize || verticalSizeClass == .compact
-                             ? [.large] : [.height(estimatedHeight), .large])
-        .presentationBackground(.clear)
-        .presentationDragIndicator(.hidden)
+        .thorbisSheetPresentation(typeSize.isAccessibilitySize || verticalSizeClass == .compact
+                                  ? [.large] : [.height(estimatedHeight), .large])
     }
 
     private var estimatedHeight: CGFloat {
-        let header: CGFloat = message == nil ? 52 : 86
-        let buttons = CGFloat(actions.count + 1) * 58
-        return (header + buttons + 44) * typeSize.sheetHeightScale
+        let header: CGFloat = message == nil ? 64 : 100
+        let buttons = CGFloat(actions.count) * 62 + 56
+        return (header + buttons + 40) * typeSize.sheetHeightScale
     }
 }
 

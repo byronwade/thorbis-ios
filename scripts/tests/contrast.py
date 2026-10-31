@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contrast check for Theme.swift text tokens on the grounds they sit on (redesign 2026-10-31).
+"""Contrast check for Theme.swift tokens on the grounds they sit on (v2: design.thorbis.com tokens).
 
 Reads the hex values straight out of Thorbis/Sources/Theme.swift, so it checks what ships.
 Run: python3 scripts/tests/contrast.py  (exit 1 on any failure)
@@ -23,12 +23,12 @@ def ratio(a, b):
     la, lb = sorted([lum(a), lum(b)], reverse=True)
     return (la + 0.05) / (lb + 0.05)
 
-grounds = ["background", "card", "fill"]
+grounds = ["background", "card", "fill", "field"]
 checks = {
-    "foreground": grounds + ["selectedSegment", "brandSurface", "warningSurface", "successSurface", "destructiveSurface"],
+    "foreground": grounds + ["surface", "selectedSegment", "brandSurface", "warningSurface", "successSurface", "destructiveSurface"],
     # The job's "Before you go in" banner sets its notes and caveat on the warning surface.
-    "muted": grounds + ["selectedSegment", "warningSurface"],
-    "subtle": grounds + ["warningSurface"],
+    "muted": grounds + ["surface", "selectedSegment", "warningSurface"],
+    "subtle": grounds + ["surface", "warningSurface"],
     "brandText": grounds[:2] + ["brandSurface"],
     "success": grounds[:2] + ["successSurface"],
     "warning": grounds[:2] + ["warningSurface"],
@@ -50,7 +50,7 @@ for mode in ["light", "dark", "highLight", "highDark"]:
         print(f"  {text:22} " + " | ".join(row))
 # Non-text (WCAG 1.4.11): each status glyph hue against the grounds it is drawn on: the screen,
 # the well, and its own chip surface (unscheduled and cancelled chips sit on `fill`). 3:1, counted.
-tokens["statusDispatched"] = {m: "2F6BFF" for m in ["light", "dark", "highLight", "highDark"]}  # = brand, Color(hex:)
+tokens["statusDispatched"] = {m: "3A6AE0" for m in ["light", "dark", "highLight", "highDark"]}  # = brand, Color(hex:)
 glyphs = {
     "statusUnscheduled": "fill",
     "statusScheduled": "statusScheduledSurface",
@@ -70,6 +70,31 @@ for mode in ["light", "dark"]:
             fails += not ok
             row.append(f"{g} {r:.2f}{'' if ok else ' FAIL'}")
         print(f"  {mode:5} {n:20} " + " | ".join(row))
+# Place marks (design.thorbis.com Color): non-text 3:1 on the canvas, the panel (drawer, menu)
+# and a chip's fill, outlined at rest and filled when it is the place.
+print("== place marks, non-text 3:1 (background | card | fill)")
+for mode in ["light", "dark"]:
+    for n in ["markOlive", "markForest", "markPumpkin", "markBurnt", "markAccent", "markBlue", "markTeal", "markRed", "markGrey"]:
+        row = []
+        for g in ["background", "card", "fill"]:
+            r = ratio(tokens[n][mode], tokens[g][mode])
+            ok = r >= 3
+            fails += not ok
+            row.append(f"{g} {r:.2f}{'' if ok else ' FAIL'}")
+        print(f"  {mode:5} {n:12} " + " | ".join(row))
+# White type on a destructive commit or badge.
+print("== white on destructiveFill")
+for mode in ["light", "dark"]:
+    r = ratio("FFFFFF", tokens["destructiveFill"][mode])
+    ok = r >= 4.5
+    fails += not ok
+    print(f"  {mode:5} {r:.2f}{'' if ok else ' FAIL'}")
+# The 1px rim's job is done by the field being one step darker than the panel (sink), never lighter.
+print("== field sinks below the panel")
+for mode in ["light", "dark"]:
+    ok = lum(tokens["field"][mode]) < lum(tokens["card"][mode])
+    fails += not ok
+    print(f"  {mode:5} field {tokens['field'][mode]} < panel {tokens['card'][mode]}{'' if ok else ' FAIL'}")
 # The dark toast capsule (ThorbisToast) and its words.
 print("== toast")
 for mode in ["light", "dark", "highLight", "highDark"]:

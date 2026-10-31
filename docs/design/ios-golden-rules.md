@@ -7,6 +7,54 @@ They describe the required direction; they do not certify existing implementatio
 > Quiet chrome. Dominant work. One obvious next action. Place before database ID.
 > System UI stays native. State is never hidden. Offline work is real work.
 
+## Design direction (v2, 31 October 2026) — read this first
+
+**Linear grammar on design.thorbis.com tokens; the drawer is an owner-approved
+exception.** The owner asked for "linear.app mobile app and design.thorbis.com".
+Linear's mobile app sets the layout grammar (quiet titles, circles, text tabs,
+grouped sections by space, property chips, a composer, anchored popovers).
+design.thorbis.com (`docs` copy: the site's text) is the law for tokens, depth,
+controls, forms, words, places and states. "Linear grammar. Not Linear dress":
+no Linear purple, no issue row, no status rings as decoration. The site says
+"iOS is a tab bar and a stack"; the owner overrides that one rule for this app
+and keeps the side drawer (rule 6). Everything below that predates v2 yields to
+these points where they disagree:
+
+- **Tokens** (`Theme.swift`): dark is the first drawing — canvas oklch 14.5%,
+  panel 20.5%, cream type, a cool grey body, a dimmer marker. Light is the warm
+  cream sheet (canvas `#F7F4EE`, panel `#FDFCFA`). One electric-blue accent
+  (`Theme.brand`, oklch 55.8% 0.188 264.4) for selected, focus and the one live
+  thing — never a wash. Status hues are the site's success, error, info and
+  warning, tuned in lightness only. Place marks are olive, forest, pumpkin, burnt
+  and the accent mixed down. `scripts/tests/contrast.py` holds 4.5:1 text, 3:1
+  marks, both themes and Increase Contrast, with 0 failures.
+- **Type:** Inter Regular 400 and Medium 500 only (`Theme.allowed` maps heavier
+  to 500). Staff screens use a compact ramp (`Theme.onRamp`): body and row titles
+  15, supporting lines 14, chrome 13 Medium, captions 12, sheet titles 16–17,
+  detail titles 24, root titles 26; money hero 30. Customer-facing presentation
+  keeps its 17pt / 56pt floors through `Theme.customerFont`.
+- **Depth:** Rest (the sheet is planar), Sink (fields and selects: `Theme.field`,
+  one step darker, inset, 1px rim — `fieldWell()`), Lift (the ink commit: radius
+  10, 1px rim, 1px light from above, 1px drop; press sinks), Overlay (menus and
+  popovers only: the panel with a real shadow). There is no fifth.
+- **No separators:** never a line between rows, under a heading or as a 1px box
+  around a section, and never a coloured side rail. A 1px rim belongs only to a
+  field, a commit, a chip or a photo. Tone, type and space separate things.
+- **Status is a word** (`StatusLabel`: a small mark in the hue, then the word).
+  A row never shows colour without its word. Rows lead with the street (time in
+  a tabular column); the status word sits in the subtitle or at the trailing edge.
+- **Places:** a route for durable records; a modal (`ThorbisModalSheet`, a clean
+  system sheet on the panel with detents, 17pt Medium title, close circle, one
+  ink commit in the pad) for one task; an anchored popover (`ThorbisMenu`) for
+  one local choice — status, tech, payment method, the ••• overflow. Never
+  pre-disable a commit: let them press it and say what is missing under the
+  field; if it truly must be off, a sentence says why.
+- **Motion:** 120ms ease-out for menus, chips and segments; no bounce or stagger
+  on routine work; the drawer and sheets may use the system spring; respect
+  Reduce Motion. Haptics stay.
+- **Words:** Job, stop, tech, truck, Dispatch, Arrive. Placeholders are examples
+  ("Mike Reyes"); empty states name the one action.
+
 Keep the [complete supplied guidelines](references/ios-field-management-guidelines-source.md)
 as context, including their role tables, component specifications, entity model,
 wireframes, flows, conflict policies, privacy guidance and quality targets.
@@ -60,17 +108,20 @@ source evidence; verify platform/API/version claims before relying on them.
    the person comes back. The drawer is about 80% of the screen and pushes the
    place right as a slightly dimmed card with the device's corner radius, a soft
    shadow and a hairline edge in dark mode, on a gentle spring (Reduce Motion
-   fades). Keep it calm — it lists only: the business name (22pt semibold, one
+   fades). *v2:* the drawer is an owner-approved exception to "iOS is a tab bar
+   and a stack"; it wears the v2 tokens — the panel tone, a modest 17pt Medium
+   business name, Medium place words in body grey that lift to cream for the
+   place showing, and place marks in soft hues, outlined at rest and filled for
+   the place showing (no wash on the row). Keep it calm — it lists only: the business name (one
    line) and a search circle; at most five places for the person's role (no
-   header; 17pt words, 22pt outline icons, about 48pt rows, the place showing on a
-   soft well) — technicians Today, Jobs, Customers, Inbox; office Schedule, Jobs,
+   header; about 44pt rows) — technicians Today, Jobs, Customers, Inbox; office Schedule, Jobs,
    Customers, Money, Inbox; owners Home, Jobs, Customers, Money, Inbox (Home
    carries the day, so the schedule sits under All places rather than a second
    "today" row); then "All places", which folds every other place and the records
    kept on this phone in and out in place (16pt words, remembered on the phone).
    Places pinned in Edit menu join the list while it has room and only then form
    a small Pinned section. Recents lists up to five jobs and customers as plain
-   words, with a `StatusGlyph` only on a job under way. Only two dots exist: unread
+   words, with a `StatusLabel` (mark and word) only on a job under way. Only two dots exist: unread
    Inbox, and saved work that needs the person (on the gear); the menu circle wears
    a dot for either. At the bottom a 48pt ink "New job" capsule (long press for
    the other creates) sits left and a gear circle right (business switcher, saved
@@ -83,7 +134,8 @@ source evidence; verify platform/API/version claims before relying on them.
 7. **Match the surface to the task.** Durable job/customer/site/equipment/document
    records belong in navigation destinations. Assignment, payment and completion
    are focused transactions. Small local choices use native menus/pickers;
-   contextual information uses a sheet/inspector. Use full-height editing when
+   contextual information uses a sheet/inspector. *v2:* one local choice is an
+   anchored popover (`ThorbisMenu`), one task is a modal sheet (`ThorbisModalSheet`). Use full-height editing when
    text entry needs room. Maps supplement a usable list.
 8. **Give each step one dominant action.** Keep the action, consequence and amount
    clear. Preserve its label and geometry during progress. Secondary actions stay
@@ -94,14 +146,13 @@ source evidence; verify platform/API/version claims before relying on them.
    creating an equal-button dashboard. Reserve cards for bounded objects such as
    media or a financial summary. Status is always a word, with color/symbols as
    reinforcement. Keep list scope, filters, position and saved views on return.
-   *Redesign, 31 October 2026 (owner: "bland and hard to navigate"; target Linear
-   mobile):* grouped sections are the norm — a semibold section header with its
-   count above rows on one rounded well (`Theme.well`, radius 14), with inset
-   hairlines between rows (`Well`, `WellList`, `WellDivider`, `SectionHeader`).
-   Job rows lead with a Linear-style `StatusGlyph` in place of the trailing word:
-   its shape (not only colour) carries the state and VoiceOver reads the word. The
-   lead card and chips still show the word.
-   Avatars (`InitialsAvatar`) and property chips (`PropertyChip`) are allowed.
+   *v2 (31 October 2026):* grouped sections are the norm — a 13pt Medium section
+   header with its count above rows on one panel (`Theme.well`, radius 14), with
+   no line between rows and no box around the group (`Well`, `WellList`,
+   `SectionHeader`; `WellDivider` now draws nothing). Rows lead with the street and
+   carry the status as a word with its small mark (`StatusLabel`). Avatars
+   (`InitialsAvatar`, in place-mark hues) and pill chips (`PropertyChip`, a 1px rim)
+   are allowed.
 
 ## Visual and interaction system
 
@@ -110,19 +161,19 @@ source evidence; verify platform/API/version claims before relying on them.
     Thorbis palette and official logo. The 4/8/12/16/24/32/48 spacing rhythm and
     approximate content radii are semantic guidance, not scattered constants.
     Respect native margins and Paper geometry; document a needed adaptation.
-    *Redesign, 31 October 2026 — these lifted earlier rules; do not revert them:*
-    the palette is crisp and neutral (light: white ground, #F4F4F5 wells,
-    #63636B secondary text, 8% black hairline; dark: #0E0E10 ground, #1A1A1D
-    wells, #9A9AA3 secondary) instead of the warm cream; semibold (600) is allowed
-    for screen titles, row titles, section headers and amounts (bold and heavier
-    resolve to 600); the ramp gains a 34pt display step for tab-root titles. Status
-    hues (`Theme.status*`) each have a glyph colour, a text-safe colour and a
+    *v2, 31 October 2026 — supersedes the earlier neutral palette:* the
+    design.thorbis.com tokens above (Linear dark greys, the warm cream light
+    sheet, one electric-blue accent, olive/forest/pumpkin/burnt place marks),
+    weights 400 and 500 only, and the compact staff ramp with no 34pt step. Status
+    hues (`Theme.status*`) each have a mark colour, a text-safe colour and a
     tinted surface. `scripts/tests/contrast.py` and `AppearanceTests` hold every
-    text token at 4.5:1 on its grounds in light, dark and Increase Contrast.
+    text token at 4.5:1 and every mark at 3:1 in light, dark and Increase Contrast.
 11. **Let system chrome be system chrome.** Use native typography and geometry in
     tabs/toolbars/navigation. Use accessible Inter and the existing money/mono
     styles in content. Liquid Glass belongs to supported system navigation/action
     chrome; do not coat static forms/cards in glass or imitate unavailable APIs.
+    Our sheets and popovers set `presentationBackground` to the panel, so iOS 26
+    never wraps them in glass.
     *User direction, 30 October 2026:* navigation and action buttons use Thorbis
     custom controls, not the system's default buttons — the round back
     (`ThorbisBackButton` via `thorbisDestination`), round icon circles

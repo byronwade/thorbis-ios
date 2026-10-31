@@ -67,13 +67,14 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// The place mark's hue in More and the iPad sidebar (redesign 2026-10-31: Linear-style tinted
-    /// squares). Related places share a family: work in blue/indigo, money in green, people in teal.
+    /// The place mark's hue (v2, design.thorbis.com "A soft olive Jobs mark. The word stays cream"):
+    /// olive, forest, pumpkin, burnt and the accent mixed down; quiet colour on chrome, not candy.
     var tint: Color {
         switch self {
-        case .home, .jobs: Theme.markBlue
-        case .schedule, .inbox: Theme.markAccent
-        case .customers: Theme.markTeal
+        case .jobs: Theme.markOlive
+        case .home, .schedule: Theme.markAccent
+        case .inbox: Theme.markPumpkin
+        case .customers: Theme.markForest
         case .attention: Theme.markRed
         case .estimates: Theme.markPumpkin
         case .invoices, .billing, .money: Theme.markForest

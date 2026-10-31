@@ -503,35 +503,50 @@ extension PaperMenuRow where Trailing == AnyView {
 }
 
 /// The sticky bottom bar: one ink commit (MA-08), at most one quiet square beside it.
+/// v2 (design.thorbis.com "Don't lock the commit"): prefer leaving it pressable and saying what is
+/// missing under the field. When it truly must be off, pass `disabledReason`: the sentence sits
+/// under the commit, so a grey commit is never a locked door.
 struct PaperActionBar<Secondary: View>: View {
     let title: String
     var symbol: String? = nil
     var busy = false
     var disabled = false
+    var disabledReason: String? = nil
+    var ground: Color = Theme.background
     let action: () -> Void
     @ViewBuilder var secondary: Secondary
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button(action: action) {
-                HStack(spacing: 7) {
-                    if busy { ProgressView().tint(Theme.onInk) } else if let symbol { Image(systemName: symbol).font(.subheadline.weight(.medium)).accessibilityHidden(true) }
-                    Text(title)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button(action: action) {
+                    HStack(spacing: 7) {
+                        if busy { ProgressView().tint(Theme.onInk) } else if let symbol { Image(systemName: symbol).font(.subheadline.weight(.medium)).accessibilityHidden(true) }
+                        Text(title)
+                    }
+                    .inkCommit(enabled: !disabled)
                 }
-                .inkCommit(enabled: !disabled)
+                .buttonStyle(PressStyle())
+                .disabled(busy || disabled)
+                .accessibilityHint(disabled ? (disabledReason ?? "") : "")
+                secondary
             }
-            .buttonStyle(PressStyle())
-            .disabled(busy || disabled)
-            secondary
+            if disabled, let disabledReason {
+                Text(disabledReason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.background)
+        .background(ground)
     }
 }
 
 extension PaperActionBar where Secondary == EmptyView {
-    init(title: String, symbol: String? = nil, busy: Bool = false, disabled: Bool = false, action: @escaping () -> Void) {
-        self.init(title: title, symbol: symbol, busy: busy, disabled: disabled, action: action) { EmptyView() }
+    init(title: String, symbol: String? = nil, busy: Bool = false, disabled: Bool = false, disabledReason: String? = nil,
+         ground: Color = Theme.background, action: @escaping () -> Void) {
+        self.init(title: title, symbol: symbol, busy: busy, disabled: disabled, disabledReason: disabledReason,
+                  ground: ground, action: action) { EmptyView() }
     }
 }
 
@@ -560,7 +575,7 @@ struct PaperSearchField: View {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
             TextField(prompt, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled()
             if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search") }
-        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
     }
 }
@@ -990,8 +1005,8 @@ extension PaperEmptyState {
 
 // MARK: - Planar card groups (approved visual design, 2026-10-30)
 //
-// Groups of rows sit on one planar panel: `Theme.card`, radius 14, a 1px `Theme.border` rim that
-// follows the radius, no shadow and no hairlines between rows (design.thorbis.com: "a border is a
+// Groups of rows sit on one planar panel: `Theme.card`, radius 14, no rim (v2: a 1px box around
+// a section is a costume), no shadow and no hairlines between rows (design.thorbis.com: "a border is a
 // use case, never a separator"; golden rule 9). Rows are separated by spacing and lead with an icon
 // tile; a status is always a word, the tile's colour only reinforces it.
 
@@ -1041,7 +1056,7 @@ struct PaperCard<Content: View>: View {
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.card, in: shape)
-            .overlay(shape.strokeBorder(wells ? .clear : Theme.border, lineWidth: 1))
+            // v2: no 1px box around a section; the panel's tone does the work.
             .environment(\.paperRowInset, PaperCardMetrics.inset)
     }
 }
@@ -1076,7 +1091,6 @@ private struct PaperCardSlot: ViewModifier {
             .background(Theme.card, in: UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
                                                                bottomTrailingRadius: last ? r : 0, topTrailingRadius: first ? r : 0,
                                                                style: .circular))
-            .overlay(PaperCardSliceRim(first: first, last: last, radius: r).stroke(Theme.border, lineWidth: 1))
     }
 }
 
@@ -1516,13 +1530,20 @@ struct PaperLabeledCircle: View {
 
 // MARK: - Forms (design 2026-10-30): one column, the label above, the answer in a field well
 
-/// The field well: a quiet field-coloured surface per answer, 48 tall, no rim.
+/// Sink (design.thorbis.com Depth): the field is a well one step darker than the panel, inset,
+/// with a 1px rim that follows the radius. Never a drop shadow. 48 tall, radius 10.
 struct FieldWell: ViewModifier {
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
         content
             .padding(.horizontal, 12).padding(.vertical, 12)
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .background(Theme.field, in: shape)
+            // Inset: a faint shade along the top edge, inside the rim.
+            .overlay(shape.strokeBorder(LinearGradient(colors: [Color.black.opacity(0.10), .clear],
+                                                       startPoint: .top, endPoint: .center), lineWidth: 1.5)
+                .blendMode(.multiply).allowsHitTesting(false))
+            .overlay(shape.strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false))
     }
 }
 

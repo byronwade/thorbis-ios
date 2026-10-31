@@ -232,6 +232,11 @@ struct SearchHit: Identifiable {
     /// What leads the row by kind (redesign phase 2): a job's status glyph, a customer's initials,
     /// a document's place mark.
     var glyph: SearchGlyph = .none
+    /// A job hit's status, shown as a word at the row's end (from `glyph`).
+    var jobStatus: (status: String, hasTime: Bool)? {
+        if case .job(let status, let hasTime) = glyph { return (status, hasTime) }
+        return nil
+    }
     let target: Target
 }
 
@@ -832,12 +837,14 @@ private struct SearchScreen: View {
             }
             PaperListRow(leading: hit.leading, title: hit.title, subtitle: hit.subtitle, dimmed: hit.dimmed,
                          highlight: terms.marks) {
-                if hit.amount != nil || hit.status != nil {
+                if hit.amount != nil || hit.status != nil || hit.jobStatus != nil {
                     VStack(alignment: .trailing, spacing: 4) {
                         if let amount = hit.amount {
                             Text(amount).font(Theme.moneyFont(.line, regular: false)).foregroundStyle(Theme.foreground)
                         }
                         if let status = hit.status { status }
+                        // v2: a job's status is a word with its mark, never a coloured glyph alone.
+                        if let job = hit.jobStatus { StatusLabel(jobStatus: job.status, hasTime: job.hasTime, emphasis: .quiet) }
                     }
                 }
             }

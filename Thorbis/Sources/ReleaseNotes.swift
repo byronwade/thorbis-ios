@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-thorbis-design",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "paintbrush", title: "A calmer look with smaller type",
+                      detail: "Quieter colors and type, status as a word, and menus that open right where you tap instead of a sheet."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-10-31-drawer-menu",
             date: "2026-10-31",
             highlights: [

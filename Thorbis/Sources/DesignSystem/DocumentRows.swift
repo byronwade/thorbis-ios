@@ -70,8 +70,8 @@ extension StatusTone {
 extension WrappingPropertyChip where Leading == AnyView {
     /// A document's status as a tinted chip led by its glyph (the job header's status chip).
     init(document status: DocumentStatus, action: (() -> Void)? = nil) {
-        self.init(text: status.word, tint: status.tone.surface, textColor: status.tone.text, action: action) {
-            AnyView(status.glyph.accessibilityHidden(true))
+        self.init(text: status.word, tint: Theme.fill, textColor: Theme.foreground, action: action) {
+            AnyView(StatusMark(tone: status.tone))
         }
     }
 }
@@ -99,19 +99,17 @@ struct DocumentListRowContent: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
 
-    /// Where the hairline starts: past the glyph, under the text.
-    static let dividerInset: CGFloat = PaperCardMetrics.inset + 16 + 12
+    /// Kept for call sites; rows have no hairline (v2).
+    static let dividerInset: CGFloat = PaperCardMetrics.inset
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            status.glyph.accessibilityHidden(true)
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
             let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
             layout {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.font(16, weight: .semibold))
+                    Text(title).font(Theme.font(16, weight: .medium))
                         .foregroundStyle(status.tone == .cancelled ? Theme.muted : Theme.foreground)
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -120,10 +118,14 @@ struct DocumentListRowContent: View {
                             .lineLimit(stacked ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if let meta, !meta.isEmpty {
-                        Text(meta).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                            .lineLimit(stacked ? nil : 2)
-                            .fixedSize(horizontal: false, vertical: true)
+                    // v2: the status is a word with its mark, then the quieter meta.
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet)
+                        if let meta, !meta.isEmpty {
+                            Text("· \(meta)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                                .lineLimit(stacked ? nil : 2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,8 +135,8 @@ struct DocumentListRowContent: View {
                             Text(amount).font(Theme.amountFont(16)).foregroundStyle(Theme.foreground)
                                 .lineLimit(1).minimumScaleFactor(0.7)
                         }
-                        if let amountNote {
-                            Text(amountNote).font(Theme.font(13, weight: .medium)).foregroundStyle(status.tone.text)
+                        if let amountNote, amountNote != status.word {
+                            Text(amountNote).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                                 .lineLimit(stacked ? nil : 1)
                         }
                     }
@@ -163,7 +165,7 @@ struct WellAmountRow: View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
                                                   : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
         layout {
-            Text(label).font(Theme.font(16, weight: strong ? .semibold : .regular))
+            Text(label).font(Theme.font(16, weight: strong ? .medium : .regular))
                 .foregroundStyle(strong ? Theme.foreground : Theme.subtle)
                 .fixedSize(horizontal: false, vertical: true)
             if !typeSize.isAccessibilitySize { Spacer(minLength: 12) }

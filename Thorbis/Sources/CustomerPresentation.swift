@@ -169,10 +169,10 @@ struct CustomerEstimatePresentation: View {
                         unknownScreen
                     } else if case .retryable(let reason)? = handoff?.outcome {
                         header(eyebrow: "Connection interrupted", title: flow.choiceName)
-                        Text(reason).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                        Text(reason).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
                     } else if case .needsReview(let reason)? = handoff?.outcome {
                         header(eyebrow: "This estimate needs review", title: flow.choiceName)
-                        Text(reason).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                        Text(reason).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
                     } else if handoff?.outcome?.isApproved == true {
                         doneScreen
                     } else if flow.step == .done || reviewReady {
@@ -256,22 +256,22 @@ struct CustomerEstimatePresentation: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top, spacing: 12) {
                         Text(total)
-                            .font(Theme.font(type.heading + 6, weight: .medium)).monospacedDigit().tracking(-0.3)
+                            .font(Theme.customerFont(type.heading + 6, weight: .medium)).monospacedDigit().tracking(-0.3)
                             .minimumScaleFactor(0.6).lineLimit(1)
                         Spacer(minLength: 8)
                         CustomerRadio(selected: selected)
                     }
-                    Text(option.title).font(Theme.font(type.body, weight: .medium))
+                    Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                     if !option.description.isEmpty {
-                        Text(option.description).font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
+                        Text(option.description).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
                             .lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 4)
                     }
                     Text("\(option.lines.count) \(option.lines.count == 1 ? "item" : "items")")
-                        .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                        .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                         .padding(.top, 10)
                 }
                 .foregroundStyle(Theme.foreground)
@@ -309,31 +309,31 @@ struct CustomerEstimatePresentation: View {
         VStack(alignment: .leading, spacing: 18) {
             header(eyebrow: "\(flow.choiceName) · \(flow.totalText)", title: "Sign to approve")
             Text(consentText ?? "By signing, I approve \"\(flow.choiceName)\" for \(flow.totalText) as shown.")
-                .font(Theme.font(type.body))
+                .font(Theme.customerFont(type.body))
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
-                Text("Your full name").font(Theme.font(type.small, weight: .medium)).foregroundStyle(Theme.muted)
+                Text("Your full name").font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
                 TextField("Your full name", text: $name)
                     .textContentType(.name)
-                    .font(Theme.font(type.body))
+                    .font(Theme.customerFont(type.body))
                     .padding(.horizontal, 16)
                     .frame(minHeight: type.target)
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Your signature").font(Theme.font(type.small, weight: .medium)).foregroundStyle(Theme.muted)
+                    Text("Your signature").font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
                     Spacer()
                     if SignatureInk.hasInk(strokes) {
                         Button("Clear") { strokes = [] }
-                            .font(Theme.font(type.small, weight: .medium))
+                            .font(Theme.customerFont(type.small, weight: .medium))
                             .frame(minWidth: type.target, minHeight: 44)
                     }
                 }
                 ZStack(alignment: .bottomLeading) {
                     SignaturePad(strokes: $strokes)
                     if !SignatureInk.hasInk(strokes) {
-                        Text("Sign here with your finger").font(Theme.font(type.small)).foregroundStyle(.black.opacity(0.62))
+                        Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(.black.opacity(0.62))
                             .padding(16).allowsHitTesting(false)
                     }
                 }
@@ -346,7 +346,7 @@ struct CustomerEstimatePresentation: View {
                 .allowsHitTesting(handoff?.submissionStarted != true)
             }
             if let error {
-                Text(error).font(Theme.font(type.body)).foregroundStyle(Theme.destructive)
+                Text(error).font(Theme.customerFont(type.body)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -356,14 +356,14 @@ struct CustomerEstimatePresentation: View {
         VStack(alignment: .center, spacing: 18) {
             Image(systemName: "checkmark.circle.fill").font(.system(size: 64)).foregroundStyle(Theme.success)
                 .accessibilityHidden(true).padding(.top, 40)
-            Text("Approved").font(Theme.font(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
-            Text(doneSentence).font(Theme.font(type.body)).multilineTextAlignment(.center)
+            Text("Approved").font(Theme.customerFont(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
+            Text(doneSentence).font(Theme.customerFont(type.body)).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if flow.total != nil {
-                Text(flow.totalText).font(Theme.monoFont(type.total, weight: .medium))
+                Text(flow.totalText).font(Theme.customerMonoFont(type.total, weight: .medium))
             }
             Text(handoff == nil && returnToDocuments == nil ? "Thank you. Please hand the device back to your technician." : "This estimate is approved. Continue when you're ready.")
-                .font(Theme.font(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
@@ -473,7 +473,7 @@ struct CustomerEstimatePresentation: View {
         VStack(alignment: .leading, spacing: 18) {
             header(eyebrow: "Approval needs confirmation", title: flow.choiceName)
             Text("Your approval may have been received. Check its current state before trying again.")
-                .font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
             CustomerSecondaryButton(title: "Check approval", type: type) {
                 if let handoff { Task { await handoff.checkOutcome() } }
             }
@@ -481,21 +481,21 @@ struct CustomerEstimatePresentation: View {
     }
 
     private func hint(_ text: String, danger: Bool = false) -> some View {
-        Text(text).font(Theme.font(type.small)).foregroundStyle(danger ? Theme.destructive : Theme.muted)
+        Text(text).font(Theme.customerFont(type.small)).foregroundStyle(danger ? Theme.destructive : Theme.muted)
             .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
     }
 
     /// Present.dc.html: a quiet eyebrow, the 30pt title, then one plain-language sentence in body colour.
     private func header(eyebrow: String, title: String, summary: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(eyebrow).font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+            Text(eyebrow).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(title).font(Theme.font(type.heading + 6, weight: .medium)).tracking(-0.4)
+            Text(title).font(Theme.customerFont(type.heading + 6, weight: .medium)).tracking(-0.4)
                 .accessibilityAddTraits(.isHeader)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
             if let summary, !summary.isEmpty {
-                Text(summary).font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
+                Text(summary).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
@@ -760,21 +760,21 @@ struct CustomerInvoicePresentation: View {
     private var invoiceScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Invoice for \(customerName)").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-                Text(due == 0 ? "Paid in full" : "Amount due").font(Theme.font(type.heading + 4, weight: .medium))
+                Text("Invoice for \(customerName)").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                Text(due == 0 ? "Paid in full" : "Amount due").font(Theme.customerFont(type.heading + 4, weight: .medium))
                     .accessibilityAddTraits(.isHeader)
                 if due > 0 {
-                    Text(dueText).font(Theme.monoFont(type.total + 8, weight: .medium))
+                    Text(dueText).font(Theme.customerMonoFont(type.total + 8, weight: .medium))
                         .minimumScaleFactor(0.6).lineLimit(1)
                 }
             }
             CustomerLinesCard(lines: invoice.lines, currency: invoice.currency, type: type, rows: amountRows)
             if let signedBy {
                 Label("Signed by \(signedBy)", systemImage: "signature")
-                    .font(Theme.font(type.body)).foregroundStyle(Theme.foreground)
+                    .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
             } else if let signature = invoice.customerAuthorization, signature.linesRevision == invoice.linesRevision {
                 Label("Signed by \(signature.signerName)", systemImage: "signature")
-                    .font(Theme.font(type.body)).foregroundStyle(Theme.foreground)
+                    .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
             }
         }
     }
@@ -788,14 +788,14 @@ struct CustomerInvoicePresentation: View {
     private var signScreen: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Invoice · \(money(total, currency: invoice.currency))").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-                Text("Sign for the work").font(Theme.font(type.heading + 4, weight: .medium)).accessibilityAddTraits(.isHeader)
+                Text("Invoice · \(money(total, currency: invoice.currency))").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                Text("Sign for the work").font(Theme.customerFont(type.heading + 4, weight: .medium)).accessibilityAddTraits(.isHeader)
             }
             Text("By signing, I confirm the work and charges on this invoice.")
-                .font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
             TextField("Your full name", text: $name)
                 .textContentType(.name)
-                .font(Theme.font(type.body))
+                .font(Theme.customerFont(type.body))
                 .padding(.horizontal, 16)
                 .frame(minHeight: type.target)
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
@@ -803,7 +803,7 @@ struct CustomerInvoicePresentation: View {
             ZStack(alignment: .bottomLeading) {
                 SignaturePad(strokes: $strokes)
                 if !SignatureInk.hasInk(strokes) {
-                    Text("Sign here with your finger").font(Theme.font(type.small)).foregroundStyle(.black.opacity(0.62))
+                    Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(.black.opacity(0.62))
                         .padding(16).allowsHitTesting(false)
                 }
             }
@@ -813,13 +813,13 @@ struct CustomerInvoicePresentation: View {
             .overlay(alignment: .topTrailing) {
                 if SignatureInk.hasInk(strokes) {
                     Button("Clear") { strokes = [] }
-                        .font(Theme.font(type.small, weight: .medium)).foregroundStyle(.black)
+                        .font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(.black)
                         .frame(minWidth: type.target, minHeight: 44)
                 }
             }
             .accessibilityLabel("Signature box. Sign with your finger.")
             if let error {
-                Text(error).font(Theme.font(type.body)).foregroundStyle(Theme.destructive)
+                Text(error).font(Theme.customerFont(type.body)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -832,7 +832,7 @@ struct CustomerInvoicePresentation: View {
                 CustomerPresentationCommit(title: "Sign for \(money(total, currency: invoice.currency))", enabled: reason == nil, busy: busy, type: type) {
                     Task { await sign() }
                 }
-                if let reason { Text(reason).font(Theme.font(type.small)).foregroundStyle(Theme.muted) }
+                if let reason { Text(reason).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
                 CustomerSecondaryButton(title: "Back", type: type) { signing = false; error = nil }
             } else if canSign && !authorized && invoice.jobId != nil {
                 CustomerPresentationCommit(title: "Sign for the work", enabled: true, busy: false, type: type) { signing = true }
@@ -915,7 +915,7 @@ struct CustomerLinesCard: View {
                 .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
             }
             if lines.isEmpty {
-                Text("Nothing listed yet.").font(Theme.font(type.body)).foregroundStyle(Theme.muted).padding(.vertical, 14)
+                Text("Nothing listed yet.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             ForEach(rows, id: \.self) { row in
@@ -947,28 +947,28 @@ struct CustomerLinesCard: View {
             if let readingAccess {
                 ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
             } else {
-                Text(line.description).font(Theme.font(type.body))
+                Text(line.description).font(Theme.customerFont(type.body))
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
-                .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func lineValue(_ line: FieldLine) -> some View {
         Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
-            .font(Theme.monoFont(type.body))
+            .font(Theme.customerMonoFont(type.body))
     }
 
     private func amountLabel(_ row: CustomerAmountRow) -> some View {
-        Text(row.label).font(Theme.font(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+        Text(row.label).font(Theme.customerFont(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private func amountValue(_ row: CustomerAmountRow) -> some View {
         Text(row.amount)
-            .font(Theme.monoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
+            .font(Theme.customerMonoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
             .minimumScaleFactor(0.6).lineLimit(1)
     }
 }
@@ -1008,10 +1008,10 @@ struct CustomerPresentationCommit: View {
                         Text(title).lineLimit(1)
                         Text(compactTitle).lineLimit(2).minimumScaleFactor(0.8)
                     }
-                    .font(Theme.font(type.body, weight: .medium)).multilineTextAlignment(.center)
+                    .font(Theme.customerFont(type.body, weight: .medium)).multilineTextAlignment(.center)
                     .accessibilityLabel(title)
                 } else {
-                    Text(title).font(Theme.font(type.body, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                    Text(title).font(Theme.customerFont(type.body, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
                         .minimumScaleFactor(0.8)
                 }
             }
@@ -1063,7 +1063,7 @@ struct CustomerTextButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title).font(Theme.font(type.small + 1, weight: .medium))
+            Text(title).font(Theme.customerFont(type.small + 1, weight: .medium))
                 .foregroundStyle(Theme.subtle)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, minHeight: type.target)
@@ -1097,7 +1097,7 @@ struct CustomerIncludedLines: View {
                         }
                     }
                     if let detail = readingAccess == nil ? LineText(line.description).detail : nil {
-                        Text(detail).font(Theme.font(type.small)).foregroundStyle(Theme.subtle)
+                        Text(detail).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
                             .lineSpacing(3)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1106,22 +1106,22 @@ struct CustomerIncludedLines: View {
                     // Consent screens keep the explicit quantity on every line.
                     if line.quantity != 1 || readingAccess != nil {
                         Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
-                            .font(Theme.font(type.small)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .font(Theme.customerFont(type.small)).monospacedDigit().foregroundStyle(Theme.muted)
                     }
                 }
                 .padding(.horizontal, 18).padding(.vertical, 16)
                 .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
             }
             if lines.isEmpty {
-                Text("Nothing listed yet.").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                Text("Nothing listed yet.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(18)
             }
             ForEach(rows, id: \.self) { row in
                 HStack(alignment: .firstTextBaseline) {
-                    Text(row.label).font(Theme.font(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+                    Text(row.label).font(Theme.customerFont(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
                     Spacer(minLength: 8)
                     Text(row.amount)
-                        .font(Theme.font(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular)).monospacedDigit()
+                        .font(Theme.customerFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular)).monospacedDigit()
                         .minimumScaleFactor(0.6).lineLimit(1)
                 }
                 // On the same sheet as the lines (no band, no rule): the total reads by size alone.
@@ -1137,7 +1137,7 @@ struct CustomerIncludedLines: View {
             ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            Text(LineText(line.description).name).font(Theme.font(type.body, weight: .medium))
+            Text(LineText(line.description).name).font(Theme.customerFont(type.body, weight: .medium))
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1146,7 +1146,7 @@ struct CustomerIncludedLines: View {
 
     private func amount(_ line: FieldLine) -> some View {
         Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
-            .font(Theme.font(type.body, weight: .medium)).monospacedDigit()
+            .font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
     }
 }
 
@@ -1159,7 +1159,7 @@ struct CustomerStatusWord: View {
         let tint = StatusWord.documentTint(status)
         HStack(spacing: 8) {
             if let tint { Circle().fill(tint).frame(width: 9, height: 9).accessibilityHidden(true) }
-            Text(status == "issued" ? "Unpaid" : status.statusLabel).font(Theme.font(type.small, weight: .medium))
+            Text(status == "issued" ? "Unpaid" : status.statusLabel).font(Theme.customerFont(type.small, weight: .medium))
                 .foregroundStyle(tint == nil ? Theme.muted : Theme.foreground)
         }
         .fixedSize()
@@ -1171,7 +1171,7 @@ struct CustomerIncludedLabel: View {
     let type: CustomerType
     var title = "What’s included"
     var body: some View {
-        Text(title).font(Theme.font(type.small, weight: .medium)).foregroundStyle(Theme.muted)
+        Text(title).font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
             .accessibilityAddTraits(.isHeader)
             .padding(.bottom, -10)
     }
@@ -1185,7 +1185,7 @@ struct CustomerSecondaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title).font(Theme.font(type.body, weight: .medium))
+            Text(title).font(Theme.customerFont(type.body, weight: .medium))
                 .frame(maxWidth: .infinity, minHeight: type.target)
                 .foregroundStyle(Theme.foreground)
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
@@ -1265,11 +1265,11 @@ struct CustomerStateMessage: View {
                 .frame(width: 56, height: 56)
                 .background(Theme.fill, in: Circle())
                 .accessibilityHidden(true)
-            Text(title).font(Theme.font(type.heading, weight: .medium))
+            Text(title).font(Theme.customerFont(type.heading, weight: .medium))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             if let message, !message.isEmpty {
-                Text(message).font(Theme.font(type.body)).foregroundStyle(Theme.foreground)
+                Text(message).font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let actionTitle, let action {
@@ -1298,7 +1298,7 @@ struct CustomerProblemBanner: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Image(systemName: symbol).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.warning)
                     .accessibilityHidden(true)
-                Text(message).font(Theme.font(type.small)).foregroundStyle(Theme.foreground)
+                Text(message).font(Theme.customerFont(type.small)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1306,7 +1306,7 @@ struct CustomerProblemBanner: View {
                 Button {
                     Task { running = true; await action(); running = false }
                 } label: {
-                    Text(actionTitle).font(Theme.font(type.small, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text(actionTitle).font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 20).frame(minHeight: 48)
                         .background(Theme.card, in: Capsule())
                         .contentShape(Capsule())
@@ -1337,7 +1337,7 @@ struct CustomerSkeleton: View {
     var body: some View {
         let type = CustomerType(sizeClass)
         VStack(alignment: .leading, spacing: 18) {
-            Text(caption).font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+            Text(caption).font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             VStack(alignment: .leading, spacing: 18) {
                 if heading {
                     VStack(alignment: .leading, spacing: 12) {

@@ -82,7 +82,7 @@ extension JobActivityAttributes.ContentState {
     }
 }
 
-/// The next forward field step for a job: On my way, Mark arrived or Start work.
+/// The next forward field step for a job: On my way, Arrive or Start work.
 struct JobNextStep: Equatable {
     /// The job status the step moves to (en_route, arrived or in_progress).
     let target: String
@@ -101,7 +101,7 @@ struct JobNextStep: Equatable {
     static func after(_ status: String) -> JobNextStep? {
         switch status {
         case "scheduled", "dispatched": JobNextStep(target: "en_route", title: "On my way", symbol: "car.fill")
-        case "en_route": JobNextStep(target: "arrived", title: "Mark arrived", symbol: "mappin.and.ellipse")
+        case "en_route": JobNextStep(target: "arrived", title: "Arrive", symbol: "mappin.and.ellipse")
         case "arrived": JobNextStep(target: "in_progress", title: "Start work", symbol: "wrench.and.screwdriver.fill")
         default: nil
         }
