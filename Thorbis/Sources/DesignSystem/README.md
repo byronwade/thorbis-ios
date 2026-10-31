@@ -2,31 +2,47 @@
 
 One custom control system, Linear-mobile style.
 
-## Redesign rules (31 October 2026) — keep these
+## v2 rules (31 October 2026) — Linear grammar on design.thorbis.com tokens
 
-The owner found the app "bland and hard to navigate", so the visual rules moved toward Linear's
-mobile app. Later passes must not undo them:
+**Linear grammar on design.thorbis.com tokens; the drawer is an owner-approved exception.**
+Linear's mobile app sets the layout grammar; design.thorbis.com is the law for tokens, depth,
+controls, forms, words, places and states ("Linear grammar. Not Linear dress"). The full rules are
+at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
 
-- **Palette:** crisp neutrals. Light: white ground, `#F4F4F5` wells (`Theme.card` / `Theme.well`),
-  `#63636B` secondary text, 8% black hairline. Dark: `#0E0E10` ground, `#1A1A1D` wells, `#9A9AA3`
-  secondary. No warm cream. Contrast stays ≥ 4.5:1 (`python3 scripts/tests/contrast.py`).
-- **Type:** 400, 500 and 600. Semibold for screen titles (34pt display step), row titles, section
-  headers and amounts. `Theme.allowed()` maps bold/heavy/black to 600.
-- **Status:** job rows lead with `StatusGlyph` (dashed ring unscheduled, ring scheduled, quarter
-  dispatched, half in progress, check done, × cancelled, ! attention). Its label is the word.
-  Status hues: `Theme.status*` (glyph), `status*Text` (words), `status*Surface` (chip grounds).
-- **Grouping:** `SectionHeader` (semibold 15, secondary, count) over a `Well`; inset hairlines
-  between rows are allowed. Avatars and property chips are allowed.
-- **In-between states (phase 4):** empty states are a soft tinted glyph (`EmptyGlyph`, the place's
-  mark colour via `PaperEmptyState(tint:)`), a semibold title, one secondary sentence and one ink
-  capsule action on a place's root list (a quiet capsule inside a record, `prominent:`). Loading is `SkeletonList` / `SkeletonRows` (status-glyph circle + two bars on a
-  well, breathing; still under Reduce Motion), never a spinner. Offline / waiting-to-sync and
-  failed reads are calm strips (`BannerGlyph` in a tinted circle on a rounded `fill` ground).
-  Toasts are `ThorbisToast` (dark capsule + glyph, at most one action) and only confirm what the
-  screen already shows. Menus lead each row with its glyph (`ThorbisMenuItem(status:)` for the
-  status picker); sheet groups are wells with inset hairlines. Pills and segments settle with
-  `Theme.selectionSpring(reduceMotion:)`. Status glyph hues hold 3:1 non-text contrast
-  (`contrast.py` counts it).
+- **Palette:** dark is Linear's greys (canvas `#0A0A0A`, panel `#171717`), cream type `#F7F4EE`,
+  cool grey body, dimmer marker. Light is the warm cream sheet (canvas `#F7F4EE`, panel `#FDFCFA`).
+  `Theme.field` is the sunk well under a field or select; `Theme.fill` is a chip or circle. One
+  electric-blue accent (`Theme.brand`) for selected, focus and the one live thing. Status hues are
+  the site's success/error/info/warning, tuned in lightness only. Place marks: `markOlive`,
+  `markForest`, `markPumpkin`, `markBurnt`, `markAccent`. `python3 scripts/tests/contrast.py`
+  reports 0 failures (4.5:1 text, 3:1 marks, both themes, Increase Contrast).
+- **Type:** 400 and 500 only (`Theme.allowed()` maps semibold and heavier to 500). The staff ramp
+  (`Theme.onRamp`) is compact: body/row title 15, secondary 14, chrome 13 Medium, captions 12,
+  sheet titles 16–17, detail titles 24, root titles 26, money hero 30. Customer-facing views use
+  `Theme.customerFont` (the older ramp) to keep their 17pt / 56pt floors.
+- **Depth:** Rest (planar sheets and panels), Sink (`fieldWell()`, `ThorbisSelect`,
+  `ThorbisSheetGroup`: one step darker, inset, 1px rim), Lift (`.inkCommit()` / `.dangerCommit()`:
+  ink, radius 10, 1px rim, light from above, 1px drop, press sinks through `PressStyle`), Overlay
+  (`ThorbisMenu` popovers only). No fifth.
+- **No separators:** `WellDivider` and `ThorbisSheetDivider` draw nothing; `PaperCard` has no rim;
+  no coloured side rails. A 1px rim is for fields, commits, chips and photos only.
+- **Status is a word:** `StatusLabel` (a small `StatusMark` in the hue, then the word). Rows lead
+  with the street; the status word sits in the subtitle (`JobListRowContent`,
+  `DocumentListRowContent`) or at the trailing edge (`CustomerListRowContent`, search). Never a
+  coloured glyph without its word. Status chips are neutral pills with the mark beside the word.
+- **Modals:** `ThorbisModalSheet` — a clean system sheet on the panel (`thorbisSheetPresentation`,
+  no Liquid Glass), `ThorbisSheetHeader` (17pt Medium title + close circle), content grouped by
+  space with 20pt padding, fields as sunk wells (`ThorbisSheetField`: label, well, one slot for
+  help or the error), one ink commit in the pad. Never pre-disable the commit; when it must be
+  off, `commitDisabledReason` / `PaperActionBar(disabledReason:)` says why.
+- **Popovers:** `ThorbisMenu` is an anchored `.popover` with compact adaptation: overlay depth,
+  ~44pt rows, a leading mark, a check on the current value, destructive rows in their own group,
+  a 120ms fade. Status, the ••• overflow, selects and filters all use it.
+- **Motion:** `Theme.selectionSpring` is now a 120ms ease-out (name kept); no bounce or stagger on
+  routine work; haptics stay.
+- **In-between states (phase 4, still current):** empty states name the one action
+  (`PaperEmptyState`), loading is `SkeletonList` / `SkeletonRows`, banners are calm strips,
+  toasts are `ThorbisToast` and only confirm what the screen already shows.
 - **Navigation (phone):** a side drawer (`AppDrawer`, `../DrawerNavigation.swift`) after the Claude
   and ChatGPT iOS apps, reachable from every screen of a place. Roots show `DrawerMenuCircle` top
   left — `PaperHeader` draws it when the shell sets `\.paperDrawer` (roots only); roots without a
@@ -59,14 +75,15 @@ in light and dark, and scales with Dynamic Type.
 | The screen's one primary action | `PrimaryButton` / `.inkCommit()` / `PaperActionBar` | `../Theme.swift`, `../PaperComponents.swift` |
 | Pill segmented tabs | `PaperTabs` | `../PaperComponents.swift` |
 | Status / value chip (display only) | `Chip` | `../Theme.swift` |
-| Job status as a Linear progress ring | `StatusGlyph` (+ `StatusTone` mapping) | `StatusGlyph.swift` |
+| Status as a word with its mark | `StatusLabel` (+ `StatusMark`) | `StatusGlyph.swift` |
+| The status mark alone (inside a chip or menu row) | `StatusGlyph` (+ `StatusTone` mapping) | `StatusGlyph.swift` |
 | Tinted property chip (status, time, tech, amount) | `PropertyChip` | `StatusGlyph.swift` |
 | Property chip whose words wrap at large text (job header) | `WrappingPropertyChip` | `WrappingPropertyChip.swift` |
 | Person's initials circle | `InitialsAvatar` | `StatusGlyph.swift` |
-| Place mark (tinted square + white glyph) | `PlaceMark` | `StatusGlyph.swift` |
-| Grouped rows on a well, inset hairlines | `Well`, `WellList`, `WellDivider` | `StatusGlyph.swift` |
+| Place mark (soft hue, outline at rest, fill when here) | `PlaceMark(filled:)` | `StatusGlyph.swift` |
+| Grouped rows on a panel, no lines | `Well`, `WellList` | `StatusGlyph.swift` |
 | A long list's well, row by row (stays lazy) | `WellSection`, `.wellSlice(first:last:)` | `ListRows.swift` |
-| Job row (glyph, street, problem, who and when, avatar) | `JobListRowContent` | `ListRows.swift` |
+| Job row (street, problem, status word · who and when, avatar) | `JobListRowContent` | `ListRows.swift` |
 | Customer row (initials, name, where, open job's status) | `CustomerListRowContent` | `ListRows.swift` |
 | Search row's kind glyph (status, initials, place mark) | `SearchGlyph` | `ListRows.swift` |
 | Estimate / invoice status as a glyph tone and word (no new `StatusTone` cases) | `DocumentStatus` | `DocumentRows.swift` |
@@ -79,8 +96,12 @@ in light and dark, and scales with Dynamic Type.
 | Section header with count | `SectionHeader` | `../Theme.swift` |
 | Linear text tabs (plain words, well pill) | `PaperTabs(textTabs: true)` | `../PaperComponents.swift` |
 | Activity timeline row (glyph on a thin line) | `JobTimelineItem`, `JobActivityGlyph` | `../JobScreenParts.swift` |
-| **Dropdown menu** (replaces `Menu {}`) | **`ThorbisMenu`** | `ThorbisMenu.swift` |
+| **Anchored popover menu** (replaces `Menu {}`) | **`ThorbisMenu`** | `ThorbisMenu.swift` |
+| **A menu shown as a sheet** (Create) | `ThorbisMenuCard` | `ThorbisMenu.swift` |
+| **Modal sheet** (one task, one ink commit) | **`ThorbisModalSheet`**, `ThorbisSheetField`, `ThorbisSheetHeader` | `ThorbisSheet.swift` |
 | **Filter / display bottom sheet** | **`ThorbisSheet*`** | `ThorbisSheet.swift` |
+| Sunk field well | `.fieldWell()` | `../PaperComponents.swift` |
+| Danger commit (Cancel job, Void invoice) | `.dangerCommit()` | `../Theme.swift` |
 | **Select row** (replaces menu/default `Picker`) | **`ThorbisSelect`** | `ThorbisControls.swift` |
 | **Pill segmented** (replaces `.pickerStyle(.segmented)`) | **`ThorbisSegmented`** | `ThorbisControls.swift` |
 | **Confirm sheet** (replaces `.confirmationDialog`) | **`.thorbisConfirm`** | `ThorbisControls.swift` |
@@ -92,17 +113,18 @@ in light and dark, and scales with Dynamic Type.
 
 ## ThorbisMenu
 
-A rounded card of rows that floats up from the bottom — no system menu material or caret.
-A semibold title, glyphs left in a fixed column (`status:` shows a `StatusGlyph`), a checkmark on
-the selected row, `.destructive` rows in red.
+An anchored popover that grows from its trigger (overlay depth: the panel, radius 14, a real
+shadow). An optional 13pt caption, ~44pt rows with a leading mark in a fixed column (`status:`
+shows the status mark), a check on the current value, `.destructive` rows in their own group in the
+danger tone. A chosen row's action runs after the popover has gone, so it may present a sheet.
 
 ```swift
 ThorbisMenu(items: [
-    ThorbisMenuItem("On my way", icon: "location.fill") { start() },
-    ThorbisMenuItem("ETA 15 min", icon: "clock") { start(eta: 15) },
+    ThorbisMenuItem("Dispatched", status: .dispatched, isSelected: true) {},
+    ThorbisMenuItem("On my way", status: .dispatched) { start() },
     ThorbisMenuItem("Cancel", icon: "xmark.circle", role: .destructive) { cancel() },
-], title: "On my way") {
-    commitLabel("On my way", symbol: "location.fill")   // your trigger label
+], title: "Status") {
+    statusChip   // your trigger label
 }
 ```
 
@@ -111,7 +133,7 @@ ThorbisMenu(items: [
 Building blocks for a filter/display sheet: `ThorbisSheetScaffold` (grabber + optional title +
 close circle), `ThorbisSheetGroup` (a rounded well) with `ThorbisSheetRow` (value + chevron-updown,
 opens a `ThorbisMenu`), `ThorbisSheetToggleRow`, and `ThorbisChipGroup`. Put a
-`ThorbisSheetDivider()` (an inset hairline) between rows in a group. `DisplayOptions` is a reusable grouping/ordering
+`ThorbisSheetDivider()` where rows meet (it draws nothing in v2). `DisplayOptions` is a reusable grouping/ordering
 value model.
 
 ```swift
@@ -141,8 +163,8 @@ ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Comme
 
 ## ThorbisConfirm (confirmationDialog)
 
-`.thorbisConfirm` presents a custom confirm sheet — title, optional message, a red destructive
-button, and an automatic Cancel. Use the `isPresented:` form for a Bool, or the `item:` form in
+`.thorbisConfirm` presents a confirm modal — a clean panel sheet with the question, the
+consequence, the commit (a destructive one in the danger tone) and an automatic Cancel. Use the `isPresented:` form for a Bool, or the `item:` form in
 place of `.confirmationDialog(presenting:)` (it clears the item on dismiss, so swipe-away = Cancel).
 
 ```swift

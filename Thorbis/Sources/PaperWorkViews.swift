@@ -610,18 +610,19 @@ private struct ScheduleHero<Commit: View>: View {
                     let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
                                                               : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
                     layout {
-                        HStack(spacing: 8) {
-                            StatusGlyph(jobStatus: status, hasTime: job.scheduledFor != nil, pending: pendingStatus != nil)
+                        HStack(spacing: 6) {
+                            // v2: the status is a word; its small mark sits beside it in the hue.
+                            StatusMark(tone: tone, pending: pendingStatus != nil)
                             if let onSiteSince, pendingStatus == nil {
                                 TimelineView(.everyMinute) { context in
                                     Text("On site \(Self.duration(from: onSiteSince, to: context.date))")
-                                        .font(Theme.font(15, weight: .semibold)).monospacedDigit()
-                                        .foregroundStyle(tone.text)
+                                        .font(Theme.font(13, weight: .medium)).monospacedDigit()
+                                        .foregroundStyle(Theme.foreground)
                                 }
                             } else {
                                 Text(pendingStatus != nil ? "\(status.statusLabel) · waiting to sync" : status.statusLabel)
-                                    .font(Theme.font(15, weight: .semibold))
-                                    .foregroundStyle(tone.text)
+                                    .font(Theme.font(13, weight: .medium))
+                                    .foregroundStyle(Theme.foreground)
                             }
                         }
                         Text(when).font(Theme.font(15, weight: .medium)).monospacedDigit()
@@ -764,8 +765,6 @@ struct TodayRow: View {
     private var content: some View {
         let stacked = typeSize.isAccessibilitySize
         return HStack(alignment: .firstTextBaseline, spacing: 12) {
-            StatusGlyph(jobStatus: status, hasTime: job.scheduledFor != nil, pending: pendingStatus != nil)
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
             let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
             layout {
@@ -782,9 +781,8 @@ struct TodayRow: View {
                         .font(Theme.font(14)).foregroundStyle(Theme.subtle)
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
-                    if pendingStatus != nil {
-                        Text("Waiting to sync").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.warning)
-                    }
+                    // v2: the status as a word with its mark (never a coloured glyph alone).
+                    StatusLabel(jobStatus: status, hasTime: job.scheduledFor != nil, pending: pendingStatus != nil, emphasis: .quiet)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

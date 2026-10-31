@@ -288,7 +288,7 @@ struct OwnerHomeView: View {
                 Text("\(count)").font(Theme.font(30, weight: .semibold)).monospacedDigit().tracking(-0.6)
                     .foregroundStyle(count == 0 ? Theme.muted : Theme.foreground)
                 HStack(spacing: 6) {
-                    StatusGlyph(tone: state.tone, label: state.title).accessibilityHidden(true)
+                    StatusMark(tone: state.tone)
                     Text(state.title).font(Theme.font(13, weight: .medium))
                         .foregroundStyle(count == 0 ? Theme.muted : state.tone.text)
                         .lineLimit(1)

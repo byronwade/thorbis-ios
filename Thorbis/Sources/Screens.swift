@@ -205,7 +205,7 @@ struct CustomerContactSheet: View {
                             }
                         }
                         if usesCustomRole {
-                            contactField("Custom role", placeholder: "Enter a role", text: $customRole, field: .customRole)
+                            contactField("Custom role", placeholder: "Service manager", text: $customRole, field: .customRole)
                                 .padding(.top, 2)
                         } else {
                             Button("Enter custom role") {

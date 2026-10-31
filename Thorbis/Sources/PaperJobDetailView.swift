@@ -832,9 +832,10 @@ struct JobDetailView: View {
     /// The chip itself, never a button: inside the status menu the menu is the button.
     private func statusChipLabel(_ job: JobRecord, queued: String?, now: Date, showsMenu: Bool) -> some View {
         let tone = StatusTone(jobStatus: queued ?? job.status, hasTime: JobFiltering.date(job.scheduledFor) != nil || job.status != "scheduled")
-        return WrappingPropertyChip(text: statusWordText(job, queued: queued, now: now), tint: tone.surface,
-                                    textColor: tone.text, showsChevron: showsMenu) {
-            StatusGlyph(tone: tone, label: (queued ?? job.status).statusLabel, pending: queued != nil)
+        // v2: a neutral pill; colour sits with the word as its small mark.
+        return WrappingPropertyChip(text: statusWordText(job, queued: queued, now: now), tint: Theme.fill,
+                                    textColor: Theme.foreground, showsChevron: showsMenu) {
+            StatusMark(tone: tone, pending: queued != nil)
         }
     }
 
