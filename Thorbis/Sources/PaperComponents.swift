@@ -276,9 +276,10 @@ struct PaperTabs: View {
         let on = selection == option
         return Button { selection = option } label: {
             if tracked {
-                // Not fixed-width: the row is only chosen once every label measures as fitting, and a
-                // fixed label could widen the screen before that measurement lands.
-                Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1)
+                // Fixed width so a long word ("All customers") may use its neighbours' padding rather
+                // than truncate; accessibility sizes, where a row of these widened the whole screen,
+                // never get here (they use `accessibleChooser`).
+                Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
                     .foregroundStyle(on ? Theme.foreground : Theme.muted)
                     .padding(.horizontal, padding)
                     .frame(maxWidth: .infinity, minHeight: 44)
