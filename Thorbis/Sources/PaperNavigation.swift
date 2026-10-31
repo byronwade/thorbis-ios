@@ -557,13 +557,7 @@ struct RootView: View {
                 .environmentObject(api).environmentObject(session).environmentObject(store)
         }
         .sheet(isPresented: $previewNewCustomer) { NewCustomerSheet() }
-        .sheet(isPresented: Binding(get: { previewFormSheet != nil }, set: { if !$0 { previewFormSheet = nil } })) {
-            if previewFormSheet == "job-schedule" {
-                QuickScheduleSheet(jobID: PaperPreview.jobID)
-            } else {
-                EquipmentEditor(customerID: PaperPreview.customerID, locations: [], existing: nil) {}
-            }
-        }
+        .modifier(PreviewFormSheet(screen: $previewFormSheet))
         .sheet(isPresented: $previewSignature) {
             SignatureCaptureSheet(title: "Approve $970.00", summary: "By signing, Danielle Marlowe approves \"AC repair and compressor replacement\" as shown.",
                                   jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe") { _ in nil }
@@ -1370,3 +1364,21 @@ struct PaperGlobalSearch: View {
         }
     }
 }
+
+#if DEBUG
+/// Screenshot-only: presents a redesigned form sheet by preview screen name.
+private struct PreviewFormSheet: ViewModifier {
+    @Binding var screen: String?
+    private var shown: Binding<Bool> { Binding(get: { screen != nil }, set: { if !$0 { screen = nil } }) }
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: shown) {
+            if screen == "job-schedule" {
+                QuickScheduleSheet(jobID: PaperPreview.jobID)
+            } else {
+                EquipmentEditor(customerID: PaperPreview.customerID, locations: [], existing: nil) {}
+            }
+        }
+    }
+}
+#endif
