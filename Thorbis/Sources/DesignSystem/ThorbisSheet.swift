@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: - Scaffold
 
-/// A bottom sheet, Linear-mobile style: a grabber, an optional title row with a close circle,
-/// and grouped rounded content on the warm canvas. Use for filters and display options — the
+/// A bottom sheet, Linear-mobile style: a grabber, an optional semibold title row with a close
+/// circle, and grouped rounded wells on the white ground (phase 4, like Linear's display options). Use for filters and display options — the
 /// place stock `Picker`/`confirmationDialog` used to go.
 struct ThorbisSheetScaffold<Content: View>: View {
     var title: String? = nil
@@ -16,7 +16,9 @@ struct ThorbisSheetScaffold<Content: View>: View {
             if title != nil || onClose != nil {
                 HStack {
                     if let title {
-                        Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                        Text(title).font(Theme.font(18, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
                     }
                     Spacer(minLength: 0)
                     if let onClose {
@@ -27,7 +29,8 @@ struct ThorbisSheetScaffold<Content: View>: View {
                 .padding(.top, 14).padding(.bottom, 6)
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                // Calm and roomy, like Linear's display options: grouped wells with generous gaps.
+                VStack(alignment: .leading, spacing: 24) {
                     content()
                 }
                 .padding(.horizontal, Theme.gutter)
@@ -44,35 +47,33 @@ struct ThorbisSheetScaffold<Content: View>: View {
 
 // MARK: - Grouped rows
 
-/// One white panel that holds a run of sheet rows (design 2026-10-30: rows on one panel per
-/// section, no rules between them). Put an optional 13pt label above it with `ThorbisSheetLabel`.
+/// One rounded well that holds a run of sheet rows (phase 4: Linear's grouped rows, radius 14,
+/// inset hairlines via `ThorbisSheetDivider`). Put an optional label above it with `ThorbisSheetLabel`.
 struct ThorbisSheetGroup<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
-        PaperCard {
-            VStack(spacing: 0) { content() }
-                .padding(.vertical, PaperCardMetrics.edge)
-        }
+        Well { content() }
     }
 }
 
-/// Kept so existing sheets compile: rows on a panel are separated by space, never a line.
+/// The inset hairline between rows of a sheet group.
 struct ThorbisSheetDivider: View {
-    var body: some View { EmptyView() }
+    var body: some View { WellDivider() }
 }
 
-/// The 13pt marker label above a sheet panel.
+/// The semibold label above a sheet group, like a list's `SectionHeader`.
 struct ThorbisSheetLabel: View {
     let title: String
     var body: some View {
-        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+        Text(title).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4).padding(.bottom, -10)
             .accessibilityAddTraits(.isHeader)
     }
 }
 
 /// A row that shows its current value; tap opens a `ThorbisMenu` of `options` and the chosen one
-/// calls `onSelect`. The value reads as the answer — no chevron, the row is the target.
+/// calls `onSelect`. The value reads as the answer, with Linear's small up-down chevron.
 struct ThorbisSheetRow: View {
     let label: String
     let value: String
@@ -91,6 +92,8 @@ struct ThorbisSheetRow: View {
                 Text(label).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                 Spacer(minLength: 8)
                 Text(value).font(Theme.font(15)).foregroundStyle(Theme.muted).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
             }
             .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52).contentShape(Rectangle())
         }
@@ -119,6 +122,7 @@ struct ThorbisChipToggle: View {
     let label: String
     let isOn: Bool
     let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         Button(action: action) {
             Text(label)
@@ -130,6 +134,8 @@ struct ThorbisChipToggle: View {
                 .overlay(Capsule().stroke(isOn ? Color.clear : Theme.border))
         }
         .buttonStyle(PressStyle())
+        // A small spring as the chip fills (phase 4); a plain fade under Reduce Motion.
+        .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: isOn)
         .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 }

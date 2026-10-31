@@ -57,6 +57,9 @@ struct JobDetailView: View {
     private var estimatesFailed: Bool { estimateRead?.isComplete == false }
     @State private var showNewEstimate = false
     @State private var committed = 0
+    /// Set when the person opens a wrap-up row; the next drop in rows left plays a light tap.
+    @State private var wrapUpTapArmed = false
+    @State private var wrapUpTaps = 0
     @State private var creatingInvoice = false
     @State private var reviewInvoiceID: String?
     @State private var showDeposit = false
@@ -235,6 +238,14 @@ struct JobDetailView: View {
         .deviceHandoffs($handoff)
         .sheet(item: $shareJob) { TextShareSheet(text: $0.text).presentationDetents([.medium, .large]) }
         .sensoryFeedback(.success, trigger: committed)
+        // A light tap as a wrap-up row the person opened turns done (phase 4). Armed by opening a
+        // row, so rows that arrive done with loaded data never tap.
+        .onChange(of: WrapUpList.left(wrapUpRows)) { old, new in
+            guard new < old else { return }
+            if wrapUpTapArmed { wrapUpTaps += 1 }
+            wrapUpTapArmed = false
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: wrapUpTaps)
         .thorbisConfirm("Complete this job?", message: "Everything before wrap up is done.", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await completeHere() } }])
         .sheet(isPresented: $showDeposit) {
@@ -774,9 +785,11 @@ struct JobDetailView: View {
         if transitions.isEmpty {
             statusChip(job, showsMenu: false)
         } else {
+            // Glyph-led (phase 4): each move shows the status it leads to; the title says where the
+            // job is now. Only the server's allowed moves are listed.
             ThorbisMenu(items: transitions.map { target in
-                ThorbisMenuItem(transitionTitle(target)) { runTransition(target) }
-            }, title: "Change status", accessibilityLabel: "Job status, \(shownStatus(job).statusLabel). Change status") {
+                ThorbisMenuItem(transitionTitle(target), status: StatusTone(jobStatus: target)) { runTransition(target) }
+            }, title: "Change status · now \(shownStatus(job).statusLabel.lowercased())", accessibilityLabel: "Job status, \(shownStatus(job).statusLabel). Change status") {
                 statusChip(job, showsMenu: true)
             }
         }
@@ -1535,6 +1548,7 @@ struct JobDetailView: View {
 
     /// Each wrap-up row goes where its fact is made; a done row opens it to look again.
     private func openWrapUpRow(_ row: WrapUpRow) {
+        if !row.done { wrapUpTapArmed = true }
         let bill = WrapUpList.billingInvoice(invoices)
         switch row.step {
         case .beforePhotos: row.done ? openPhotos() : openCapture(.camera(stage: "Before"))
@@ -1860,7 +1874,8 @@ struct JobDetailView: View {
             if days.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     activityFilterLabel(title: "Activity")
-                    PaperEmptyState(symbol: "clock", title: "No activity yet")
+                    PaperEmptyState(symbol: "clock", title: "No activity yet",
+                                    message: "Status changes, notes and photos on this job show up here.")
                 }
             }
             ForEach(Array(days.enumerated()), id: \.element.day) { index, group in

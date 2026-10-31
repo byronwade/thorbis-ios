@@ -154,7 +154,7 @@ struct ScheduleView: View {
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if store.loading && store.jobs.isEmpty {
-                    SkeletonRows()
+                    SkeletonList(count: 4, leading: true).paperCardMargin()
                 } else if tab == "Board" && canSchedule {
                     DispatchBoardView()
                 } else if jobs.isEmpty {
@@ -370,6 +370,7 @@ struct ScheduleView: View {
                 : range == .unscheduled ? nil
                 : mine ? "Choose Everyone in the filter to see the whole team's jobs." : "Try another range, or check Jobs for everything open.",
             actionTitle: boardEmpty && session.can("job.create", feature: "jobs") ? "Book a job" : nil,
+            tint: Theme.markAccent, prominent: true,
             action: { showNew = true }
         )
         .padding(.top, 24)
@@ -942,7 +943,7 @@ struct JobsView: View {
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 VStack(alignment: .leading, spacing: 0) {
                     if store.loading && store.jobs.isEmpty {
-                        SkeletonRows().padding(.horizontal, -PaperCardMetrics.margin)
+                        SkeletonList(count: 5, leading: true)
                     } else if tab == "Recent" {
                         group("Recently updated", jobs: Array(jobs.prefix(25)))
                     } else {
@@ -954,6 +955,7 @@ struct JobsView: View {
                             title: filterActive ? "No jobs match these filters" : tab == "Assigned" ? "Nothing assigned to you" : "No open jobs",
                             message: filterActive ? "Clear the filters to see the whole board." : tab == "Assigned" ? "All jobs shows the whole board." : nil,
                             actionTitle: session.can("job.create", feature: "jobs") && !filterActive ? "Book a job" : nil,
+                            tint: Theme.markBlue, prominent: true,
                             action: { showNew = true }
                         )
                     }

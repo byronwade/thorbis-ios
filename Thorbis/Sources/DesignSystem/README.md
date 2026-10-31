@@ -17,6 +17,16 @@ mobile app. Later passes must not undo them:
   Status hues: `Theme.status*` (glyph), `status*Text` (words), `status*Surface` (chip grounds).
 - **Grouping:** `SectionHeader` (semibold 15, secondary, count) over a `Well`; inset hairlines
   between rows are allowed. Avatars and property chips are allowed.
+- **In-between states (phase 4):** empty states are a soft tinted glyph (`EmptyGlyph`, the place's
+  mark colour via `PaperEmptyState(tint:)`), a semibold title, one secondary sentence and one ink
+  capsule action on a place's root list (a quiet capsule inside a record, `prominent:`). Loading is `SkeletonList` / `SkeletonRows` (status-glyph circle + two bars on a
+  well, breathing; still under Reduce Motion), never a spinner. Offline / waiting-to-sync and
+  failed reads are calm strips (`BannerGlyph` in a tinted circle on a rounded `fill` ground).
+  Toasts are `ThorbisToast` (dark capsule + glyph, at most one action) and only confirm what the
+  screen already shows. Menus lead each row with its glyph (`ThorbisMenuItem(status:)` for the
+  status picker); sheet groups are wells with inset hairlines. Pills and segments settle with
+  `Theme.selectionSpring(reduceMotion:)`. Status glyph hues hold 3:1 non-text contrast
+  (`contrast.py` counts it).
 - **Navigation (phone):** a side drawer (`AppDrawer`, `../DrawerNavigation.swift`) after the Claude
   and ChatGPT iOS apps. Each place root shows `DrawerMenuCircle` top left — `PaperHeader` draws it
   when the shell sets `\.paperDrawer` (roots only, never pushed screens); roots without a Paper
@@ -67,11 +77,16 @@ in light and dark, and scales with Dynamic Type.
 | **Pill segmented** (replaces `.pickerStyle(.segmented)`) | **`ThorbisSegmented`** | `ThorbisControls.swift` |
 | **Confirm sheet** (replaces `.confirmationDialog`) | **`.thorbisConfirm`** | `ThorbisControls.swift` |
 | Selectable chip | `ThorbisChipToggle` / `ThorbisChipGroup` | `ThorbisSheet.swift` |
+| Empty state (tinted glyph, title, sentence, action) | `PaperEmptyState(tint:)`, `EmptyGlyph` | `ThorbisStates.swift` |
+| Loading list / rows | `SkeletonList`, `SkeletonRows`, `SkeletonPulse` | `ThorbisStates.swift` |
+| Banner glyph (offline, sync, error strips) | `BannerGlyph` | `ThorbisStates.swift` |
+| Confirmation toast (saved, undo) | `ThorbisToast` | `ThorbisToast.swift` |
 
 ## ThorbisMenu
 
 A rounded card of rows that floats up from the bottom — no system menu material or caret.
-Icons left, a checkmark on the selected row, `.destructive` rows in red.
+A semibold title, glyphs left in a fixed column (`status:` shows a `StatusGlyph`), a checkmark on
+the selected row, `.destructive` rows in red.
 
 ```swift
 ThorbisMenu(items: [
@@ -86,9 +101,9 @@ ThorbisMenu(items: [
 ## ThorbisSheet
 
 Building blocks for a filter/display sheet: `ThorbisSheetScaffold` (grabber + optional title +
-close circle), `ThorbisSheetGroup` (rounded card) with `ThorbisSheetRow` (value + chevron-updown,
+close circle), `ThorbisSheetGroup` (a rounded well) with `ThorbisSheetRow` (value + chevron-updown,
 opens a `ThorbisMenu`), `ThorbisSheetToggleRow`, and `ThorbisChipGroup`. Put a
-`ThorbisSheetDivider()` between rows in a group. `DisplayOptions` is a reusable grouping/ordering
+`ThorbisSheetDivider()` (an inset hairline) between rows in a group. `DisplayOptions` is a reusable grouping/ordering
 value model.
 
 ```swift

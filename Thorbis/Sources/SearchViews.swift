@@ -787,7 +787,7 @@ private struct SearchScreen: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Searching…").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, 4).frame(minHeight: 28)
-                PaperCard { SkeletonRows(count: built.isEmpty ? 3 : 2, leading: false, inset: PaperCardMetrics.inset) }
+                Well { SkeletonRows(count: built.isEmpty ? 3 : 2, leading: false, inset: PaperCardMetrics.inset, dividers: true) }
                     .accessibilityLabel("Searching")
             }
         } else if built.isEmpty {

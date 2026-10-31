@@ -993,30 +993,23 @@ struct RemovedLine: Equatable {
     let optionID: String?
 }
 
-/// "Line removed · Undo" for five seconds, above the commit.
+/// "Line removed · Undo" for five seconds, above the commit, as a `ThorbisToast`.
 struct LineRemovedToast: View {
     let removed: RemovedLine
     let undo: () -> Void
     let expire: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text("Line removed").font(Theme.font(15)).foregroundStyle(Theme.onInk)
-            Spacer(minLength: 8)
-            Button("Undo", action: undo)
-                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.onInk)
-                .frame(minWidth: 44, minHeight: 44)
-        }
-        .padding(.horizontal, 16)
-        .background(Theme.ink, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        ThorbisToast(symbol: "trash", message: String(localized: "Line removed"),
+                     actionTitle: String(localized: "Undo"), action: undo)
         .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .transition(ThorbisToast.transition(reduceMotion: reduceMotion))
         .task(id: removed.line.id) {
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
             expire()
         }
-        .accessibilityElement(children: .combine)
         .accessibilityAction(named: "Undo", undo)
     }
 }

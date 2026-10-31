@@ -28,7 +28,7 @@ struct EstimatesView: View {
                     .environment(\.paperMenuButton, false)
                     .padding(.horizontal, -PaperCardMetrics.margin)
                 if let error { ErrorBanner(message: error) { await load() } }
-                if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
+                if loading && records.isEmpty { SkeletonList(count: 5) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
                     WellSection(title: DocumentStatus(estimateStatus: status).word, count: group.count, data: group,
                                 dividerInset: DocumentListRowContent.dividerInset) { record in
@@ -46,7 +46,8 @@ struct EstimatesView: View {
                 }
                 if !loading && records.isEmpty && error == nil {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates yet",
-                                    actionTitle: session.can("estimate.create", feature: "estimates") ? "New estimate" : nil, action: { showCreate = true })
+                                    actionTitle: session.can("estimate.create", feature: "estimates") ? "New estimate" : nil,
+                                    tint: Theme.markPumpkin, prominent: true, action: { showCreate = true })
                 }
             }
             .paperCardMargin().padding(.bottom, 24)
@@ -387,7 +388,7 @@ struct InvoicesView: View {
                     .environment(\.paperMenuButton, false)
                     .padding(.horizontal, -PaperCardMetrics.margin)
                 if let error { ErrorBanner(message: error) { await load() } }
-                if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
+                if loading && records.isEmpty { SkeletonList(count: 5) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
                     WellSection(title: status == "issued" ? "Awaiting payment" : status.statusLabel, count: group.count, data: group,
                                 dividerInset: DocumentListRowContent.dividerInset) { record in
@@ -409,7 +410,8 @@ struct InvoicesView: View {
                     PaperEmptyState.search(search.trimmingCharacters(in: .whitespaces))
                 }
                 if !loading && records.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices are made from a job.")
+                    PaperEmptyState(symbol: "doc.plaintext", title: "No invoices yet", message: "Invoices are made from a job.",
+                                    tint: Theme.markForest)
                 }
             }
             .paperCardMargin().padding(.bottom, 24)

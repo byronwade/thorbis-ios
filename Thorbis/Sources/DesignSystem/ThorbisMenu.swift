@@ -25,21 +25,25 @@ extension DynamicTypeSize {
 ///
 /// `role: .destructive` tints the row `Theme.destructive`. `isSelected` shows a trailing
 /// checkmark. `tint` colours the leading mark only (a soft place-mark hue), never the word.
+/// `status` leads the row with that status's `StatusGlyph` instead of an icon (the status picker);
+/// the glyph is decorative there, the title already says where the job goes.
 struct ThorbisMenuItem: Identifiable {
     let id = UUID()
     var title: String
     var subtitle: String? = nil
     var icon: String? = nil
     var tint: Color? = nil
+    var status: StatusTone? = nil
     var isSelected: Bool = false
     var isDisabled: Bool = false
     var role: ButtonRole? = nil
     var action: () -> Void
 
-    init(_ title: String, icon: String? = nil, subtitle: String? = nil, tint: Color? = nil,
+    init(_ title: String, icon: String? = nil, subtitle: String? = nil, tint: Color? = nil, status: StatusTone? = nil,
          isSelected: Bool = false, isDisabled: Bool = false, role: ButtonRole? = nil, action: @escaping () -> Void) {
         self.title = title
         self.icon = icon
+        self.status = status
         self.subtitle = subtitle
         self.tint = tint
         self.isSelected = isSelected
@@ -107,6 +111,7 @@ struct ThorbisMenuCard: View {
     let onSelect: (ThorbisMenuItem) -> Void
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var glyphColumn: CGFloat = 22
 
     private var estimatedHeight: CGFloat {
         let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? 50 : 62) + (customerFacing ? 12 : 0) }
@@ -130,9 +135,9 @@ struct ThorbisMenuCard: View {
             rows
             ScrollView { rows }
         }
-        .padding(4)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+        .padding(6)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.border))
         .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
         .padding(.horizontal, 12)
         .frame(maxWidth: 460)
@@ -143,59 +148,80 @@ struct ThorbisMenuCard: View {
         .presentationDragIndicator(.hidden)
     }
 
-    /// Planar rows with no rules between them; spacing and the press state separate them.
+    /// Linear's menu (phase 4): a semibold title over rounded rows, each led by its glyph (a status
+    /// ring or a symbol) in a fixed column so the words line up.
     private var rows: some View {
         VStack(spacing: 0) {
             if let title {
                 Text(title)
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 6)
+                    .accessibilityAddTraits(.isHeader)
             }
             ForEach(items) { item in
                 Button { onSelect(item) } label: { row(item) }
-                    .buttonStyle(RowPressStyle())
+                    .buttonStyle(MenuRowPressStyle())
                     .disabled(item.isDisabled)
                     .opacity(item.isDisabled ? 0.4 : 1)
             }
         }
-        .padding(.bottom, 4)
+        .padding(.bottom, 2)
     }
 
     private func row(_ item: ThorbisMenuItem) -> some View {
         let destructive = item.role == .destructive
         let titleColor = destructive ? Theme.destructive : Theme.foreground
         return HStack(spacing: 12) {
-            if let icon = item.icon {
-                Image(systemName: icon).font(.system(size: 16))
+            if let status = item.status {
+                StatusGlyph(tone: status, label: item.title)
+                    .accessibilityHidden(true)
+                    .frame(width: glyphColumn)
+            } else if let icon = item.icon {
+                Image(systemName: icon).font(.system(size: 16, weight: .medium))
                     .foregroundStyle(destructive ? Theme.destructive : (item.tint ?? Theme.muted))
-                    .frame(width: 22)
+                    .frame(width: glyphColumn)
+                    .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).font(Theme.font(customerFacing ? 17 : 15, weight: .medium)).foregroundStyle(titleColor)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let subtitle = item.subtitle {
                     Text(subtitle).font(Theme.font(customerFacing ? 17 : 13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 8)
             if item.isSelected {
                 Image(systemName: "checkmark").font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.brandText)
+                    .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, 10)
-        .frame(minHeight: customerFacing ? 56 : (item.subtitle == nil ? 50 : 58))
+        .padding(.horizontal, 12)
+        .frame(minHeight: customerFacing ? 56 : (item.subtitle == nil ? 48 : 58))
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(item.isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
+/// A menu row's press: a rounded `fill` highlight inside the card, like Linear's menus.
+struct MenuRowPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Theme.fill : .clear,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
 #if DEBUG
 #Preview("ThorbisMenu card") {
     ThorbisMenuCard(items: [
-        ThorbisMenuItem("On my way", icon: "location.fill", isSelected: true) {},
-        ThorbisMenuItem("ETA 15 min", icon: "clock") {},
+        ThorbisMenuItem("On my way", status: .dispatched) {},
+        ThorbisMenuItem("Start work", status: .inProgress) {},
+        ThorbisMenuItem("ETA 15 min", icon: "clock", isSelected: true) {},
         ThorbisMenuItem("ETA 30 min", icon: "clock") {},
         ThorbisMenuItem("Cancel trip", icon: "xmark.circle", role: .destructive) {},
     ], title: "On my way") { _ in }

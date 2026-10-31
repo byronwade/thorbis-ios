@@ -48,10 +48,35 @@ for mode in ["light", "dark", "highLight", "highDark"]:
             fails += not ok
             row.append(f"{g} {r:.2f}{'' if ok else ' FAIL'}")
         print(f"  {text:22} " + " | ".join(row))
-# Non-text: status glyph hues against background and well (3:1 target, reported only).
-print("== status glyphs vs background/well (non-text, 3:1 target; informational)")
+# Non-text (WCAG 1.4.11): each status glyph hue against the grounds it is drawn on: the screen,
+# the well, and its own chip surface (unscheduled and cancelled chips sit on `fill`). 3:1, counted.
+tokens["statusDispatched"] = {m: "2F6BFF" for m in ["light", "dark", "highLight", "highDark"]}  # = brand, Color(hex:)
+glyphs = {
+    "statusUnscheduled": "fill",
+    "statusScheduled": "statusScheduledSurface",
+    "statusDispatched": "brandSurface",
+    "statusInProgress": "warningSurface",
+    "statusDone": "successSurface",
+    "statusAttention": "destructiveSurface",
+    "statusInvoiced": "statusInvoicedSurface",
+}
+print("== status glyphs, non-text 3:1 (background | well | own chip surface)")
 for mode in ["light", "dark"]:
-    for n in ["statusUnscheduled", "statusScheduled", "statusInProgress", "statusDone", "statusAttention", "statusInvoiced"]:
-        print(f"  {mode:5} {n:20} bg {ratio(tokens[n][mode], tokens['background'][mode]):.2f}  well {ratio(tokens[n][mode], tokens['card'][mode]):.2f}")
+    for n, surface in glyphs.items():
+        row = []
+        for g in ["background", "card", surface]:
+            r = ratio(tokens[n][mode], tokens[g][mode])
+            ok = r >= 3
+            fails += not ok
+            row.append(f"{g} {r:.2f}{'' if ok else ' FAIL'}")
+        print(f"  {mode:5} {n:20} " + " | ".join(row))
+# The dark toast capsule (ThorbisToast) and its words.
+print("== toast")
+for mode in ["light", "dark", "highLight", "highDark"]:
+    for text in ["toastText", "toastMuted"]:
+        r = ratio(tokens[text][mode], tokens["toastFill"][mode])
+        ok = r >= 4.5
+        fails += not ok
+        print(f"  {mode:9} {text:10} toastFill {r:.2f}{'' if ok else ' FAIL'}")
 print("FAILURES:", fails)
 sys.exit(1 if fails else 0)

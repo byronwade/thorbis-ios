@@ -18,6 +18,8 @@ struct StatesPreview: View {
             case "state-errors": NavigationStack { ErrorStatesGallery() }
             case "state-loading": NavigationStack { LoadingStatesGallery() }
             case "state-customer": NavigationStack { CustomerStatesGallery() }
+            case "state-sheets": SheetStatesGallery()
+            case "state-toasts": NavigationStack { ToastStatesGallery() }
             case "state-workspaces":
                 if forced { WorkspaceGateView() } else { SessionLoadingView(message: "Opening your workspace…") }
             default:
@@ -44,9 +46,11 @@ private struct EmptyStatesGallery: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                PaperSection("Jobs") { PaperEmptyState(symbol: "briefcase", title: "No open jobs", actionTitle: "Book a job") {} }
+                PaperSection("Jobs") { PaperEmptyState(symbol: "briefcase", title: "No open jobs", actionTitle: "Book a job", tint: Theme.markBlue, prominent: true) {} }
                 PaperSection("Photos") { PaperEmptyState(symbol: "camera", title: "No photos yet", actionTitle: "Take a photo") {} }
                 PaperSection("Follow-ups") { PaperEmptyState(symbol: "list.bullet", title: "No follow-ups on this job") }
+                PaperSection("Activity") { PaperEmptyState(symbol: "clock", title: "No activity yet",
+                                                           message: "Status changes, notes and photos on this job show up here.") }
                 PaperSection("Search") { PaperEmptyState.search("Hartley") }
                 PaperSection("Assign") {
                     PaperEmptyState(symbol: "person.crop.circle.badge.xmark", title: "Assignment is off for your role",
@@ -139,6 +143,45 @@ private struct CustomerStatesGallery: View {
 
     private func label(_ text: String) -> some View {
         Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 18)
+    }
+}
+
+/// The job's status picker as the status chip opens it (a dispatched job's moves), shown open.
+private struct SheetStatesGallery: View {
+    var body: some View {
+        Color.clear
+            .background(Theme.background.ignoresSafeArea())
+            .sheet(isPresented: .constant(true)) {
+                ThorbisMenuCard(items: StatesPreviewFixtures.statusPickerItems, title: StatesPreviewFixtures.statusPickerTitle) { _ in }
+            }
+    }
+}
+
+/// The undo confirmation the estimate builder shows after a line is removed.
+private struct ToastStatesGallery: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            LineRemovedToast(removed: StatesPreviewFixtures.removedLine, undo: {}, expire: {})
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.background)
+        .navigationTitle("Confirmations")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+enum StatesPreviewFixtures {
+    static let statusPickerTitle = "Change status · now dispatched"
+    /// The same rows `PaperJobDetailView.statusControl` builds for a dispatched job.
+    static var statusPickerItems: [ThorbisMenuItem] {
+        [("On my way", "en_route"), ("Mark arrived", "arrived"), ("Start work", "in_progress"),
+         ("Pause job…", "paused"), ("Move back to scheduled", "scheduled")].map { title, target in
+            ThorbisMenuItem(title, status: StatusTone(jobStatus: target)) {}
+        }
+    }
+    static var removedLine: RemovedLine {
+        RemovedLine(line: EstimateRevisionLineDraft(description: "PEX crimp rings, 1-in.", quantity: "1", unitPrice: "15.13"), index: 0, optionID: nil)
     }
 }
 
