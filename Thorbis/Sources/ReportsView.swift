@@ -91,7 +91,7 @@ struct ReportsView: View {
                 if let error { ErrorBanner(message: error) }
                 Group {
                     if tabs.isEmpty {
-                        PaperEmptyState(symbol: "chart.bar", title: "Reports are off for your role", message: "Ask your office for access to reports.")
+                        PaperEmptyState(symbol: "chart.bar", title: "You can't see reports", message: "Your role doesn't include estimates, jobs or invoices. Ask an owner for access.")
                     } else if (tabs.contains(tab) ? tab : tabs[0]) == "Revenue" {
                         // Rebuilt on pull to refresh, so its figures reload with the rest.
                         WorkspaceRevenueView(api: api, available: true, embedded: true).id(refreshes)
@@ -124,19 +124,19 @@ struct ReportsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 PaperSection("Estimates") {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("\(report.estimates.conversionBps / 100)%").font(Theme.font(34, weight: .medium)).monospacedDigit()
+                        Text("\(report.estimates.conversionBps / 100)%").font(Theme.moneyHeroFont).tracking(-0.6)
                         Text("of presented estimates approved").font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
                     .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 14)
                     .accessibilityElement(children: .combine)
-                    PaperStatRow.Content(stats: [
+                    statRows( [
                         stat("Presented", report.estimates.presented),
                         stat("Approved", report.estimates.approved),
                         stat("Declined", report.estimates.declined),
                     ])
                 }
                 PaperSection("Jobs") {
-                    PaperStatRow.Content(stats: [
+                    statRows( [
                         stat("Booked", report.jobs.booked),
                         stat("Completed", report.jobs.completed),
                         stat("Open", report.jobs.open),
@@ -159,7 +159,7 @@ struct ReportsView: View {
         else {
             VStack(alignment: .leading, spacing: 22) {
                 PaperSection("Needs attention") {
-                    PaperStatRow.Content(stats: [
+                    statRows( [
                         stat("Unscheduled", report.backlog.unscheduledOpenJobs, alert: report.backlog.unscheduledOpenJobs > 0),
                         stat("Past due", report.backlog.overdueScheduledJobs, alert: report.backlog.overdueScheduledJobs > 0),
                     ])
@@ -180,7 +180,7 @@ struct ReportsView: View {
         else {
             VStack(alignment: .leading, spacing: 22) {
                 PaperSection("All time") {
-                    PaperStatRow.Content(stats: [
+                    statRows( [
                         .init(label: "Payments", value: money(report.totals.recorded, currency: "USD"),
                               detail: entries(report.totals.recordedCount)),
                         .init(label: "Refunds", value: money(report.totals.refunded, currency: "USD"),
@@ -223,6 +223,34 @@ struct ReportsView: View {
                 }
             }
         }
+    }
+
+    /// v2: figures as quiet rows (label, then the tabular figure on the trailing edge), not a row of
+    /// equal tiles. A figure that needs someone carries its word with the mark.
+    private func statRows(_ stats: [PaperStatRow.Stat]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(stats) { stat in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if stat.tint != Theme.foreground {
+                            StatusLabel(tone: .attention, word: stat.label, size: 15)
+                        } else {
+                            Text(stat.label).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                        }
+                        if let detail = stat.detail {
+                            Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    Text(stat.value).font(Theme.rowAmountFont(15)).foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                .frame(minHeight: 44)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(.vertical, PaperCardMetrics.edge)
     }
 
     private func entries(_ count: Int) -> String { count == 1 ? "1 entry" : "\(count) entries" }

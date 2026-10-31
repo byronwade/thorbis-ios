@@ -249,7 +249,8 @@ struct WorkspaceRevenueView: View {
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(money(current?.collected ?? 0, currency: "USD"))
-                    .moneyStyle(.hero)
+                    .font(Theme.moneyHeroFont).tracking(-0.6)
+                    .lineLimit(1).minimumScaleFactor(0.6)
                 if let current, let previous, previous.collected > 0 {
                     let change = Double(current.collected - previous.collected) / Double(previous.collected) * 100
                     Label("\(abs(Int(change.rounded())))% vs \(monthName(previous.month, long: false))", systemImage: change >= 0 ? "arrow.up" : "arrow.down")
@@ -262,19 +263,26 @@ struct WorkspaceRevenueView: View {
         }
         .padding(.bottom, 18)
 
-        // The tiles open the invoices behind the numbers, so nobody has to go looking for them.
-        NavigationLink(value: PaperRoute.invoices) {
-            PaperStatRow(stats: [
-                .init(label: "Outstanding", value: money(report.receivable.balance, currency: "USD"),
-                      detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")"),
-                .init(label: "Overdue", value: money(report.receivable.overdueBalance, currency: "USD"),
-                      detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
-                      detailTint: report.receivable.overdueInvoices > 0 ? Theme.destructive : Theme.muted),
-            ])
+        // v2: what's due as two quiet rows, not a pair of equal tiles. Each opens the invoices behind it.
+        PaperSection("Due") {
+            VStack(spacing: 0) {
+                NavigationLink(value: PaperRoute.invoices) {
+                    dueRow(word: "Outstanding", tone: .scheduled,
+                           detail: "\(report.receivable.openInvoices) open invoice\(report.receivable.openInvoices == 1 ? "" : "s")",
+                           amount: money(report.receivable.balance, currency: "USD"))
+                }
+                .buttonStyle(RowPressStyle())
+                NavigationLink(value: PaperRoute.invoices) {
+                    dueRow(word: "Overdue", tone: report.receivable.overdueInvoices > 0 ? .attention : .done,
+                           detail: "\(report.receivable.overdueInvoices) invoice\(report.receivable.overdueInvoices == 1 ? "" : "s")",
+                           amount: money(report.receivable.overdueBalance, currency: "USD"))
+                }
+                .buttonStyle(RowPressStyle())
+            }
+            .padding(.vertical, PaperCardMetrics.edge)
         }
-        .buttonStyle(RowPressStyle())
         .accessibilityHint("Opens invoices")
-        .padding(.bottom, 18)
+        .padding(.bottom, 24)
 
         // design 2026-10-30: plain rows on one panel, no calendar tiles.
         PaperSection("By month", count: months.count) {
@@ -289,6 +297,23 @@ struct WorkspaceRevenueView: View {
             }
             .padding(.vertical, PaperCardMetrics.edge)
         }
+    }
+
+    /// A receivable as a row: its word with its mark, how many invoices, the amount in the tabular column.
+    private func dueRow(word: String, tone: StatusTone, detail: String, amount: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                StatusLabel(tone: tone, word: word, size: 15)
+                Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            }
+            Spacer(minLength: 8)
+            Text(amount).font(Theme.rowAmountFont(15)).foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private func bars(_ months: [RevenueReport.Month]) -> some View {
@@ -382,8 +407,8 @@ struct WorkspacePriceBookView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !canList || localScope == nil {
-                PaperEmptyState(symbol: "book.closed", title: "Price book is off for your role",
-                                message: "Viewing prices needs the price book permission. An owner can turn it on in Team.")
+                PaperEmptyState(symbol: "book.closed", title: "You can't see the price book",
+                                message: "Your role doesn't have the price book permission. An owner can turn it on in Team.")
             } else {
                 // design 2026-10-30: one selector per screen — the category chips moved behind the
                 // header's filter circle; the count and the chosen category read in the subtitle.
@@ -420,16 +445,16 @@ struct WorkspacePriceBookView: View {
                                     if collapsedGroups.contains(groupName) { collapsedGroups.remove(groupName) }
                                     else { collapsedGroups.insert(groupName) }
                                 } label: {
-                                    // Redesign phase 3: the semibold section header with its count.
+                                    // v2: the group's 13 Medium label with its count (a chrome label, not a heading).
                                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                        Text(groupName).font(Theme.font(15, weight: .semibold))
+                                        Text(groupName).font(Theme.font(13, weight: .medium))
                                         Text("\(grouped.count)\(currentCursor == nil ? "" : " loaded")")
-                                            .font(Theme.font(15)).monospacedDigit()
+                                            .font(Theme.font(13)).monospacedDigit()
                                         Image(systemName: collapsedGroups.contains(groupName) ? "chevron.right" : "chevron.down")
-                                            .font(.system(size: 11, weight: .semibold))
+                                            .font(.system(size: 10, weight: .medium))
                                         Spacer()
                                     }
-                                    .foregroundStyle(Theme.muted).frame(minHeight: 36).contentShape(Rectangle())
+                                    .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
                                     .padding(.horizontal, 4)
                                 }
                                 .padding(.bottom, -10)
@@ -474,8 +499,8 @@ struct WorkspacePriceBookView: View {
                         }
                         if hasCurrentOwner && visibleItems.isEmpty && !loading && error == nil {
                             if currentItems.isEmpty {
-                                PaperEmptyState(symbol: "book.closed", title: "No price book items yet",
-                                                message: "Services, parts and fees you add here show up when building estimates and invoices.",
+                                PaperEmptyState(symbol: "book.closed", title: "No price book items",
+                                                message: canEdit ? "Services, parts and fees you add here fill estimates and invoices. Add an item." : "Services, parts and fees your office adds show up here.",
                                                 actionTitle: canEdit ? "Add an item" : nil, tint: Theme.markBurnt, prominent: true,
                                                 action: canEdit ? { creating = true } : nil)
                             } else {
@@ -575,14 +600,14 @@ struct WorkspacePriceBookView: View {
 
     private func itemTitle(_ item: PriceBookListItem, showFullDescription: Bool) -> some View {
         Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
-            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
             .lineLimit(showFullDescription || dynamicTypeSize.isAccessibilitySize ? nil : 2)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func itemPrice(_ item: PriceBookListItem) -> some View {
         Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-            .font(Theme.amountFont(17)).lineLimit(1).minimumScaleFactor(0.7)
+            .font(Theme.rowAmountFont(15)).lineLimit(1).minimumScaleFactor(0.7)
             .foregroundStyle(Theme.foreground)
     }
 
