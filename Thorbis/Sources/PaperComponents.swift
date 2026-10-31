@@ -1343,3 +1343,67 @@ struct PaperLabeledCircle: View {
         .accessibilityLabel(accessibilityLabel ?? title)
     }
 }
+
+// MARK: - Forms (design 2026-10-30): one column, the label above, the answer in a field well
+
+/// The field well: a quiet field-coloured surface per answer, 48 tall, no rim.
+struct FieldWell: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+    }
+}
+
+extension View {
+    /// Puts a text field or a choice in the shared field well.
+    func fieldWell() -> some View { modifier(FieldWell()) }
+}
+
+/// A persistent 13pt label above its field, with an optional quiet note ("Optional") beside it.
+struct PaperFormField<Content: View>: View {
+    let label: String
+    var note: String? = nil
+    @ViewBuilder var content: Content
+
+    init(_ label: String, note: String? = nil, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.note = note
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                if let note { Text("· \(note)").font(Theme.font(13)).foregroundStyle(Theme.muted.opacity(0.8)) }
+            }
+            .accessibilityHidden(true)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A tappable choice in a field well: a neutral glyph, the value (muted while unset).
+struct PaperChoiceWell: View {
+    let text: String
+    var symbol: String? = nil
+    var isSet = true
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                    .frame(width: 20).accessibilityHidden(true)
+            }
+            Text(text).font(Theme.font(16, weight: isSet ? .medium : .regular))
+                .foregroundStyle(isSet ? Theme.foreground : Theme.muted)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .fieldWell()
+        .contentShape(Rectangle())
+    }
+}

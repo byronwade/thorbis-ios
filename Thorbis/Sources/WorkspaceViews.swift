@@ -378,38 +378,21 @@ struct WorkspacePriceBookView: View {
                 PaperEmptyState(symbol: "book.closed", title: "Price book is off for your role",
                                 message: "Viewing prices needs the price book permission. An owner can turn it on in Team.")
             } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Price book").font(Theme.font(30, weight: .medium)).tracking(-0.6).foregroundStyle(Theme.foreground)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("\(currentItems.count) item\(currentItems.count == 1 ? "" : "s")\(currentCursor == nil ? "" : " loaded")")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                // design 2026-10-30: one selector per screen — the category chips moved behind the
+                // header's filter circle; the count and the chosen category read in the subtitle.
+                PaperHeader(title: "Price book",
+                            subtitle: "\(currentItems.count) item\(currentItems.count == 1 ? "" : "s")\(currentCursor == nil ? "" : " loaded")\(category == "All" ? "" : " · showing \(category.lowercased())")",
+                            filterMenu: categories.map { option in
+                                ThorbisMenuItem(option == "All" ? "All · \(currentItems.count)\(currentCursor == nil ? "" : " loaded")" : option,
+                                                isSelected: category == option) {
+                                    category = option
+                                    if option == "All" { collapsedGroups.removeAll() }
+                                    else { collapsedGroups.remove(option) }
+                                }
+                            },
+                            filterActive: category != "All")
+                    .environment(\.paperMenuButton, false)
                 PaperSearchField(text: $search, prompt: "Search price book")
-                ScrollView(.horizontal) {
-                    HStack(spacing: 4) {
-                        ForEach(categories, id: \.self) { option in
-                            Button {
-                                category = option
-                                if option == "All" { collapsedGroups.removeAll() }
-                                else { collapsedGroups.remove(option) }
-                            } label: {
-                                Text(option == "All" ? "All · \(currentItems.count)\(currentCursor == nil ? "" : " loaded")" : option)
-                                    .font(Theme.font(13, weight: .medium))
-                                    .foregroundStyle(category == option ? Theme.foreground : Theme.muted)
-                                    .padding(.horizontal, 14).frame(height: Theme.chipHeight)
-                                    .background(category == option ? Theme.fill : .clear, in: Capsule())
-                                    .overlay(Capsule().stroke(category == option ? Theme.border : .clear))
-                                    .frame(minHeight: 44).contentShape(Rectangle())
-                            }
-                            .buttonStyle(PressStyle())
-                            .accessibilityAddTraits(category == option ? .isSelected : [])
-                            .sensoryFeedback(.selection, trigger: category)
-                        }
-                    }.padding(.horizontal, 20)
-                }
-                .scrollIndicators(.hidden)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() }.padding(.horizontal, -PaperCardMetrics.margin) }
@@ -430,16 +413,17 @@ struct WorkspacePriceBookView: View {
                                     if collapsedGroups.contains(groupName) { collapsedGroups.remove(groupName) }
                                     else { collapsedGroups.insert(groupName) }
                                 } label: {
-                                    HStack(spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        Text("\(groupName) · \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
+                                            .font(Theme.font(13, weight: .medium)).monospacedDigit()
                                         Image(systemName: collapsedGroups.contains(groupName) ? "chevron.right" : "chevron.down")
-                                            .frame(width: 16)
-                                        Text(groupName).font(Theme.font(13, weight: .medium))
+                                            .font(.system(size: 10, weight: .semibold))
                                         Spacer()
-                                        Text("\(grouped.count)\(currentCursor == nil ? "" : " loaded")").font(Theme.monoFont(12))
                                     }
-                                    .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
-                                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                                    .foregroundStyle(Theme.muted).frame(minHeight: 36).contentShape(Rectangle())
+                                    .padding(.horizontal, 4)
                                 }
+                                .padding(.bottom, -10)
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("\(groupName), \(grouped.count)\(currentCursor == nil ? "" : " loaded")")
                                 .accessibilityValue(collapsedGroups.contains(groupName) ? "Collapsed" : "Expanded")
@@ -544,26 +528,26 @@ struct WorkspacePriceBookView: View {
     }
 
     private func row(_ item: PriceBookListItem, showFullDescription: Bool = false) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            IconTile(symbol: priceBookSymbol(for: item.kind), tint: Theme.brandText, fill: Theme.brandSurface)
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 6) {
-                    itemTitle(item, showFullDescription: showFullDescription)
-                    itemUnit(item)
-                    itemPrice(item)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    itemTitle(item, showFullDescription: showFullDescription)
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        itemUnit(item)
-                        Spacer(minLength: 6)
-                        itemPrice(item).fixedSize(horizontal: true, vertical: false)
+        // design 2026-10-30: the list row — name, unit, the price on the right; no kind tile
+        // (the group label above already says the kind).
+        let unit = ([item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · ")
+        return Group {
+            if showFullDescription {
+                // Stale rows keep their full description, unclipped.
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        itemTitle(item, showFullDescription: true)
+                        Text(unit).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                    itemPrice(item).fixedSize(horizontal: true, vertical: false)
+                }
+                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+            } else {
+                PaperListRow(title: PriceBookPresentation.title(item.description), subtitle: unit) {
+                    itemPrice(item).fixedSize(horizontal: true, vertical: false)
+                }
             }
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10).frame(minHeight: 60)
         .contentShape(Rectangle())
         // MA-12: the quick copies people reach for while quoting on the phone.
         .contextMenu {
@@ -578,29 +562,14 @@ struct WorkspacePriceBookView: View {
 
     private func itemTitle(_ item: PriceBookListItem, showFullDescription: Bool) -> some View {
         Text(showFullDescription ? PriceBookPresentation.readableDescription(item.description) : PriceBookPresentation.title(item.description))
-            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
             .lineLimit(showFullDescription || dynamicTypeSize.isAccessibilitySize ? nil : 2)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func itemUnit(_ item: PriceBookListItem) -> some View {
-        Text(([item.unit] + (item.archivedAt == nil ? [] : ["Archived"])).joined(separator: " · "))
-            .font(Theme.font(13)).foregroundStyle(Theme.muted)
     }
 
     private func itemPrice(_ item: PriceBookListItem) -> some View {
         Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
             .moneyStyle(.row).foregroundStyle(Theme.foreground)
-    }
-
-    private func priceBookSymbol(for kind: String) -> String {
-        switch kind.lowercased() {
-        case "service": "wrench.and.screwdriver"
-        case "material": "shippingbox"
-        case "labor": "person"
-        case "assembly": "square.stack.3d.up"
-        default: "tag"
-        }
     }
 
     private func activate(scope: PriceBookLocalScope) async {

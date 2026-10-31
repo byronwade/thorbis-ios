@@ -224,39 +224,69 @@ struct LocalWorkspaceView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                Text("On this device · Not synced")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if let error = actionError ?? model.error { Text(error).foregroundStyle(.red) }
-            if model.actorID == actorID && model.organizationID == organizationID {
-                let rows = model.rows(section)
-                Section(section.title) {
-                    ForEach(rows) { row in
-                        Button { if let draft = model.draft(section, id: row.id) { present(draft) } } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(row.title).foregroundStyle(.primary)
-                                if !row.subtitle.isEmpty { Text(row.subtitle).font(.caption).foregroundStyle(.secondary) }
+        // design 2026-10-30: the list system — header, rows on one panel, edits in each row's •••
+        // (swipe-to-delete moved there), the one ink commit at the bottom.
+        let bound = model.actorID == actorID && model.organizationID == organizationID
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(section.title).font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("On this device · Not synced").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                if let error = actionError ?? model.error {
+                    Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                }
+                if bound {
+                    let rows = model.rows(section)
+                    PaperSection(section.title, count: rows.isEmpty ? nil : rows.count) {
+                        if rows.isEmpty {
+                            Text("No records on this device").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                        } else {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(rows) { row in
+                                    HStack(spacing: 0) {
+                                        Button { if let draft = model.draft(section, id: row.id) { present(draft) } } label: {
+                                            PaperListRow(title: row.title, subtitle: row.subtitle.isEmpty ? nil : row.subtitle, subtitleLines: 2)
+                                        }
+                                        .buttonStyle(RowPressStyle())
+                                        ThorbisMenu(items: [
+                                            ThorbisMenuItem("Edit", icon: "pencil") { if let draft = model.draft(section, id: row.id) { present(draft) } },
+                                            ThorbisMenuItem("Remove", icon: "trash", role: .destructive) {
+                                                do { try model.remove(row.id, section: section); actionError = nil }
+                                                catch { actionError = error.localizedDescription }
+                                            },
+                                        ], accessibilityLabel: "Options for \(row.title)") {
+                                            Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                                                .frame(width: 44, height: 44).contentShape(Rectangle())
+                                        }
+                                        .padding(.trailing, 4)
+                                    }
+                                }
                             }
+                            .padding(.vertical, PaperCardMetrics.edge)
                         }
                     }
-                    .onDelete { offsets in
-                        do {
-                            for offset in offsets { try model.remove(rows[offset].id, section: section) }
-                            actionError = nil
-                        } catch { actionError = error.localizedDescription }
-                    }
-                    if rows.isEmpty { Text("No records on this device").foregroundStyle(.secondary) }
+                    .id(model.revision)
+                } else if model.error == nil {
+                    SkeletonRows(count: 3, leading: false, inset: 0)
                 }
-                .id(model.revision)
-            } else if model.error == nil { ProgressView("Opening device book…") }
+                Text("These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+            }
+            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
         }
-        .navigationTitle(section.title)
-        .toolbar { Button("Add", systemImage: "plus") { present(LocalWorkspaceDraft()) }
-            .disabled(model.actorID != actorID || model.organizationID != organizationID) }
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            PaperActionBar(title: "Add to \(section.title.lowercased())", symbol: "plus", disabled: !bound) {
+                present(LocalWorkspaceDraft())
+            }
+        }
         .task(id: identityKey) {
             editor = nil
             editorOwner = nil

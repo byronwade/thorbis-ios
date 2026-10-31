@@ -625,41 +625,22 @@ struct JobFollowUpsView: View {
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
                 if let error { ErrorBanner(message: error, retry: records.isEmpty ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
                 if loading && records.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
-                if !records.isEmpty { PaperGroupHeader(title: "On this job", count: records.count) }
-                ForEach(records) { record in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(record.kind.statusLabel).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                            Spacer()
-                            PaperStatusChip(status: record.status)
-                        }
-                        Text(record.reason).font(Theme.font(15, weight: .medium))
-                        Text("Next: \(record.nextAction)").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        if let scheduling = record.scheduling {
-                            Label(scheduling.appointment != nil ? "Visit booked" : "Waiting for office review",
-                                  systemImage: scheduling.appointment != nil ? "calendar.badge.checkmark" : "hourglass")
-                                .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                        }
-                        if record.status == "open", session.can("job.assign", feature: "jobs") {
-                            HStack(spacing: 18) {
-                                if record.kind == "office_scheduling", record.scheduling?.appointment == nil {
-                                    Button("Book the return visit") { booking = record }
-                                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                                        .frame(minHeight: 44).disabled(busy)
-                                }
-                                Button("Resolve") { Task { await resolve(record.id) } }
-                                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                                    .frame(minHeight: 44).disabled(busy)
+                // design 2026-10-30: follow-ups as rows on one panel, the state as a word; Book the
+                // return visit and Resolve moved into each row's ••• menu.
+                if !records.isEmpty {
+                    PaperSection("On this job", count: records.count) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(records) { record in
+                                followUpRow(record)
                             }
                         }
+                        .padding(.vertical, PaperCardMetrics.edge)
                     }
-                    .padding(14)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
+                    .padding(.bottom, 14)
                 }
                 if session.can("job.edit", feature: "jobs") {
-                    PaperGroupHeader(title: "New follow-up").padding(.top, 10)
+                    PaperGroupHeader(title: "New follow-up").padding(.top, 8)
                     ThorbisSegmented(options: [
                         (FieldFollowUpRequest.Kind.notifyOffice, "Notify office"),
                         (FieldFollowUpRequest.Kind.officeScheduling, "Schedule a return visit"),
@@ -668,7 +649,7 @@ struct JobFollowUpsView: View {
                     followUpField("What happened?", example: "Part on order, customer away until Friday…", text: $reason)
                     followUpField("What needs to happen next?", example: "Book a return visit to fit the part…", text: $nextAction).padding(.top, 12)
                     Text("A return-visit request goes to the office to book; it doesn't reserve a time.")
-                        .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                 }
                 if !loading && records.isEmpty && !session.can("job.edit", feature: "jobs") {
                     PaperEmptyState(symbol: "list.bullet", title: "No follow-ups", message: "Follow-ups recorded on this job appear here.")
@@ -696,15 +677,36 @@ struct JobFollowUpsView: View {
 
     /// The question stays above the field once typing starts (GR-26); the placeholder is only an example.
     private func followUpField(_ label: String, example: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                .accessibilityHidden(true)
+        PaperFormField(label) {
             TextField(example, text: text, axis: .vertical)
                 .font(Theme.font(16)).lineLimit(2...5)
-                .padding(12)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+                .fieldWell()
                 .accessibilityLabel(label)
+        }
+    }
+
+    private func followUpRow(_ record: FieldFollowUpRecord) -> some View {
+        var actions: [ThorbisMenuItem] = []
+        if record.status == "open", session.can("job.assign", feature: "jobs") {
+            if record.kind == "office_scheduling", record.scheduling?.appointment == nil {
+                actions.append(ThorbisMenuItem("Book the return visit", icon: "calendar.badge.plus", isDisabled: busy) { booking = record })
+            }
+            actions.append(ThorbisMenuItem("Resolve", icon: "checkmark.circle", isDisabled: busy) { Task { await resolve(record.id) } })
+        }
+        let meta = [record.kind.statusLabel,
+                    record.scheduling.map { $0.appointment != nil ? "Visit booked" : "Waiting for office review" }]
+            .compactMap { $0 }.joined(separator: " · ")
+        return HStack(alignment: .top, spacing: 0) {
+            PaperListRow(title: record.reason, subtitle: "Next: \(record.nextAction)", meta: meta, subtitleLines: 3) {
+                StatusWord(text: record.status.statusLabel, tint: record.status == "open" ? Theme.warning : Theme.success)
+            }
+            if !actions.isEmpty {
+                ThorbisMenu(items: actions, accessibilityLabel: "Follow-up actions") {
+                    Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .padding(.trailing, 4).padding(.top, 4)
+            }
         }
     }
 

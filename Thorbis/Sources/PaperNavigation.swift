@@ -602,6 +602,10 @@ struct RootView: View {
             case "estimates": primaryTab = .more; morePath.append(PaperRoute.estimates)
             case "invoices": primaryTab = .more; morePath.append(PaperRoute.invoices)
             case "price-book": primaryTab = .more; morePath.append(PaperRoute.priceBook)
+            case "drafts": primaryTab = .more; morePath.append(PaperRoute.drafts)
+            case "local-fleet": primaryTab = .more; morePath.append(PaperRoute.local(.fleet))
+            case "local-equipment": primaryTab = .more; morePath.append(PaperRoute.local(.equipment))
+            case "local-agreements": primaryTab = .more; morePath.append(PaperRoute.local(.agreements))
             case "team": primaryTab = .more; morePath.append(PaperRoute.team)
             case "customize-menu": primaryTab = .more; morePath.append(PaperRoute.customizeMenu)
             case "signature": previewSignature = true

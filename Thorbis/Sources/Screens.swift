@@ -231,7 +231,6 @@ struct NewJobSheet: View {
                 .foregroundStyle(set ? Theme.foreground : Theme.muted)
                 .lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
         }
         .modifier(FieldWell())
         .contentShape(Rectangle())
@@ -303,17 +302,6 @@ struct NewJobSheet: View {
                 dismiss()
             }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
-    }
-}
-
-/// The new-job form's field surface: one quiet well per answer.
-private struct FieldWell: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .padding(.horizontal, 12).padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
     }
 }
 
