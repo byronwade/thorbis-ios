@@ -372,7 +372,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard isCurrent, approvalAllowed(item) else { throw CancellationError() }
         let fresh = try await api.liveFieldJob(scope.jobID)
         guard isCurrent, sameJob(fresh) else { retire(); throw CancellationError() }
-        let links = try await api.fieldJobEstimateLinks(scope.jobID)
+        let links = try await api.liveFieldJobEstimateLinks(scope.jobID)
         guard isCurrent else { throw CancellationError() }
         let valid = links.filter { $0.jobId == scope.jobID }
         let ids = Set(valid.map(\.estimateId) + (fresh.estimateId.map { [$0] } ?? []))

@@ -169,6 +169,14 @@ extension APIClient {
         return record
     }
 
+    /// The job's estimate links for a signature's membership check: a copy saved on this phone
+    /// (served when the read drops) must never stand in for the server's answer.
+    func liveFieldJobEstimateLinks(_ jobID: String) async throws -> [JobEstimateLink] {
+        let links = try await fieldJobEstimateLinks(jobID)
+        try requireLive("/v1/jobs/\(jobID)/estimates")
+        return links
+    }
+
     private func requireLive(_ path: String) throws {
         guard savedCopyDate(path) == nil else {
             throw Problem(title: "Network error", status: nil, detail: "This needs a connection. Try again when you have signal.")
