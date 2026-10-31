@@ -41,6 +41,7 @@ struct WrappingPropertyChip<Leading: View>: View {
         .padding(.horizontal, 10).padding(.vertical, 5)
         .frame(minHeight: Theme.chipHeight)
         .background(tint, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
         // 44pt tall to the finger, 28 to the eye.
         .padding(.vertical, 8)
         .contentShape(Rectangle())

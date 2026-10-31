@@ -25,27 +25,30 @@ final class AppearanceTests: XCTestCase {
         }
     }
 
-    // Redesign 2026-10-31: weights 400, 500 and 600; anything heavier is 600; nothing under 12.
-    func testTypeRampKeepsThreeWeightsAndAFloor() {
-        for heavy: Font.Weight in [.bold, .heavy, .black] {
-            XCTAssertEqual(Theme.allowed(heavy), .semibold)
+    // v2 (design.thorbis.com): weights 400 and 500 only; anything heavier is 500; nothing under 12.
+    func testTypeRampKeepsTwoWeightsAndAFloor() {
+        for heavy: Font.Weight in [.semibold, .bold, .heavy, .black] {
+            XCTAssertEqual(Theme.allowed(heavy), .medium)
         }
-        XCTAssertEqual(Theme.allowed(.semibold), .semibold)
         XCTAssertEqual(Theme.allowed(.regular), .regular)
         XCTAssertEqual(Theme.allowed(.medium), .medium)
         XCTAssertEqual(Theme.minimumSize, 12)
     }
 
+    // v2 (owner: "the font size is too big"): staff screens use the compact ramp; customer-facing
+    // presentation keeps the older ramp so its 17pt floor holds.
     func testEverySizeLandsOnTheRamp() {
-        let ramp: Set<CGFloat> = [12, 13, 15, 16, 17, 20, 24, 30, 34]
+        let ramp: Set<CGFloat> = [12, 13, 14, 15, 16, 17, 20, 24, 26]
         for size in stride(from: CGFloat(8), through: 40, by: 1) {
             XCTAssertTrue(ramp.contains(Theme.onRamp(size)), "\(size) snapped to \(Theme.onRamp(size))")
         }
-        XCTAssertEqual(Theme.onRamp(14), 15)
-        XCTAssertEqual(Theme.onRamp(26), 24)
-        XCTAssertEqual(Theme.onRamp(30), 30)
-        XCTAssertEqual(Theme.onRamp(34), 34)
-        XCTAssertEqual(Theme.onRamp(40), 34)
+        XCTAssertEqual(Theme.onRamp(15), 14)
+        XCTAssertEqual(Theme.onRamp(16), 15)
+        XCTAssertEqual(Theme.onRamp(17), 15)
+        XCTAssertEqual(Theme.onRamp(30), 24)
+        XCTAssertEqual(Theme.onRamp(34), 26)
+        XCTAssertEqual(Theme.customerRamp(17), 17)
+        XCTAssertEqual(Theme.customerRamp(34), 34)
     }
 
     // Catches unreadable labels on cards/fields, including Increase Contrast.
@@ -53,7 +56,7 @@ final class AppearanceTests: XCTestCase {
         for style: UIUserInterfaceStyle in [.light, .dark] {
             for contrast: UIAccessibilityContrast in [.normal, .high] {
                 for foreground in [Theme.foreground, Theme.muted, Theme.subtle] {
-                    for background in [Theme.background, Theme.surface, Theme.chrome, Theme.card, Theme.fill] {
+                    for background in [Theme.background, Theme.surface, Theme.chrome, Theme.card, Theme.fill, Theme.field] {
                         let text = luminance(resolve(foreground, style: style, contrast: contrast))
                         let surface = luminance(resolve(background, style: style, contrast: contrast))
                         XCTAssertGreaterThanOrEqual((max(text, surface) + 0.05) / (min(text, surface) + 0.05), 4.5,

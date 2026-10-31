@@ -52,11 +52,11 @@ struct JobCustomerDocumentsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Your job documents").font(Theme.font(28, weight: .medium))
+                            Text("Your job documents").font(Theme.customerFont(28, weight: .medium))
                                 .accessibilityAddTraits(.isHeader)
-                            Text(jobTitle).font(Theme.font(20)).fixedSize(horizontal: false, vertical: true)
+                            Text(jobTitle).font(Theme.customerFont(20)).fixedSize(horizontal: false, vertical: true)
                             Text("JOB-\(scope.jobID.suffix(4).uppercased()) · \(customerName)")
-                                .font(Theme.font(17)).foregroundStyle(Theme.muted)
+                                .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
                         }
                         if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await refresh() } }
                         else if estimates?.isComplete == false || invoices?.isComplete == false {
@@ -215,9 +215,9 @@ struct JobCustomerDocumentsView: View {
                     Image(systemName: "person.crop.circle").font(.system(size: 22)).foregroundStyle(Theme.brandText)
                         .frame(width: 30).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Check your details").font(Theme.font(18, weight: .medium))
+                        Text("Check your details").font(Theme.customerFont(18, weight: .medium))
                         Text("Name, phone, email, addresses and how to reach you")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)
@@ -318,7 +318,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func empty(_ text: String) -> some View {
-        Text(text).font(Theme.font(18)).foregroundStyle(Theme.muted).padding(.vertical, 8)
+        Text(text).font(Theme.customerFont(18)).foregroundStyle(Theme.muted).padding(.vertical, 8)
     }
 
     private func refresh() async {
@@ -441,18 +441,18 @@ private struct CustomerJobReadOnlyPaper: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if let estimate {
-                        Text(estimate.title).font(Theme.font(type.heading, weight: .medium))
+                        Text(estimate.title).font(Theme.customerFont(type.heading, weight: .medium))
                         CustomerStatusWord(status: estimate.status, type: type)
                         if let options = estimate.options, !options.isEmpty, estimate.status != "approved" {
                             ForEach(options) { option in
-                                Text(option.title).font(Theme.font(type.heading, weight: .medium))
-                                if !option.description.isEmpty { Text(option.description).font(Theme.font(type.body)) }
+                                Text(option.title).font(Theme.customerFont(type.heading, weight: .medium))
+                                if !option.description.isEmpty { Text(option.description).font(Theme.customerFont(type.body)) }
                                 CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: option.lines, type: type, rows: [CustomerAmountRow(label: "Option total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
                             }
                         } else { lines(estimate.lines, currency: estimate.lines.first?.unitPrice.currency ?? "USD", type: type) }
                     } else if let invoice {
-                        Text("Invoice").font(Theme.font(type.heading, weight: .medium))
+                        Text("Invoice").font(Theme.customerFont(type.heading, weight: .medium))
                         CustomerStatusWord(status: invoice.status, type: type)
                         lines(invoice.lines, currency: invoice.currency, type: type)
                     }
@@ -473,7 +473,7 @@ private struct CustomerJobReadOnlyPaper: View {
 /// A section label at customer size (17pt): the customer reads this screen, not the tech.
 private func customerSectionLabel(_ title: String, count: Int? = nil) -> some View {
     Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
-        .font(Theme.font(17, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+        .font(Theme.customerFont(17, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
         .accessibilityAddTraits(.isHeader)
         .frame(minHeight: 32, alignment: .leading)
 }

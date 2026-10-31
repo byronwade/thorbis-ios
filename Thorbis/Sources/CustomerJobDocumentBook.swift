@@ -101,7 +101,7 @@ struct CustomerJobDocumentBook: View {
                 }
             }
         }
-        .font(Theme.font(17)).buttonStyle(.plain)
+        .font(Theme.customerFont(17)).buttonStyle(.plain)
         .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
     }
 
@@ -238,12 +238,12 @@ private struct CustomerEstimateBookPage: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(issued?.title ?? estimate.title).font(Theme.font(type.heading, weight: .medium))
+                    Text(issued?.title ?? estimate.title).font(Theme.customerFont(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                     if fresh { CustomerStatusWord(status: estimate.status, type: type) }
-                    else { Text("Status needs refresh").font(Theme.font(type.body)).foregroundStyle(Theme.muted) }
+                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
                     if !fresh {
-                        Text("This copy needs a refresh before you can decide.").font(Theme.font(type.body))
+                        Text("This copy needs a refresh before you can decide.").font(Theme.customerFont(type.body))
                     } else if loading { CustomerSkeleton(caption: "Opening the current estimate…", heading: false) }
                     if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() } }
                     if estimate.status != "sent" || issued != nil {
@@ -252,10 +252,10 @@ private struct CustomerEstimateBookPage: View {
                         } else {
                             if estimate.status == "approved" {
                                 Text("These are the quoted packages. The approved package selection isn't available here.")
-                                    .font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                                    .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                             }
                             ForEach(options) { option in
-                                Text(option.title).font(Theme.font(type.heading, weight: .medium))
+                                Text(option.title).font(Theme.customerFont(type.heading, weight: .medium))
                                 if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess) }
                                 estimateLines(option.lines, currency: option.currency)
                             }
@@ -281,7 +281,7 @@ private struct CustomerEstimateBookPage: View {
                     CustomerIncludedLines(lines: lines, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
-                .font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -334,28 +334,28 @@ private struct CustomerInvoiceBookPage: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(invoice.origin == "estimate_deposit" ? "Deposit invoice" : "Invoice")
-                        .font(Theme.font(type.heading, weight: .medium)).accessibilityIdentifier("customer-invoice-summary")
+                        .font(Theme.customerFont(type.heading, weight: .medium)).accessibilityIdentifier("customer-invoice-summary")
                     if fresh { CustomerStatusWord(status: invoice.status, type: type) }
-                    else { Text("Status needs refresh").font(Theme.font(type.body)).foregroundStyle(Theme.muted) }
+                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
                     if signed, let authorization = invoice.customerAuthorization {
                         Label("Signed by \(authorization.signerName)", systemImage: "signature")
-                            .font(Theme.font(type.body))
+                            .font(Theme.customerFont(type.body))
                     }
                     if let amounts {
                         let balance = CustomerInvoiceBalanceSummary(status: invoice.status, fresh: fresh, amounts: amounts,
                             historyReconciled: model.historyComplete && model.paymentTotalCents == amounts.paid)
                         Text(balance.title)
-                            .font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                            .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                         if let headlineAmount = balance.amount {
                             Text(money(headlineAmount, currency: invoice.currency))
-                                .font(Theme.font(type.total, weight: .medium)).monospacedDigit()
+                                .font(Theme.customerFont(type.total, weight: .medium)).monospacedDigit()
                         }
                         CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: invoice.lines, type: type, rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"), readingAccess: readingAccess)
                     } else {
-                        Text("These amounts couldn't be verified. Hand the device back to your technician.").font(Theme.font(type.body))
+                        Text("These amounts couldn't be verified. Hand the device back to your technician.").font(Theme.customerFont(type.body))
                     }
-                    if !fresh { Text("This copy needs a refresh.").font(Theme.font(type.body)) }
+                    if !fresh { Text("This copy needs a refresh.").font(Theme.customerFont(type.body)) }
                     if model.isLoading {
                         SkeletonRows(count: 2, leading: false, inset: 0)
                             .accessibilityLabel("Loading your payments")
@@ -389,24 +389,24 @@ private struct CustomerInvoiceBookPage: View {
 
     private var paymentHistory: some View {
         DisclosureGroup(isExpanded: $showPayments) {
-            if model.payments.isEmpty { Text("No payments yet.").font(Theme.font(type.body)).padding(.vertical, 12) }
+            if model.payments.isEmpty { Text("No payments yet.").font(Theme.customerFont(type.body)).padding(.vertical, 12) }
             ForEach(model.payments.sorted { $0.recordedAt > $1.recordedAt }) { payment in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(payment.method == "ach" ? "Bank transfer" : FieldPaymentMethod(rawValue: payment.method)?.displayName ?? "Payment")
                         Spacer(minLength: 8)
-                        Text(money(payment.amount.amount, currency: payment.amount.currency)).font(Theme.font(type.body)).monospacedDigit()
+                        Text(money(payment.amount.amount, currency: payment.amount.currency)).font(Theme.customerFont(type.body)).monospacedDigit()
                     }
-                    Text(customerPaymentDate(payment.recordedAt)).font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                    Text(customerPaymentDate(payment.recordedAt)).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                     let refunded = payment.refundedAmount ?? (payment.status == .refunded ? payment.amount.amount : 0)
                     if refunded > 0 {
-                        Text("Refunded \(money(refunded, currency: payment.amount.currency))").font(Theme.font(type.body))
-                        if let date = payment.refundedAt { Text(customerPaymentDate(date)).font(Theme.font(type.small)).foregroundStyle(Theme.muted) }
+                        Text("Refunded \(money(refunded, currency: payment.amount.currency))").font(Theme.customerFont(type.body))
+                        if let date = payment.refundedAt { Text(customerPaymentDate(date)).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
                         Text("Received after refund \(money(payment.netAmount?.amount ?? 0, currency: payment.amount.currency))")
-                            .font(Theme.font(type.small))
+                            .font(Theme.customerFont(type.small))
                     }
                 }
-                .font(Theme.font(type.body)).padding(.vertical, 14).accessibilityElement(children: .combine)
+                .font(Theme.customerFont(type.body)).padding(.vertical, 14).accessibilityElement(children: .combine)
             }
         } label: {
             HStack {
@@ -414,7 +414,7 @@ private struct CustomerInvoiceBookPage: View {
                 Spacer(minLength: 8)
                 Text("\(model.payments.count)").foregroundStyle(Theme.muted)
             }
-            .font(Theme.font(type.body, weight: .medium)).frame(minHeight: 56)
+            .font(Theme.customerFont(type.body, weight: .medium)).frame(minHeight: 56)
         }
         .tint(Theme.foreground).accessibilityIdentifier("customer-payment-history")
     }

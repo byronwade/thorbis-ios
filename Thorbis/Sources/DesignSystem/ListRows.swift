@@ -4,8 +4,8 @@ import SwiftUI
 // Search, after Linear's issue rows. Each one is content only; the screen wraps it in its own link
 // (`PaperSplitLink` on the lists so iPad selects into the detail column) and context menu.
 
-/// One row of a lazily built well: the first slice rounds the top, the last the bottom, and an
-/// inset hairline separates it from the next. Like `paperCardSlot`, so a long list stays lazy
+/// One row of a lazily built panel: the first slice rounds the top, the last the bottom. No line
+/// between rows (v2: tone and space do the pause). Like `paperCardSlot`, so a long list stays lazy
 /// instead of becoming one eager `Well`.
 private struct WellSlice: ViewModifier {
     let first: Bool
@@ -20,7 +20,6 @@ private struct WellSlice: ViewModifier {
             .background(Theme.well, in: UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
                                                                bottomTrailingRadius: last ? r : 0, topTrailingRadius: first ? r : 0,
                                                                style: .continuous))
-            .overlay(alignment: .bottom) { if !last { WellDivider(leading: dividerInset) } }
     }
 }
 
@@ -59,10 +58,10 @@ extension WellSection where Trailing == EmptyView {
     }
 }
 
-/// A job in a list (Jobs tab, a customer's open jobs): the status glyph, the street in semibold
-/// (or the job's title when the site is unknown), the problem, then who and when, and the tech's
-/// avatar. The job's title is always its own line, so it reads (and is found) on its own.
-/// VoiceOver reads the row as one button: street, problem, who and when, the status word.
+/// A job in a list (Jobs tab, a customer's open jobs), v2: the street leads in Medium (or the
+/// job's title when the site is unknown), then the problem, then the status as a word with its small
+/// mark followed by who and when, and the tech's avatar. Colour never appears without its word.
+/// VoiceOver reads the row as one button: street, problem, status, who and when.
 struct JobListRowContent: View {
     let job: Job
     /// Nil on a customer's own page, where the name is the page.
@@ -73,7 +72,7 @@ struct JobListRowContent: View {
     /// "Today 4 p.m.", "No time yet"; nil for finished work.
     var when: String? = nil
     var pendingStatus: String? = nil
-    /// A booked visit whose time has passed: the glyph turns red and the line says "Late".
+    /// A booked visit whose time has passed: the status reads "Late" in the error hue.
     var late = false
     /// "You" when the roster is out of reach but the job is the signed-in person's.
     var assigneeWord: String? = nil
@@ -83,18 +82,17 @@ struct JobListRowContent: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
 
-    /// Where the hairline starts: past the glyph, under the text.
-    static let dividerInset: CGFloat = PaperCardMetrics.inset + 16 + 12
+    /// Kept for call sites; rows have no hairline (v2).
+    static let dividerInset: CGFloat = PaperCardMetrics.inset
 
     private var status: String { pendingStatus ?? job.status }
     private var dimmed: Bool { ["completed", "canceled"].contains(job.status) }
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            glyph.alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(street ?? job.title).font(Theme.font(16, weight: .semibold))
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(street ?? job.title).font(Theme.font(16, weight: .medium))
                     .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
                     .lineLimit(stacked ? nil : titleLines)
                     .fixedSize(horizontal: false, vertical: true)
@@ -103,15 +101,7 @@ struct JobListRowContent: View {
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let meta {
-                    Text(meta).font(Theme.font(13)).monospacedDigit()
-                        .foregroundStyle(late ? Theme.statusAttentionText : Theme.muted)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if pendingStatus != nil {
-                    Text("Waiting to sync").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.warning)
-                }
+                statusLine(stacked: stacked)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if let assignee {
@@ -124,11 +114,27 @@ struct JobListRowContent: View {
         .contentShape(Rectangle())
     }
 
-    @ViewBuilder private var glyph: some View {
+    /// The status word with its mark, then who and when: "◔ En route · Danielle Marlowe · Today 4 p.m.".
+    @ViewBuilder private func statusLine(stacked: Bool) -> some View {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 6))
+        layout {
+            label
+            if let meta {
+                Text(stacked ? meta : "· \(meta)").font(Theme.font(13)).monospacedDigit()
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(stacked ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder private var label: some View {
         if late {
-            StatusGlyph(tone: .attention, label: "Late, \(status.statusLabel)")
+            StatusLabel(tone: .attention, word: "Late", emphasis: .strong)
+                .accessibilityLabel("Late, \(status.statusLabel)")
         } else {
-            StatusGlyph(jobStatus: status, hasTime: job.scheduledFor != nil, pending: pendingStatus != nil)
+            StatusLabel(jobStatus: status, hasTime: job.scheduledFor != nil, pending: pendingStatus != nil, emphasis: .quiet)
         }
     }
 
@@ -136,7 +142,6 @@ struct JobListRowContent: View {
         var parts: [String] = []
         if let customer { parts.append(customer) }
         if let place { parts.append(place) }
-        if late { parts.append("Late") }
         if let when { parts.append(when) }
         if let assigneeWord { parts.append(assigneeWord) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
@@ -156,7 +161,7 @@ struct CustomerListRowContent: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.paperRowInset) private var inset
 
-    /// Where the hairline starts: past the avatar, under the name.
+    /// Kept for call sites; rows have no hairline (v2).
     static let dividerInset: CGFloat = PaperCardMetrics.inset + 32 + 12
 
     var body: some View {
@@ -169,7 +174,7 @@ struct CustomerListRowContent: View {
                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
             layout {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name).font(Theme.font(16, weight: .semibold))
+                    Text(name).font(Theme.font(16, weight: .medium))
                         .foregroundStyle(archived ? Theme.muted : Theme.foreground)
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -195,18 +200,15 @@ struct CustomerListRowContent: View {
         if archived {
             StatusWord(text: "Archived")
         } else if let status {
-            HStack(spacing: 6) {
-                StatusGlyph(tone: status.tone, label: status.word).accessibilityHidden(true)
-                Text(status.word).font(Theme.font(13, weight: .medium)).foregroundStyle(status.tone.text)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-            }
-            .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: true)
+            StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet)
+                .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: true)
         }
     }
 }
 
-/// What leads a search row, by the kind of record (Linear's search): a job's status glyph, a
-/// customer's initials, a document's place mark, or a symbol for an action or recent search.
+/// What leads a search row, by the kind of record (Linear's search): a job's place mark (its status
+/// is a word at the row's end), a customer's initials, a document's place mark, or a symbol for an
+/// action or recent search.
 enum SearchGlyph {
     case none
     case job(status: String, hasTime: Bool)
@@ -229,8 +231,8 @@ enum SearchGlyph {
     @ViewBuilder var view: some View {
         switch self {
         case .none: EmptyView()
-        // A job's glyph is its status: VoiceOver reads the word (the row has no other status).
-        case .job(let status, let hasTime): StatusGlyph(jobStatus: status, hasTime: hasTime)
+        // v2: a job leads with the Jobs mark; the row ends in its status word (see SearchViews).
+        case .job: PlaceMark(symbol: MenuItem.jobs.symbol, tint: MenuItem.jobs.tint)
         case .customer(let name): InitialsAvatar(name: name, size: 24).accessibilityHidden(true)
         case .place(let symbol, let tint): PlaceMark(symbol: symbol, tint: tint)
         case .icon(let symbol):

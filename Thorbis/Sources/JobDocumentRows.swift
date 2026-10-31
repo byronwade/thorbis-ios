@@ -66,7 +66,7 @@ struct JobDocumentRow: View {
     }
 
     private var titleText: some View {
-        Text(title).font(Theme.font(17, weight: .medium))
+        Text(title).font(Theme.customerFont(17, weight: .medium))
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -75,22 +75,22 @@ struct JobDocumentRow: View {
     private var customerRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let amount {
-                Text(amount).font(Theme.font(28, weight: .medium)).monospacedDigit()
+                Text(amount).font(Theme.customerFont(28, weight: .medium)).monospacedDigit()
                     .minimumScaleFactor(0.7).lineLimit(1)
             }
-            Text(title).font(Theme.font(20, weight: .medium))
+            Text(title).font(Theme.customerFont(20, weight: .medium))
                 .fixedSize(horizontal: false, vertical: true)
             if let detail {
-                Text(detail).font(Theme.font(17)).foregroundStyle(Theme.muted)
+                Text(detail).font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(reference).font(Theme.font(17)).monospacedDigit().foregroundStyle(Theme.muted)
+                Text(reference).font(Theme.customerFont(17)).monospacedDigit().foregroundStyle(Theme.muted)
                 if fresh {
                     CustomerStatusWord(status: status, type: CustomerType(nil))
                 } else {
                     Label("Needs refresh", systemImage: "arrow.clockwise")
-                        .font(Theme.font(17)).foregroundStyle(Theme.muted)
+                        .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
                 }
             }
             .padding(.top, 2)

@@ -306,7 +306,7 @@ struct CustomerCommitButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if busy { ProgressView().tint(Theme.background) } else if let icon { Image(systemName: icon) }
-                Text(title).font(Theme.font(CustomerModeStyle.body, weight: .semibold))
+                Text(title).font(Theme.customerFont(CustomerModeStyle.body, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -345,7 +345,7 @@ struct CustomerModeOwnerUnlockButton: View {
             Task { await unlock(); busy = false }
         } label: {
             HStack(spacing: 8) { Image(systemName: "lock"); Text("Hand back") }
-                .font(Theme.font(17, weight: .medium)).frame(minHeight: CustomerModeStyle.target)
+                .font(Theme.customerFont(17, weight: .medium)).frame(minHeight: CustomerModeStyle.target)
         }
         .accessibilityLabel("Hand back")
         .accessibilityHint("Technician authentication is required to leave customer mode.")
@@ -429,7 +429,7 @@ struct CustomerModeContainer<Content: View>: View {
             } else {
             Button { Task { await unlock() } } label: {
                 Group {
-                    if let ownerControlTitle { HStack(spacing: 8) { Image(systemName: "lock"); Text(ownerControlTitle) }.font(Theme.font(17, weight: .medium)) }
+                    if let ownerControlTitle { HStack(spacing: 8) { Image(systemName: "lock"); Text(ownerControlTitle) }.font(Theme.customerFont(17, weight: .medium)) }
                     else { Image(systemName: "lock").font(.system(size: 20)) }
                 }.frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
             }
@@ -445,15 +445,15 @@ struct CustomerModeContainer<Content: View>: View {
         VStack(spacing: 20) {
             Spacer()
             Image(systemName: "hand.wave").font(.system(size: 44)).foregroundStyle(Theme.brandText).accessibilityHidden(true)
-            Text("Thank you").font(Theme.font(28, weight: .semibold)).tracking(-0.42)
+            Text("Thank you").font(Theme.customerFont(28, weight: .semibold)).tracking(-0.42)
                 .accessibilityAddTraits(.isHeader)
             Text("Please hand the device back to your technician.")
-                .font(Theme.font(CustomerModeStyle.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                .font(Theme.customerFont(CustomerModeStyle.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
             Spacer()
             VStack(spacing: 8) {
                 CustomerCommitButton(title: "Technician: unlock", icon: "faceid", busy: unlocking) { Task { await unlock() } }
                 Button("Go back") { handingBack = false }
-                    .font(Theme.font(CustomerModeStyle.body, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .font(Theme.customerFont(CustomerModeStyle.body, weight: .medium)).foregroundStyle(Theme.brandText)
                     .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target)
             }
             .frame(maxWidth: CustomerModeStyle.readableWidth)
@@ -577,10 +577,10 @@ struct CustomerSelfEditForm: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Your details").font(Theme.font(34, weight: .bold)).tracking(-0.68)
+                        Text("Your details").font(Theme.customerFont(34, weight: .bold)).tracking(-0.68)
                             .accessibilityAddTraits(.isHeader)
                         Text("Check what \(businessName) has on file and fix anything that's wrong.")
-                            .font(Theme.font(CustomerModeStyle.body)).foregroundStyle(Theme.muted)
+                            .font(Theme.customerFont(CustomerModeStyle.body)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.top, 8).padding(.bottom, 24)
@@ -604,9 +604,9 @@ struct CustomerSelfEditForm: View {
                         Toggle(isOn: Binding(get: { draft.wrappedValue.allowsTexts == true },
                                              set: { draft.wrappedValue.allowsTexts = $0 })) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Text me about my appointments").font(Theme.font(CustomerModeStyle.body, weight: .medium))
+                                Text("Text me about my appointments").font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
                                 Text("On my way, arrival and job updates. Reply STOP any time.")
-                                    .font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
+                                    .font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
                             }
                         }
                         .tint(Theme.brand)
@@ -633,7 +633,7 @@ struct CustomerSelfEditForm: View {
                             }
                             .padding(.bottom, 12)
                         }
-                        Text("Add someone").font(Theme.font(CustomerModeStyle.smallest, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 2)
+                        Text("Add someone").font(Theme.customerFont(CustomerModeStyle.smallest, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 2)
                         field("Name", text: draft.newContactName, content: .name,
                               error: showErrors ? draft.wrappedValue.newContactError : nil)
                         field("Phone", text: draft.newContactPhone, content: .telephoneNumber, keyboard: .phonePad)
@@ -680,7 +680,7 @@ struct CustomerSelfEditForm: View {
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Theme.font(CustomerModeStyle.smallest, weight: .semibold)).foregroundStyle(Theme.muted)
+            Text(title).font(Theme.customerFont(CustomerModeStyle.smallest, weight: .semibold)).foregroundStyle(Theme.muted)
                 .accessibilityAddTraits(.isHeader)
             content()
         }
@@ -691,9 +691,9 @@ struct CustomerSelfEditForm: View {
                        keyboard: UIKeyboardType = .default, axis: Axis = .horizontal, error: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
+                Text(label).font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
                 TextField("", text: text, axis: axis)
-                    .font(Theme.font(CustomerModeStyle.body))
+                    .font(Theme.customerFont(CustomerModeStyle.body))
                     .textContentType(content)
                     .keyboardType(keyboard)
                     .textInputAutocapitalization(keyboard == .emailAddress ? .never : .words)
@@ -706,13 +706,13 @@ struct CustomerSelfEditForm: View {
             .frame(minHeight: 68, alignment: .leading)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(error == nil ? Theme.border : Theme.destructive))
-            if let error { Text(error).font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.destructive) }
+            if let error { Text(error).font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.destructive) }
         }
     }
 
     private func choice(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(Theme.font(CustomerModeStyle.body, weight: .medium))
+            Text(title).font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
                 .frame(maxWidth: .infinity).frame(height: CustomerModeStyle.commitHeight)
                 .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
                 .background(selected ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 12))
@@ -744,20 +744,20 @@ struct CustomerSelfEditReview: View {
         let changes = model.draft?.changeSummary ?? []
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Review changes").font(Theme.font(24, weight: .medium)).tracking(-0.36)
+                Text("Review changes").font(Theme.customerFont(24, weight: .medium)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader)
                 Text("These save to the customer's record and activity under your name.")
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(changes.enumerated()), id: \.offset) { index, line in
-                        Text(line).font(Theme.font(15)).padding(.vertical, 10)
+                        Text(line).font(Theme.customerFont(15)).padding(.vertical, 10)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                 }
                 .padding(.horizontal, 14)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
                 if let saveError = model.saveError {
-                    Text(saveError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
+                    Text(saveError).font(Theme.customerFont(13)).foregroundStyle(Theme.destructive)
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                         .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 10))
                 }
@@ -770,7 +770,7 @@ struct CustomerSelfEditReview: View {
             VStack(spacing: 8) {
                 PrimaryButton(title: "Save changes", busy: model.saving) { Task { await model.save(api: api) } }
                 Button("Discard changes", role: .destructive) { onFinished() }
-                    .font(Theme.font(15, weight: .medium)).frame(minHeight: 44).disabled(model.saving)
+                    .font(Theme.customerFont(15, weight: .medium)).frame(minHeight: 44).disabled(model.saving)
             }
             .frame(maxWidth: CustomerModeStyle.readableWidth)
             .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
@@ -783,7 +783,7 @@ struct CustomerSelfEditReview: View {
         VStack(spacing: 16) {
             Spacer()
             Image(systemName: "checkmark.circle").font(.system(size: 44)).foregroundStyle(Theme.success).accessibilityHidden(true)
-            Text("Customer details saved").font(Theme.font(22, weight: .semibold))
+            Text("Customer details saved").font(Theme.customerFont(22, weight: .semibold))
             Spacer()
             PrimaryButton(title: "Done") { onFinished() }.frame(maxWidth: CustomerModeStyle.readableWidth)
         }

@@ -439,13 +439,8 @@ struct JobAccessBanner: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // v2: the warning reads from its words ("Before you go in") on the tinted ground; no edge rail.
         .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(alignment: .leading) {
-            // A warning edge, so the hazards read as hazards before a word is read.
-            UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, bottomLeadingRadius: Theme.cardRadius, style: .continuous)
-                .fill(Theme.statusInProgress).frame(width: 4)
-                .accessibilityHidden(true)
-        }
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .contentShape(Rectangle())
         .contextMenu {

@@ -662,13 +662,8 @@ private struct ScheduleHero<Commit: View>: View {
         }
         .padding(.vertical, 16).padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // v2: no coloured side rail; "you are here" is the status word and its mark (D-018).
         .background(Theme.well, in: shape)
-        .overlay(alignment: .leading) {
-            if tone == .inProgress {
-                // The amber edge says "you are here" before any word is read.
-                Rectangle().fill(Theme.statusInProgress).frame(width: 4).accessibilityHidden(true)
-            }
-        }
         .clipShape(shape)
     }
 

@@ -184,7 +184,7 @@ struct ThorbisBarButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Theme.font(customerFacing ? 17 : 15, weight: prominent ? .semibold : .medium))
+            .font((customerFacing ? Theme.customerFont(17, weight: .medium) : Theme.font(15, weight: .medium)))
             .lineLimit(1)
             // iOS 26 bars propose a circle-sized width to items; keep the whole word ("Cancel", not "C").
             .fixedSize(horizontal: true, vertical: false)
