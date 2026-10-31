@@ -928,32 +928,35 @@ struct JobsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Jobs", subtitle: subtitle, filter: { showDisplay = true }, filterActive: filterActive, showsCreate: true)
+                // v2 List room: the title, then the view bar (text tabs and the filter circle).
+                PaperHeader(title: "Jobs", subtitle: subtitle, showsCreate: true)
                 OfflineBanner()
-                PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab, textTabs: true)
-                    .padding(.bottom, filterActive ? 0 : 4)
+                ListViewBar(options: ["Assigned", "All jobs", "Recent"], selection: $tab, filterLabel: "Filter jobs",
+                            filterActive: filterActive, showFilter: $showDisplay) { filterPopover }
                 if filterActive { filterBar }
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
-                VStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if store.loading && store.jobs.isEmpty {
-                        SkeletonList(count: 5, leading: true)
+                        ListRoomSkeleton(count: 6)
                     } else if tab == "Recent" {
-                        group("Recently updated", jobs: Array(jobs.prefix(25)))
+                        group("Recently updated", jobs: Array(jobs.prefix(25)), first: true)
                     } else {
-                        ForEach(groups, id: \.title) { group in self.group(group.title, jobs: group.jobs) }
+                        ForEach(Array(groups.enumerated()), id: \.element.title) { index, group in
+                            self.group(group.title, jobs: group.jobs, first: index == 0)
+                        }
                     }
                     if MyDayRules.shouldShowEmptyState(isEmpty: jobs.isEmpty, isLoading: store.loading, hasError: store.error != nil) {
-                        PaperEmptyState(
-                            symbol: "briefcase",
-                            title: filterActive ? "No jobs match these filters" : tab == "Assigned" ? "Nothing assigned to you" : "No open jobs",
-                            message: filterActive ? "Clear the filters to see the whole board." : tab == "Assigned" ? "All jobs shows the whole board." : nil,
-                            actionTitle: session.can("job.create", feature: "jobs") && !filterActive ? "Book a job" : nil,
-                            tint: Theme.markBlue, prominent: true,
+                        let canCreate = session.can("job.create", feature: "jobs")
+                        ListRoomEmpty(
+                            title: filterActive ? "No jobs match these filters." : store.jobs.isEmpty ? "No open jobs."
+                                : tab == "Assigned" ? "No jobs assigned to you." : "No open jobs.",
+                            message: filterActive ? "Clear the filters to see the whole board."
+                                : tab == "Assigned" && !store.jobs.isEmpty ? "All jobs shows the whole board." : nil,
+                            actionTitle: canCreate && !filterActive ? "Create a job" : nil,
                             action: { showNew = true }
                         )
                     }
                 }
-                .paperCardMargin()
             }
             .padding(.bottom, 24)
         }
@@ -966,7 +969,6 @@ struct JobsView: View {
             }
         }
         .sheet(isPresented: $showNew) { NewJobSheet() }
-        .sheet(isPresented: $showDisplay) { displaySheet }
         .sheet(item: $scheduling) { QuickScheduleSheet(jobID: $0.id) }
         .task(id: "roster|\(session.generation)|\(session.isOffline)") {
             guard session.can("job.view", feature: "jobs"), !session.isOffline,
@@ -979,7 +981,11 @@ struct JobsView: View {
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }
         #if DEBUG
-        .onAppear { if PaperPreview.enabled && PaperPreview.screen == "jobs-filters" { showDisplay = true } }
+        .onAppear {
+            if PaperPreview.enabled && PaperPreview.screen == "jobs-filters" {
+                Task { try? await Task.sleep(for: .seconds(1.5)); showDisplay = true }
+            }
+        }
         #endif
     }
 
@@ -1008,34 +1014,59 @@ struct JobsView: View {
         .padding(.horizontal, Theme.gutter)
     }
 
-    /// Ordering, completed work and status: the real ways to narrow the board.
-    private var displaySheet: some View {
-        ThorbisSheetScaffold(title: "Filters", onClose: { showDisplay = false }) {
-            ThorbisSheetGroup {
-                ThorbisSheetRow(label: "Ordering", value: display.ordering.label,
-                                options: DisplayOptions.Ordering.allCases.map(\.label)) { picked in
-                    display.ordering = DisplayOptions.Ordering.allCases.first { $0.label == picked } ?? .recent
+    /// Ordering, completed work and status: the real ways to narrow the board, in a popover from the
+    /// view bar's filter circle (design.thorbis.com Places: a popover is one local choice).
+    private var filterPopover: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Filters").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 0)
+                    if filterActive {
+                        Button { withMotion { statusFilter = []; display = DisplayOptions() } } label: {
+                            Text("Reset").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("Reset filters")
+                    }
                 }
-                ThorbisSheetDivider()
-                ThorbisSheetToggleRow(label: "Show completed", isOn: $display.showCompleted)
-            }
-
-            HStack {
+                .frame(minHeight: 32)
+                Text("Ordering").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .padding(.top, 8).accessibilityAddTraits(.isHeader)
+                ForEach(DisplayOptions.Ordering.allCases) { ordering in
+                    Button { display.ordering = ordering } label: {
+                        HStack {
+                            Text(ordering.label).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                            Spacer(minLength: 8)
+                            if display.ordering == ordering {
+                                Image(systemName: "checkmark").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.foreground)
+                            }
+                        }
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityAddTraits(display.ordering == ordering ? .isSelected : [])
+                }
+                Toggle(isOn: $display.showCompleted) {
+                    Text("Show completed").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                }
+                .tint(Theme.brand)
+                .frame(minHeight: 48)
+                .padding(.top, 8)
                 Text("Status").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                if filterActive {
-                    Button("Reset") { statusFilter = []; display = DisplayOptions() }
-                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(minHeight: 44)
+                    .padding(.top, 16).padding(.bottom, 8).accessibilityAddTraits(.isHeader)
+                ThorbisChipGroup(data: statusChips, id: \.self,
+                                 isOn: { statusFilter.contains($0) },
+                                 label: { $0.statusLabel }) { status in
+                    if statusFilter.contains(status) { statusFilter.remove(status) } else { statusFilter.insert(status) }
                 }
             }
-            ThorbisChipGroup(data: statusChips, id: \.self,
-                             isOn: { statusFilter.contains($0) },
-                             label: { $0.statusLabel }) { status in
-                if statusFilter.contains(status) { statusFilter.remove(status) } else { statusFilter.insert(status) }
-            }
+            .padding(16)
         }
+        .frame(maxHeight: 520)
+        .background(Theme.card)
     }
 
     /// When the visit is ("Today 4 p.m."), "No time yet", or nothing once the work is finished.
@@ -1050,12 +1081,13 @@ struct JobsView: View {
         return date < .now
     }
 
-    /// Grouped by status: the semibold header with its count over one well of rows, each led by its
-    /// status glyph, the street, the problem, who and when, and the tech's avatar. New job is the
-    /// header's +, or the floating pill on iPad.
-    @ViewBuilder private func group(_ title: String, jobs: [Job]) -> some View {
-        WellSection(title: title, count: jobs.count, data: jobs, dividerInset: JobListRowContent.dividerInset) { job in
-            jobRow(job)
+    /// Grouped by status on the canvas (v2 List room): a 13 Medium label with its count, then the
+    /// rows: street, problem · customer, when and who, and the status word trailing. Space between
+    /// groups, no lines. New job is the header's +, or the floating pill on iPad.
+    @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool) -> some View {
+        if !jobs.isEmpty {
+            ListGroupLabel(title: title, count: jobs.count, first: first)
+            ForEach(jobs) { job in jobRow(job) }
         }
     }
 
@@ -1065,22 +1097,22 @@ struct JobsView: View {
             && !ScheduleLead.activeStatuses.contains(job.status)
         let mine = job.assignedToUserId != nil && job.assignedToUserId == session.user?.id
         let assignee = job.assignedToUserId.flatMap { roster[$0] }
+        // The tech by name from the roster; "You" only where the roster can't name you, on a shared board.
+        let who = assignee ?? (tab != "Assigned" && mine ? "You" : nil)
         return HStack(spacing: 0) {
             // iPad selects into the detail column beside the list; iPhone pushes.
             PaperSplitLink(id: job.id, value: job) {
-                JobListRowContent(job: job, customer: customer, street: addresses.street(job), when: when(job),
-                                  late: isLate(job),
-                                  // "You" only where the roster can't show your avatar, on a shared board.
-                                  assigneeWord: tab != "Assigned" && mine && assignee == nil ? "You" : nil,
-                                  assignee: needsTime ? nil : assignee)
+                JobRoomRow(job: job, street: addresses.street(job), customer: customer, when: when(job),
+                           who: needsTime ? nil : who, late: isLate(job), showsStatus: !needsTime)
             }
             .buttonStyle(RowPressStyle())
             .jobContextMenu(job, customer: customer)
             .accessibilityHint("Opens the job")
             .accessibilityIdentifier("job-row-\(job.id)")
-            // No time yet: book it from the row (beside the link, so each is its own target).
+            // No time yet: book it from the row (beside the link, so each is its own target). The
+            // group's label already says Unscheduled.
             if needsTime {
-                ScheduleRowButton(job: job) { scheduling = job }.padding(.trailing, PaperCardMetrics.inset)
+                ScheduleRowButton(job: job) { scheduling = job }.padding(.trailing, ListRoom.gutter - 4)
             }
         }
     }

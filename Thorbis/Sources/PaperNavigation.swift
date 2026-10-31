@@ -33,7 +33,9 @@ struct RootView: View {
     /// Whether Inbox holds unread notices, as the server last said. Unknown shows no dot.
     @State private var inboxUnread = false
     /// iPhone search: a field floats low on the screen and results rise in a card above it.
+    /// True while the Search route is the screen showing (v2: Search is a pushed route).
     @State private var barSearching = false
+    @State private var searchCloser = SearchRouteCloser()
     /// The floating search's field and results share this.
     @StateObject private var searchModel = SearchModel()
     @State private var newCustomer = false
@@ -191,8 +193,7 @@ struct RootView: View {
         let shape = DrawerCardShape(radius: DrawerMotion.cornerRadius(topInset: insets.top) * progress,
                                     top: insets.top, bottom: insets.bottom)
         return phonePlaces()
-            .accessibilityHidden(barSearching || drawerOpen)
-            .overlay { searchOverlay }
+            .accessibilityHidden(drawerOpen)
             // The pushed card dims a little as it slides, so the drawer reads as the thing in front.
             .overlay {
                 Color.black.opacity((colorScheme == .dark ? 0.28 : 0.10) * progress)
@@ -416,70 +417,36 @@ struct RootView: View {
 
     // MARK: - Search
 
-    /// Frosts the place, raises the results card and floats the field low on the screen.
-    @ViewBuilder private var searchOverlay: some View {
-        if barSearching {
-            GeometryReader { geometry in
-                ZStack(alignment: .bottom) {
-                    Rectangle().fill(.ultraThinMaterial)
-                        .overlay(Theme.background.opacity(0.55))
-                        .ignoresSafeArea()
-                        .onTapGesture { closeBarSearch() }
-                        .accessibilityHidden(true)
-                    VStack(spacing: 10) {
-                        searchDrawer(height: max(geometry.size.height - 92, 240))
-                        FloatingSearchBar(query: $searchModel.query, close: { closeBarSearch() }, submit: { searchModel.submit() })
-                    }
-                    .padding(.bottom, 8)
-                }
-            }
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
-        }
-    }
-
-    /// Recent records and results in a card above the field. Drag its handle down to close.
-    private func searchDrawer(height: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            Capsule().fill(Theme.border).frame(width: 36, height: 5)
-                .frame(maxWidth: .infinity, minHeight: 22)
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 8).onEnded { if $0.translation.height > 60 { closeBarSearch() } })
-                .accessibilityHidden(true)
-            PaperGlobalSearch(model: searchModel, openResult: openSearchResult, focus: .of(place: selectedTab), actions: searchCommands)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("bar-search-results")
-        .frame(height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .modifier(FloatingSurface(shape: RoundedRectangle(cornerRadius: 28, style: .continuous)))
-        .padding(.horizontal, 12)
-    }
-
-    private var searchAnimation: Animation {
-        reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.38, dampingFraction: 0.86)
-    }
-
+    /// v2: Search is a route pushed on the place showing (design.thorbis.com Places). The field
+    /// starts empty each time it opens.
     private func openBarSearch() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        searchModel.query = ""
         searchModel.opened()
-        withAnimation(searchAnimation) { barSearching = true }
+        pushOnCurrent(SearchRoute())
     }
 
+    /// Closes the Search route (before a search action runs, or when the drawer opens).
     private func closeBarSearch() {
-        withAnimation(searchAnimation) {
-            barSearching = false
-            searchModel.query = ""
-        }
+        searchCloser.close?()
+        searchCloser.close = nil
+        searchModel.query = ""
     }
 
-    /// A picked result closes search and opens on the place showing, so Back returns there.
+    /// A picked result opens on top of Search, so Back returns to the results.
     private func openSearchResult(_ destination: SearchDestination) {
-        closeBarSearch()
         switch destination {
         case .job(let job): pushOnCurrent(job)
         case .customer(let customer): pushOnCurrent(customer)
         case .route(let route): pushOnCurrent(route)
         }
+    }
+
+    /// What the Search route borrows from the shell.
+    private var searchRouteHost: SearchRouteHost {
+        SearchRouteHost(model: searchModel, open: openSearchResult, actions: searchCommands,
+                        focus: .of(place: selectedTab), closer: searchCloser,
+                        showing: { barSearching = $0 })
     }
 
     private func pushOnCurrent<V: Hashable>(_ value: V) {
@@ -569,6 +536,7 @@ struct RootView: View {
         // Roots carry the menu circle in their header or bar; pushed screens beside Back.
         .environment(\.paperDrawer, atTabRoot && !barSearching ? drawerControl : nil)
         .environment(\.paperDrawerReach, barSearching ? nil : drawerControl)
+        .environment(\.searchRouteHost, searchRouteHost)
     }
 
     /// The selected place, with the sheets and request handlers every place shares.
@@ -691,8 +659,9 @@ struct RootView: View {
             RecentItems.shared.clear()
             RecentItems.shared.record(.customer, id: PaperPreview.customerID, title: "Danielle Marlowe", subtitle: "Customer")
             RecentItems.shared.record(.job, id: PaperPreview.jobID, title: "AC not cooling", subtitle: "JOB-2214 · Danielle Marlowe")
+            searchModel.opened()
+            pushOnCurrent(SearchRoute())
             if PaperPreview.screen == "search-typed" { searchModel.query = "AC" }
-            barSearching = true
         case "search-empty", "search-phone", "search-actions", "search-street", "search-offline":
             // Recent searches and records on the empty field; the typed screens show each kind of match.
             RecentItems.shared.bind(actorID: session.user?.id ?? "preview", organizationID: session.activeOrganization?.id ?? "preview")
@@ -712,13 +681,18 @@ struct RootView: View {
                 await session.revalidate()
             }
             searchModel.opened()
-            barSearching = true
+            pushOnCurrent(SearchRoute())
             switch PaperPreview.screen {
             case "search-phone": searchModel.query = "555-0413"
             case "search-actions": searchModel.query = "new"
             case "search-street": searchModel.query = "birch"
             case "search-offline": searchModel.query = "chen"
             default: break
+            }
+            // `--paper-preview-search-query <words>`: any words, e.g. ones that match nothing.
+            let args = ProcessInfo.processInfo.arguments
+            if let index = args.firstIndex(of: "--paper-preview-search-query"), args.indices.contains(index + 1) {
+                searchModel.query = args[index + 1]
             }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-search-submit") {
                 // The same path as Return in the field: the top hit opens.
@@ -1079,6 +1053,7 @@ private struct PaperDestinations: ViewModifier {
             .thorbisDestination(for: Job.self) { JobDetailView(jobId: $0.id).tabletReadable() }
             .thorbisDestination(for: Customer.self) { CustomerDetailView(customer: $0).tabletReadable() }
             .thorbisDestination(for: PaperRoute.self) { PaperRouteView(route: $0).tabletReadable() }
+            .thorbisDestination(for: SearchRoute.self) { _ in SearchRoutePage() }
     }
 }
 

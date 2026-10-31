@@ -48,28 +48,27 @@ struct CustomersView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Finding a customer is the bar's Search; Recent / All / Archived narrow the book.
                 PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", showsCreate: true)
-                PaperTabs(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView, textTabs: true)
+                // v2 List room: the view bar is the text tabs alone; the book has no other filter.
+                ListViewBar(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
                 if let error = error ?? store.error {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
                 }
-                if recordsLoading && records.isEmpty { SkeletonList(count: 6).paperCardMargin() }
-                // Grouped wells (redesign phase 2): a semibold header with its count over one well,
-                // each row its own lazy slice so a long book stays lazy.
-                ForEach(sections, id: \.0) { letter, customers in
-                    WellSection(title: letter, count: customers.count, data: customers,
-                                dividerInset: CustomerListRowContent.dividerInset) { customer in
+                if recordsLoading && records.isEmpty { ListRoomSkeleton(count: 7, threeLines: false) }
+                // Rows on the canvas under a 13 Medium label per letter (Recent keeps one group);
+                // space between groups, no lines, no panel. Lazy, so a long book stays cheap.
+                ForEach(Array(sections.enumerated()), id: \.element.0) { index, section in
+                    ListGroupLabel(title: section.0, count: section.1.count, first: index == 0)
+                    ForEach(section.1) { customer in
                         customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
                     }
                 }
-                .paperCardMargin()
                 if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
-                        PaperEmptyState(symbol: "archivebox", title: "No archived customers",
-                                        message: "Customers you archive move here.", tint: Theme.markTeal)
+                        ListRoomEmpty(title: "No archived customers.", message: "Customers you archive move here.")
                     } else {
-                        PaperEmptyState(symbol: "person.2", title: "No customers yet",
-                                        actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
-                                        tint: Theme.markTeal, prominent: true, action: { showNew = true })
+                        ListRoomEmpty(title: "No customers yet.",
+                                      actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
+                                      action: { showNew = true })
                     }
                 }
             }
@@ -94,16 +93,19 @@ struct CustomersView: View {
         let jobCount = jobs.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
         // iPad selects into the detail column beside the list; iPhone pushes.
+        let late = summaryJob.map { isLate($0, now: now) } ?? false
+        // iPad selects into the detail column beside the list; iPhone pushes.
         return PaperSplitLink(id: customer.id, value: listCustomer) {
-            // Redesign phase 2: initials, the name, where and how to reach them, how many jobs and
-            // when the open visit is, and the open job's state as a glyph and word.
-            CustomerListRowContent(name: customer.name, detail: rowDetail(customer),
-                                   meta: rowMeta(jobCount: jobCount, open: summaryJob, now: now),
-                                   status: summaryJob.map { job in
-                                       isLate(job, now: now) ? (StatusTone.attention, "Late")
-                                           : (StatusTone(jobStatus: job.status, hasTime: job.scheduledFor != nil), job.status.statusLabel)
-                                   },
-                                   archived: customer.archived)
+            // v2 List room: the name, then street · phone; the open job's status word and when trail,
+            // otherwise how many jobs.
+            CustomerRoomRow(name: customer.name, detail: rowDetail(customer),
+                            status: summaryJob.map { job in
+                                late ? (StatusTone.attention, "Late", "Late, \(job.status.statusLabel)")
+                                     : (StatusTone(jobStatus: job.status, hasTime: job.scheduledFor != nil), job.status.statusLabel, job.status.statusLabel)
+                            },
+                            when: summaryJob.flatMap { visitWhen($0, now: now) },
+                            jobs: "\(jobCount) \(jobCount == 1 ? "job" : "jobs")",
+                            archived: customer.archived)
         }
         .buttonStyle(RowPressStyle())
         .accessibilityIdentifier("customer-row-\(customer.id)")
@@ -136,13 +138,10 @@ struct CustomersView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    /// The job count, then when the open visit is. Same words as Jobs ("Today 4 p.m.").
-    private func rowMeta(jobCount: Int, open: Job?, now: Date) -> String {
-        var parts = ["\(jobCount) \(jobCount == 1 ? "job" : "jobs")"]
-        if let open, let date = JobFiltering.date(open.scheduledFor), ["scheduled", "dispatched"].contains(open.status) {
-            parts.append(date.visitLabel(now: now))
-        }
-        return parts.joined(separator: " · ")
+    /// When the open visit is, in the same words as Jobs ("Today 4 p.m."), for booked work only.
+    private func visitWhen(_ job: Job, now: Date) -> String? {
+        guard ["scheduled", "dispatched"].contains(job.status), let date = JobFiltering.date(job.scheduledFor) else { return nil }
+        return date.visitLabel(now: now)
     }
 
     private func create() async {
@@ -300,8 +299,9 @@ struct CustomerDetailView: View {
     }
 
     var body: some View {
+        ScrollViewReader { reader in
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 20) {
                 OfflineBanner().padding(.horizontal, -Theme.gutter)
                 SavedCopyNote(savedAt: api.savedCopyDate("/v1/customers/\(customer.id)")).padding(.horizontal, -Theme.gutter)
                 customerIdentity
@@ -321,10 +321,20 @@ struct CustomerDetailView: View {
                 // At accessibility sizes a pinned New job would cover half the screen, so it
                 // follows the content instead (as on the customer presentation).
                 if typeSize.isAccessibilitySize { customerPrimaryActions.padding(.horizontal, -Theme.gutter) }
+                Color.clear.frame(height: 1).id("customer-end")
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
             // Redesign phase 2: every section here is a semibold header over a grouped well.
             .environment(\.paperGroupedWells, true)
+        }
+        #if DEBUG
+        // `--paper-preview-scroll center|bottom`: the lower sections, once they have loaded.
+        .task {
+            guard let anchor = PaperPreview.scrollAnchor, anchor != .top else { return }
+            try? await Task.sleep(for: .seconds(3))
+            withAnimation(nil) { reader.scrollTo(anchor == .bottom ? "customer-end" : "customer-contacts", anchor: anchor == .bottom ? .bottom : .top) }
+        }
+        #endif
         }
         .foregroundStyle(Theme.foreground).background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
@@ -417,7 +427,7 @@ struct CustomerDetailView: View {
         }
         if session.can("job.view", feature: "jobs") { nextVisit }
         CustomerMembershipSection(customerID: customer.id)
-        contactsSection
+        contactsSection.id("customer-contacts")
         locationsSection
         CustomerEquipmentSection(customerID: customer.id, locations: locations.filter { $0.kind == "service" })
         activitySection
@@ -463,55 +473,54 @@ struct CustomerDetailView: View {
         }
     }
 
-    /// Redesign phase 2 (after Linear's project overview): the customer's initials, the name in
-    /// 30 semibold, then a row of property chips for what the record says about them. The chips wrap,
-    /// so nothing is cut at accessibility sizes.
+    /// v2 Record room (after Linear's project overview): the name at 24 Medium, then the quiet
+    /// properties (membership, type, since, archived) as marked words. No avatar: the name is the
+    /// page. The job count lives on the Jobs tab, once.
     private var customerIdentity: some View {
         let name = record?.name ?? customer.name
-        return VStack(alignment: .leading, spacing: 10) {
-            // The name is the page's heading; the circle repeats it, so VoiceOver skips the circle.
-            InitialsAvatar(name: name, size: 52).accessibilityHidden(true)
+        return VStack(alignment: .leading, spacing: 8) {
             Text(name)
-                .font(Theme.font(30, weight: .semibold)).tracking(-0.5)
+                .font(Theme.font(24, weight: .medium)).tracking(-0.3)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            let chips = identityChips
-            if !chips.isEmpty {
-                FlowRow(spacing: 6, lineSpacing: 6) {
-                    ForEach(chips, id: \.text) { chip in
-                        WrappingPropertyChip(chip.text, symbol: chip.symbol, tint: chip.tint, textColor: chip.textColor, action: chip.action)
-                            .accessibilityHint(chip.action == nil ? "" : "Shows the customer's jobs")
+            let properties = identityProperties
+            if !properties.isEmpty {
+                FlowRow(spacing: 14, lineSpacing: 6) {
+                    ForEach(properties, id: \.text) { property in
+                        HStack(spacing: 5) {
+                            Image(systemName: property.symbol).font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(property.tint).accessibilityHidden(true)
+                            Text(property.text).font(Theme.font(13, weight: .medium)).monospacedDigit()
+                                .foregroundStyle(Theme.subtle)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(chips.map(\.text).joined(separator: ", "))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(properties.map(\.text).joined(separator: ", "))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
     }
 
-    /// Since when, membership, how many jobs (opens Jobs), the account type and archived: each only
-    /// when the record or the server says so. There is no balance here: the customer's open balance
-    /// only exists once the records compilation loads, on Jobs and Money.
-    private var identityChips: [(text: String, symbol: String?, tint: Color, textColor: Color, action: (() -> Void)?)] {
-        var chips: [(text: String, symbol: String?, tint: Color, textColor: Color, action: (() -> Void)?)] = []
+    /// Membership, the account type, since when, and archived: each only when the record or the
+    /// server says so. There is no balance here: it only exists once the records load (Money).
+    private var identityProperties: [(text: String, symbol: String, tint: Color)] {
+        var properties: [(text: String, symbol: String, tint: Color)] = []
         if record?.archived ?? customer.archived ?? false {
-            chips.append(("Archived", "archivebox", Theme.fill, Theme.foreground, nil))
+            properties.append(("Archived", "archivebox", Theme.muted))
         }
         if let pricing, pricing.isMember {
-            chips.append((pricing.discountPercent > 0 ? "Member, \(pricing.discountPercent)% off" : "Member", "star.fill",
-                          Theme.statusInvoicedSurface, Theme.statusInvoicedText, nil))
+            properties.append((pricing.discountPercent > 0 ? "Member, \(pricing.discountPercent)% off" : "Member", "star", Theme.markOlive))
         }
-        if session.can("job.view", feature: "jobs") {
-            let open = jobs.filter { !["completed", "canceled"].contains($0.status) }.count
-            let text = open > 0 ? "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs") · \(open) open" : "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")"
-            chips.append((text, "briefcase", Theme.fill, Theme.foreground, { tab = "Jobs" }))
+        if let type = record?.accountType {
+            properties.append((type.statusLabel, type == "commercial" ? "building.2" : "house", Theme.muted))
         }
-        if let type = record?.accountType { chips.append((type.statusLabel, "house", Theme.fill, Theme.foreground, nil)) }
         if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
-            chips.append(("Since \(date.formatted(.dateTime.year()))", "calendar", Theme.fill, Theme.foreground, nil))
+            properties.append(("Since \(date.formatted(.dateTime.year()))", "calendar", Theme.muted))
         }
-        return chips
+        return properties
     }
 
     /// Always open, on one panel: address first, then phone and email, then the rest (F18).
@@ -519,16 +528,17 @@ struct CustomerDetailView: View {
         if let record {
             PaperCard {
                 VStack(alignment: .leading, spacing: 0) {
-                    if let address = record.address, !address.isEmpty {
+                    // Every fact once: the address shows here only when no location below carries it,
+                    // the phone and email only when no contact does. The type is a property up top.
+                    if let address = record.address, !address.isEmpty, !CustomerFacts.address(address, isIn: locations.map(\.address)) {
                         detailLine("Address") { AddressLink(address: address) }
                     }
-                    if let phone = record.phone, !phone.isEmpty {
+                    if let phone = record.phone, !phone.isEmpty, !CustomerFacts.phone(phone, isIn: contacts.compactMap(\.phone)) {
                         detailLine("Phone") { ContactActions(phone: phone, email: nil) }
                     }
-                    if let email = record.email, !email.isEmpty {
+                    if let email = record.email, !email.isEmpty, !CustomerFacts.email(email, isIn: contacts.compactMap(\.email)) {
                         detailLine("Email") { ContactActions(phone: nil, email: email) }
                     }
-                    if let type = record.accountType { detailLine("Account") { Text(type.statusLabel) } }
                     if let industry = record.industry { detailLine("Industry") { Text(industry) } }
                     if let preferred = record.preferredContact { detailLine("Contact preference") { Text(preferred.statusLabel) } }
                     if let terms = record.billingTerms { detailLine("Billing terms") { Text(terms) } }
@@ -554,10 +564,10 @@ struct CustomerDetailView: View {
             let late = ["scheduled", "dispatched"].contains(job.status) && (JobFiltering.date(job.scheduledFor).map { $0 < .now } ?? false)
             PaperSection(summary.openCount > 1 ? "Open jobs" : "Open job", count: summary.openCount > 1 ? summary.openCount : nil) {
                 NavigationLink(value: job) {
-                    // The status glyph, the problem, then where, when and who (the page is the customer).
-                    JobListRowContent(job: job, place: street(for: job.locationId),
-                                      when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
-                                      late: late, assigneeWord: tech(job.assignedToUserId), titleLines: 3)
+                    // The jobs row grammar: the street, the problem, when and who; the status word trails.
+                    JobRoomRow(job: job, street: street(for: job.locationId),
+                               when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
+                               who: tech(job.assignedToUserId), late: late, titleLines: 3, inset: PaperCardMetrics.inset)
                 }
                 .buttonStyle(RowPressStyle())
                 .accessibilityIdentifier("customer-next-visit")
@@ -731,16 +741,11 @@ struct CustomerDetailView: View {
                         ForEach(Array(contacts.enumerated()), id: \.element.id) { index, contact in
                             if index > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? PaperCardMetrics.inset : PaperCardMetrics.inset + 28 + 12) }
                             HStack(spacing: 0) {
-                                if !typeSize.isAccessibilitySize {
-                                    InitialsAvatar(name: contact.name, size: 28)
-                                        .padding(.leading, PaperCardMetrics.inset)
-                                        .accessibilityHidden(true)
-                                }
                                 PaperListRow(title: contact.name,
                                              subtitle: [contact.role, contact.phone ?? contact.email].compactMap { $0 }.joined(separator: " · ")) {
                                     if contact.primary { StatusWord(text: "Primary") }
                                 }
-                                .environment(\.paperRowInset, typeSize.isAccessibilitySize ? PaperCardMetrics.inset : 12)
+                                .environment(\.paperRowInset, PaperCardMetrics.inset)
                                 // Name, "Primary", role and number as one VoiceOver stop; ••• stays its own.
                                 .accessibilityElement(children: .combine)
                                 ThorbisMenu(items: contactMenuItems(contact),
@@ -910,7 +915,12 @@ struct CustomerDetailView: View {
                     }
                 }
             }
-            if jobs.isEmpty { emptyText("No jobs yet") }
+            if jobs.isEmpty {
+                // New job is the page's one commit, so the empty history points to it.
+                ListRoomEmpty(title: "No jobs yet.",
+                              message: session.can("job.create", feature: "jobs") ? "Create a job with New job." : nil)
+                    .padding(.horizontal, -Theme.gutter)
+            }
             recordsParts([.photos, .notes, .documents, .activity])
         }
     }
@@ -919,17 +929,18 @@ struct CustomerDetailView: View {
         let full = jobRecords.first { $0.id == job.id }
         return NavigationLink(value: job) {
             if open {
-                // Open work: the status glyph, the problem, where, when and who.
-                JobListRowContent(job: job, place: street(for: job.locationId),
-                                  when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
-                                  assigneeWord: tech(job.assignedToUserId))
+                // Open work, in the jobs row grammar: the street, the problem, when and who.
+                JobRoomRow(job: job, street: street(for: job.locationId),
+                           when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
+                           who: tech(job.assignedToUserId),
+                           late: ["scheduled", "dispatched"].contains(job.status) && (JobFiltering.date(job.scheduledFor).map { $0 < .now } ?? false),
+                           inset: PaperCardMetrics.inset)
             } else {
-                // History (PR #199): the date column, the job's notes folding with "More", then tech · photos · paid.
-                PaperListRow(leading: .text(shortDate(job, record: full)), title: job.title,
-                             subtitle: summary(job, record: full), meta: meta(job),
-                             subtitleLines: 3, expandsSubtitle: true) {
-                    if job.status == "canceled" { StatusWord(jobStatus: job.status) }
-                }
+                // History, the same grammar: the street, the problem, the date and tech · photos · paid,
+                // then the job's notes folding with "More"; Done or Canceled trails.
+                JobRoomRow(job: job, street: street(for: job.locationId),
+                           when: shortDate(job, record: full), who: meta(job), note: summary(job, record: full),
+                           inset: PaperCardMetrics.inset)
             }
         }
         .buttonStyle(RowPressStyle())
@@ -1143,20 +1154,18 @@ struct CustomerDetailView: View {
         .font(Theme.font(15)).frame(minHeight: 44)
         .accessibilityElement(children: .combine)
     }
-    /// A site hazard (dogs on site): the warning tint on its own surface, so it can't be missed.
+    /// A site hazard (dogs on site): a word with its warning mark, then what to know. No coloured
+    /// surface or rail; the mark and the word carry it (design.thorbis.com: words first, colour second).
     private func hazardRow(_ title: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13, weight: .semibold))
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.warning)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(13, weight: .semibold))
-                Text(value).font(Theme.font(15)).fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            (Text(title).font(Theme.font(14, weight: .medium)).foregroundColor(Theme.foreground)
+             + Text("  \(value)").font(Theme.font(14)).foregroundColor(Theme.subtle))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .foregroundStyle(Theme.warning)
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Warning, \(title): \(value)")
