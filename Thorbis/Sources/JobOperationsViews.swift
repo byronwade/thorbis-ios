@@ -518,6 +518,7 @@ struct JobScheduleView: View {
                             VStack(spacing: 0) {
                                 ForEach(timeOptions, id: \.hour) { option in
                                     timeRow(hour: option.hour, minute: option.minute)
+                                    WellDivider()
                                 }
                                 if showsCustomTime {
                                     HStack {
@@ -549,6 +550,7 @@ struct JobScheduleView: View {
                 .padding(.horizontal, PaperCardMetrics.margin)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
+                .environment(\.paperGroupedWells, true)
             }
             .scrollIndicators(.hidden)
             .disabled(busy)
@@ -583,8 +585,9 @@ struct JobScheduleView: View {
                 .accessibilityHidden(true)
             Spacer(minLength: 0)
             Text("Schedule")
-                .font(Theme.font(17, weight: .medium))
+                .font(Theme.font(17, weight: .semibold))
                 .tracking(-0.17)
+                .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             Button { dismiss() } label: {
                 Image(systemName: "xmark")

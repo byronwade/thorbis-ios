@@ -67,6 +67,8 @@ struct ThorbisSegmented<Value: Hashable>: View {
     let options: [(value: Value, label: String)]
     @Binding var selection: Value
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var pill
 
     var body: some View {
         Group {
@@ -81,6 +83,7 @@ struct ThorbisSegmented<Value: Hashable>: View {
         }
         .padding(3)
         .background(Theme.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: selection)
         .sensoryFeedback(.selection, trigger: selection)
     }
 
@@ -99,9 +102,14 @@ struct ThorbisSegmented<Value: Hashable>: View {
                     .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(isOn ? Theme.selectedSegment : .clear, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(isOn ? Theme.border : .clear))
-                    .shadow(color: .black.opacity(isOn ? 0.06 : 0), radius: 3, y: 1)
+                    .background {
+                        if isOn {
+                            RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Theme.selectedSegment)
+                                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(Theme.border))
+                                .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+                                .matchedGeometryEffect(id: "pill", in: pill)
+                        }
+                    }
                     .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
@@ -173,14 +181,14 @@ struct ThorbisConfirmCard: View {
                 Button(action: onCancel) {
                     Text("Cancel").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity).frame(minHeight: 50)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        .background(Theme.well, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 }
                 .buttonStyle(PressStyle())
             }
         }
         .padding(16)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Theme.border))
         .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
         .padding(.horizontal, 12)
         .frame(maxWidth: 460)

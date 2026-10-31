@@ -66,7 +66,7 @@ struct JobAssignmentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Assign tech").font(Theme.font(24, weight: .medium)).tracking(-0.36)
+                Text("Assign tech").font(Theme.font(24, weight: .semibold)).tracking(-0.36)
                     .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
                 if !session.can("job.assign", feature: "jobs") {
                     PaperEmptyState(symbol: "person.crop.circle.badge.xmark", title: "Assignment unavailable", message: "Your role can't assign jobs in this workspace.")
@@ -89,11 +89,13 @@ struct JobAssignmentView: View {
                                         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
                                 } else {
                                     VStack(spacing: 0) {
-                                        ForEach(assignees.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }) { person in
+                                        let sorted = assignees.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+                                        ForEach(sorted) { person in
                                             let chosen = selectedUserID == person.userId
                                             Button { selectedUserID = person.userId } label: {
                                                 HStack(spacing: 12) {
-                                                    Avatar(name: person.displayName, size: 32)
+                                                    InitialsAvatar(name: person.displayName, size: 32)
+                                                        .accessibilityHidden(true)
                                                     Text(person.displayName).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                                                     Spacer(minLength: 8)
                                                     if chosen {
@@ -106,6 +108,7 @@ struct JobAssignmentView: View {
                                             }
                                             .buttonStyle(RowPressStyle())
                                             .accessibilityAddTraits(chosen ? .isSelected : [])
+                                            if person.id != sorted.last?.id { WellDivider(leading: PaperCardMetrics.inset + 32 + 12) }
                                         }
                                     }
                                     .padding(.vertical, PaperCardMetrics.edge)
@@ -113,6 +116,8 @@ struct JobAssignmentView: View {
                             }
                         }
                         .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
+                        // Phase 4: the picker reads like the redesigned lists (semibold header, well).
+                        .environment(\.paperGroupedWells, true)
                     }
                 }
             }

@@ -24,6 +24,14 @@ final class ThorbisControlsTests: XCTestCase {
         XCTAssertNil(item.role)
     }
 
+    func testStatusPickerRowsCarryTheToneOfWhereTheJobGoes() {
+        // The status picker leads each move with the glyph of the status it leads to.
+        let moves = ["en_route", "arrived", "in_progress", "paused", "completed", "scheduled"]
+        let rows = moves.map { ThorbisMenuItem($0, status: StatusTone(jobStatus: $0)) {} }
+        XCTAssertEqual(rows.map(\.status), [.dispatched, .inProgress, .inProgress, .inProgress, .done, .scheduled])
+        XCTAssertNil(ThorbisMenuItem("Plain", icon: "clock") {}.status, "rows without a status keep their icon")
+    }
+
     func testConfirmActionCarriesDestructiveRoleAndFires() {
         var fired = false
         let action = ThorbisConfirmAction("Remove", role: .destructive) { fired = true }

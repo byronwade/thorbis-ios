@@ -255,6 +255,8 @@ struct JobCircleLabel: View {
 struct JobSectionControl: View {
     let options: [(value: String, label: String, spoken: String)]
     @Binding var selection: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var pill
 
     var body: some View {
         JobSectionRowLayout(spacing: 4, fills: false) {
@@ -272,7 +274,7 @@ struct JobSectionControl: View {
                         .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .frame(minHeight: Theme.chipHeight + 4)
-                        .background(isOn ? Theme.fill : .clear, in: Capsule())
+                        .background { if isOn { Capsule().fill(Theme.fill).matchedGeometryEffect(id: "pill", in: pill) } }
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -282,6 +284,8 @@ struct JobSectionControl: View {
                 .accessibilityIdentifier("job-section-\(option.value.lowercased())")
             }
         }
+        // The pill glides on a small spring; the section below swaps with the existing snappy motion.
+        .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: selection)
         .sensoryFeedback(.selection, trigger: selection)
     }
 
