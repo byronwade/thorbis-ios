@@ -334,6 +334,13 @@ struct TeamGoalsView: View {
                         }
                     }
                 }
+                if screen.truncated {
+                    Section {
+                        Label("Showing the first \(screen.people.count) people. Set a role goal to cover everyone else.",
+                              systemImage: "person.3")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                }
                 if let asOf = model.asOf {
                     Section {
                         Label("As of \(asOf.formatted(date: .omitted, time: .shortened)). Changes send when you're back online.",

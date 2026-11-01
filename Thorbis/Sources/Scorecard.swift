@@ -216,10 +216,24 @@ struct RecordFilterBar: View {
 struct FilteredJobsView: View {
     let filter: RecordFilter
     @EnvironmentObject private var store: Store
+    @EnvironmentObject private var api: APIClient
+    /// Jobs read by id because they aren't in the schedule this phone holds (older weeks).
+    @State private var fetched: [String: Job] = [:]
 
     private var jobs: [Job] {
         let byID = Dictionary(store.jobs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return filter.ids.compactMap { byID[$0] }
+        return filter.ids.compactMap { byID[$0] ?? fetched[$0] }
+    }
+
+    /// The schedule answers most ids; the rest are read one by one, and offline they stay counted
+    /// as not on this phone.
+    private func load() async {
+        let held = Set(store.jobs.map(\.id))
+        let needed = filter.ids.filter { !held.contains($0) && fetched[$0] == nil }
+        guard !needed.isEmpty else { return }
+        let result = await FilteredRecords.load(needed) { try await api.job($0) }
+        guard !Task.isCancelled else { return }
+        for job in result.records { fetched[job.id] = job }
     }
 
     var body: some View {
@@ -245,6 +259,8 @@ struct FilteredJobsView: View {
             .padding(.bottom, 24)
         }
         .background(Theme.background)
+        .task { await load() }
+        .refreshable { await load() }
         .navigationTitle("Jobs done")
         .navigationBarTitleDisplayMode(.inline)
     }

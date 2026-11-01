@@ -69,7 +69,13 @@ struct EstimatesView: View {
         loading = true
         defer { loading = false }
         if let active = activeFilter {
-            let result = await FilteredRecords.load(active.ids) { try await api.fieldEstimate($0) }
+            let result = await FilteredRecords.load(active.ids, fetch: { id in
+                let estimate = try await api.fieldEstimate(id)
+                JobDetailCache.save(estimate: estimate)
+                return estimate
+            }, cached: { JobDetailCache.estimate($0) })
+            // "Show all" while this was loading: the unfiltered list owns the screen now.
+            guard !Task.isCancelled, activeFilter == active else { return }
             records = result.records
             missing = result.missing
             error = nil
@@ -310,7 +316,9 @@ struct EstimateDetailView: View {
     }
     private func load() async {
         do {
-            record = try await api.fieldEstimate(id)
+            let loaded = try await api.fieldEstimate(id)
+            record = loaded
+            JobDetailCache.save(estimate: loaded)
             error = nil
             if let customer = record?.customerId { memberPricing = try? await api.memberPricing(customer) }
         }
@@ -384,6 +392,8 @@ struct InvoicesView: View {
         if let active = activeFilter {
             let result = await FilteredRecords.load(active.ids, fetch: { try await api.fieldInvoice($0) },
                                                     cached: { JobDetailCache.invoice($0) })
+            // "Show all" while this was loading: the unfiltered list owns the screen now.
+            guard !Task.isCancelled, activeFilter == active else { return }
             records = result.records
             missing = result.missing
             error = nil
