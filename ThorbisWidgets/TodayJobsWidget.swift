@@ -18,7 +18,9 @@ struct TodayProvider: TimelineProvider {
         let now = Date()
         // Redraw as each booking passes and again at midnight; the app reloads on every change.
         let upcoming = TodaySnapshot.load()?.upcoming(on: now).compactMap(\.at).filter { $0 > now } ?? []
-        let midnight = Calendar.current.startOfDay(for: now.addingTimeInterval(86_400))
+        // The next calendar day, not now + 24h: on a 25-hour day that is still today.
+        let calendar = Calendar.current
+        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now.addingTimeInterval(86_400)
         let dates = [now] + upcoming.prefix(6) + [midnight]
         completion(Timeline(entries: dates.map(Self.entry(at:)), policy: .after(now.addingTimeInterval(1_800))))
     }

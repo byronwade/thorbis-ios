@@ -13,6 +13,17 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-01-ipad-pass",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "ipad.landscape", title: "Calmer iPad layout",
+                      detail: "The iPad sidebar matches the menu, and Inbox and Money keep their buttons beside what they act on."),
+                .init(symbol: "keyboard", title: "Keyboard shortcuts in Slide Over",
+                      detail: "With a keyboard, Command-F searches and Command-N starts a new job in any window size."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
             id: "2026-11-01-forms-say-whats-missing",
             date: "2026-11-01",
             highlights: [

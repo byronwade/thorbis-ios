@@ -258,6 +258,9 @@ struct ThorbisApp: App {
                 SpotlightIndex.shared.open(identifier: identifier)
             }
         }
+        // Hardware keyboard: the menu bar's commands, so no hidden buttons sit in the view tree
+        // (they showed up as extra "New job" / "Search" buttons for VoiceOver and UI tests).
+        .commands { KeyboardCommands() }
     }
 }
 

@@ -131,11 +131,30 @@ final class JobFilteringTests: XCTestCase {
     }
 
     func testVisitLabelSaysTodayTomorrowOrTheDate() {
+        // Calendar days, not 24-hour steps: on a 25-hour day (DST ends) now + 24h is still today.
+        let calendar = Calendar.current
         let now = Date()
-        XCTAssertTrue(now.visitLabel(now: now).hasPrefix("Today "))
-        XCTAssertTrue(now.addingTimeInterval(86400).visitLabel(now: now).hasPrefix("Tomorrow "))
-        let later = now.addingTimeInterval(5 * 86400).visitLabel(now: now)
+        XCTAssertTrue(now.visitLabel(now: now, calendar: calendar).hasPrefix("Today "))
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)!
+        XCTAssertTrue(tomorrow.visitLabel(now: now, calendar: calendar).hasPrefix("Tomorrow "))
+        let later = calendar.date(byAdding: .day, value: 5, to: now)!.visitLabel(now: now, calendar: calendar)
         XCTAssertFalse(later.hasPrefix("Today") || later.hasPrefix("Tomorrow"))
+    }
+
+    func testVisitLabelCountsCalendarDaysAcrossDaylightSavingChanges() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        // 1 Nov 2026 has 25 hours there (clocks fall back at 2 a.m.); 8 Mar 2026 has 23.
+        for (day, hours) in [((2026, 11, 1), 25.0), ((2026, 3, 8), 23.0)] {
+            let start = calendar.date(from: DateComponents(year: day.0, month: day.1, day: day.2))!
+            XCTAssertEqual(calendar.date(byAdding: .day, value: 1, to: start)!.timeIntervalSince(start), hours * 3600)
+            let earlyMorning = start.addingTimeInterval(30 * 60)
+            // 12:30 a.m. + 24h: 11:30 p.m. the same day on the long day, 1:30 a.m. the next on the short one.
+            let label = earlyMorning.addingTimeInterval(86_400).visitLabel(now: earlyMorning, calendar: calendar)
+            XCTAssertTrue(label.hasPrefix(hours > 24 ? "Today " : "Tomorrow "), label)
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: earlyMorning)!
+            XCTAssertTrue(tomorrow.visitLabel(now: earlyMorning, calendar: calendar).hasPrefix("Tomorrow "))
+        }
     }
 
     func testTodayUsesScheduledTimeAndKeepsUnscheduledSeparate() {

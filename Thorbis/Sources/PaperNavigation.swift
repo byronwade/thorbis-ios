@@ -76,6 +76,7 @@ struct RootView: View {
         }
         #if DEBUG
         .modifier(PreviewLandscape())
+        .modifier(PreviewWindowWidth())
         #endif
         // Widgets, the Control Center control and Spotlight read today's jobs from here.
         .modifier(GlanceSnapshotWriter())
@@ -140,6 +141,7 @@ struct RootView: View {
     private func usesTabletLayout(width: CGFloat) -> Bool {
         #if DEBUG
         if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-compact") { return false }
+        if PreviewWindowWidth.width != nil { return false }
         #endif
         return UIDevice.current.userInterfaceIdiom == .pad && sizeClass == .regular && width >= 700
     }
@@ -190,6 +192,16 @@ struct RootView: View {
                 .padding(.top, 8)
                 .presentationDetents([.large])
                 .thorbisSheetSurface()
+        }
+        // Hardware keyboard (Slide Over, a narrow Split View, an iPhone with one): the scene's
+        // ⌘F / ⌘K search, ⌘N new job and ⇧⌘N create (`KeyboardCommands`).
+        .onReceive(NotificationCenter.default.publisher(for: KeyboardCommand.notification)) { note in
+            switch KeyboardCommand(note) {
+            case .search: closeDrawer(thenRun: { openBarSearch() })
+            case .newJob: if session.can("job.create", feature: "jobs") { closeDrawer(thenRun: { createJob = true }) }
+            case .create: if !createChoices.isEmpty { closeDrawer(thenRun: { createMenuOpen = true }) }
+            case nil: break
+            }
         }
     }
 
@@ -998,7 +1010,7 @@ private struct DrawerCircleInBar: ViewModifier {
 
 #if DEBUG
 /// Screenshot-only sheets, kept off the shell's long modifier chain.
-private struct PreviewSheets: ViewModifier {
+struct PreviewSheets: ViewModifier {
     @Binding var invoiceEditor: Bool
     @Binding var invoiceDetail: Bool
     @Binding var estimateRevision: Bool
@@ -1174,6 +1186,31 @@ private struct PreviewFormSheet: ViewModifier {
 /// Screenshot-only (`--paper-preview-landscape`): iPadOS's windowed mode refuses programmatic
 /// rotation, so the app is laid out at the landscape size and turned a quarter. The capture is
 /// turned back afterwards. Layout is real; safe areas are approximate.
+/// `--paper-preview-window-width 375`: the app drawn in a narrow window at the leading edge, the
+/// way Slide Over or a narrow Split View gives it compact width on iPad. Screenshot-only.
+private struct PreviewWindowWidth: ViewModifier {
+    static var width: CGFloat? {
+        let args = ProcessInfo.processInfo.arguments
+        guard PaperPreview.enabled, let index = args.firstIndex(of: "--paper-preview-window-width"), args.indices.contains(index + 1),
+              let value = Double(args[index + 1]) else { return nil }
+        return CGFloat(value)
+    }
+
+    func body(content: Content) -> some View {
+        if let width = Self.width {
+            HStack(spacing: 0) {
+                content
+                    .environment(\.horizontalSizeClass, .compact)
+                    .frame(width: width)
+                    .clipped()
+                Color.black.opacity(0.5).ignoresSafeArea()
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct PreviewLandscape: ViewModifier {
     func body(content: Content) -> some View {
         if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-landscape") {
