@@ -13,6 +13,19 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-01-cream-sheet",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Every place in the menu",
+                      detail: "The menu lists every place you can open, grouped under Work, Money, Shop and On this phone."),
+                .init(symbol: "calendar", title: "Today at a glance",
+                      detail: "Today shows stops left, what to collect and who is running late, with a map on each stop."),
+                .init(symbol: "doc.text", title: "A cleaner job page",
+                      detail: "The job sits on one sheet: status, address, Call, Text and Directions, then what to know there."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
             id: "2026-11-01-ipad-back-swipe",
             date: "2026-11-01",
             highlights: [

@@ -47,55 +47,87 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(DrawerMotion.cornerRadius(topInset: 47), 44)
     }
 
-    // MARK: Drawer places by role
+    // MARK: Sidebar places (Cream sheet: every place a role can reach, grouped)
 
-    private let everyone = PrimaryTabAccess(canViewJobs: true, canViewCustomers: true)
-
-    private func places(_ role: WorkRole, tabs: [MenuItem]? = nil, explicit: Bool = false, hidden: Set<MenuItem> = [],
-                        access: PrimaryTabAccess? = nil, permitted: @escaping (MenuItem) -> Bool = { _ in true }) -> DrawerPlaces {
-        DrawerPlaces.make(role: role, tabs: tabs ?? MenuLayout.defaultTabs(for: role, permitted: permitted), explicitPins: explicit,
-                          hidden: hidden, order: [], access: access ?? everyone, permitted: permitted)
-    }
-
-    func testDrawerPrimaryRowsByRole() {
-        XCTAssertEqual(places(.technician).primary, [.schedule, .jobs, .customers, .inbox])
-        XCTAssertEqual(places(.office).primary, [.schedule, .jobs, .customers, .money, .inbox])
-        XCTAssertEqual(places(.owner).primary, [.home, .jobs, .customers, .money, .inbox],
-                       "Owners get Home, which carries the day, instead of a second today row")
-        for role in [WorkRole.technician, .office, .owner] {
-            let result = places(role)
-            XCTAssertLessThanOrEqual(result.primary.count, DrawerPlaces.maxPrimary)
-            XCTAssertTrue(result.pinned.isEmpty, "Role defaults never add a Pinned section")
-            XCTAssertTrue(Set(result.primary).isDisjoint(with: result.more))
+    /// A role's permissions, as the server grants them, by place.
+    private func permitted(_ role: WorkRole) -> (MenuItem) -> Bool {
+        switch role {
+        case .technician: { [.schedule, .jobs, .customers, .inbox, .estimates, .invoices, .priceBook, .drafts, .attention].contains($0) }
+        case .office: { $0 != .home && $0 != .notices && $0 != .team }
+        case .owner: { _ in true }
         }
-        XCTAssertTrue(places(.owner).more.contains(.schedule), "The owner still reaches the schedule under All places")
-        XCTAssertTrue(places(.technician).more.contains(.estimates))
     }
 
-    func testDrawerRowsFollowAccessAndHiddenPlaces() {
-        let noJobs = places(.technician, access: PrimaryTabAccess(canViewJobs: false, canViewCustomers: true),
-                            permitted: { ![.schedule, .jobs, .inbox].contains($0) })
-        XCTAssertEqual(noJobs.primary, [.customers])
-        XCTAssertFalse(noJobs.more.contains(.jobs))
-        XCTAssertEqual(places(.office, hidden: [.inbox]).primary, [.schedule, .jobs, .customers, .money])
-        XCTAssertFalse(places(.office, permitted: { $0 != .money }).primary.contains(.money))
+    private func sections(_ role: WorkRole, pins: [MenuItem]? = nil, explicit: Bool = false, hidden: Set<MenuItem> = [],
+                          local: [LocalWorkspaceSection] = [], opens: ((MenuItem) -> Bool)? = nil) -> DrawerSections {
+        let allowed = opens ?? permitted(role)
+        return DrawerSections.make(pins: pins ?? MenuLayout.defaultTabs(for: role, permitted: allowed), explicitPins: explicit,
+                                   roleDefaults: MenuLayout.defaultTabs(for: role, permitted: allowed),
+                                   hidden: hidden, local: local, opens: allowed)
     }
 
-    func testDrawerExplicitPinsJoinThePrimaryListThenOverflowToPinned() {
-        let tech = places(.technician, tabs: [.estimates, .schedule], explicit: true)
-        XCTAssertEqual(tech.primary, [.schedule, .jobs, .customers, .inbox, .estimates])
-        XCTAssertTrue(tech.pinned.isEmpty)
-        let office = places(.office, tabs: [.estimates, .invoices], explicit: true)
-        XCTAssertEqual(office.primary.count, 5)
-        XCTAssertEqual(office.pinned, [.estimates, .invoices])
-        XCTAssertFalse(office.more.contains(.estimates))
-        let company = DrawerPlaces.make(role: .owner, tabs: [.schedule, .money, .customers], explicitPins: true,
-                                        roleDefaults: MenuLayout.defaultTabs(for: .owner, permitted: { _ in true }),
-                                        hidden: [], order: [], access: everyone, permitted: { _ in true })
-        XCTAssertTrue(company.pinned.isEmpty, "A company layout made from the owner's defaults adds no Pinned Schedule")
-        XCTAssertTrue(company.more.contains(.schedule))
-        let defaults = places(.owner, tabs: [.home, .schedule, .money, .customers], explicit: false)
-        XCTAssertTrue(defaults.pinned.isEmpty)
-        XCTAssertFalse(defaults.primary.contains(.schedule))
+    func testSidebarListsEveryReachablePlaceExactlyOnceForEachRole() {
+        for role in [WorkRole.technician, .office, .owner] {
+            let result = sections(role, local: LocalWorkspaceSection.allCases)
+            let expected = Set(MenuItem.allCases.filter(permitted(role)))
+            XCTAssertEqual(Set(result.places), expected, "\(role) sees every place it may open, and only those")
+            XCTAssertEqual(result.places.count, expected.count, "\(role): no place is listed twice")
+            XCTAssertEqual(result.sections.last?.local, LocalWorkspaceSection.allCases, "On this phone lists the local places")
+            XCTAssertFalse(result.sections.contains { $0.kind == .pinned }, "Role defaults never add a Pinned section")
+        }
+        // Notification rules and Reports are places of their own now (Shop, Money).
+        XCTAssertTrue(sections(.owner).places.contains(.notices))
+        XCTAssertTrue(sections(.owner).places.contains(.reports))
+    }
+
+    func testSidebarGroupsAndOrderFollowTheDesign() {
+        let owner = sections(.owner)
+        XCTAssertEqual(owner.sections.map(\.kind), [.work, .money, .shop])
+        XCTAssertEqual(owner.sections[0].places, [.home, .schedule, .jobs, .customers, .properties, .inbox, .attention])
+        XCTAssertEqual(owner.sections[1].places, [.money, .estimates, .invoices, .billing, .reports, .scorecard, .priceBook])
+        XCTAssertEqual(owner.sections[2].places, [.team, .notices, .drafts])
+        XCTAssertEqual(sections(.technician).sections.map(\.kind), [.work, .money, .shop])
+    }
+
+    func testSidebarFollowsAccessAndHiddenPlaces() {
+        let noJobs = sections(.technician, opens: { ![.schedule, .jobs, .inbox].contains($0) && self.permitted(.technician)($0) })
+        XCTAssertFalse(noJobs.places.contains(.jobs))
+        XCTAssertTrue(noJobs.places.contains(.customers))
+        XCTAssertFalse(sections(.office, hidden: [.inbox]).places.contains(.inbox), "A place turned off in Customize menu stays off")
+        XCTAssertTrue(sections(.office, local: []).sections.allSatisfy { $0.kind != .phone })
+    }
+
+    func testExplicitPinsLeadInTheirOwnSectionOnce() {
+        let office = sections(.office, pins: [.estimates, .invoices], explicit: true)
+        XCTAssertEqual(office.sections.first?.kind, .pinned)
+        XCTAssertEqual(office.sections.first?.places, [.estimates, .invoices])
+        XCTAssertEqual(office.places.filter { $0 == .estimates }.count, 1, "A pinned place leaves its group")
+        let company = DrawerSections.make(pins: [.schedule, .money, .customers], explicitPins: true,
+                                          roleDefaults: MenuLayout.defaultTabs(for: .owner, permitted: { _ in true }),
+                                          opens: { _ in true })
+        XCTAssertEqual(company.sections.first?.kind, .work, "A company layout made from the owner's defaults adds no Pinned section")
+        let ordered = DrawerSections.make(order: [.customers, .jobs], opens: { _ in true })
+        XCTAssertEqual(Array(ordered.sections[0].places.prefix(2)), [.customers, .jobs], "Edit menu's order leads inside a section")
+    }
+
+    func testTodayNumbersCountLeftAndLate() {
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        func job(_ id: String, _ status: String, hoursFromNow: Double, who: String? = "me") -> Job {
+            Job(id: id, customerId: nil, title: id, status: status, createdAt: nil, updatedAt: nil, allowedTransitions: nil,
+                scheduledFor: iso.string(from: now.addingTimeInterval(hoursFromNow * 3600)), assignedToUserId: who)
+        }
+        // Times stay inside today wherever the test runs.
+        let start = Calendar.current.startOfDay(for: now)
+        let base = now.timeIntervalSince(start) / 3600
+        let jobs = [job("a", "completed", hoursFromNow: -min(base, 1) * 0.5), job("b", "scheduled", hoursFromNow: -min(base, 1) * 0.25),
+                    job("c", "dispatched", hoursFromNow: min(24 - base, 1) * 0.5), job("d", "canceled", hoursFromNow: 0),
+                    job("e", "scheduled", hoursFromNow: min(24 - base, 1) * 0.5, who: "other")]
+        let mine = TodayNumbers.visits(jobs, assignee: "me", now: now)
+        XCTAssertEqual(mine.map(\.id), ["a", "b", "c"])
+        XCTAssertEqual(TodayNumbers.left(mine), 2)
+        XCTAssertEqual(TodayNumbers.late(mine, now: now), 1)
+        XCTAssertEqual(TodayNumbers.open(jobs), 3)
+        XCTAssertEqual(TodayNumbers.visits(jobs, assignee: nil, now: now).count, 4)
     }
 }

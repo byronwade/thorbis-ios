@@ -58,16 +58,33 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(bar.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(title.frame.minY, bar.frame.maxY,
                                     "The job title must not sit behind navigation controls")
-        // The balance is a property chip ("$340.00 due") that opens Money.
+        // Cream sheet: the balance is the Money cluster's "Due on site" row ("$340.00 due"); it opens Money.
         let balance = app.buttons["job-chip-amount"]
         XCTAssertTrue(balance.waitForExistence(timeout: 20))
         XCTAssertTrue(balance.label.hasSuffix("due"), balance.label)
+        scrollUntilHittable(balance, in: app)
         XCTAssertTrue(balance.isHittable)
         capture(app, name: "Job header before invoice")
         balance.tap()
         let invoices = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Invoices")).firstMatch
         XCTAssertTrue(invoices.waitForExistence(timeout: 10), "Tapping the balance should open invoice content")
         XCTAssertTrue(app.buttons["job-section-money"].isSelected)
+    }
+
+    /// Switching section from the pinned tabs at the bottom of the job opens the new section at its
+    /// top and the app keeps answering. (Due on site, far down the page, used to hang the app: see
+    /// testJobHeaderKeepsTitleClearOfNavigationAndBalanceOpensInvoice.)
+    func testSwitchingSectionWhileScrolledKeepsTheAppResponsive() {
+        let app = preview("job", working: true)
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 20))
+        for _ in 0..<8 { app.swipeUp(velocity: .slow) }
+        let money = app.buttons["job-section-money"]
+        XCTAssertTrue(money.waitForExistence(timeout: 5))
+        money.tap()
+        let invoices = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Invoices")).firstMatch
+        XCTAssertTrue(invoices.waitForExistence(timeout: 10), "Money shows after switching while scrolled")
+        app.buttons["job-section-overview"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 10), "The app still answers")
     }
 
     /// The Thorbis back circle replaces the system one; both it and the edge swipe still go back.
@@ -108,9 +125,10 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(payment.waitForExistence(timeout: 20))
         XCTAssertTrue(work.waitForExistence(timeout: 20))
         XCTAssertTrue(title.isHittable)
-        XCTAssertTrue(payment.isHittable)
-        XCTAssertTrue(work.isHittable)
         XCTAssertGreaterThanOrEqual(title.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        XCTAssertTrue(work.isHittable)
+        scrollUntilHittable(payment, in: app)
+        XCTAssertTrue(payment.isHittable)
         capture(app, name: "Dark job overview")
     }
 
@@ -386,7 +404,12 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertFalse(app.buttons.matching(chipQuery).firstMatch.exists, "No floating current-job chip")
         let newJob = app.buttons["drawer-new"]
         XCTAssertTrue(newJob.exists)
-        XCTAssertLessThanOrEqual(underWay.frame.maxY, newJob.frame.minY, "Recents stay clear of the drawer's foot")
+        // Cream sheet: Recents follow every place, so they may start under the foot; the list scrolls
+        // them clear of it.
+        let list = app.scrollViews["drawer-rows"]
+        for _ in 0..<6 where underWay.frame.maxY > newJob.frame.minY { list.swipeUp(velocity: .slow) }
+        XCTAssertLessThanOrEqual(underWay.frame.maxY, newJob.frame.minY, "Recents scroll clear of the drawer's foot")
+        XCTAssertTrue(underWay.isHittable, "The job under way is reachable in Recents")
     }
 
     /// iPad: the sidebar's foot names the job under way once, above the account, and only the sidebar
@@ -429,6 +452,13 @@ final class JobOverviewUITests: XCTestCase {
         let rows = app.buttons.matching(NSPredicate(format: "label == %@", title))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "\(title) is not in the menu")
         return rows.element(boundBy: max(0, rows.count - 1))
+    }
+
+    /// The Money cluster sits below what to know at the address; scroll the sheet until it is reachable.
+    private func scrollUntilHittable(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<8 where !element.isHittable || element.frame.maxY > app.frame.height - 140 {
+            app.swipeUp(velocity: .slow)
+        }
     }
 
     private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false) -> XCUIApplication {

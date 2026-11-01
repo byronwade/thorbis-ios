@@ -112,8 +112,9 @@ struct JobPropertyHistory: Codable, Hashable {
             let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed?.isEmpty == false ? trimmed : nil
         }
-        return [clean(place.dogOnSite).map { Fact(label: "Dog", value: $0, isCode: false) },
-                clean(place.gateCode).map { Fact(label: "Gate code", value: $0, isCode: true) },
+        // In the order they matter at the curb (C-Job): the gate, the dog, then the rest.
+        return [clean(place.gateCode).map { Fact(label: "Gate code", value: $0, isCode: true) },
+                clean(place.dogOnSite).map { Fact(label: "Dog", value: $0, isCode: false) },
                 clean(place.alarmCode).map { Fact(label: "Alarm code", value: $0, isCode: true) },
                 clean(place.parking).map { Fact(label: "Parking", value: $0, isCode: false) },
                 clean(place.notes).map { Fact(label: "Site notes", value: $0, isCode: false) }].compactMap { $0 }
@@ -248,8 +249,8 @@ struct JobPropertyHistorySection: View {
         let units = expanded || history.equipment.count <= JobPropertyHistoryLayout.collapsedRows + 1
             ? history.equipment[...] : history.equipment.prefix(JobPropertyHistoryLayout.collapsedRows)
         let facts = showsFacts ? history.facts : []
-        // Access codes, dogs and parking are what to know before going in: a warning mark leads.
-        JobPanelSection(title: facts.isEmpty ? "Equipment" : history.title, mark: facts.isEmpty ? nil : "exclamationmark.triangle.fill",
+        // Cream sheet: a plain cluster heading; the on-site banner keeps the warning mark.
+        JobPanelSection(title: facts.isEmpty ? "Equipment" : history.title,
                         actionTitle: history.equipment.count > JobPropertyHistoryLayout.collapsedRows + 1 ? (expanded ? "Show less" : "Show all \(history.equipment.count)") : nil,
                         actionIdentifier: "job-property-history-show-all",
                         action: { withMotion(.snappy) { expanded.toggle() } }) {

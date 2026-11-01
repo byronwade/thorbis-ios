@@ -139,6 +139,8 @@ final class JobAddressBook: ObservableObject {
 @MainActor
 final class NextStopETA: ObservableObject {
     @Published private(set) var minutes: Int?
+    /// The drive's length in miles, with the minutes (the map strip's "18 min · 6.2 mi").
+    @Published private(set) var miles: Double?
     /// Location is denied or restricted for Thorbis, so there is no drive time to show. Never set
     /// while the permission is still undecided (the system prompt is about to ask).
     @Published private(set) var locationOff = false
@@ -148,13 +150,15 @@ final class NextStopETA: ObservableObject {
         guard key != self.key || minutes == nil else { return }
         self.key = key
         minutes = nil
+        miles = nil
         #if DEBUG
         if PaperPreview.enabled {
             // Fixture: no screenshot ever depends on a permission prompt or the network (a fresh
             // simulator would otherwise cover every screen with the location alert).
             // `--paper-preview-location-off` shows the card as it is with location turned off.
             locationOff = ProcessInfo.processInfo.arguments.contains("--paper-preview-location-off")
-            minutes = PaperPreview.screen.hasPrefix("next-stop") && enabled && destination != nil && !locationOff ? 18 : nil
+            minutes = (PaperPreview.screen.hasPrefix("next-stop") || PaperPreview.screen == "job") && enabled && destination != nil && !locationOff ? 18 : nil
+            miles = minutes == nil ? nil : 6.2
             return
         }
         #endif
@@ -176,6 +180,7 @@ final class NextStopETA: ObservableObject {
         guard let eta = try? await MKDirections(request: request).calculateETA(), !Task.isCancelled,
               self.key == key else { return }
         minutes = max(1, Int((eta.expectedTravelTime / 60).rounded()))
+        miles = eta.distance > 0 ? eta.distance / 1609.344 : nil
     }
 
     /// One fix, asking When In Use the first time. Gives up quietly on denial or after 15 seconds.

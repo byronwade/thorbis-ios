@@ -4,9 +4,9 @@ import UIKit
 // MARK: - Phone drawer (simplified 2026-10-31, after owner feedback on build 125)
 //
 // The phone's navigation: a side drawer that slides in from the left and pushes the place showing to
-// the right, where it waits as a dimmed, rounded card. Calm like the Claude and ChatGPT drawers: a
-// modest business name and Search, at most five places for the person's role, "All places" folded
-// behind one row, a few recent records as plain words, then New job and the gear.
+// the right, where it waits as a rounded card. Cream sheet (2026-11-01, C-Nav.dc.html): the business
+// name and Search, every place the role can reach grouped under Work, Money, Shop and On this phone,
+// a few recent records as plain words, then New job and the gear.
 // Every screen in a place offers the menu circle: roots in their header, pushed screens beside Back.
 // An edge swipe opens it on a root; on a pushed screen the edge swipe stays Back.
 // iPad at regular width keeps its sidebar (TabletRoot).
@@ -19,7 +19,7 @@ struct DrawerMenuCircle: View {
 
     var body: some View {
         Button(action: control.open) {
-            PaperCircleLabel(symbol: "line.3.horizontal", size: size, fill: Theme.fill)
+            CreamCircleLabel(symbol: "line.3.horizontal", size: size)
                 .overlay(alignment: .topTrailing) {
                     if control.hasNews { DrawerDot().offset(x: -6, y: 6) }
                 }
@@ -50,80 +50,28 @@ struct DrawerRecent: Identifiable {
     var inProgress: Bool { ["arrived", "in_progress", "paused"].contains(status ?? "") }
 }
 
-/// Which places the drawer lists, and where: the role's primary rows, any extra pins from Edit menu,
-/// and everything else behind "All places". Pure, so the role table is unit-tested.
-struct DrawerPlaces: Equatable {
-    /// The one primary list, no header (at most `maxPrimary`).
-    var primary: [MenuItem]
-    /// Places the person pinned in Edit menu that do not fit the primary list.
-    var pinned: [MenuItem]
-    /// Everything else this person may open, behind "All places".
-    var more: [MenuItem]
-
-    static let maxPrimary = 5
-
-    /// The primary rows each role starts from (owner feedback, 2026-10-31).
-    /// - Technicians: their day, the jobs and customers it touches, and Inbox.
-    /// - Office: the schedule they run, jobs, customers, money and Inbox.
-    /// - Owners: Home already carries the day (who is out, the next visit, jobs without a time), so
-    ///   the schedule sits under All places rather than a second "today" row beside Home.
-    static func roleRows(_ role: WorkRole) -> [MenuItem] {
-        switch role {
-        case .technician: [.schedule, .jobs, .customers, .inbox]
-        case .office: [.schedule, .jobs, .customers, .money, .inbox]
-        case .owner: [.home, .jobs, .customers, .money, .inbox]
-        }
-    }
-
-    /// The drawer's word for a place. Schedule is the same screen for everyone: technicians read it
-    /// as their day ("Today"), office and owners as the schedule they run.
+/// The drawer's words for a place.
+enum DrawerPlaces {
+    /// Schedule is the same screen for everyone: technicians read it as their day ("Today"), office
+    /// and owners as the schedule they run.
     static func title(_ item: MenuItem, role: WorkRole) -> String {
         item == .schedule ? (role == .technician ? "Today" : "Schedule") : item.title
     }
-
-    /// - Parameters:
-    ///   - tabs: the layout's pinned places (company or this phone).
-    ///   - explicitPins: true when the person or company chose pins (not the role's defaults), so
-    ///     only real choices add rows.
-    ///   - roleDefaults: the role's default pinned places, which never count as a choice.
-    static func make(role: WorkRole, tabs: [MenuItem], explicitPins: Bool, roleDefaults: [MenuItem] = [], hidden: Set<MenuItem>,
-                     order: [MenuItem], access: PrimaryTabAccess, permitted: (MenuItem) -> Bool) -> DrawerPlaces {
-        func opens(_ item: MenuItem) -> Bool {
-            switch item {
-            case .schedule: access.canOpen(.schedule)
-            case .jobs: access.canOpen(.jobs)
-            case .customers: access.canOpen(.customers)
-            default: permitted(item) && MenuItem.listed(item, permitted: permitted) && !hidden.contains(item)
-            }
-        }
-        var primary = roleRows(role).filter(opens)
-        var pinned: [MenuItem] = []
-        if explicitPins {
-            // A pin that merely repeats the role's defaults (a company layout started from them keeps
-            // Schedule beside an owner's Home) adds nothing.
-            for item in tabs where opens(item) && !primary.contains(item) && !roleDefaults.contains(item) {
-                if primary.count < maxPrimary { primary.append(item) } else { pinned.append(item) }
-            }
-        }
-        let more = AppMenuContent.menu(tabs: primary + pinned, hidden: hidden, order: order, permitted: permitted)
-            .filter { item in [.schedule, .jobs, .customers].contains(item) ? opens(item) : true }
-        return DrawerPlaces(primary: primary, pinned: pinned, more: more)
-    }
 }
 
-/// The drawer itself: the business name and Search on top, one short list of places, All places,
-/// recent records, then a floating New job capsule and the gear circle.
+/// The drawer itself (Cream sheet, C-Nav.dc.html): the business name and a search circle on top,
+/// then every place this role can reach grouped under Work, Money, Shop and On this phone (pinned
+/// places from Edit menu lead), recent records, and at the foot the ink New job commit and the
+/// Settings circle. The list fades at its bottom edge where it continues under the foot.
 struct AppDrawer: View {
     let title: String
     let role: WorkRole
     /// The place showing (a MenuItem id or "local-<section>").
     let current: String
-    let places: DrawerPlaces
-    let local: [LocalWorkspaceSection]
+    let sections: DrawerSections
+    let count: (MenuItem) -> PlaceCount?
     let recents: [DrawerRecent]
-    /// Inbox holds unread notices.
-    let inboxUnread: Bool
-    /// Saved work on this phone: its words go to the gear's VoiceOver value, its dot when it needs the person.
+    /// Saved work on this phone: its row under On this phone, its words on the gear, its dot when it needs the person.
     var savedWork: AppBottomBar.Sync?
     var create: PaperCreateAction?
     /// The gear circle's menu: businesses, saved work, Add a business, Settings, Edit menu.
@@ -131,7 +79,7 @@ struct AppDrawer: View {
     /// At accessibility sizes the drawer is full width, so it carries its own close circle.
     let showsClose: Bool
     /// False while the drawer sits closed under the card (and from the moment it starts closing). The
-    /// capsule's context menu and the gear's popover are UIKit-hosted and stay in the accessibility
+    /// commit's context menu and the gear's popover are UIKit-hosted and stay in the accessibility
     /// tree even when the drawer is hidden, so they are only built while the drawer can be seen.
     var showsControls = true
     /// False once the drawer has slid shut: its scroll view (UIKit-hosted too) would otherwise sit
@@ -143,203 +91,86 @@ struct AppDrawer: View {
     let openPlace: (MenuItem) -> Void
     let openLocal: (LocalWorkspaceSection) -> Void
     let openRecent: (RecentItems.Item) -> Void
+    var openSavedWork: () -> Void = {}
 
-    /// All places stays folded unless the person opened it; remembered on this phone.
-    @AppStorage("thorbis.drawer.allPlacesOpen") private var allPlacesOpen = false
     @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Row icons grow with the words beside them.
-    @ScaledMetric(relativeTo: .body) private var iconSize: CGFloat = 20
-    @ScaledMetric(relativeTo: .body) private var iconColumn: CGFloat = 26
-    /// Room under the last row for the capsule and gear, which grow with the text.
-    @ScaledMetric(relativeTo: .body) private var bottomClearance: CGFloat = 110
-
-    /// Words line up under the primary rows' labels: row padding, icon column, gap.
-    private var textInset: CGFloat { 12 + iconColumn + 14 }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Closed, nothing is built: an empty scroll view would still sit in the accessibility tree.
-            if showsRows { rows }
+        VStack(spacing: 0) {
+            // Closed, nothing is built: the header and an empty scroll view would still sit in the
+            // accessibility tree behind the card.
+            if showsRows { header; rows } else { Spacer(minLength: 0) }
             if showsControls { bottomControls }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .foregroundStyle(Theme.foreground)
-        .background(Theme.card.ignoresSafeArea())
-        #if DEBUG
-        .onAppear {
-            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-drawer-all-places") { allPlacesOpen = true }
-        }
-        #endif
+        // C-Nav: the drawer sits on the canvas; the place it pushed aside is the panel.
+        .background(Theme.background.ignoresSafeArea())
     }
 
     private var rows: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                header
-                ForEach(places.primary) { placeRow($0) }
-                if hasMore { allPlacesRow }
-                if allPlacesOpen, hasMore {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(places.more) { item in
-                            plainRow(id: "drawer-\(item.rawValue)", title: DrawerPlaces.title(item, role: role),
-                                     here: current == item.rawValue, dot: item == .inbox && inboxUnread) { openPlace(item) }
-                        }
-                        ForEach(local, id: \.self) { section in
-                            plainRow(id: "drawer-local-\(section.rawValue)", title: section.title,
-                                     here: current == "local-\(section.rawValue)", dot: false) { openLocal(section) }
-                        }
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-                if !places.pinned.isEmpty {
-                    sectionLabel("Pinned")
-                    ForEach(places.pinned) { placeRow($0) }
-                }
+                PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: role) },
+                           isCurrent: { current == $0.rawValue }, isCurrentLocal: { current == "local-\($0.rawValue)" },
+                           count: count, idPrefix: "drawer", savedWork: savedWork,
+                           openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork)
                 if !recents.isEmpty {
-                    sectionLabel("Recents")
+                    Text("Recent")
+                        .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 4)
+                        .accessibilityAddTraits(.isHeader)
                     ForEach(recents.prefix(5)) { recentRow($0) }
                 }
             }
-            .padding(.horizontal, 12)
-            // Room for the capsule and gear so the last rows scroll clear of them.
-            .padding(.bottom, bottomClearance)
+            .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
+        // "Where a list continues, fade the edge": the last rows fade into the foot.
+        .mask {
+            LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9),
+                                   .init(color: .black.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom)
+        }
         .accessibilityIdentifier("drawer-rows")
         #if DEBUG
         .modifier(PaperPreviewScrollAnchor())
         #endif
     }
 
-    private var hasMore: Bool { !places.more.isEmpty || !local.isEmpty }
-
     // MARK: Header
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Text(title)
-                .font(Theme.font(20, weight: .medium)).tracking(-0.2)
+                .font(Theme.font(18, weight: .medium)).tracking(-0.2)
                 .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                 .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityFocused(titleFocus)
-            Spacer(minLength: 8)
-            PaperCircleButton(symbol: "magnifyingglass", label: "Search", size: 44, fill: Theme.background, bordered: true, action: search)
+            Button(action: search) { CreamCircleLabel(symbol: "magnifyingglass") }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Search")
                 .accessibilityIdentifier("drawer-search")
             if showsClose {
-                PaperCircleButton(symbol: "xmark", label: "Close menu", size: 44, fill: Theme.background, bordered: true, action: close)
+                Button(action: close) { CreamCircleLabel(symbol: "xmark") }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Close menu")
                     .accessibilityIdentifier("drawer-close")
             }
         }
-        .padding(.leading, 12)
-        .padding(.top, 8).padding(.bottom, 16)
+        .padding(.leading, 12).padding(.trailing, 2)
+        .padding(.top, 6).padding(.bottom, 4)
     }
 
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(Theme.font(13, weight: .medium))
-            .foregroundStyle(Theme.muted)
-            .padding(.horizontal, 12)
-            .padding(.top, 28).padding(.bottom, 6)
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    // MARK: Rows
-
-    /// A primary place (v2): its mark in a soft place hue, outlined at rest and filled when this is
-    /// the place; the word stays cream or body and lifts to full type when here. No wash on the row.
-    private func placeRow(_ item: MenuItem) -> some View {
-        let here = current == item.rawValue
-        let dot = item == .inbox && inboxUnread
-        let title = DrawerPlaces.title(item, role: role)
-        return Button { openPlace(item) } label: {
-            HStack(alignment: .center, spacing: 14) {
-                Image(systemName: item.symbol)
-                    .font(.system(size: iconSize, weight: .regular))
-                    .symbolVariant(here ? .fill : .none)
-                    .foregroundStyle(item.tint)
-                    .frame(width: iconColumn)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(Theme.font(17, weight: .medium))
-                    .foregroundStyle(here ? Theme.foreground : Theme.subtle)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                if dot { DrawerDot() }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 2)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(dot ? "Unread" : "")
-        .accessibilityAddTraits(here ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("drawer-\(item.rawValue)")
-    }
-
-    /// The last primary row: folds every other place in and out, in place.
-    private var allPlacesRow: some View {
-        Button {
-            withAnimation(.easeOut(duration: 0.12)) { allPlacesOpen.toggle() }
-        } label: {
-            HStack(alignment: .center, spacing: 14) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: iconSize, weight: .regular))
-                    .foregroundStyle(Theme.markGrey)
-                    .frame(width: iconColumn)
-                    .accessibilityHidden(true)
-                Text("All places").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.subtle)
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.muted)
-                    .rotationEffect(.degrees(allPlacesOpen ? 0 : -90))
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 2)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("All places")
-        .accessibilityValue(allPlacesOpen ? "Expanded" : "Collapsed")
-        .accessibilityHint(allPlacesOpen ? "Hides the other places" : "Shows every other place")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("drawer-all-places")
-    }
-
-    /// A place inside All places: 16pt words under the primary labels, no icon.
-    private func plainRow(id: String, title: String, here: Bool, dot: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Text(title).font(Theme.font(16, weight: here ? .medium : .regular))
-                    .foregroundStyle(here ? Theme.foreground : Theme.subtle)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                if dot { DrawerDot() }
-            }
-            .padding(.leading, textInset).padding(.trailing, 12).padding(.vertical, 2)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(dot ? "Unread" : "")
-        .accessibilityAddTraits(here ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier(id)
-    }
-
-    /// A recent record as plain words, like ChatGPT's recents. A job under way wears its status glyph.
+    /// A recent record as plain words, like ChatGPT's recents. A job under way wears its status word.
     private func recentRow(_ recent: DrawerRecent) -> some View {
         Button { openRecent(recent.item) } label: {
             HStack(alignment: .center, spacing: 10) {
                 Text(recent.item.title)
-                    .font(Theme.font(16))
+                    .font(Theme.font(15))
+                    .foregroundStyle(Theme.subtle)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                     .fixedSize(horizontal: false, vertical: typeSize.isAccessibilitySize)
                 Spacer(minLength: 8)
@@ -349,7 +180,7 @@ struct AppDrawer: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressStyle())
+        .buttonStyle(RowPressStyle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([recent.item.title, recent.inProgress ? recent.status?.statusLabel : nil].compactMap { $0 }.joined(separator: ", "))
         .accessibilityHint(recent.item.kind == .job ? "Opens the job" : "Opens the customer")
@@ -368,55 +199,35 @@ struct AppDrawer: View {
         #endif
     }
 
-    /// The ink New job capsule on the left and the gear on the right, over a fade. The gear wears
-    /// saved work's dot when it needs the person, and says what is still on the phone.
+    /// The ink New job commit and the Settings circle, pinned under the list. The gear wears saved
+    /// work's dot when it needs the person, and says what is still on the phone.
     private var bottomControls: some View {
         HStack(alignment: .center, spacing: 12) {
-            if let create { createCapsule(create) }
-            Spacer(minLength: 0)
+            if let create { createCommit(create) } else { Spacer(minLength: 0) }
             // The gear sits at the bottom edge: its menu grows up so every row (saved work, Settings,
             // Edit menu) stays on screen and clear of the home indicator.
             ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Settings and businesses",
                         opensOnAppear: gearOpensForPreview, arrowEdge: .bottom) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 19, weight: .regular))
-                    .foregroundStyle(Theme.foreground)
-                    .frame(width: 48, height: 48)
-                    .background(Theme.background, in: Circle())
-                    .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1))
+                CreamCircleLabel(symbol: "gearshape", size: 44)
                     .overlay(alignment: .topTrailing) {
                         if savedWork?.needsPerson == true { DrawerDot().offset(x: -3, y: 3) }
                     }
-                    .contentShape(Circle())
             }
             .accessibilityValue(savedWork?.words ?? "")
             .accessibilityIdentifier("drawer-settings")
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 24).padding(.bottom, 8)
-        .background {
-            LinearGradient(stops: [.init(color: Theme.card.opacity(0), location: 0), .init(color: Theme.card, location: 0.45)],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea(edges: .bottom)
-                .allowsHitTesting(false)
-        }
+        .padding(.horizontal, 4)
+        .padding(.top, 10).padding(.bottom, 8)
     }
 
-    private func createCapsule(_ create: PaperCreateAction) -> some View {
+    private func createCommit(_ create: PaperCreateAction) -> some View {
         Button(action: create.run) {
-            HStack(spacing: 8) {
-                Image(systemName: "square.and.pencil").font(.system(size: 16, weight: .medium))
+            HStack(spacing: 6) {
+                Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
                     .accessibilityHidden(true)
-                Text(create.label).font(Theme.font(16, weight: .medium))
-                    .lineLimit(1).minimumScaleFactor(0.8)
+                Text(create.label).lineLimit(1).minimumScaleFactor(0.8)
             }
-            .foregroundStyle(Theme.onInk)
-            .padding(.horizontal, 18)
-            .frame(minHeight: 48)
-            .background(Theme.ink, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-            .shadow(color: .black.opacity(0.28), radius: 0, y: 1)
-            .contentShape(Capsule())
+            .inkCommit(height: 44)
         }
         .buttonStyle(PressStyle())
         .contextMenu {
@@ -425,48 +236,6 @@ struct AppDrawer: View {
             }
         }
         .accessibilityIdentifier("drawer-new")
-    }
-}
-
-// MARK: - The menu circle on pushed screens
-
-/// The drawer as every screen in a phone place sees it, pushed screens included. Set by the phone
-/// shell only (nil on iPad). Sheets and full-screen covers never show it: `ThorbisBackButton`
-/// checks it is not inside a presentation, and customer mode clears it outright.
-private struct PaperDrawerReachKey: EnvironmentKey {
-    static let defaultValue: PaperDrawerControl? = nil
-}
-extension EnvironmentValues {
-    var paperDrawerReach: PaperDrawerControl? {
-        get { self[PaperDrawerReachKey.self] }
-        set { self[PaperDrawerReachKey.self] = newValue }
-    }
-}
-
-/// Reports whether the view sits inside a sheet or full-screen cover (any presented controller),
-/// so a pushed screen there keeps Back alone.
-struct PresentationProbe: UIViewRepresentable {
-    @Binding var presented: Bool
-
-    func makeUIView(context: Context) -> ProbeView {
-        let view = ProbeView()
-        view.report = { value in if presented != value { presented = value } }
-        return view
-    }
-
-    func updateUIView(_ uiView: ProbeView, context: Context) {}
-
-    final class ProbeView: UIView {
-        var report: ((Bool) -> Void)?
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            guard window != nil else { return }
-            var responder: UIResponder? = self
-            while let next = responder?.next, !(next is UIViewController) { responder = next }
-            let controller = responder?.next as? UIViewController
-            let presented = controller?.presentingViewController != nil
-            DispatchQueue.main.async { [weak self] in self?.report?(presented) }
-        }
     }
 }
 

@@ -251,6 +251,8 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         let app = launch(["--paper-preview-job-invoices-equal-balances"], screen: "job-invoice")
         let first = app.buttons["job-invoice-\(invoice)"]
         XCTAssertTrue(first.waitForExistence(timeout: 15))
+        // Cream sheet: the invoice row can start under the pinned Collect payment commit.
+        app.scrollClearOfFoot(first)
         first.tap()
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
         // Since #210 the drawer's menu circle sits beside Back on pushed screens, so take Back by name.

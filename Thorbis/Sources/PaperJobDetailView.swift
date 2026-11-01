@@ -35,6 +35,8 @@ struct JobDetailView: View {
     @State private var note = ""
     /// Speech-to-text into `note`; it only fills the draft, saving still goes through `saveNote`.
     @StateObject private var dictation = NoteDictation()
+    /// The drive to this job's place while it is still ahead (the map strip's pill).
+    @StateObject private var eta = NextStopETA()
     @Environment(\.scenePhase) private var scenePhase
     @State private var reason = ""
     @State private var nextAction = ""
@@ -42,6 +44,8 @@ struct JobDetailView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var selectedTab = "Overview"
+    /// True while the job is scrolled past the top of its sections (the tabs are pinned).
+    @State private var tabsPinned = false
     @StateObject private var documents = JobDocumentCollections()
     @State private var documentGeneration: UUID?
     private var invoiceRead: JobDocumentRead<InvoiceRecord>? { documents.invoices }
@@ -178,6 +182,9 @@ struct JobDetailView: View {
                     // At accessibility sizes a fixed action can cover most of a small screen.
                     // Keep the same action early in the scrollable content instead.
                     if typeSize.isAccessibilitySize { primaryAction }
+                    // Where the sections start; it reports when the tabs are pinned (scrolled past).
+                    Color.clear.frame(height: 0).id("job-sections")
+                        .onGeometryChange(for: Bool.self) { $0.frame(in: .scrollView).minY < -1 } action: { tabsPinned = $0 }
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedTab {
@@ -191,9 +198,16 @@ struct JobDetailView: View {
                         .padding(.top, selectedTab == "Overview" ? (isOnSite ? 12 : 14) : 8)
                         .padding(.bottom, 28)
                     } header: {
-                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.canvas) }
+                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card) }
                     }
                     }
+                    }
+                    // A section opened while the tabs are pinned (the pinned tabs, or Due on site, Open
+                    // and See all far down the page) starts at its top. Left at the old offset, the
+                    // shorter section had the scroll view re-adjusting its offset every frame (a hang).
+                    .onChange(of: selectedTab) {
+                        guard tabsPinned else { return }
+                        proxy.scrollTo("job-sections", anchor: .top)
                     }
                     #if DEBUG
                     // `--paper-preview-scroll-history`: screenshots start at "At this address".
@@ -218,6 +232,9 @@ struct JobDetailView: View {
                     }
                     #endif
                     }
+                    // C-Job: the job lives in a panel sheet (radius 14) under the canvas bar.
+                    .background { jobSheet }
+                    .padding(.top, 6)
                 }
             } else if error == nil {
                 // MA-13: the record's shape while it loads, not a lone spinner.
@@ -431,9 +448,9 @@ struct JobDetailView: View {
                 // scrolls visibly beneath it (the destination's bottom inset isn't always ignorable).
                 composer.frame(maxWidth: .infinity)
                     .background(alignment: .top) {
-                        Theme.background.padding(.bottom, -120).ignoresSafeArea()
+                        Theme.card.padding(.bottom, -120).ignoresSafeArea()
                     }
-            } else if !typeSize.isAccessibilitySize { primaryAction }
+            } else if !typeSize.isAccessibilitySize { primaryAction.environment(\.thorbisSheetCanvas, true) }
         }
         .sheet(isPresented: $showPause) { SheetSurface {
             // v2 modal: two sunk fields, one ink commit in the sheet's pad. The commit is never
@@ -474,6 +491,16 @@ struct JobDetailView: View {
     /// Native bar with Thorbis circles: our back on the left (`thorbisDestination`), share and
     /// the job's one menu on the right (HIG-005, JS-02).
     @ToolbarContentBuilder private var toolbarActions: some ToolbarContent {
+        if let job, let context = contextLine(job) {
+            // C-Job: where this job sits in the day, beside Back ("Today · Stop 3 of 6").
+            ThorbisToolbarItem(placement: .principal) {
+                Text(context)
+                    .font(Theme.font(13, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("job-context")
+            }
+        }
         if let job {
             ThorbisToolbarItem(placement: .topBarTrailing) {
                 // One quiet circle (Job.dc.html): Share job sits in the menu with the rest, so it is always there.
@@ -487,6 +514,14 @@ struct JobDetailView: View {
                 }
             }
         }
+    }
+
+    /// The panel sheet the job sits in: radius 14 at the top, a 1px rim, down past the home indicator.
+    private var jobSheet: some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: Theme.cardRadius, topTrailingRadius: Theme.cardRadius, style: .continuous)
+        return shape.fill(Theme.card)
+            .overlay(shape.stroke(Theme.border.opacity(0.6), lineWidth: 1))
+            .ignoresSafeArea(edges: .bottom)
     }
 
     /// JS-03: only what this person can do now, without the step the bar is carrying.
@@ -603,106 +638,101 @@ struct JobDetailView: View {
         .accessibilityLabel("Job status, \((queued ?? job.status).statusLabel)")
     }
 
-    /// Redesign phase 2 (Linear issue detail): the job number as an eyebrow, the street as the
-    /// title with the problem under it, one row of property chips (status, time, technician,
-    /// membership, what's owed), then the circles; on site, what to know before going in sits
-    /// right under the chips.
+    /// Cream sheet (C-Job.dc.html): the status pill (it opens the status popover), the street as the
+    /// title, the problem and who, one meta line (when · who · job number · membership), the map
+    /// strip, then Call, Text and Directions as labelled rimmed buttons. On site, what to know before
+    /// going in sits right under the meta line. Rescheduling and assigning live in the ••• menu.
     private func fullHeader(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Job number only: jobs have no type on record, so none is shown.
-            Text("JOB-\(job.id.suffix(4).uppercased())")
-                .font(Theme.monoFont(13, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .accessibilityLabel("Job \(job.id.suffix(4).uppercased().map(String.init).joined(separator: " "))")
-                .accessibilityIdentifier("job-number")
-                // The job number shows once, here; a long press copies the full ID (also in •••).
-                .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
+            statusControl(job)
             Text(displayTitle(job))
-                .font(Theme.font(30, weight: .medium))
+                .font(Theme.font(28, weight: .medium))
                 .tracking(-0.6)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
+                .padding(.top, 10)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("job-title")
             if let subtitle = headerSubtitle(job) {
                 Text(subtitle)
-                    .font(Theme.font(16))
+                    .font(Theme.font(15))
                     .foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
-            propertyChips(job).padding(.top, 16)
+            Text(metaLine(job))
+                .font(Theme.font(13)).monospacedDigit()
+                .foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+                .accessibilityIdentifier("job-number")
+                // A long press copies the full ID (also in •••).
+                .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
             // On site, what to know before touching anything comes before every action.
             if isOnSite, let banner = accessBanner(job) {
                 banner.padding(.top, 16)
             }
-            reachCircles(job).padding(.top, 16)
+            MapStrip(pill: MapStrip.drive(minutes: eta.minutes, miles: nil), aspect: 350 / 96, pillAtBottom: true,
+                     hasPlace: jobCoordinates(job) != nil || !customerLocations.isEmpty)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border.opacity(0.7), lineWidth: 1))
+                .padding(.top, 16)
+                .task(id: "eta|\(job.id)|\(shownStatus(job))|\(jobCoordinates(job).map { "\($0.latitude),\($0.longitude)" } ?? "")|\(session.isOffline)") {
+                    let ahead = ["scheduled", "dispatched", "en_route"].contains(shownStatus(job))
+                    await eta.update(to: jobCoordinates(job), key: "\(job.id)|\(job.locationId ?? "")", enabled: ahead && !session.isOffline)
+                }
+            reachCircles(job).padding(.top, 12)
         }
         .padding(.horizontal, Theme.gutter)
-        .padding(.top, 4)
+        .padding(.top, 20)
         .padding(.bottom, 14)
     }
 
-    /// The problem under the street. The customer's name is said once, in the customer row below.
-    private func headerSubtitle(_ job: JobRecord) -> String? {
-        street(job) == nil ? nil : job.title
+    /// The job's own place, when its service location is on file with a position.
+    private func jobCoordinates(_ job: JobRecord) -> FieldCoordinates? {
+        guard let locationID = job.locationId else { return nil }
+        return customerLocations.first { $0.id == locationID }?.coordinates
     }
 
-    /// Linear's property chips, wrapping onto more rows as needed: the status opens the status
-    /// menu, the time reschedules, the technician (re)assigns, what's owed opens Money. A chip
-    /// with nothing to do for this role is a label, never a button that does nothing.
-    private func propertyChips(_ job: JobRecord) -> some View {
-        let canSchedule = session.can("job.assign", feature: "jobs")
-        let canAssign = session.can("job.assign", feature: "jobs")
+    /// "10:30 a.m. · Ramon M. · JOB-2214 · Member 15% off": when, who, the job number, membership.
+    private func metaLine(_ job: JobRecord) -> String {
         let arrived = isOnSite && outbox.pendingStatus(for: job.id) == nil ? JobFiltering.date(job.arrivedAt) : nil
-        let scheduled = arrived == nil ? JobFiltering.date(job.scheduledFor) : nil
-        let assignee = assignedDisplayName(for: job)
-        let balance = invoiceBalanceCents.flatMap { $0 > 0 ? $0 : nil }
-        return FlowRow(spacing: 6, lineSpacing: 6) {
-            statusControl(job)
-            if let arrived {
-                WrappingPropertyChip("Arrived \(arrived.tradeTime)", symbol: "clock")
-                    .accessibilityLabel("Arrived \(arrived.tradeTime)")
-            } else if let scheduled {
-                WrappingPropertyChip(scheduled.visitLabel(), symbol: "calendar", action: canSchedule ? { showSchedule = true } : nil)
-                    .accessibilityHint(canSchedule ? "Change the scheduled time" : "")
-                    .accessibilityIdentifier("job-chip-time")
-            } else if job.status != "completed", job.status != "canceled" {
-                WrappingPropertyChip("Not scheduled", symbol: "calendar", textColor: Theme.muted,
-                                     action: canSchedule ? { showSchedule = true } : nil)
-                    .accessibilityHint(canSchedule ? "Schedule the visit" : "")
-                    .accessibilityIdentifier("job-chip-time")
-            }
-            Group {
-                if let assignee, assignee != "Assigned" {
-                    // Only the signed-in person can be named; others need the roster (BYR-1599).
-                    WrappingPropertyChip(text: shortName(assignee), action: canAssign ? { showAssign = true } : nil) {
-                        InitialsAvatar(name: assignee, size: 18).accessibilityHidden(true)
-                    }
-                } else if assignee != nil {
-                    WrappingPropertyChip("Assigned", symbol: "person.fill", action: canAssign ? { showAssign = true } : nil)
-                } else {
-                    WrappingPropertyChip("Unassigned", symbol: "person.crop.circle.dashed", textColor: Theme.muted,
-                                         action: canAssign ? { showAssign = true } : nil)
-                }
-            }
-            .accessibilityLabel(assignee.map { $0 == "Assigned" ? "Assigned technician" : "Technician, \($0)" } ?? "No technician assigned")
-            .accessibilityHint(canAssign ? "Assign a technician" : "")
-            .accessibilityIdentifier("job-chip-tech")
-            if let memberPricing, memberPricing.isMember {
-                // v2: a quiet property like the rest; the word says it, no green wash.
-                WrappingPropertyChip(memberPricing.discountPercent > 0 ? "Member · \(memberPricing.discountPercent)% off" : "Member",
-                                     symbol: "star")
-                    .accessibilityIdentifier("job-chip-member")
-            }
-            if let balance {
-                WrappingPropertyChip("\(jobShortMoney(balance, currency: "USD"))\u{00A0}due", symbol: "dollarsign.circle",
-                                     action: { withMotion(.snappy) { selectedTab = "Money" } })
-                    .accessibilityLabel("\(money(balance, currency: "USD"))\u{00A0}due")
-                    .accessibilityHint("Opens Money")
-                    .accessibilityIdentifier("job-chip-amount")
-            }
+        var parts: [String] = []
+        if let arrived {
+            parts.append("Arrived \(arrived.tradeTime)")
+        } else if let scheduled = JobFiltering.date(job.scheduledFor) {
+            parts.append(Calendar.current.isDateInToday(scheduled) ? scheduled.tradeTime : scheduled.visitLabel())
+        } else if job.status != "completed", job.status != "canceled" {
+            parts.append("Not scheduled")
         }
+        if let assignee = assignedDisplayName(for: job) {
+            parts.append(assignee == "Assigned" ? "Assigned" : shortName(assignee))
+        } else {
+            parts.append("Unassigned")
+        }
+        parts.append("JOB-\(job.id.suffix(4).uppercased())")
+        if let memberPricing, memberPricing.isMember {
+            parts.append(memberPricing.discountPercent > 0 ? "Member \(memberPricing.discountPercent)% off" : "Member")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Where this job sits, for the bar: "Today · Stop 3 of 6" on the person's day, else when it is.
+    private func contextLine(_ job: JobRecord) -> String? {
+        guard let date = JobFiltering.date(job.scheduledFor) else { return nil }
+        guard Calendar.current.isDateInToday(date) else { return date.visitLabel() }
+        let scope = ScheduleScope.initial(schedulesOwnDay: WorkRole(session).schedulesOwnDay, actorID: session.user?.id)
+        let visits = TodayNumbers.visits(store.jobs, assignee: scope.assignee(session.user?.id, range: .today))
+        let stops = TodayStopOrder.ordered(visits) { outbox.pendingStatus(for: $0.id) ?? $0.status }
+        guard let at = stops.firstIndex(where: { $0.id == job.id }) else { return "Today" }
+        return "Today · Stop \(at + 1) of \(stops.count)"
+    }
+
+    /// The problem and who it is for, under the street.
+    private func headerSubtitle(_ job: JobRecord) -> String? {
+        let problem = street(job) == nil ? nil : job.title
+        let customer = store.customerName(job.customerId)
+        let parts = [problem, customer == "Customer" ? nil : customer].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// The access facts for the job's place, from the loaded locations or, offline, the copy saved on this phone.
@@ -745,55 +775,55 @@ struct JobDetailView: View {
         return JobLocationPolicy.accountLocations(locations, customerID: job.customerId, organizationID: job.organizationId)
     }
 
-    /// Job.dc.html: Call, Text, Directions and Show customer as one row of labelled circles.
-    /// Directions always require choosing an account location; no job site is inferred.
+    /// C-Job: Call, Text and Directions as labelled rimmed buttons, 12pt apart (stacked at accessibility
+    /// sizes). Directions always require choosing an account location; no job site is inferred.
     private func reachCircles(_ job: JobRecord) -> some View {
         let phone = customerContext(job) == contactsContext ? customerPhone : nil
         let reach = JobReach(phone: phone, email: nil)
-        let columns = typeSize.isAccessibilitySize ? 2 : 4
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: columns), spacing: 12) {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Button { if let call = reach.call { openURL(call) } } label: {
-                JobCircleLabel(title: "Call", symbol: "phone", enabled: reach.call != nil)
+                RimmedButtonLabel(title: "Call", symbol: "phone", enabled: reach.call != nil)
             }
             .buttonStyle(PressStyle())
             .disabled(reach.call == nil)
             .accessibilityLabel("Call \(store.customerName(job.customerId))")
             .accessibilityIdentifier("job-call")
             Button { if let text = reach.text { openURL(text) } } label: {
-                JobCircleLabel(title: "Text", symbol: "message", enabled: reach.text != nil)
+                RimmedButtonLabel(title: "Text", symbol: "message", enabled: reach.text != nil)
             }
             .buttonStyle(PressStyle())
             .disabled(reach.text == nil)
             .accessibilityLabel("Text \(store.customerName(job.customerId))")
             .accessibilityIdentifier("job-text")
             directionsCircle
-            Button { openCustomerView(.home) } label: {
-                JobCircleLabel(title: "Show customer", symbol: "iphone", enabled: canOpenCustomerView)
-            }
-            .buttonStyle(PressStyle())
-            .disabled(!canOpenCustomerView)
-            .accessibilityLabel("Show customer")
-            .accessibilityHint("Hands the device to the customer for their estimates, invoices and details")
-            .accessibilityIdentifier("job-customer-view")
         }
     }
 
     @ViewBuilder
     private var directionsCircle: some View {
-        if !customerLocations.isEmpty {
+        if customerLocations.count == 1, let only = customerLocations.first,
+           let url = JobLocationPolicy.directions(for: only.id, in: customerLocations) {
+            Button { openURL(url) } label: { RimmedButtonLabel(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond") }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Directions")
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("job-directions")
+        } else if !customerLocations.isEmpty {
             ThorbisMenu(items: customerLocations.map { place in
                 ThorbisMenuItem(place.label, icon: place.kind == "billing" ? "creditcard" : "mappin.and.ellipse",
                                 subtitle: "\(place.kind == "billing" ? "Billing" : "Service") · \(place.address)") {
                     if let url = JobLocationPolicy.directions(for: place.id, in: customerLocations) { openURL(url) }
                 }
             }, title: "Directions to") {
-                JobCircleLabel(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond")
+                RimmedButtonLabel(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond")
             }
             .accessibilityLabel("Directions")
             .accessibilityHint("Choose a customer location")
             .accessibilityIdentifier("job-directions")
         } else {
-            JobCircleLabel(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond", enabled: false)
+            RimmedButtonLabel(title: "Directions", symbol: "arrow.triangle.turn.up.right.diamond", enabled: false)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Directions, no address on file")
                 .accessibilityIdentifier("job-directions")
         }
@@ -854,7 +884,7 @@ struct JobDetailView: View {
         // v2: a neutral pill; colour sits with the word as its small mark.
         return WrappingPropertyChip(text: statusWordText(job, queued: queued, now: now), tint: Theme.fill,
                                     textColor: Theme.foreground, showsChevron: showsMenu) {
-            StatusMark(tone: tone, pending: queued != nil)
+            StatusDot(tone: tone, pending: queued != nil)
         }
     }
 
@@ -978,77 +1008,51 @@ struct JobDetailView: View {
         return true
     }
 
-    /// Redesign phase 2 (Linear's "+ Comment" row): a "+ Note" pill that opens the note composer,
-    /// a camera circle, then the one ink commit (the next step, or on site "Wrap up · N left" with
-    /// the call-the-office circle). When the commit's words won't share a row (long titles, the
-    /// office circle, larger text) the pill and circles sit on their own row above it.
+    /// C-Job's bar, in the sheet's pad: a note circle, a photo circle (the office's call circle on
+    /// site), then the one ink commit for the next step. At accessibility sizes the circles sit on
+    /// their own row above the commit.
     @ViewBuilder private var overviewBar: some View {
         let step = nextStep
         let canNote = session.can("job.note", feature: "jobs")
         let canPhoto = session.can("job.edit", feature: "jobs")
         if step != nil || canNote || canPhoto {
-            let title = step.map { onSiteWrapsUp ? commitTitle(wrapUpRows) : $0.title(resuming: job?.status == "paused") }
-            let hasOfficeCall = onSiteWrapsUp && officeContact?.callURL != nil
-            let oneRow = title != nil && !typeSize.isAccessibilitySize && typeSize < .xLarge
-                && (title?.count ?? 0) + (hasOfficeCall ? 6 : 0) <= 15
+            let circles = HStack(spacing: 12) {
+                if canNote { noteCircle }
+                if canPhoto { cameraCircle }
+                if onSiteWrapsUp { callCircle }
+            }
             VStack(spacing: 10) {
-                if oneRow {
-                    HStack(spacing: 8) {
-                        if canNote { notePill(wide: false) }
-                        if canPhoto { cameraCircle }
-                        if let step { commitButton(step) }
-                    }
-                } else {
-                    if canNote || canPhoto || hasOfficeCall {
-                        HStack(spacing: 8) {
-                            if canNote { notePill(wide: true) } else { Spacer(minLength: 0) }
-                            if canPhoto { cameraCircle }
-                            if onSiteWrapsUp { callCircle }
-                        }
-                    }
+                if typeSize.isAccessibilitySize {
+                    circles.frame(maxWidth: .infinity, alignment: .leading)
                     if let step { commitButton(step) }
+                } else {
+                    HStack(spacing: 12) {
+                        circles
+                        if let step { commitButton(step) } else { Spacer(minLength: 0) }
+                    }
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
             .background(Theme.canvas)
         }
     }
 
-    /// "+ Note": opens Activity with the note field focused, ready to type or dictate.
-    private func notePill(wide: Bool) -> some View {
-        Button { openNoteTool() } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "plus").font(.system(size: 15, weight: .medium)).accessibilityHidden(true)
-                Text(wide ? "Add a note" : "Note").font(Theme.font(16, weight: wide ? .regular : .medium))
-                    .foregroundStyle(wide ? Theme.muted : Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                if wide { Spacer(minLength: 0) }
-            }
-            .foregroundStyle(Theme.foreground)
-            .padding(.horizontal, 18).padding(.vertical, 10)
-            .frame(maxWidth: wide ? .infinity : nil, minHeight: Theme.commitHeight)
-            .background(Theme.well, in: Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel("Add a note")
-        .accessibilityHint("Opens the note composer in Activity")
-        .accessibilityIdentifier("job-bar-note")
+    /// The note circle: opens Activity with the note field focused, ready to type or dictate.
+    private var noteCircle: some View {
+        Button { openNoteTool() } label: { CreamCircleLabel(symbol: "note.text", size: 44) }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Add a note")
+            .accessibilityHint("Opens the note composer in Activity")
+            .accessibilityIdentifier("job-bar-note")
     }
 
     /// The bar's camera: the job's photos open straight into the camera.
     private var cameraCircle: some View {
-        Button { openCapture(.camera(stage: nil)) } label: {
-            Image(systemName: "camera")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Theme.foreground)
-                .frame(width: Theme.commitHeight, height: Theme.commitHeight)
-                .background(Theme.well, in: Circle())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel("Take photo")
-        .accessibilityHint("Opens the camera and adds the photo to this job")
-        .accessibilityIdentifier("job-bar-camera")
+        Button { openCapture(.camera(stage: nil)) } label: { CreamCircleLabel(symbol: "camera", size: 44) }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Take photo")
+            .accessibilityHint("Opens the camera and adds the photo to this job")
+            .accessibilityIdentifier("job-bar-camera")
     }
 
     /// The ink commit. On site it walks the wrap-up rows: with rows left it goes to the first one;
@@ -1066,7 +1070,7 @@ struct JobDetailView: View {
                     else { Image(systemName: canCompleteHere && next == nil ? "checkmark" : "checkmark.seal").font(.subheadline.weight(.medium)).accessibilityHidden(true) }
                     commitLabel(rows)
                 }
-                .inkCommit()
+                .inkCommit(height: 44)
             }
             .buttonStyle(PressStyle())
             .disabled(busy || creatingInvoice)
@@ -1080,7 +1084,7 @@ struct JobDetailView: View {
                     else { Image(systemName: step.symbol).font(.subheadline.weight(.medium)).accessibilityHidden(true) }
                     Text(step.title(resuming: job?.status == "paused"))
                 }
-                .inkCommit()
+                .inkCommit(height: 44)
             }
             .buttonStyle(PressStyle())
             .disabled(busy || creatingInvoice)
@@ -1139,13 +1143,7 @@ struct JobDetailView: View {
     /// Call is already in the header's circles, so it isn't repeated here (BYR-1599: no office phone, no circle).
     @ViewBuilder private var callCircle: some View {
         if let url = officeContact?.callURL {
-            Button { openURL(url) } label: {
-                Image(systemName: "phone")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Theme.foreground)
-                    .frame(width: Theme.commitHeight, height: Theme.commitHeight)
-                    .background(Theme.well, in: Circle())
-            }
+            Button { openURL(url) } label: { CreamCircleLabel(symbol: "phone", size: 44) }
             .buttonStyle(PressStyle())
             .accessibilityLabel("Call the office")
             .accessibilityIdentifier("job-onsite-call")
@@ -1192,13 +1190,14 @@ struct JobDetailView: View {
                 wrapUpPanel(job).id("job-wrap-up")
                 partsPanel
             }
-            customerPanel(job)
-            // Before you go in: access facts and equipment, here or for the customer.
+            // C-Job: what to know at this address, then the money, then who it is for.
             JobPropertyHistorySection(job: job, part: .place, locations: customerLocations,
                                       locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
                                       visits: visits, visitsLoaded: visitsLoaded,
                                       showsFacts: !(isOnSite && accessBanner(job) != nil))
                 .id("job-property-history")
+            moneyPanel(job)
+            customerPanel(job)
             photosStrip(job)
             latestActivity(job).id("job-latest-activity")
             // Left out once the visits answer with none here, so an empty section adds no gap above Money.
@@ -1208,7 +1207,6 @@ struct JobDetailView: View {
                                           locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
                                           visits: visits, visitsLoaded: visitsLoaded)
             }
-            moneyPanel(job)
             followUpsPanel
             // JS-05: only when the platform recorded the call that booked this job.
             if let bookingCall { JobBookingCallSection(call: bookingCall) }
@@ -1245,6 +1243,26 @@ struct JobDetailView: View {
             } else {
                 customerRow(job, name: store.customerName(job.customerId), opens: false)
             }
+            // Hands the phone to the customer for their estimates, invoices and details.
+            Button { openCustomerView(.home) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "iphone").font(.system(size: 16, weight: .medium)).frame(width: 36)
+                        .accessibilityHidden(true)
+                    Text("Show customer").font(Theme.font(15, weight: .medium))
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+                        .accessibilityHidden(true)
+                }
+                .foregroundStyle(Theme.foreground.opacity(canOpenCustomerView ? 1 : 0.4))
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .disabled(!canOpenCustomerView)
+            .accessibilityLabel("Show customer")
+            .accessibilityHint("Hands the device to the customer for their estimates, invoices and details")
+            .accessibilityIdentifier("job-customer-view")
             if job.pauseReason != nil || job.pauseNextAction != nil {
                 VStack(alignment: .leading, spacing: 3) {
                     JobStatusWord(word: "Paused", color: Theme.warning)
@@ -1419,6 +1437,24 @@ struct JobDetailView: View {
                 if estimates.isEmpty && bills.isEmpty {
                     if loading { SkeletonRows(count: 1, leading: false, inset: 16) }
                     else { JobPanelRow(title: "No estimates or invoices yet", titleSize: 15) }
+                }
+                if let balance = invoiceBalanceCents, balance > 0 {
+                    // What is owed now, in the type colour; it opens Money.
+                    Button { withMotion(.snappy) { selectedTab = "Money" } } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            Spacer(minLength: 8)
+                            Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
+                                .foregroundStyle(Theme.foreground)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 11)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityLabel("\(money(balance, currency: "USD"))\u{00A0}due")
+                    .accessibilityHint("Opens Money")
+                    .accessibilityIdentifier("job-chip-amount")
                 }
             }
         }
