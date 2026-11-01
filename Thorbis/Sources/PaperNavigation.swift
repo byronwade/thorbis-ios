@@ -154,7 +154,7 @@ struct RootView: View {
             ZStack(alignment: .leading) {
                 // Kept built under the card so opening (from a root or a pushed screen) only slides.
                 if !reduceMotion {
-                    drawer(width: width, full: typeSize.isAccessibilitySize)
+                    drawer(width: width, full: typeSize.isAccessibilitySize, visible: progress > 0)
                         .frame(width: width)
                         .simultaneousGesture(closeDrag(width: width))
                         .opacity(progress > 0 ? 1 : 0)
@@ -232,7 +232,7 @@ struct RootView: View {
             .offset(x: reduceMotion ? 0 : width * progress)
     }
 
-    private func drawer(width: CGFloat, full: Bool) -> some View {
+    private func drawer(width: CGFloat, full: Bool, visible: Bool = true) -> some View {
         AppDrawer(
             title: session.activeOrganization?.name ?? "Thorbis",
             role: WorkRole(session),
@@ -245,6 +245,7 @@ struct RootView: View {
             create: drawerCreate,
             settingsItems: settingsItems,
             showsClose: full,
+            showsControls: visible,
             titleFocus: $drawerTitleFocus,
             search: { closeDrawer(thenRun: { openBarSearch() }) },
             close: { closeDrawer() },
@@ -255,11 +256,15 @@ struct RootView: View {
                 openRecent(item)
             }
         )
-        // VoiceOver: the drawer is a modal group while open; the escape gesture closes it.
+        // VoiceOver: the drawer is a modal group while open; the escape gesture closes it. Closed, it
+        // stays built under the card but is out of the accessibility tree: no modal trait to trap
+        // focus and no rows for VoiceOver to land on behind the card (AppDrawer leaves out its
+        // UIKit-hosted bottom controls while closed, which `accessibilityHidden` does not reach).
         .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
+        .accessibilityAddTraits(drawerOpen ? .isModal : [])
         .accessibilityAction(.escape) { closeDrawer() }
         .accessibilityIdentifier("drawer")
+        .accessibilityHidden(!drawerOpen)
     }
 
     private func openDrag(width: CGFloat) -> some Gesture {
@@ -602,6 +607,11 @@ struct RootView: View {
             return
         }
         if PaperPreview.screen == "new-estimate" { previewNewEstimate = true; return }
+        if PaperPreview.opensSheet("saved-work") {
+            // Once the seeded saved work is listed, open its review the way the gear menu does.
+            for _ in 0..<20 where savedWorkScope == nil { try? await Task.sleep(for: .milliseconds(500)) }
+            reviewScope = savedWorkScope
+        }
         if PaperPreview.screen == "offline" || PaperPreview.screen.hasPrefix("offline-") {
             // The day was opened with signal: let today's read-ahead finish, then lose signal.
             await DayPrefetch.shared.waitUntilIdle()

@@ -954,6 +954,7 @@ struct InvoicePaymentCollectionSheet: View {
     private var amountHero: some View {
         VStack(spacing: 4) {
             PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
+                .accessibilityIdentifier("collect-payment-invoice")
             // MF-01: the amount being collected is the screen.
             Text(money(amountCents ?? model.pendingRequest?.amount.amount ?? model.outstandingCents ?? 0, currency: invoice.currency))
                 .font(Theme.moneyHeroFont).tracking(-0.6)

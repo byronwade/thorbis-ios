@@ -161,8 +161,11 @@ final class CustomerDocumentBookUITests: XCTestCase {
         signFirstEstimate(app)
         XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10))
         app.buttons["Back to job documents"].tap()
-        XCTAssertTrue(app.staticTexts["Status needs refresh"].waitForExistence(timeout: 15))
-        XCTAssertFalse(app.staticTexts["Sent"].exists)
+        // The staff job screen stays in the tree under Customer view and lists the estimate as "Sent"
+        // in its Money section, so the status is read from the customer's own page.
+        let pages = app.collectionViews["customer-document-pages"]
+        XCTAssertTrue(pages.staticTexts["Status needs refresh"].waitForExistence(timeout: 15))
+        XCTAssertFalse(pages.staticTexts["Sent"].exists)
         XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
     }
 
@@ -208,7 +211,9 @@ final class CustomerDocumentBookUITests: XCTestCase {
     }
 
     private func signFirstEstimate(_ app: XCUIApplication) {
-        let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Approve and sign")).firstMatch
+        // The commit reads "Approve and sign · $190.00", or for a chosen package "Approve Sample package ·
+        // $250.00" / "Approve · $250.00" (#170), so it is found by identifier.
+        let review = app.buttons["customer-estimate-approve"]
         XCTAssertTrue(review.waitForExistence(timeout: 10))
         review.tap()
         let pad = app.descendants(matching: .any)["customer-estimate-signature-pad"]

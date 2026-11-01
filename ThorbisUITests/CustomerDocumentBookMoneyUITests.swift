@@ -109,8 +109,15 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         return app
     }
 
+    /// The customer's document pages. The staff job screen stays in the accessibility tree under
+    /// Customer view, and since #189 it lists the invoice's lines ("On the invoice"), so every check
+    /// here reads the document being shown, not the screen behind it.
+    private func pages(_ app: XCUIApplication) -> XCUIElement {
+        app.collectionViews["customer-document-pages"]
+    }
+
     private func text(_ value: String, in app: XCUIApplication) -> XCUIElement {
-        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", value)).firstMatch
+        pages(app).staticTexts.matching(NSPredicate(format: "label CONTAINS %@", value)).firstMatch
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
@@ -129,7 +136,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
 
     private func assertMoneyRow(_ title: String, _ amount: String, in app: XCUIApplication,
                                 file: StaticString = #filePath, line: UInt = #line) {
-        let row = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", title, amount)).firstMatch
+        let row = pages(app).staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", title, amount)).firstMatch
         reveal(row, in: app, file: file, line: line)
         XCTAssertTrue(row.exists, "Missing \(title) \(amount)", file: file, line: line)
     }

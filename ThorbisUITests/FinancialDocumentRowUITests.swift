@@ -12,6 +12,9 @@ final class FinancialDocumentRowUITests: XCTestCase {
         XCTAssertTrue(invoice.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(invoice.isHittable)
         invoice.tap()
-        XCTAssertTrue(app.navigationBars["Invoice"].waitForExistence(timeout: 10), app.debugDescription)
+        // Since #216 the invoice is a money room: its title ("Invoice 2209") is in the page, not the bar.
+        let title = app.staticTexts["invoice-detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(title.label, "Invoice 2209")
     }
 }

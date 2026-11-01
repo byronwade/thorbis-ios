@@ -15,10 +15,12 @@ final class JobListSearchUITests: XCTestCase {
         let field = app.textFields["Street, name, phone or number"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.typeText("Kitchen")
-        let results = app.otherElements["bar-search-results"]
+        // #214 made Search a pushed route: its results room is a scroll view, and each result is one
+        // button whose label combines street, title, customer, number and status.
+        let results = app.scrollViews["bar-search-results"]
         XCTAssertTrue(results.waitForExistence(timeout: 10))
-        XCTAssertTrue(results.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Kitchen sink backup")).firstMatch.waitForExistence(timeout: 10))
-        XCTAssertFalse(results.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "AC not cooling")).firstMatch.exists)
+        XCTAssertTrue(results.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Kitchen sink backup")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(results.buttons.matching(NSPredicate(format: "label CONTAINS %@", "AC not cooling")).firstMatch.exists)
         app.buttons["Close search"].tap()
         XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 10))
         app.buttons["Filter jobs"].tap()
@@ -45,7 +47,12 @@ final class JobListSearchUITests: XCTestCase {
         let commit = app.buttons["book-job-commit"]
         XCTAssertTrue(commit.exists)
         XCTAssertLessThan(customer.frame.minY, commit.frame.minY)
-        XCTAssertFalse(commit.isEnabled)
+        // Since #216 the commit is never pre-disabled ("Don't lock the commit"): pressed without a
+        // caller it books nothing, stays on the sheet and says what is missing under the caller.
+        commit.tap()
+        XCTAssertTrue(app.staticTexts["Pick who's calling, or add them as a new customer."].waitForExistence(timeout: 5))
+        XCTAssertTrue(customer.exists)
+        XCTAssertTrue(commit.exists)
     }
 
     func testUnscheduledRowOpensScheduleSheetDirectly() {

@@ -82,6 +82,8 @@ struct MediaTile<Thumb: View>: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay { image }
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            // A filled thumbnail overflows its square; taps must stay on this tile.
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(selected ? Theme.brand : Theme.border.opacity(0.5), lineWidth: selected ? 3 : 1)

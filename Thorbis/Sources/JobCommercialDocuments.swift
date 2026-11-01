@@ -183,10 +183,17 @@ enum JobDocumentsLoader {
         var ids = scope.originEstimateID.map { [$0] } ?? []
         var complete = true
         var linksRead = false
+        var linksSaved = false
         do {
             let links = try await api.fieldJobEstimateLinks(scope.jobID)
             guard isCurrent(), !Task.isCancelled else { return nil }
             linksRead = true
+            // A list saved on this phone (no signal) shows the job's estimates, but it can't vouch for
+            // what belongs to the job now, so none of them is fresh enough to decide on.
+            if api.savedCopyDate("/v1/jobs/\(scope.jobID)/estimates") != nil {
+                linksSaved = true
+                complete = false
+            }
             for link in links {
                 guard link.jobId == scope.jobID else { complete = false; continue }
                 ids.append(link.estimateId)
@@ -215,7 +222,7 @@ enum JobDocumentsLoader {
                 }
                 records.append(record)
                 // A copy saved on this phone is shown, but is not a fresh read to act on.
-                if api.savedCopyDate("/v1/estimates/\(id)") == nil { fresh.insert(record.id) }
+                if !linksSaved, api.savedCopyDate("/v1/estimates/\(id)") == nil { fresh.insert(record.id) }
             } catch is CancellationError { return nil }
             catch {
                 guard isCurrent(), !Task.isCancelled else { return nil }

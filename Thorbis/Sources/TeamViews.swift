@@ -279,7 +279,12 @@ struct TeamView: View {
             }
         }
         .refreshable { await load() }
-        .task { await load() }
+        .task {
+            #if DEBUG
+            if PaperPreview.opensSheet("team-invite") { inviting = true }
+            #endif
+            await load()
+        }
         .sheet(item: $changing) { member in SheetSurface {
             MemberRoleSheet(member: member) { await load() }
         } }

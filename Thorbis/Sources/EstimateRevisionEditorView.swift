@@ -119,6 +119,7 @@ struct EstimateRevisionEditorView: View {
                 PriceBookCartPicker(
                     destination: optionName(target.optionID),
                     canUsePriceBook: canUsePriceBook,
+                    notice: editingDraft && canRevise ? "Draft changes can't be saved yet." : nil,
                     quantityInDraft: { id in lines(for: target.optionID).quantity(ofPriceBookItem: id) },
                     secondaryPriceText: { memberPricing?.secondaryPriceText($0) },
                     addItem: { add($0, to: target) },

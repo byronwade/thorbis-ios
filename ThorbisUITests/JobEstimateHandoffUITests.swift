@@ -19,6 +19,13 @@ func thorbisSection(_ app: XCUIApplication, _ name: String) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", "job-section-" + name.lowercased(), name)).firstMatch
 }
 
+/// The job has loaded with its balance. Since #189 an in-progress job's bar reads "Wrap up · N left"
+/// (collecting is a wrap-up row and Money's bar), so the balance is read from the Money section,
+/// whose spoken label carries it ("Money, $340.00 due"; identifier "job-section-money").
+func thorbisJobBalanceLoaded(_ app: XCUIApplication, _ amount: String) -> XCUIElement {
+    app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "job-section-money", amount)).firstMatch
+}
+
 /// Customer view's home: bring a document card fully above the fixed hand-back footer before tapping it.
 func thorbisRevealInCustomerView(_ element: XCUIElement, in app: XCUIApplication) {
     XCTAssertTrue(element.waitForExistence(timeout: 10))

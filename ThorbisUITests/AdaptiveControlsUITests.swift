@@ -65,8 +65,15 @@ final class SetupRecoveryUITests: XCTestCase {
         app.launch()
         let retry = app.buttons["Try again"]
         XCTAssertTrue(retry.waitForExistence(timeout: 20))
-        if !retry.isHittable { app.swipeUp() }
+        // At this size the banner sits just above the pinned commit, which covers its Try again. A full
+        // swipe overshoots it past the top, so scroll in short drags until it is clear of both edges.
+        let top = app.frame.height * 0.12, bottom = app.frame.height * 0.62
+        for _ in 0..<12 where !retry.isHittable || retry.frame.maxY > bottom {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.42)))
+        }
         XCTAssertTrue(retry.isHittable)
+        XCTAssertGreaterThan(retry.frame.minY, top)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Setup retry at accessibility text size"
         screenshot.lifetime = .keepAlways
@@ -82,7 +89,8 @@ final class SetupRecoveryUITests: XCTestCase {
         app.launch()
         let retry = app.buttons["Try again"]
         XCTAssertTrue(retry.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts["Some steps couldn't be checked."].exists)
+        // #179 set the banner in typographic quotes: "couldn’t".
+        XCTAssertTrue(app.staticTexts["Some steps couldn\u{2019}t be checked."].exists)
         let payment = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Get paid by card")).firstMatch
         XCTAssertTrue(payment.exists)
         XCTAssertTrue(payment.value as? String == "Status unavailable")

@@ -62,7 +62,7 @@ final class JobDocumentsUITests: XCTestCase {
     func testAllJobInvoicesAreVisibleAndOpenTheirOwnDetail() {
         continueAfterFailure = false
         let app = preview()
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Collect $340.00")).firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(thorbisJobBalanceLoaded(app, "$340.00").waitForExistence(timeout: 15))
         XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 15))
         thorbisSection(app, "Money").tap()
         let issued = app.buttons["job-invoice-\(invoiceA)"]
@@ -248,14 +248,19 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 15))
         first.tap()
         XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.firstMatch.tap()
+        // Since #210 the drawer's menu circle sits beside Back on pushed screens, so take Back by name.
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["job-invoice-\(invoice)"].waitForExistence(timeout: 5))
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
         collect.tap()
         XCTAssertTrue(app.navigationBars["Collect payment"].waitForExistence(timeout: 5))
-        let collection = app.scrollViews.containing(.textField, identifier: "Amount to collect in dollars").firstMatch
-        XCTAssertTrue(collection.staticTexts["INV-2209"].exists)
-        XCTAssertFalse(collection.staticTexts["INV-2240"].exists)
+        // Since #216 the collection leads with "INV-2209 · customer" over the amount, and the amount
+        // field only shows for a custom amount, so the invoice is read from that line.
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 5))
+        XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
+        XCTAssertFalse(collecting.label.contains("INV-2240"), collecting.label)
     }
 
     func testLegacyCustomerRefreshKeepsBothKnownJobInvoices() {
@@ -319,7 +324,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         return app
     }
     private func ready(_ app: XCUIApplication) {
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Collect $340.00")).firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(thorbisJobBalanceLoaded(app, "$340.00").waitForExistence(timeout: 15))
     }
     private func handToCustomer(_ app: XCUIApplication) {
         app.buttons["Job actions"].tap()

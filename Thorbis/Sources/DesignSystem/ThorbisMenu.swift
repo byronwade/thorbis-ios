@@ -99,12 +99,17 @@ struct ThorbisMenu<Label: View>: View {
     var customerFacing = false
     /// Screenshot-only: open on appear (preview flags).
     var opensOnAppear = false
-    /// Where the popover's arrow sits. `.top` grows the menu down from its control; a control near
-    /// the bottom of the screen (the drawer's gear) passes `.bottom` so the menu grows up, on screen.
-    var arrowEdge: Edge = .top
+    /// Where the popover's arrow sits. `.top` grows the menu down from its control, `.bottom` grows it
+    /// up. Left nil (the default) it follows the control: down from the top half of the window, up
+    /// from the bottom half, so a select low in a sheet (a long location list) opens where it has
+    /// room instead of squeezing into the strip below it.
+    var arrowEdge: Edge? = nil
     @ViewBuilder var label: () -> Label
 
     @State private var model = ThorbisMenuModel()
+    @State private var inLowerHalf = false
+
+    private var resolvedEdge: Edge { arrowEdge ?? (inLowerHalf ? .bottom : .top) }
 
     var body: some View {
         Group {
@@ -114,7 +119,11 @@ struct ThorbisMenu<Label: View>: View {
                 button
             }
         }
-        .popover(isPresented: $model.isPresented, arrowEdge: arrowEdge) {
+        .onGeometryChange(for: Bool.self) { proxy in
+            let height = ThorbisMenuWindow.height
+            return height > 0 && proxy.frame(in: .global).midY > height / 2
+        } action: { inLowerHalf = $0 }
+        .popover(isPresented: $model.isPresented, arrowEdge: resolvedEdge) {
             ThorbisMenuPanel(items: items, title: title, customerFacing: customerFacing,
                              onSelect: { model.choose($0) }, onClose: { model.isPresented = false })
                 .onDisappear { model.finish() }
@@ -132,6 +141,15 @@ struct ThorbisMenu<Label: View>: View {
         Button { model.isPresented = true } label: { label() }
             .buttonStyle(PressStyle())
             .sensoryFeedback(.selection, trigger: model.isPresented) { _, open in open }
+    }
+}
+
+/// The key window's height, in the global coordinate space SwiftUI reports frames in.
+@MainActor enum ThorbisMenuWindow {
+    static var height: CGFloat {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.first?.windows.first
+        return window?.bounds.height ?? 0
     }
 }
 

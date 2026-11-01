@@ -922,7 +922,9 @@ struct EstimateBuilderSection<Header: View>: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(disabled || lines.count >= [EstimateRevisionLineDraft].maximumLines)
+                    .accessibilityValue(label)
                     .accessibilityHint("Opens the price book")
+                    .accessibilityIdentifier("estimate-add-item")
                     if showTotal, !lines.isEmpty {
                         VStack(alignment: .trailing, spacing: 2) {
                             HStack(alignment: .firstTextBaseline) {
