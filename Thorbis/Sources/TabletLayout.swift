@@ -528,6 +528,9 @@ struct TabletRoot: View {
         .opacity(0)
         .frame(width: 0, height: 0)
         .allowsHitTesting(false)
+        // Keyboard only: no element for VoiceOver or UI tests (a plain accessibilityHidden on the
+        // stack still left the zero-size buttons in the tree).
+        .accessibilityElement(children: .ignore)
         .accessibilityHidden(true)
     }
 
