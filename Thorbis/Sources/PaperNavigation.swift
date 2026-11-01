@@ -775,6 +775,11 @@ enum PaperRoute: Hashable {
     case team
     case reports
     case scorecard
+    case teamGoals
+    /// Lists opened from the scorecard, filtered to the records behind a number (TG-19).
+    case filteredInvoices(RecordFilter)
+    case filteredEstimates(RecordFilter)
+    case filteredJobs(RecordFilter)
     case assign(jobID: String)
     case billing
     case billingSchedule(String)
@@ -833,6 +838,10 @@ struct PaperRouteView: View {
         case .team: TeamView()
         case .reports: ReportsView()
         case .scorecard: ScorecardView()
+        case .teamGoals: TeamGoalsView()
+        case .filteredInvoices(let filter): InvoicesView(filter: filter)
+        case .filteredEstimates(let filter): EstimatesView(filter: filter)
+        case .filteredJobs(let filter): FilteredJobsView(filter: filter)
         case .assign(let jobID): JobAssignmentView(jobID: jobID)
         case .billing: BillingSchedulesView()
         case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)

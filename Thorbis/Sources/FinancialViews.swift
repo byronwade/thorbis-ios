@@ -1,9 +1,13 @@
 import SwiftUI
 
 struct EstimatesView: View {
+    /// Opened from the scorecard: only the estimates behind Close rate (TG-19), until cleared.
+    var filter: RecordFilter? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @State private var showAll = false
+    @State private var missing = 0
     @State private var records: [EstimateRecord] = []
     @State private var loading = true
     @State private var error: String?
@@ -23,6 +27,7 @@ struct EstimatesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) { await load() } }
+                if let active = activeFilter { RecordFilterBar(filter: active, missing: missing) { showAll = true } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(estimates: records) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"]), id: \.0) { status, group in
@@ -50,7 +55,7 @@ struct EstimatesView: View {
         .navigationTitle("Estimates")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $search, prompt: "Title, customer or EST number")
-        .task { await load() }
+        .task(id: showAll) { await load() }
         .refreshable { await load() }
         .toolbar {
             // Neutral like the back button beside it; blue stays for links and selection.
@@ -58,9 +63,24 @@ struct EstimatesView: View {
         }
         .sheet(isPresented: $showCreate, onDismiss: { Task { await load() } }) { NewEstimateView() }
     }
+    private var activeFilter: RecordFilter? { showAll ? nil : filter }
+
     private func load() async {
         loading = true
         defer { loading = false }
+        if let active = activeFilter {
+            let result = await FilteredRecords.load(active.ids, fetch: { id in
+                let estimate = try await api.fieldEstimate(id)
+                JobDetailCache.save(estimate: estimate)
+                return estimate
+            }, cached: { JobDetailCache.estimate($0) })
+            // "Show all" while this was loading: the unfiltered list owns the screen now.
+            guard !Task.isCancelled, activeFilter == active else { return }
+            records = result.records
+            missing = result.missing
+            error = nil
+            return
+        }
         do { records = try await api.fieldEstimates(); error = nil }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
@@ -296,7 +316,9 @@ struct EstimateDetailView: View {
     }
     private func load() async {
         do {
-            record = try await api.fieldEstimate(id)
+            let loaded = try await api.fieldEstimate(id)
+            record = loaded
+            JobDetailCache.save(estimate: loaded)
             error = nil
             if let customer = record?.customerId { memberPricing = try? await api.memberPricing(customer) }
         }
@@ -305,8 +327,12 @@ struct EstimateDetailView: View {
 }
 
 struct InvoicesView: View {
+    /// Opened from the scorecard: only the invoices behind Sold (TG-19), until cleared.
+    var filter: RecordFilter? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
+    @State private var showAll = false
+    @State private var missing = 0
     @State private var records: [InvoiceRecord] = []
     @State private var error: String?
     @State private var loading = true
@@ -324,6 +350,7 @@ struct InvoicesView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error { ErrorBanner(message: error) { await load() } }
+                if let active = activeFilter { RecordFilterBar(filter: active, missing: missing) { showAll = true } }
                 if loading && records.isEmpty { SkeletonRows(count: 6, leading: false) }
                 if !records.isEmpty { summaryLine(invoices: records) }
                 ForEach(paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"]), id: \.0) { status, group in
@@ -354,12 +381,24 @@ struct InvoicesView: View {
         .navigationTitle("Invoices")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $search, prompt: "Customer or INV number")
-        .task { await load() }
+        .task(id: showAll) { await load() }
         .refreshable { await load() }
     }
+    private var activeFilter: RecordFilter? { showAll ? nil : filter }
+
     private func load() async {
         loading = true
         defer { loading = false }
+        if let active = activeFilter {
+            let result = await FilteredRecords.load(active.ids, fetch: { try await api.fieldInvoice($0) },
+                                                    cached: { JobDetailCache.invoice($0) })
+            // "Show all" while this was loading: the unfiltered list owns the screen now.
+            guard !Task.isCancelled, activeFilter == active else { return }
+            records = result.records
+            missing = result.missing
+            error = nil
+            return
+        }
         do { records = try await api.fieldInvoices(); error = nil }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
     }

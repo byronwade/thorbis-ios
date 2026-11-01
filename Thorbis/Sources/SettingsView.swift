@@ -53,6 +53,12 @@ struct SettingsView: View {
                             row("Review requests", symbol: "star.bubble", value: nil)
                         }
                     }
+                    // TG-07: whoever may see the team's numbers sets its goals.
+                    if session.can("organization.performance.view") {
+                        NavigationLink(value: PaperRoute.teamGoals) {
+                            row("Team goals", symbol: "target", value: nil)
+                        }
+                    }
                 }
 
                 Section("This phone") {
