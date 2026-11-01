@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// `GET /v1/reports/scorecard` (Thorbis-TanStack composition/scorecard.ts, BYR-1565).
 /// Money is integer minor units. A number the caller can't see is null, never zero (TG-13).
