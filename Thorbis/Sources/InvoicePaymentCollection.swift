@@ -46,6 +46,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     @Published private(set) var loadError: String?
     @Published private(set) var paymentError: String?
     @Published private(set) var pendingRequest: FieldRecordPaymentRequest?
+    /// The invoice and payments shown are the copy last saved on this phone (OF-04).
+    @Published private(set) var offlineCopy = false
+    /// Where cash and check go when there is no signal (OF-08); set by the screen that owns this.
+    weak var outbox: FieldOutbox?
+    var policyVersion = 0
 
     private let api: APIClient
     private let invoiceID: String
@@ -79,8 +84,22 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         return max(0, balance)
     }
 
+    /// Cash and check taken on this phone and not yet recorded. They never lower the balance due
+    /// (OF-02), but they do stop the same money being collected twice.
+    var waitingCents: Int {
+        guard let outbox else { return 0 }
+        let queued = outbox.waitingPayments(invoiceID: invoiceID).reduce(0) { $0 + $1.amountCents }
+        // Recorded from the queue but not yet in this screen's history: still held until reload.
+        let landed = outbox.recordedPayments
+            .filter { recorded in recorded.invoiceId == invoiceID && !payments.contains { $0.idempotencyKey == recorded.idempotencyKey } }
+            .reduce(0) { $0 + $1.amountCents }
+        return queued + landed
+    }
+
+    var collectableCents: Int? { outstandingCents.map { max(0, $0 - waitingCents) } }
+
     var canOfferCollection: Bool {
-        invoice?.status == "issued" && invoice?.currency == "USD" && (outstandingCents ?? 0) > 0
+        invoice?.status == "issued" && invoice?.currency == "USD" && (collectableCents ?? 0) > 0
     }
 
     var paymentTotalCents: Int? {
@@ -101,8 +120,10 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     var waitingForProjection: Bool { acceptedPaymentID != nil }
 
     var canRecordPayment: Bool {
+        // Offline, a saved history may be missing or older than the invoice. Only cash and check can
+        // be taken then, and the server checks the balance when they record (OF-08).
         canOfferCollection && !isLoading && !isRecording && !waitingForProjection &&
-            historyComplete && paymentTotalCents == invoice?.amountPaid
+            (offlineCopy || (historyComplete && paymentTotalCents == invoice?.amountPaid))
     }
 
     /// Why Collect payment is off, while nothing is running; nil when it can be pressed. Every
@@ -150,11 +171,18 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
             guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
-            // A copy saved on this phone can be read, never collected on: payments wait for a live read.
+            // A copy saved on this phone is never charged: card, link and Tap to Pay wait for a live
+            // read. Cash and check can still be taken and record once back online (OF-04, OF-08).
             if api.savedCopyDate("/v1/invoices/\(invoiceID)") != nil {
-                loadError = "Saved on this phone. Payments need a connection."
+                guard outbox != nil else {
+                    loadError = "Saved on this phone. Payments need a connection."
+                    return
+                }
+                useOfflineCopy(loadedInvoice)
                 return
             }
+            offlineCopy = false
+            JobDetailCache.save(invoice: loadedInvoice)
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
@@ -166,6 +194,9 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                 throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
             }
             payments = loadedPayments
+            JobDetailCache.save(payments: loadedPayments, invoiceID: invoiceID)
+            // Saved with the payments in it, so the saved copy now holds them (OF-08).
+            outbox?.forgetRecorded(seen: Set(loadedPayments.map(\.idempotencyKey)))
             verifiedHistoryGeneration = generation
             historyComplete = true
             loadError = nil
@@ -180,8 +211,41 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             pendingRequest = nil
             historyComplete = false
         } catch {
+            if error.isConnectivityFailure, outbox != nil,
+               let cached = invoice ?? JobDetailCache.invoice(invoiceID), acceptInvoiceMutationResponse(cached) {
+                // No signal: the last copy, so cash and check can still be taken (OF-04, OF-08).
+                useOfflineCopy(cached)
+                return
+            }
             loadError = error.localizedDescription
         }
+    }
+
+    /// Shows the copy saved on this phone so cash and check can go to the outbox (OF-08). A payment
+    /// sent before the app lost signal keeps its key (OF-05).
+    private func useOfflineCopy(_ cached: InvoiceRecord) {
+        if pendingRequest == nil {
+            pendingRequest = intentStore.load(organizationID: cached.organizationId, invoiceID: invoiceID)
+        }
+        if let saved = JobDetailCache.payments(invoiceID), validHistory(saved, for: cached) {
+            payments = saved
+            historyComplete = true
+        }
+        offlineCopy = true
+        loadError = nil
+    }
+
+    /// Saves a cash or check payment on the phone to record once online (OF-08).
+    private func queueOffline(_ request: FieldRecordPaymentRequest) -> Bool {
+        guard request.method == .cash || request.method == .check, let outbox, let invoice,
+              outbox.enqueue(.payment(.init(invoiceId: invoiceID, jobId: invoice.jobId, amountCents: request.amount.amount,
+                                            method: request.method.rawValue, idempotencyKey: request.idempotencyKey)),
+                             policyVersion: policyVersion) != nil else { return false }
+        // The outbox now owns this payment and its key; the sheet is free for the next one.
+        pendingRequest = nil
+        intentStore.remove(organizationID: invoice.organizationId, invoiceID: invoiceID)
+        paymentError = nil
+        return true
     }
 
     private func validHistory(_ records: [FieldPaymentRecord], for invoice: InvoiceRecord) -> Bool {
@@ -222,7 +286,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             paymentError = "Enter a payment amount greater than zero with no more than two decimal places."
             return false
         }
-        guard amountCents <= (outstandingCents ?? 0) else {
+        guard amountCents <= (collectableCents ?? 0) else {
             paymentError = "The payment cannot be greater than the invoice balance."
             return false
         }
@@ -249,6 +313,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             pendingRequest = request
         }
 
+        if offlineCopy {
+            if queueOffline(request) { return true }
+            paymentError = "Couldn't save this payment on the phone. Try again."
+            return false
+        }
         isRecording = true
         paymentError = nil
         defer { isRecording = false }
@@ -268,6 +337,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         } catch is CancellationError {
             return false
         } catch {
+            if error.isConnectivityFailure, queueOffline(request) { return true }
             if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status) {
                 pendingRequest = nil
                 if let organizationID = invoice?.organizationId {
@@ -301,6 +371,7 @@ struct InvoicePaymentsSection: View {
     let onInvoiceUpdated: (InvoiceRecord) -> Void
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @State private var selectedPayment: FieldPaymentRecord?
     @State private var didOpenRefundPreview = false
 
@@ -320,7 +391,7 @@ struct InvoicePaymentsSection: View {
                 } else if model.isLoading && !model.historyComplete {
                     SkeletonRows(count: 2, leading: false, inset: 15)
                         .padding(.vertical, 8)
-                } else if model.payments.isEmpty {
+                } else if model.payments.isEmpty && outbox.waitingPayments(invoiceID: invoice.id).isEmpty {
                     // Empty names the one action (design.thorbis.com States).
                     Text(invoice.status == "draft" ? "No payments. Issue the invoice to take one."
                          : invoice.status == "issued" ? "No payments yet. Collect payment records the first one."
@@ -331,13 +402,21 @@ struct InvoicePaymentsSection: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(PaperCardMetrics.inset)
                 } else {
-                    ForEach(model.payments) { payment in
-                        Button { selectedPayment = payment } label: {
-                            paymentRow(payment)
+                    VStack(spacing: 0) {
+                        // OF-08: money taken without signal is a record waiting, never Paid.
+                        ForEach(outbox.waitingPayments(invoiceID: invoice.id), id: \.idempotencyKey) { waiting in
+                            waitingRow(waiting)
+                                .padding(.horizontal, PaperCardMetrics.inset)
+                                .frame(minHeight: 56)
                         }
-                        .buttonStyle(RowPressStyle())
-                        .padding(.horizontal, PaperCardMetrics.inset)
-                        .frame(minHeight: 56)
+                        ForEach(model.payments) { payment in
+                            Button { selectedPayment = payment } label: {
+                                paymentRow(payment)
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .padding(.horizontal, PaperCardMetrics.inset)
+                            .frame(minHeight: 56)
+                        }
                     }
                     .padding(.vertical, 4)
                 }
@@ -357,6 +436,14 @@ struct InvoicePaymentsSection: View {
         }
         .onChange(of: model.invoice?.amountPaid) { _, _ in
             if let updated = model.invoice { onInvoiceUpdated(updated) }
+        }
+        .onChange(of: outbox.syncGeneration) { _, _ in
+            // A queued payment or signature may have just landed: show the server's invoice, its
+            // authorization and history, even when the amount paid didn't change.
+            Task {
+                await model.load()
+                if let updated = model.invoice { onInvoiceUpdated(updated) }
+            }
         }
         .sheet(item: $selectedPayment) { payment in SheetSurface {
             InvoicePaymentDetailSheet(
@@ -379,6 +466,25 @@ struct InvoicePaymentsSection: View {
             selectedPayment = payment
         }
 #endif
+    }
+
+    /// A cash or check payment taken on this phone and waiting to record: same row, no detail.
+    private func waitingRow(_ waiting: OutboxEntry.PaymentPayload) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(waiting.method.capitalized) received")
+                    .font(Theme.font(15, weight: .medium))
+                    .foregroundStyle(Theme.foreground)
+                WaitingToSyncLabel(text: "Records when you're back online")
+            }
+            Spacer(minLength: 8)
+            Text(money(waiting.amountCents, currency: invoice.currency))
+                .font(Theme.rowAmountFont(15))
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .foregroundStyle(Theme.foreground)
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
     }
 
     /// v2: the method and when on the left; the tabular amount over the status word on the right.
@@ -830,6 +936,7 @@ struct InvoicePaymentCollectionSheet: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
+    @EnvironmentObject private var outbox: FieldOutbox
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
     @FocusState private var amountFocused: Bool
@@ -850,18 +957,22 @@ struct InvoicePaymentCollectionSheet: View {
     init(model: InvoicePaymentCollectionModel, invoice: InvoiceRecord) {
         self.model = model
         self.invoice = invoice
-        let cents = model.pendingRequest?.amount.amount ?? min(model.outstandingCents ?? 0, 1_000_000_000_000)
+        let cents = model.pendingRequest?.amount.amount ?? min(model.collectableCents ?? 0, 1_000_000_000_000)
         _amountText = State(initialValue: paymentAmountText(cents))
         // MF-09: open on the way this phone last collected (cash, check or link); otherwise on
         // the fastest path that actually takes money today. Tap to Pay is chosen in `.task`.
         let last = InvoiceCollectionOption.lastUsed
-        _option = State(initialValue: InvoiceCollectionOption.initial(
+        // OF-09: without signal the sheet opens on cash, the way that still works. Cash or check
+        // still waiting to record also rules out the full-balance link (OF-08).
+        let offlineOpening = model.pendingRequest == nil && (model.offlineCopy || model.waitingCents > 0)
+            && (last == nil || last == .paymentLink)
+        _option = State(initialValue: offlineOpening ? .cash : InvoiceCollectionOption.initial(
             pendingMethod: model.pendingRequest?.method, lastUsed: last))
         _tapToPayController = StateObject(wrappedValue: TapToPayController(invoiceID: invoice.id))
     }
 
     private var amountCents: Int? {
-        MoneyInput.cents(amountText, maximumCents: min(model.outstandingCents ?? 0, 1_000_000_000_000))
+        MoneyInput.cents(amountText, maximumCents: min(model.collectableCents ?? 0, 1_000_000_000_000))
     }
 
     private var hasLockedIntent: Bool { model.pendingRequest != nil }
@@ -918,7 +1029,7 @@ struct InvoicePaymentCollectionSheet: View {
                     canCreate: session.can("invoice.payment.create", feature: "payments") && model.canRecordPayment && !isCreatingPayLink,
                     error: payLinkError,
                     onCreate: {
-                        amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+                        amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
                         Task { await createPayLink() }
                     },
                     onDone: { dismiss() })
@@ -929,7 +1040,8 @@ struct InvoicePaymentCollectionSheet: View {
                             actions: [ThorbisConfirmAction(primaryTitle) { Task { await recordPayment() } }])
             .task {
                 // Open on the iPhone reader when this workspace and phone can take cards in person.
-                if tapToPayAvailable && model.pendingRequest == nil && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
+                if tapToPayAvailable && model.pendingRequest == nil && !offline && !paymentWaiting
+                    && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
                 await loadReceiptDestination()
 #if DEBUG
                 if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-timeout"),
@@ -956,14 +1068,18 @@ struct InvoicePaymentCollectionSheet: View {
             PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
                 .accessibilityIdentifier("collect-payment-invoice")
             // MF-01: the amount being collected is the screen.
-            Text(money(amountCents ?? model.pendingRequest?.amount.amount ?? model.outstandingCents ?? 0, currency: invoice.currency))
+            Text(money(amountCents ?? model.pendingRequest?.amount.amount ?? model.collectableCents ?? 0, currency: invoice.currency))
                 .font(Theme.moneyHeroFont).tracking(-0.6)
                 .lineLimit(1).minimumScaleFactor(0.6)
                 .contentTransition(.numericText())
                 .padding(.top, 4)
-                .accessibilityLabel("Collecting \(money(amountCents ?? model.outstandingCents ?? 0, currency: invoice.currency))")
+                .accessibilityLabel("Collecting \(money(amountCents ?? model.collectableCents ?? 0, currency: invoice.currency))")
             Text("Balance due \(money(model.outstandingCents ?? 0, currency: invoice.currency))")
                 .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            if model.waitingCents > 0 {
+                // OF-08: what's waiting to record isn't paid yet, but it can't be collected twice.
+                WaitingToSyncLabel(text: "\(money(model.waitingCents, currency: invoice.currency)) waiting to record")
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 4)
@@ -975,16 +1091,16 @@ struct InvoicePaymentCollectionSheet: View {
         FormField(label: "Amount", help: "Up to the balance due. Take part now and the rest later.", error: amountError) {
             HStack(spacing: 8) {
                 MoneyFieldWell {
-                    TextField(paymentAmountText(model.outstandingCents ?? 0), text: $amountText, prompt: .placeholder(paymentAmountText(model.outstandingCents ?? 0)))
+                    TextField(paymentAmountText(model.collectableCents ?? 0), text: $amountText, prompt: .placeholder(paymentAmountText(model.collectableCents ?? 0)))
                         .keyboardType(.decimalPad)
                         .focused($amountFocused)
                         .font(Theme.monoFont(16))
                         .accessibilityLabel("Amount to collect in dollars")
                         .onChange(of: amountText) { _, _ in amountError = nil }
                 }
-                if amountCents != model.outstandingCents {
+                if amountCents != model.collectableCents {
                     Button("Full balance") {
-                        amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+                        amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
                         amountError = nil
                     }
                     .font(Theme.font(13, weight: .medium))
@@ -1049,18 +1165,22 @@ struct InvoicePaymentCollectionSheet: View {
     private var paymentOptions: some View {
         let locked = hasLockedIntent || model.waitingForProjection
         let off = locked || !session.can("invoice.payment.create", feature: "payments") || !model.canRecordPayment
+        // OF-09: card, link and Tap to Pay need signal; they also wait while cash or check is
+        // still recording, since they charge the whole balance (OF-08).
+        let needsSignalOff = off || offline
         return FormField(label: "Method", help: methodHelp) {
             FlowRow(spacing: 8, lineSpacing: 8) {
-                if tapToPayAvailable && !hasLockedIntent {
+                if tapToPayAvailable && !hasLockedIntent && !offline && !paymentWaiting {
                     methodChip("Tap to Pay", selected: option == .tapToPay, off: locked) {
                         option = .tapToPay
-                        amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+                        amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
                     }
                     .accessibilityIdentifier("tap-to-pay")
                 }
-                methodChip("Payment link", selected: option == .paymentLink, busy: isCreatingPayLink, off: off) {
+                methodChip("Payment link", selected: option == .paymentLink, busy: isCreatingPayLink,
+                           off: needsSignalOff || paymentWaiting) {
                     option = .paymentLink
-                    amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+                    amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
                 }
                 .accessibilityLabel("Card · send payment link")
                 methodChip("Check", selected: option == .check, off: off) { option = .check }
@@ -1072,7 +1192,7 @@ struct InvoicePaymentCollectionSheet: View {
                     chipLabel(option.isExternalReceipt ? (option.recordedMethod?.displayName ?? "Other") : "Other",
                               selected: option.isExternalReceipt, trailingSymbol: "chevron.down")
                 }
-                .disabled(off)
+                .disabled(needsSignalOff)
                 .accessibilityIdentifier("received-payment-methods")
             }
         }
@@ -1081,12 +1201,23 @@ struct InvoicePaymentCollectionSheet: View {
     private var methodHelp: String {
         switch option {
         case .tapToPay: tapToPayHeadline == "Tap to Pay on iPhone" ? "Contactless cards, Apple Pay and other wallets, on this iPhone." : tapToPayHeadline
-        case .paymentLink: "Text or email a secure card checkout for the full balance."
-        case .check: "Record a check already in your hand."
-        case .cash: "Record cash already in your hand."
-        case .bankTransfer, .externalCard: "Only record money already received. This doesn't charge a card or bank account."
+        case .paymentLink:
+            offline ? "Card payments need signal."
+                : paymentWaiting ? "Available after the waiting payment records."
+                : "Text or email a secure card checkout for the full balance."
+        case .check: offline ? "Records when you're back online." : "Record a check already in your hand."
+        case .cash: offline ? "Records when you're back online." : "Record cash already in your hand."
+        case .bankTransfer, .externalCard:
+            offline ? "Needs signal." : "Only record money already received. This doesn't charge a card or bank account."
         }
     }
+
+    /// No signal, or only the copy saved on this phone: card, link and Tap to Pay can't work (OF-09).
+    private var offline: Bool { session.isOffline || model.offlineCopy }
+
+    /// Cash or check on this phone that hasn't recorded yet. Tap to Pay and the link charge the
+    /// whole balance, so they wait until it lands rather than charge money already taken (OF-08).
+    private var paymentWaiting: Bool { model.waitingCents > 0 }
 
     private func methodChip(_ title: String, selected: Bool, busy: Bool = false, off: Bool,
                             action: @escaping () -> Void) -> some View {
@@ -1159,7 +1290,7 @@ struct InvoicePaymentCollectionSheet: View {
         switch option {
         case .tapToPay:
             if case .failed = tapToPay?.phase { return "Try again" }
-            return "Charge \(money(model.outstandingCents ?? 0, currency: invoice.currency))"
+            return "Charge \(money(model.collectableCents ?? 0, currency: invoice.currency))"
         case .paymentLink:
             return "Create payment link"
         case .cash:
@@ -1179,9 +1310,13 @@ struct InvoicePaymentCollectionSheet: View {
         guard !canSubmit, !model.isRecording, !model.isLoading, !isCreatingPayLink, tapToPay?.busy != true else { return nil }
         if !session.can("invoice.payment.create", feature: "payments") { return "Your role can't take payments. Ask your office." }
         if !model.canRecordPayment { return "This invoice can't take a payment right now." }
+        if offline && option != .cash && option != .check { return "Without signal, record cash or check. They record when you're back online." }
+        if (option == .tapToPay || option == .paymentLink) && paymentWaiting {
+            return "A cash or check payment is still recording. Charge a card once it lands."
+        }
         if option == .tapToPay {
             if !tapToPayAvailable { return "Tap to Pay isn't ready on this iPhone. Pick another way to pay." }
-            return (model.outstandingCents ?? 0) > 0 ? nil : "Nothing is due on this invoice."
+            return (model.collectableCents ?? 0) > 0 ? nil : "Nothing is due on this invoice."
         }
         if option == .paymentLink { return "A payment link is for the full balance due." }
         return nil
@@ -1191,8 +1326,10 @@ struct InvoicePaymentCollectionSheet: View {
         guard !model.isRecording, !model.isLoading, !isCreatingPayLink else { return false }
         if model.waitingForProjection { return true }
         guard session.can("invoice.payment.create", feature: "payments"), model.canRecordPayment else { return false }
-        if option == .tapToPay { return tapToPayAvailable && (model.outstandingCents ?? 0) > 0 && tapToPay?.busy != true }
-        if option == .paymentLink { return model.outstandingCents == amountCents }
+        if offline && option != .cash && option != .check { return false }
+        if (option == .tapToPay || option == .paymentLink) && paymentWaiting { return false }
+        if option == .tapToPay { return tapToPayAvailable && (model.collectableCents ?? 0) > 0 && tapToPay?.busy != true }
+        if option == .paymentLink { return model.collectableCents == amountCents }
         return true
     }
 
@@ -1203,10 +1340,10 @@ struct InvoicePaymentCollectionSheet: View {
             return matches ? nil : "Finish the payment already started first, with the same amount and method."
         }
         guard let amountCents else {
-            return "Enter an amount up to \(money(model.outstandingCents ?? 0, currency: invoice.currency)), like \(paymentAmountText(model.outstandingCents ?? 0))."
+            return "Enter an amount up to \(money(model.collectableCents ?? 0, currency: invoice.currency)), like \(paymentAmountText(model.collectableCents ?? 0))."
         }
-        return amountCents > (model.outstandingCents ?? 0)
-            ? "That's more than the balance due of \(money(model.outstandingCents ?? 0, currency: invoice.currency))." : nil
+        return amountCents > (model.collectableCents ?? 0)
+            ? "That's more than the balance left to collect, \(money(model.collectableCents ?? 0, currency: invoice.currency))." : nil
     }
 
     private var recordConfirmationTitle: String {
@@ -1264,7 +1401,7 @@ struct InvoicePaymentCollectionSheet: View {
 
     private func createPayLink() async {
         guard session.can("invoice.payment.create", feature: "payments"),
-              model.canRecordPayment, model.outstandingCents == amountCents else { return }
+              model.canRecordPayment, !paymentWaiting, model.outstandingCents == amountCents else { return }
         isCreatingPayLink = true
         defer { isCreatingPayLink = false }
         do {

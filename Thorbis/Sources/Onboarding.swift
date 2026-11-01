@@ -485,6 +485,10 @@ enum CompanyFact {
         case "email_sender_name": "Name on emails"
         case "email_sender_address": "Reply-to email"
         case "dba_names": "Also known as"
+        case "timezone": "Time zone"
+        case "business_hours": "Business hours"
+        case "sales_tax_rate": "Sales tax rate"
+        case "default_payment_terms": "Payment terms"
         default: fallback
         }
     }
@@ -533,8 +537,10 @@ enum CompanyFact {
         ["business_address", "mailing_address", "business_description", "service_areas"].contains(key)
     }
 
-    /// Group order: what setup needs, what customers see, then the legal paperwork.
+    /// Group order: what setup needs, what customers see, then the legal paperwork. 3 is shown elsewhere.
     static func group(_ entry: OrganizationProfile.Entry) -> Int {
+        // Review requests have their own screen (Settings › Review requests).
+        if ["review_link", "review_requests"].contains(entry.factKey) { return 3 }
         if entry.required { return 0 }
         if entry.tier >= 2 || ["dba_names", "mailing_address"].contains(entry.factKey) { return 2 }
         return 1
@@ -549,6 +555,8 @@ final class CompanyDetailsModel: ObservableObject {
     @Published var saving = false
     @Published var loadError: String?
     @Published var fieldErrors: [String: String] = [:]
+    /// Values typed without signal, waiting in the outbox; they count as saved here.
+    @Published var queued: [String: String] = [:]
 
     func load(api: APIClient) async {
         loading = true
@@ -557,6 +565,8 @@ final class CompanyDetailsModel: ObservableObject {
             let fresh = try await api.organizationProfile()
             profile = fresh
             loadError = nil
+            // A queued value the server now has is no longer waiting.
+            for (key, value) in queued where fresh.value(key) == value { queued[key] = nil }
             for entry in fresh.catalog where drafts[entry.factKey] == nil {
                 drafts[entry.factKey] = fresh.value(entry.factKey) ?? ""
             }
@@ -570,13 +580,16 @@ final class CompanyDetailsModel: ObservableObject {
 
     func changed(_ key: String) -> Bool {
         let draft = (drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return !draft.isEmpty && draft != (profile?.value(key) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return !draft.isEmpty && draft != queued[key]
+            && draft != (profile?.value(key) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var dirty: Bool { profile?.catalog.contains { changed($0.factKey) } ?? false }
 
     /// Confirms each changed fact in turn; a refused one keeps its typed value and says why.
-    func save(api: APIClient, session: SessionController) async -> Bool {
+    /// `only` limits the save to some facts (one setup step), leaving other edits untouched.
+    /// With an outbox, a fact that can't reach the server is kept on the phone and sent later (OF-01).
+    func save(api: APIClient, session: SessionController, only: Set<String>? = nil, outbox: FieldOutbox? = nil) async -> Bool {
         guard let profile, let actor = session.user?.id, let org = session.activeOrganization?.id,
               org.lowercased() == profile.organizationId.lowercased() else {
             loadError = "The open company changed. Close this screen and try again."
@@ -586,17 +599,32 @@ final class CompanyDetailsModel: ObservableObject {
         defer { saving = false }
         fieldErrors = [:]
         var allSaved = true
-        for entry in profile.catalog where changed(entry.factKey) {
+        var queuedNow = false
+        for entry in profile.catalog where changed(entry.factKey) && (only?.contains(entry.factKey) ?? true) {
             let value = (drafts[entry.factKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             do {
                 try await api.confirmOrganizationFact(entry.factKey, value: value, actorID: actor, organizationID: org)
+                outbox?.discardPendingFact(entry.factKey)
+                queued[entry.factKey] = nil
             } catch is CancellationError {
                 return false
+            } catch let error where error.isConnectivityFailure && outbox != nil {
+                let label = CompanyFact.label(entry.factKey, fallback: entry.label)
+                if outbox?.enqueue(.organizationFact(.init(factKey: entry.factKey, value: value, label: label)),
+                                   policyVersion: session.policyVersion ?? 0) != nil {
+                    queued[entry.factKey] = value
+                    queuedNow = true
+                } else {
+                    allSaved = false
+                    fieldErrors[entry.factKey] = error.localizedDescription
+                }
             } catch {
                 allSaved = false
                 fieldErrors[entry.factKey] = error.plainMessage(subject: "company details")
             }
         }
+        // Offline: keep what is on screen rather than reloading into an error.
+        if queuedNow { return allSaved }
         let typed = drafts
         await load(api: api)
         // Keep what failed to save on screen.
@@ -615,6 +643,7 @@ struct CompanyDetailsView: View {
     var step: (Int, Int)? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = CompanyDetailsModel()
     @State private var saved = 0
@@ -682,7 +711,8 @@ struct CompanyDetailsView: View {
     }
 
     private func form(_ profile: OrganizationProfile) -> some View {
-        let entries = profile.catalog
+        // Hours, tax and terms have their own screen with real controls.
+        let entries = profile.catalog.filter { !OperatingFacts.keys.contains($0.factKey) && $0.factKey != "logo" }
         let needed = entries.filter { CompanyFact.group($0) == 0 }
         let shown = entries.filter { CompanyFact.group($0) == 1 }
         let legal = entries.filter { CompanyFact.group($0) == 2 }
@@ -701,6 +731,9 @@ struct CompanyDetailsView: View {
                         .padding(.horizontal, -Theme.gutter).padding(.bottom, 8)
                 }
                 group("Needed for setup", needed)
+                if profile.catalog.contains(where: { $0.factKey == "logo" }) {
+                    CompanyLogoPicker().padding(.top, 16)
+                }
                 group("What customers see", shown)
                 Text("Name on emails and Reply-to email are used when estimates and invoices are emailed.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -727,10 +760,19 @@ struct CompanyDetailsView: View {
                     }
                 }
                 PaperCard {
-                    NavigationLink { CompanyFeaturesView().thorbisBackButton() } label: {
-                        PaperListRow(leading: .icon("square.grid.2x2"), title: "Plan and features")
+                    VStack(spacing: 0) {
+                        if OperatingFacts.offered(profile) {
+                            NavigationLink { OperatingDetailsView().thorbisBackButton() } label: {
+                                PaperListRow(leading: .icon("clock"), title: "Hours, tax and terms")
+                            }
+                            .buttonStyle(RowPressStyle())
+                            WellDivider()
+                        }
+                        NavigationLink { CompanyFeaturesView().thorbisBackButton() } label: {
+                            PaperListRow(leading: .icon("square.grid.2x2"), title: "Plan and features")
+                        }
+                        .buttonStyle(RowPressStyle())
                     }
-                    .buttonStyle(RowPressStyle())
                 }
                 .padding(.top, 24)
             }
@@ -786,7 +828,7 @@ struct CompanyDetailsView: View {
 
     private func save() async {
         focused = nil
-        if await model.save(api: api, session: session) {
+        if await model.save(api: api, session: session, outbox: outbox) {
             saved += 1
             onSaved?()
         }
@@ -985,6 +1027,7 @@ struct BusinessSetupView: View {
     @StateObject private var model = BusinessSetupModel()
     @State private var inviting = false
     @State private var opened: BusinessSetupModel.Step?
+    @State private var guided = false
 
     var body: some View {
         let steps = model.steps(session)
@@ -1017,6 +1060,18 @@ struct BusinessSetupView: View {
                     }
                     .padding(.horizontal, -Theme.gutter)
                     .padding(.top, 8)
+                }
+                if session.can("organization.settings.edit") {
+                    Button { guided = true } label: {
+                        Label(doneCount == 0 ? "Start guided setup" : "Continue guided setup", systemImage: "arrow.right.circle")
+                            .font(Theme.font(15, weight: .medium))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+                            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    }
+                    .buttonStyle(PressStyle())
+                    .padding(.top, 20)
+                    .accessibilityIdentifier("setup-guided")
                 }
                 PaperSection("Steps", count: nil) {
                     ForEach(steps) { stepRow($0) }
@@ -1070,6 +1125,9 @@ struct BusinessSetupView: View {
             // Back from a step: read it again, so its word changes to Done.
             if old != nil, new == nil { Task { await model.refresh(api: api, session: session) } }
         }
+        .fullScreenCover(isPresented: $guided, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
+            NavigationStack { SetupWizardView() }
+        }
         .task(id: [session.authorityRevision, api.requestGeneration]) { await model.refresh(api: api, session: session) }
     }
 
@@ -1108,9 +1166,9 @@ private struct BusinessSetupPrompt: ViewModifier {
                 guard !Task.isCancelled, session.can("organization.settings.edit") else { return }
                 showing = true
             }
-            .sheet(isPresented: $showing) { SheetSurface {
-                NavigationStack { BusinessSetupView(presented: true) }
-            } }
+            .fullScreenCover(isPresented: $showing) {
+                NavigationStack { SetupWizardView() }
+            }
     }
 }
 
@@ -1131,7 +1189,10 @@ struct OnboardingPreview: View {
         default:
             if session.phase == .ready {
                 NavigationStack {
-                    if screen == "onboard-details" { CompanyDetailsView() } else { BusinessSetupView(presented: true) }
+                    if screen == "onboard-details" { CompanyDetailsView() }
+                    else if screen == "onboard-wizard" { SetupWizardView(start: .company) }
+                    else if screen == "onboard-trade" { SetupWizardView(start: .trade) }
+                    else { BusinessSetupView(presented: true) }
                 }
             } else {
                 ProgressView()

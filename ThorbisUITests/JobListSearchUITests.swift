@@ -50,8 +50,8 @@ final class JobListSearchUITests: XCTestCase {
         // The Jobs list's subtitle, on the phone layout and the iPad's list column alike.
         XCTAssertTrue(app.staticTexts["5 active"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons["New job"].exists, "No hidden shortcut button may be in the tree")
-        app.typeKey("n", modifierFlags: .command)
-        XCTAssertTrue(app.descendants(matching: .any)["book-job-caller"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.pressShortcut("n", .command, expecting: app.descendants(matching: .any)["book-job-caller"], timeout: 10),
+                      "⌘N opens New job")
     }
 
     func testPlusOpensCreateMenuAndNewJobStartsWithCustomer() {

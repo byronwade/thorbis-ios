@@ -1223,7 +1223,7 @@ struct JobDetailView: View {
                                            headerStreet: displayTitle(job),
                                            factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
             }
-            CustomerMembershipSection(customerID: job.customerId, editable: false)
+            CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)
             detailsGroup(job).id("job-details")
         }
     }
@@ -2470,6 +2470,8 @@ struct JobDetailView: View {
         if loadedInvoiceModelID != invoice.id {
             loadedInvoiceModelID = invoice.id
             invoicePaymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: invoice.id, expectedJobScope: scope)
+            invoicePaymentModel?.outbox = outbox
+            invoicePaymentModel?.policyVersion = session.policyVersion ?? 0
         }
         await invoicePaymentModel?.load()
     }

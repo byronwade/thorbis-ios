@@ -14,8 +14,8 @@ enum PlaceSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// The order places take inside their section (C-Nav.dc.html).
-    static let canonical: [MenuItem] = [.home, .schedule, .jobs, .customers, .inbox, .attention,
-                                        .money, .estimates, .invoices, .billing, .reports, .priceBook,
+    static let canonical: [MenuItem] = [.home, .schedule, .jobs, .customers, .properties, .inbox, .attention,
+                                        .money, .estimates, .invoices, .billing, .reports, .scorecard, .priceBook,
                                         .team, .notices, .drafts]
 }
 
@@ -23,8 +23,8 @@ extension MenuItem {
     /// Where the place is listed in the sidebar.
     var placeSection: PlaceSection {
         switch self {
-        case .home, .schedule, .jobs, .customers, .inbox, .attention: .work
-        case .money, .estimates, .invoices, .billing, .reports, .priceBook: .money
+        case .home, .schedule, .jobs, .customers, .properties, .inbox, .attention: .work
+        case .money, .estimates, .invoices, .billing, .reports, .scorecard, .priceBook: .money
         case .team, .notices, .drafts: .shop
         }
     }
@@ -36,10 +36,10 @@ extension MenuItem {
         switch self {
         case .home, .schedule: Theme.markAccent
         case .jobs, .priceBook: Theme.markOlive
-        case .customers: Theme.markForest
+        case .customers, .properties: Theme.markForest
         case .inbox: Theme.markPumpkin
         case .attention, .money: Theme.markBurnt
-        case .estimates, .invoices, .billing, .reports, .team, .notices, .drafts: Theme.markGrey
+        case .estimates, .invoices, .billing, .reports, .scorecard, .team, .notices, .drafts: Theme.markGrey
         }
     }
 }

@@ -80,6 +80,30 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["drawer-rows"].exists)
     }
 
+    /// iPad: the hidden sidebar's edge-swipe strip starts below the top bar, so the Show sidebar
+    /// button keeps its whole target. A tap on its leading few points used to land on the strip.
+    func testTabletShowSidebarButtonTakesItsLeadingEdge() throws {
+        guard XCUIApplication().usesTabletLayout else {
+            throw XCTSkip("iPad layout only: the phone has no Show sidebar button.")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
+        app.launch()
+        let show = app.buttons["sidebar-show"]
+        XCTAssertTrue(show.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["sidebar-search"].exists)
+        XCTAssertLessThan(show.frame.minX, 18, "The button sits within the edge strip's width of the screen edge")
+        // 3pt inside the button's leading edge: inside the old 18pt strip.
+        show.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 3, dy: show.frame.height / 2)).tap()
+        XCTAssertTrue(app.buttons["sidebar-search"].waitForExistence(timeout: 5), "The button's leading edge shows the sidebar")
+        // The strip still works below the bar.
+        app.buttons["Close sidebar"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["sidebar-search"].waitForNonExistence(timeout: 5))
+        app.swipeInFromLeftEdge()
+        XCTAssertTrue(app.buttons["sidebar-search"].waitForExistence(timeout: 5), "The edge swipe below the bar shows the sidebar")
+    }
+
     func testGearMenuStaysOnScreenInPortrait() { assertGearMenuOnScreen(landscape: false) }
 
     func testGearMenuStaysOnScreenInLandscape() { assertGearMenuOnScreen(landscape: true) }

@@ -115,6 +115,7 @@ struct TeamView: View {
     @State private var invitations: [TeamInvitation] = []
     @State private var inviting = false
     @State private var notice: String?
+    @State private var removing: RoleMember?
     private var canInvite: Bool { session.can("organization.members.manage") }
     /// Changing someone's access needs both owner capabilities, the same pair the server checks.
     private var canManage: Bool {
@@ -188,6 +189,9 @@ struct TeamView: View {
                             }
                             if canManage && !member.member.isLegalOwner {
                                 Button { opening = member } label: { Label("Change role", systemImage: "person.badge.key") }
+                            }
+                            if MemberRemovalRules.canRemove(member, session: session) {
+                                Button(role: .destructive) { removing = member } label: { Label("Remove from team", systemImage: "person.badge.minus") }
                             }
                         }
                     }
@@ -288,6 +292,10 @@ struct TeamView: View {
         .sheet(item: $changing) { member in SheetSurface {
             MemberRoleSheet(member: member) { await load() }
         } }
+        .removeMemberPrompt($removing, onRemoved: { removed in
+            notice = "\(removed.member.displayName) was removed from the team."
+            await load()
+        }, onError: { message in error = message })
         .thorbisDestination(item: $opening) { member in
             MemberAccessView(member: member) { await load() }
         }

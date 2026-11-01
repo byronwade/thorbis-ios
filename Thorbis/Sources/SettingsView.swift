@@ -69,6 +69,26 @@ struct SettingsView: View {
                                     row("Payments", symbol: "creditcard", value: nil)
                                 }
                                 .buttonStyle(RowPressStyle())
+                                WellDivider(leading: Self.rowDivider)
+                                NavigationLink { ReviewRequestsView().thorbisBackButton() } label: {
+                                    row("Review requests", symbol: "star.bubble", value: nil)
+                                }
+                                .buttonStyle(RowPressStyle())
+                            }
+                            if session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm") {
+                                WellDivider(leading: Self.rowDivider)
+                                NavigationLink(value: PaperRoute.importCustomers) {
+                                    row("Import customers", symbol: "square.and.arrow.down", value: nil)
+                                }
+                                .buttonStyle(RowPressStyle())
+                            }
+                            // TG-07: whoever may see the team's numbers sets its goals.
+                            if session.can("organization.performance.view") {
+                                WellDivider(leading: Self.rowDivider)
+                                NavigationLink(value: PaperRoute.teamGoals) {
+                                    row("Team goals", symbol: "target", value: nil)
+                                }
+                                .buttonStyle(RowPressStyle())
                             }
                             // Who hears about booked and changed jobs; the feed itself is Inbox.
                             if MenuItem.notices.permitted(session) {

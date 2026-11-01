@@ -83,8 +83,8 @@ final class PrimaryNavigationTests: XCTestCase {
     func testSidebarGroupsAndOrderFollowTheDesign() {
         let owner = sections(.owner)
         XCTAssertEqual(owner.sections.map(\.kind), [.work, .money, .shop])
-        XCTAssertEqual(owner.sections[0].places, [.home, .schedule, .jobs, .customers, .inbox, .attention])
-        XCTAssertEqual(owner.sections[1].places, [.money, .estimates, .invoices, .billing, .reports, .priceBook])
+        XCTAssertEqual(owner.sections[0].places, [.home, .schedule, .jobs, .customers, .properties, .inbox, .attention])
+        XCTAssertEqual(owner.sections[1].places, [.money, .estimates, .invoices, .billing, .reports, .scorecard, .priceBook])
         XCTAssertEqual(owner.sections[2].places, [.team, .notices, .drafts])
         XCTAssertEqual(sections(.technician).sections.map(\.kind), [.work, .money, .shop])
     }

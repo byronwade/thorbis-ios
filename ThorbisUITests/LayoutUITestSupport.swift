@@ -73,9 +73,17 @@ extension XCUIApplication {
     }
 
     /// Presses a hardware-keyboard shortcut and waits for `expected`, pressing once more if nothing
-    /// answered. In the simulator the first Go-menu or ⇧⌘N press after a relaunch often goes
-    /// unanswered while the second works (⌘N answers the first time); the cause is not settled —
-    /// simulator key delivery or the app's menu not yet built — so the retry is reported, not hidden.
+    /// answered. The retry covers XCUITest's simulated keyboard, not the app. After each launch the
+    /// first chord's modifier never reaches the app. backboardd (BackBoard EventDelivery log) posts
+    /// the first ⌘ key-down only to SpringBoard's `systemKeyCommandOverlay`, so the letter lands
+    /// without ⌘. From the second chord on, ⌘ goes to the app too. The checks behind this (#139):
+    /// - Stock Safari's first ⌘T routes the same way.
+    /// - UIKit's own ⌘A (select all) in the search field fails on the first chord in 3 of 3 runs
+    ///   ("Kitchen" + ⌘A + x gives "Kitchenx") and works on the second.
+    /// - ⌘N failed its first press 3 of 3 times, like ⌘F, ⌘K, ⇧⌘N and ⌃⌘S.
+    /// - The app's command never fired. Nothing app-side helped: a static Go menu without
+    ///   `@FocusedValue`, waiting 8s, tapping first.
+    /// - An unrelated chord first (⌘J) made the next shortcut work on its first press.
     @discardableResult
     func pressShortcut(_ key: String, _ modifiers: XCUIElement.KeyModifierFlags, expecting expected: XCUIElement,
                        timeout: TimeInterval = 4) -> Bool {

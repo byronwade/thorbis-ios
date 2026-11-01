@@ -53,6 +53,8 @@ final class JobDocumentCollections: ObservableObject {
         invoices = read
         if read.isComplete {
             JobInvoiceMemory.replace(read.records.map(\.id), jobID: scope.jobID)
+            // OF-04: the job's invoices as last seen, so an offline closeout still counts cash and check.
+            JobDetailCache.save(invoices: read.records, jobID: scope.jobID)
         } else {
             read.records.filter { read.freshIDs.contains($0.id) }.forEach { JobInvoiceMemory.remember($0.id, jobID: scope.jobID) }
         }
