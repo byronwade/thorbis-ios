@@ -611,9 +611,8 @@ struct RootView: View {
         place(selectedTab).id(selectedTab)
         // Kept off phonePlaces' long modifier chain, which is at the type checker's limit.
         .onChange(of: store.requestedSearch, initial: true) { openRequestedSearch(phone: true) }
-        // Roots carry the menu circle in their header or bar; pushed screens beside Back.
+        // Roots carry the menu circle in their header or bar; pushed screens keep Back alone.
         .environment(\.paperDrawer, atTabRoot && !barSearching ? drawerControl : nil)
-        .environment(\.paperDrawerReach, barSearching ? nil : drawerControl)
         .environment(\.searchRouteHost, searchRouteHost)
         .environment(\.paperSearch, PaperSearchAction(run: { openBarSearch() }))
     }
