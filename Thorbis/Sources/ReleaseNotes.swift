@@ -13,6 +13,20 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-01-team-goals",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "flag", title: "Set weekly goals for your team",
+                      detail: "Settings › Team goals sets a weekly sold goal per role or person. Works offline."),
+                .init(symbol: "chart.bar", title: "See how close you are to your goal",
+                      detail: "My scorecard shows your goal and a bar under Sold, plus the leaderboard when it's on."),
+                .init(symbol: "list.bullet", title: "Every number opens its list",
+                      detail: "Tap Sold, Jobs done or Close rate to see just the invoices, jobs or estimates behind it."),
+                .init(symbol: "sun.max", title: "Your week at the top of Today",
+                      detail: "Today shows this week's sold and your goal in one row that opens My scorecard."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-01-my-scorecard",
             date: "2026-11-01",
             highlights: [

@@ -102,6 +102,7 @@ struct ScheduleView: View {
                 OfflineBanner()
                 if searchVisible { PaperSearchField(text: $search, prompt: "Search schedule") }
                 PaperTabs(options: ["Today", "Week", "Map", "Unscheduled"], selection: $tab)
+                if tab == "Today", search.isEmpty, session.can("job.view", feature: "jobs") { ScorecardTodayRow() }
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if store.loading && store.jobs.isEmpty {
