@@ -130,10 +130,13 @@ struct AppDrawer: View {
     let settingsItems: [ThorbisMenuItem]
     /// At accessibility sizes the drawer is full width, so it carries its own close circle.
     let showsClose: Bool
-    /// False while the drawer sits closed under the card. Its scroll view, the capsule's context menu
-    /// and the gear's popover are UIKit-hosted and stay in the accessibility tree even when the
-    /// drawer is hidden, so nothing is built until the drawer can be seen.
+    /// False while the drawer sits closed under the card (and from the moment it starts closing). The
+    /// capsule's context menu and the gear's popover are UIKit-hosted and stay in the accessibility
+    /// tree even when the drawer is hidden, so they are only built while the drawer can be seen.
     var showsControls = true
+    /// False once the drawer has slid shut: its scroll view (UIKit-hosted too) would otherwise sit
+    /// empty in the accessibility tree. Kept through the closing slide so the rows don't pop.
+    var showsRows = true
     var titleFocus: AccessibilityFocusState<Bool>.Binding
     let search: () -> Void
     let close: () -> Void
@@ -157,7 +160,7 @@ struct AppDrawer: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             // Closed, nothing is built: an empty scroll view would still sit in the accessibility tree.
-            if showsControls { rows }
+            if showsRows { rows }
             if showsControls { bottomControls }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

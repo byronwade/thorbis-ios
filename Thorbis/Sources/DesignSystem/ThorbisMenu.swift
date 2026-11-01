@@ -167,7 +167,7 @@ struct AnchoredPopover<PopoverContent: View>: ViewModifier {
     private static var visible = false
     private static var observers: [NSObjectProtocol] = []
 
-    /// Starts listening (idempotent); called by the app at launch and by every popover trigger.
+    /// Starts listening (idempotent); called at launch (`ThorbisApp.init`) and by every popover.
     static func watch() {
         guard observers.isEmpty else { return }
         let center = NotificationCenter.default

@@ -35,8 +35,11 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["drawer-rows"].exists)
         // Closing takes everything out again once the drawer has slid shut.
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        // The UIKit-hosted controls leave as the close starts (VoiceOver returns to the place then);
+        // only the rows stay through the slide.
+        XCTAssertFalse(app.drawerRow("new").exists, "New job must leave the tree as the drawer starts closing")
+        XCTAssertFalse(app.drawerRow("settings").exists, "The gear must leave the tree as the drawer starts closing")
         XCTAssertTrue(app.scrollViews["drawer-rows"].waitForNonExistence(timeout: 5))
-        XCTAssertFalse(app.drawerRow("new").exists)
     }
 
     /// The edge swipe still opens the drawer although its contents are not built while closed.

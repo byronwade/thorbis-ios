@@ -162,7 +162,8 @@ struct RootView: View {
                 // still opens a drawer whose contents are not built yet.
                 if !reduceMotion {
                     drawer(width: width, full: typeSize.isAccessibilitySize,
-                           visible: drawerOpen || drawerDrag != 0 || drawerSettling)
+                           rowsBuilt: drawerOpen || drawerDrag != 0 || drawerSettling,
+                           visible: drawerOpen || drawerDrag != 0)
                         .frame(width: width)
                         .simultaneousGesture(closeDrag(width: width))
                         .opacity(progress > 0 ? 1 : 0)
@@ -240,7 +241,10 @@ struct RootView: View {
             .offset(x: reduceMotion ? 0 : width * progress)
     }
 
-    private func drawer(width: CGFloat, full: Bool, visible: Bool = true) -> some View {
+    /// `rowsBuilt`: the rows stay through the slide shut so nothing pops. `visible`: the UIKit-hosted
+    /// controls (New job's context menu, the gear's popover) leave the moment it starts closing, so
+    /// VoiceOver returning to the place can never land on them behind the card.
+    private func drawer(width: CGFloat, full: Bool, rowsBuilt: Bool = true, visible: Bool = true) -> some View {
         AppDrawer(
             title: session.activeOrganization?.name ?? "Thorbis",
             role: WorkRole(session),
@@ -254,6 +258,7 @@ struct RootView: View {
             settingsItems: settingsItems,
             showsClose: full,
             showsControls: visible,
+            showsRows: rowsBuilt,
             titleFocus: $drawerTitleFocus,
             search: { closeDrawer(thenRun: { openBarSearch() }) },
             close: { closeDrawer() },

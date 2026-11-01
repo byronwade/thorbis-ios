@@ -20,6 +20,8 @@ struct ThorbisApp: App {
     @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
 
     init() {
+        // Popovers put the keyboard away before opening; they need to know whether it is up.
+        ThorbisKeyboard.watch()
         #if DEBUG
         let api = PaperPreview.enabled ? PaperPreview.api() : APIClient()
         let session = SessionController(api: api, defaults: PaperPreview.enabled ? PaperPreview.defaults() : .standard)
