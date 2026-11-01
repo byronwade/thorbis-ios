@@ -4,10 +4,16 @@ import XCTest
 final class JobOverviewUITests: XCTestCase {
     /// iPad: the job is the detail column's first screen (picked from the list beside it, so nothing
     /// to go back to). A screen pushed from it — the customer — offers the same Back circle, which
-    /// returns to the job. Not asserted: the back swipe. Started at the detail column's own edge
-    /// (380pt in, beside the list) it did not pop in the simulator; an open iPad gap. At the
-    /// screen's edge the swipe brings the sidebar in (DrawerGearMenuUITests).
+    /// returns to the job, and a swipe in from the detail column's own leading edge (beside the
+    /// list, far from the screen edge UIKit's swipe listens on) goes back too. At the screen's edge
+    /// the swipe brings the sidebar in (DrawerGearMenuUITests).
     private func assertBackInTheDetailColumn() {
+        for useSwipe in [false, true] {
+            assertBackInTheDetailColumn(useSwipe: useSwipe)
+        }
+    }
+
+    private func assertBackInTheDetailColumn(useSwipe: Bool) {
         let app = preview("job", working: true)
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 20))
         let actions = app.buttons["Job actions"]
@@ -22,9 +28,25 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(back.frame.width, 43.5)
         XCTAssertGreaterThanOrEqual(back.frame.height, 43.5)
         XCTAssertGreaterThan(back.frame.minX, app.frame.width * 0.3, "Back sits in the detail column, beside the list")
-        back.tap()
-        XCTAssertTrue(app.buttons["Customer actions"].waitForNonExistence(timeout: 5), "Back should pop the customer")
-        XCTAssertTrue(actions.waitForExistence(timeout: 5), "Back returns to the job")
+        if useSwipe {
+            // The detail column's leading edge: its bar starts there, beside the list.
+            let bars = app.navigationBars.allElementsBoundByIndex.filter { $0.frame.minX > app.frame.width * 0.3 }
+            let edge = bars.first?.frame.minX ?? back.frame.minX - 16
+            let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: edge + 4, dy: app.frame.height * 0.55))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 400, dy: 0)))
+        } else {
+            back.tap()
+        }
+        let how = useSwipe ? "The detail column's edge swipe" : "Back"
+        XCTAssertTrue(app.buttons["Customer actions"].waitForNonExistence(timeout: 5), "\(how) should pop the customer")
+        XCTAssertTrue(actions.waitForExistence(timeout: 5), "\(how) returns to the job")
+        if useSwipe {
+            // The pop reached the layout's path: back on the column's first screen, the screen-edge
+            // swipe brings the sidebar in again.
+            app.swipeInFromLeftEdge()
+            XCTAssertTrue(app.buttons["sidebar-search"].waitForExistence(timeout: 5), "Back on the first screen, the edge swipe shows the sidebar")
+        }
+        app.terminate()
     }
 
     func testJobHeaderKeepsTitleClearOfNavigationAndBalanceOpensInvoice() {
