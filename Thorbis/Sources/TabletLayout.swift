@@ -4,26 +4,56 @@ import SwiftUI
 
 /// What a hardware-keyboard command asks the shell showing to do. Posted by `KeyboardCommands`;
 /// the iPad layout and the phone layout each answer it with their own Search and creates.
-enum KeyboardCommand: String {
+enum KeyboardCommand: Equatable {
     case search, newJob, create
+    /// iPad only: ⌃⌘S shows or hides the sidebar; ⌘1…⌘9 open the sidebar's places in order.
+    case toggleSidebar, place(Int)
     static let notification = Notification.Name("ThorbisKeyboardCommand")
-    @MainActor func post() { NotificationCenter.default.post(name: Self.notification, object: rawValue) }
+    @MainActor func post() { NotificationCenter.default.post(name: Self.notification, object: Box(command: self)) }
     init?(_ note: Notification) {
-        guard let raw = note.object as? String, let command = Self(rawValue: raw) else { return nil }
-        self = command
+        guard let box = note.object as? Box else { return nil }
+        self = box.command
+    }
+    private final class Box: NSObject {
+        let command: KeyboardCommand
+        init(command: KeyboardCommand) { self.command = command }
+    }
+}
+
+/// The iPad sidebar's places, in order, while the iPad layout shows: the Go menu's ⌘1…⌘9.
+struct TabletPlacesKey: FocusedValueKey { typealias Value = [String] }
+extension FocusedValues {
+    var tabletPlaces: [String]? {
+        get { self[TabletPlacesKey.self] }
+        set { self[TabletPlacesKey.self] = newValue }
     }
 }
 
 /// ⌘F / ⌘K search, ⌘N new job, ⇧⌘N create, at every window size (sidebar, Slide Over, Split View).
+/// On the iPad layout a Go menu adds ⌃⌘S (sidebar) and ⌘1…⌘9 (places). Scene commands rather than
+/// hidden buttons in the view, so nothing invisible lands in the accessibility tree.
 struct KeyboardCommands: Commands {
+    @FocusedValue(\.tabletPlaces) private var tabletPlaces
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New job") { KeyboardCommand.newJob.post() }.keyboardShortcut("n", modifiers: .command)
             Button("Create…") { KeyboardCommand.create.post() }.keyboardShortcut("n", modifiers: [.command, .shift])
         }
-        CommandGroup(after: .textEditing) {
+        // Search sits in a menu of our own: placed after the system's text editing, ⌘F did not
+        // reach the app in the simulator (⌘K beside it did). Here both do, on iPhone and iPad.
+        CommandMenu("Go") {
             Button("Search") { KeyboardCommand.search.post() }.keyboardShortcut("f", modifiers: .command)
             Button("Search everything") { KeyboardCommand.search.post() }.keyboardShortcut("k", modifiers: .command)
+            if let tabletPlaces {
+                Divider()
+                Button("Toggle sidebar") { KeyboardCommand.toggleSidebar.post() }
+                    .keyboardShortcut("s", modifiers: [.command, .control])
+                ForEach(Array(tabletPlaces.prefix(9).enumerated()), id: \.offset) { index, title in
+                    Button(title) { KeyboardCommand.place(index).post() }
+                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+                }
+            }
         }
     }
 }
@@ -140,9 +170,13 @@ struct TabletRoot: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
+    @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var pendingMedia: PendingMediaStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var tab: TabletSection = .schedule
+    /// Saved work's review, opened from the sidebar's "Saved on this phone" (the phone's gear row).
+    @State private var reviewScope: SavedWorkScope?
     @State private var path = NavigationPath()
     @State private var picks: [TabletSection: TabletPick] = [:]
     @State private var scheduleRange = "Today"
@@ -181,6 +215,33 @@ struct TabletRoot: View {
     static let inlineSidebarWidth: CGFloat = 1100
 
     var body: some View {
+        savedWorkSheet(shell)
+            // iPad: the sidebar holds Create and Settings, so no header menu circle or floating + pill.
+            .environment(\.paperMenuButton, false)
+            .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
+            .focusedSceneValue(\.tabletPlaces, menuPlaces.map(\.title))
+            .onReceive(NotificationCenter.default.publisher(for: KeyboardCommand.notification)) { note in
+                switch KeyboardCommand(note) {
+                case .search: search = true
+                case .newJob: if canCreateJob { createJob = true }
+                case .create: if !createChoices.isEmpty { createMenuOpen = true }
+                case .toggleSidebar: withAnimation(motion) { sidebarFolded.toggle(); sidebarOpen.toggle() }
+                case .place(let index): if menuPlaces.indices.contains(index) { show(section(for: menuPlaces[index])) }
+                case nil: break
+                }
+            }
+    }
+
+    /// Saved work's review over the whole layout, retired the moment its scope stops being current.
+    private func savedWorkSheet(_ content: some View) -> some View {
+        content
+            .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
+            .onChange(of: reviewScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
+                if !valid { reviewScope = nil }
+            }
+    }
+
+    private var shell: some View {
         GeometryReader { geometry in
             let inline = geometry.size.width >= Self.inlineSidebarWidth && !sidebarFolded
             HStack(spacing: 0) {
@@ -191,6 +252,17 @@ struct TabletRoot: View {
                 VStack(spacing: 0) {
                     if !inline { topBar(wide: geometry.size.width >= Self.inlineSidebarWidth) }
                     columns(width: geometry.size.width - (inline ? Self.sidebarWidth : 0))
+                }
+            }
+            .overlay(alignment: .leading) {
+                // As on the phone, a swipe from the left edge brings the sidebar in when it is hidden,
+                // on a column's first screen only: a pushed screen keeps the system back swipe.
+                if !inline && !sidebarOpen && path.isEmpty {
+                    Color.clear
+                        .frame(width: 18)
+                        .contentShape(Rectangle())
+                        .gesture(sidebarEdgeDrag(wide: geometry.size.width >= Self.inlineSidebarWidth))
+                        .accessibilityHidden(true)
                 }
             }
             .overlay(alignment: .leading) {
@@ -210,18 +282,6 @@ struct TabletRoot: View {
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
-        // iPad: the sidebar holds Create and Settings, so no header menu circle or floating + pill.
-        .environment(\.paperMenuButton, false)
-        .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
-        .background { keyboardShortcuts }
-        .onReceive(NotificationCenter.default.publisher(for: KeyboardCommand.notification)) { note in
-            switch KeyboardCommand(note) {
-            case .search: search = true
-            case .newJob: if canCreateJob { createJob = true }
-            case .create: if !createChoices.isEmpty { createMenuOpen = true }
-            case nil: break
-            }
-        }
         .sheet(isPresented: $search, onDismiss: {
             searchSeed = ""
             let run = afterSearch
@@ -280,6 +340,15 @@ struct TabletRoot: View {
             if PaperPreview.enabled { applyPreview() }
             #endif
         }
+    }
+
+    /// The left-edge swipe: far or fast enough to the right shows the sidebar (unfolds it when wide).
+    private func sidebarEdgeDrag(wide: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .global)
+            .onEnded { value in
+                guard value.translation.width > 60 || value.predictedEndTranslation.width > 160 else { return }
+                withAnimation(motion) { if wide { sidebarFolded = false } else { sidebarOpen = true } }
+            }
     }
 
     private var motion: Animation { reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.88) }
@@ -410,6 +479,7 @@ struct TabletRoot: View {
             PaperCircleButton(symbol: "sidebar.left", label: "Show sidebar", fill: Theme.card, bordered: true) {
                 withAnimation(motion) { if wide { sidebarFolded = false } else { sidebarOpen = true } }
             }
+            .accessibilityIdentifier("sidebar-show")
             Text(title(of: tab)).font(Theme.font(16, weight: .medium)).lineLimit(1)
             Spacer(minLength: 12)
             TabletSearchField(compact: true) { search = true }.frame(maxWidth: 300)
@@ -426,6 +496,7 @@ struct TabletRoot: View {
         .buttonStyle(PressStyle())
         .accessibilityLabel("Create")
         .accessibilityHint("New job, estimate or customer")
+        .accessibilityIdentifier("tablet-create")
     }
 
     // MARK: Sidebar
@@ -441,6 +512,7 @@ struct TabletRoot: View {
             currentJobTitle: currentJob.map { addresses.street($0) ?? $0.title },
             currentJobCustomer: currentJob.map { store.customerName($0.customerId) },
             canCreate: !createChoices.isEmpty,
+            savedWork: savedWorkSync,
             select: { target in
                 withAnimation(motion) { sidebarOpen = false }
                 show(target)
@@ -453,6 +525,10 @@ struct TabletRoot: View {
             create: { createMenuOpen = true },
             workspace: { workspace = true },
             settings: { settings = true },
+            reviewSavedWork: {
+                withAnimation(motion) { sidebarOpen = false }
+                reviewScope = savedWorkScope
+            },
             fold: fold
         )
         .frame(width: Self.sidebarWidth)
@@ -524,6 +600,19 @@ struct TabletRoot: View {
 
     private var canCreateJob: Bool { session.can("job.create", feature: "jobs") }
 
+    private var savedWorkScope: SavedWorkScope? {
+        .capture(session: session, api: api, media: pendingMedia, outbox: outbox)
+    }
+
+    /// What is still on this iPad, as the phone's gear row says it; nil when nothing is waiting.
+    private var savedWorkSync: AppBottomBar.Sync? {
+        guard let scope = savedWorkScope else { return nil }
+        return .savedWork(.make(scope: scope, entries: outbox.entries, media: pendingMedia.items,
+                                mediaErrors: pendingMedia.errors, unverifiedMediaIDs: pendingMedia.unverifiedIDs,
+                                uploadingMediaID: pendingMedia.uploadingID, commandsSyncing: outbox.syncing,
+                                jobs: store.jobs, listingWarning: pendingMedia.storageWarning))
+    }
+
     /// The same creates as the phone's +, in the same order.
     private var createChoices: [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
@@ -543,25 +632,6 @@ struct TabletRoot: View {
         let creates = createChoices.map { item in (item.title, item.icon ?? "plus", later(item.action)) }
         return SearchAction.standard(creates: creates, settings: later { settings = true }, places: menuPlaces,
                                      openPlace: { place in afterSearch = nil; search = false; show(section(for: place)) })
-    }
-
-    // MARK: Keyboard
-
-    /// Always mounted, so the shortcuts work whether the sidebar is shown, folded or closed. Search
-    /// and the creates are scene commands (`KeyboardCommands`), shared with the phone layout.
-    private var keyboardShortcuts: some View {
-        ZStack {
-            Button("Toggle sidebar") { withAnimation(motion) { sidebarFolded.toggle(); sidebarOpen.toggle() } }
-                .keyboardShortcut("s", modifiers: [.command, .control])
-            ForEach(Array(menuPlaces.prefix(9).enumerated()), id: \.element) { index, item in
-                Button(item.title) { show(section(for: item)) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
-            }
-        }
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
     // MARK: Deep links
@@ -629,6 +699,17 @@ struct TabletRoot: View {
             if let job { store.requestedJobID = job.id }
         case "ipad-sidebar": sidebarOpen = true; sidebarFolded = true
         case "inbox": show(.place(.inbox))
+        case "price-book": show(.place(.priceBook))
+        case "team": show(.place(.team))
+        case "drafts": show(.place(.drafts))
+        case "billing": show(.place(.billing))
+        case "notices": show(.place(.notices))
+        case "billing-detail":
+            show(.place(.billing))
+            path.append(PaperRoute.billingSchedule("00000000-0000-4000-8000-000000009501"))
+        case "local-fleet": show(.local(.fleet))
+        case "local-equipment": show(.local(.equipment))
+        case "local-agreements": show(.local(.agreements))
         case "attention": show(.place(.attention))
         case "reports": show(.place(.reports))
         case "revenue": show(.place(.money))
@@ -666,12 +747,15 @@ struct TabletSidebar: View {
     let currentJobTitle: String?
     let currentJobCustomer: String?
     let canCreate: Bool
+    /// Saved work still on this iPad; the row shows only while something is waiting.
+    var savedWork: AppBottomBar.Sync? = nil
     let select: (TabletSection) -> Void
     let openJob: (Job) -> Void
     let search: () -> Void
     let create: () -> Void
     let workspace: () -> Void
     let settings: () -> Void
+    var reviewSavedWork: () -> Void = {}
     var fold: (() -> Void)? = nil
 
     var body: some View {
@@ -692,6 +776,7 @@ struct TabletSidebar: View {
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Create")
                     .accessibilityHint("New job, estimate or customer")
+                    .accessibilityIdentifier("sidebar-create")
                 }
             }
             .padding(.bottom, 14)
@@ -708,18 +793,20 @@ struct TabletSidebar: View {
                                     .accessibilityAddTraits(.isHeader)
                             }
                             ForEach(items) { item in
-                                row(item.title, icon: item.symbol, target: section(item), count: count(item))
+                                row(item.title, icon: item.symbol, target: section(item), count: count(item), id: item.rawValue)
                             }
                             ForEach(locals, id: \.self) { section in
-                                row(section.title, icon: section.moreSymbol, target: .local(section))
+                                row(section.title, icon: section.moreSymbol, target: .local(section), id: "local-\(section.rawValue)")
                             }
                         }
                     }
+                    if let savedWork { savedWorkRow(savedWork).padding(.top, 14) }
                     Button(action: settings) {
                         rowLabel("Settings", icon: "gearshape", selected: false, count: nil)
                     }
                     .buttonStyle(RowPressStyle())
-                    .padding(.top, 14)
+                    .accessibilityIdentifier("sidebar-settings")
+                    .padding(.top, savedWork == nil ? 14 : 0)
                 }
                 .padding(.bottom, 12)
             }
@@ -756,13 +843,41 @@ struct TabletSidebar: View {
         .accessibilityHint("Switch or manage businesses")
     }
 
-    private func row(_ title: String, icon: String, target: TabletSection, count: Int? = nil) -> some View {
+    /// Each row is `sidebar-<place>` (`sidebar-jobs`, `sidebar-inbox`), as the phone drawer's are `drawer-<place>`.
+    private func row(_ title: String, icon: String, target: TabletSection, count: Int? = nil, id: String) -> some View {
         let selected = current == target
         return Button { select(target) } label: {
             rowLabel(title, icon: icon, selected: selected, count: count)
         }
         .buttonStyle(RowPressStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("sidebar-\(id)")
+    }
+
+    /// The phone gear's "Saved on this phone", with its words under it and a dot when it needs the person.
+    private func savedWorkRow(_ sync: AppBottomBar.Sync) -> some View {
+        Button(action: reviewSavedWork) {
+            HStack(spacing: 12) {
+                Image(systemName: sync.needsPerson ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath")
+                    .font(.system(size: 16)).frame(width: 22)
+                    .foregroundStyle(sync.needsPerson ? Theme.warning : Theme.muted)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Saved on this iPad").font(Theme.font(15)).lineLimit(1)
+                    Text(sync.words).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                if sync.needsPerson { DrawerDot() }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6).frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Saved on this iPad")
+        .accessibilityValue(sync.words)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Review what is waiting to sync")
+        .accessibilityIdentifier("sidebar-saved-work")
     }
 
     /// Selected place: the drawer's grammar (ink word, filled glyph) on a quiet well, no rim.
@@ -835,6 +950,7 @@ struct TabletSearchField: View {
         .buttonStyle(PressStyle())
         .accessibilityLabel("Search")
         .accessibilityHint("Jobs, customers, invoices. Command F")
+        .accessibilityIdentifier(compact ? "tablet-search" : "sidebar-search")
     }
 }
 

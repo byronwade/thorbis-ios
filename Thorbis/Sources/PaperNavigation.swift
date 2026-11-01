@@ -200,7 +200,7 @@ struct RootView: View {
             case .search: closeDrawer(thenRun: { openBarSearch() })
             case .newJob: if session.can("job.create", feature: "jobs") { closeDrawer(thenRun: { createJob = true }) }
             case .create: if !createChoices.isEmpty { closeDrawer(thenRun: { createMenuOpen = true }) }
-            case nil: break
+            case .toggleSidebar, .place, nil: break
             }
         }
     }

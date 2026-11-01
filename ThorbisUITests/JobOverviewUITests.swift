@@ -2,6 +2,31 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    /// iPad: the job is the detail column's first screen (picked from the list beside it, so nothing
+    /// to go back to). A screen pushed from it — the customer — offers the same Back circle, which
+    /// returns to the job. Not asserted: the back swipe. Started at the detail column's own edge
+    /// (380pt in, beside the list) it did not pop in the simulator; an open iPad gap. At the
+    /// screen's edge the swipe brings the sidebar in (DrawerGearMenuUITests).
+    private func assertBackInTheDetailColumn() {
+        let app = preview("job", working: true)
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 20))
+        let actions = app.buttons["Job actions"]
+        XCTAssertTrue(actions.exists)
+        XCTAssertFalse(app.navigationBars.buttons["Back"].exists, "The detail column's first screen has no Back")
+        let customer = app.buttons["job-customer-link"]
+        reveal(customer, in: app)
+        customer.tap()
+        XCTAssertTrue(app.buttons["Customer actions"].waitForExistence(timeout: 10))
+        let back = app.navigationBars.buttons["Back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(back.frame.width, 43.5)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 43.5)
+        XCTAssertGreaterThan(back.frame.minX, app.frame.width * 0.3, "Back sits in the detail column, beside the list")
+        back.tap()
+        XCTAssertTrue(app.buttons["Customer actions"].waitForNonExistence(timeout: 5), "Back should pop the customer")
+        XCTAssertTrue(actions.waitForExistence(timeout: 5), "Back returns to the job")
+    }
+
     func testJobHeaderKeepsTitleClearOfNavigationAndBalanceOpensInvoice() {
         let app = preview("job", working: true)
         // v2: the header leads with the street (`job-title`), the problem under it.
@@ -25,6 +50,7 @@ final class JobOverviewUITests: XCTestCase {
 
     /// The Thorbis back circle replaces the system one; both it and the edge swipe still go back.
     func testThorbisBackButtonAndEdgeSwipeReturnFromJob() {
+        if XCUIApplication().usesTabletLayout { return assertBackInTheDetailColumn() }
         for useSwipe in [false, true] {
             let app = preview("job", working: true)
             let title = app.staticTexts["job-title"]
@@ -186,10 +212,13 @@ final class JobOverviewUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates",
                                "--paper-preview-working-job", "--paper-preview-long-job-title"]
         app.launch()
-        let title = app.staticTexts["Diagnose the upstairs air conditioner and replace the damaged compressor at the back of the property"]
-        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        let titles = app.staticTexts.matching(NSPredicate(format: "label == %@", "Diagnose the upstairs air conditioner and replace the damaged compressor at the back of the property"))
+        XCTAssertTrue(titles.firstMatch.waitForExistence(timeout: 20))
+        // iPad lists the job beside its detail too: the header is the rightmost copy.
+        let title = titles.allElementsBoundByIndex.max { $0.frame.minX < $1.frame.minX } ?? titles.firstMatch
         // Money's header is one line of title and status, but a long title still wraps in full.
-        XCTAssertGreaterThan(title.frame.height, 45, "The complete job title should wrap instead of truncating")
+        // Three lines on a phone; the iPad's wider detail column needs two.
+        XCTAssertGreaterThan(title.frame.height, app.usesTabletLayout ? 30 : 45, "The complete job title should wrap instead of truncating")
         XCTAssertTrue(app.buttons["Job actions"].exists)
     }
 
@@ -273,7 +302,9 @@ final class JobOverviewUITests: XCTestCase {
         continueAfterFailure = false
         let app = preview("job", accessibleText: true, working: true)
         let collect = button(startingWith: "Collect ", in: app)
-        let content = app.scrollViews.firstMatch
+        // The job's own scroll view (on iPad the list column beside it scrolls too).
+        let content = app.usesTabletLayout ? app.scrollViews.containing(NSPredicate(format: "label BEGINSWITH %@", "Collect ")).firstMatch
+                                           : app.scrollViews.firstMatch
         XCTAssertTrue(content.waitForExistence(timeout: 20))
         for _ in 0..<5 where !collect.isHittable { content.swipeUp() }
         XCTAssertTrue(collect.isHittable, "Collection must remain reachable")
@@ -325,6 +356,7 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertFalse(jobs.buttons.matching(chipQuery).firstMatch.exists, "Jobs already leads with the job in progress")
         jobs.terminate()
 
+        if jobs.usesTabletLayout { return assertSidebarNamesTheJobUnderWay() }
         let app = preview("more", working: true)
         let underWay = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", ", In progress")).firstMatch
         XCTAssertTrue(underWay.waitForExistence(timeout: 20), "The drawer's Recents name the job under way")
@@ -333,6 +365,24 @@ final class JobOverviewUITests: XCTestCase {
         let newJob = app.buttons["drawer-new"]
         XCTAssertTrue(newJob.exists)
         XCTAssertLessThanOrEqual(underWay.frame.maxY, newJob.frame.minY, "Recents stay clear of the drawer's foot")
+    }
+
+    /// iPad: the sidebar's foot names the job under way once, above the account, and only the sidebar
+    /// does — no floating chip over the columns.
+    private func assertSidebarNamesTheJobUnderWay() {
+        let app = preview("jobs", working: true)
+        XCTAssertTrue(app.staticTexts["In progress"].waitForExistence(timeout: 20))
+        app.showSidebar()
+        let chips = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Current job"))
+        let current = chips.firstMatch
+        XCTAssertTrue(current.waitForExistence(timeout: 10), "The sidebar names the job under way")
+        XCTAssertEqual(chips.count, 1, "Named once")
+        XCTAssertTrue(current.label.hasSuffix("In progress"), current.label)
+        capture(app, name: "Sidebar with the job under way")
+        let account = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Settings, ")).firstMatch
+        XCTAssertTrue(account.exists)
+        XCTAssertLessThanOrEqual(current.frame.maxY, account.frame.minY, "The job under way stays clear of the sidebar's foot")
+        XCTAssertTrue(current.isHittable)
     }
 
     /// Scrolls until the element sits in the open middle of the screen, either way.

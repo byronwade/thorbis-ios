@@ -16,7 +16,14 @@ final class AdaptiveControlsUITests: XCTestCase {
         let dismissStart = form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.29))
         let dismissEnd = form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.46))
         dismissStart.press(forDuration: 0.1, thenDragTo: dismissEnd)
-        XCTAssertFalse(app.keyboards.firstMatch.exists, "Dismiss the keyboard before navigating the form.")
+        // iPad: the form is a centered sheet the keyboard does not cover, so a drag in it does not
+        // reach the keyboard; the iPad keyboard's own key puts it away.
+        let hide = app.keyboards.buttons["Hide keyboard"]
+        for _ in 0..<3 where app.usesTabletLayout && !app.waitForKeyboardToHide(timeout: 1) {
+            if hide.exists && hide.isHittable { hide.tap() }
+        }
+        _ = app.waitForKeyboardToHide(timeout: 3)
+        XCTAssertFalse(app.keyboardShowing, "Dismiss the keyboard before navigating the form.")
         // The pinned Save bar is disabled in the read-only preview, and a disabled bar does not
         // block XCUI's hit test: a choice behind it reports hittable while a tap lands on the bar.
         let save = app.buttons["Save customer"]

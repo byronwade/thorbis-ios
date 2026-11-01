@@ -93,6 +93,7 @@ private struct SearchRouteContent: View {
                 .submitLabel(.search)
                 .onSubmit { model.submit() }
                 .autocorrectionDisabled()
+                .accessibilityIdentifier("search-field")
                 .textInputAutocapitalization(.never)
             if !model.query.isEmpty {
                 Button { model.query = "" } label: {

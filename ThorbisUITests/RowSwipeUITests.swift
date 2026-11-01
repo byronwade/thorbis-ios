@@ -31,6 +31,9 @@ final class RowSwipeUITests: XCTestCase {
         let app = launch("jobs")
         let row = app.buttons["job-row-\(birchwood)"]
         XCTAssertTrue(row.waitForExistence(timeout: 30))
+        // iPad: the Jobs preview has already picked this job into the detail column beside the list,
+        // so "the job opened" is read from the list staying put rather than from the job's controls.
+        let jobShownBefore = app.buttons["job-status"].exists
         // Right: Call and Directions, each a button with its word.
         drag(row, by: 200)
         let call = app.buttons["row-swipe-call-\(birchwood)"]
@@ -44,7 +47,8 @@ final class RowSwipeUITests: XCTestCase {
         // A tap on the open row closes it rather than opening the job.
         row.tap()
         XCTAssertTrue(call.waitForNonExistence(timeout: 3), "A tap closes the open row")
-        XCTAssertFalse(app.buttons["job-status"].exists, "Closing the row must not open the job")
+        XCTAssertEqual(app.buttons["job-status"].exists, jobShownBefore, "Closing the row must not open the job")
+        XCTAssertTrue(row.isHittable, "Closing the row keeps the list showing")
 
         // Left: the move the server allows from here, read on the first swipe.
         drag(row, by: -130)
@@ -54,11 +58,14 @@ final class RowSwipeUITests: XCTestCase {
         XCTAssertTrue(move.isHittable)
         attach(app, "jobs-trailing")
 
-        // The open row closes when the list scrolls, and the list still scrolls.
+        // The open row closes when the list scrolls, and the list still scrolls. On iPad the list is
+        // a column beside the job, so the drag is made on the list itself; its few rows fit the
+        // column's height, so it only bounces (which is still a scroll, and still closes the row).
         let before = row.frame.minY
-        app.swipeUp(velocity: .slow)
+        let list = app.scrollViews.containing(.button, identifier: "job-row-\(birchwood)").firstMatch
+        (app.usesTabletLayout ? list : app).swipeUp(velocity: .slow)
         XCTAssertTrue(move.waitForNonExistence(timeout: 3), "Scrolling closes the open row")
-        XCTAssertLessThan(row.frame.minY, before, "Vertical scrolling still moves the list")
+        if !app.usesTabletLayout { XCTAssertLessThan(row.frame.minY, before, "Vertical scrolling still moves the list") }
     }
 
     /// The design preview refuses every write: a full swipe must say the move wasn't saved and keep
@@ -95,6 +102,7 @@ final class RowSwipeUITests: XCTestCase {
     /// Rows sit below Today's stop-card pager: the pager still pages, a row still swipes, and a drag
     /// from the screen's edge level with a row opens the drawer instead of the row.
     func testSwipesLeaveThePagerAndTheDrawerEdgeAlone() throws {
+        try skipOnTablet(because: "the stop-card pager is the phone's Today; iPad Schedule rows swipe in testTodayRowSwipeOffersOnMyWay and the sidebar's edge swipe is in DrawerGearMenuUITests.")
         let app = launch("next-stop", ["--paper-preview-role", "tech", "--paper-preview-today-cards"])
         let pager = any(app, "today-stop-cards")
         XCTAssertTrue(pager.waitForExistence(timeout: 30))

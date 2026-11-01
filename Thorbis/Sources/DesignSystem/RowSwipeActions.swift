@@ -101,6 +101,9 @@ struct RowSwipeContainer<Content: View>: View {
 
     @State private var offset: CGFloat = 0
     @State private var dragging = false
+    /// Where the row sat when this drag began (closed, or open on a side). Read once: reading it
+    /// on every change counted an open side twice, so a modest drag ran the full swipe.
+    @State private var dragBase: CGFloat = 0
     @State private var armed = false
     @State private var rowWidth: CGFloat = 390
     #if DEBUG
@@ -186,14 +189,14 @@ struct RowSwipeContainer<Content: View>: View {
     }
 
     private func began() {
+        dragBase = state.openID == id ? settledOffset : 0
         dragging = true
         if state.openID != id { state.openID = id }
         onReveal()
     }
 
     private func changed(_ translation: CGFloat) {
-        let base: CGFloat = state.openID == id ? settledOffset : 0
-        var next = base + (layoutDirection == .rightToLeft ? -translation : translation)
+        var next = dragBase + (layoutDirection == .rightToLeft ? -translation : translation)
         // A side with nothing (and nothing being read) doesn't move.
         if next > 0 && leadingCells == 0 { next = 0 }
         if next < 0 && trailingCells == 0 { next = 0 }

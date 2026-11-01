@@ -4,6 +4,10 @@ import XCTest
 /// the drawer's left-edge swipe still opens the drawer above the pager.
 @MainActor
 final class TodayStopCardsUITests: XCTestCase {
+    override func setUpWithError() throws {
+        try skipOnTablet(because: "iPad Schedule lists the day beside the selected job's detail; the one-stop-at-a-time pager and its list toggle are the phone's Today (ScheduleView), which TabletRoot does not build. The iPad sidebar's edge swipe is covered by DrawerGearMenuUITests.")
+    }
+
     private let dispatched = "today-stop-card-00000000-0000-4000-8000-000000002214"
     private let nextStop = "today-stop-card-00000000-0000-4000-8000-000000002212"
     private let done = "today-stop-card-00000000-0000-4000-8000-000000002209"

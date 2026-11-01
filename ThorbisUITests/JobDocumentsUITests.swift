@@ -149,8 +149,13 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertLessThanOrEqual(app.staticTexts["customer-document-position"].frame.height, 75)
         let description = app.staticTexts.matching(NSPredicate(format: "label == %@", "Compressor diagnostic")).firstMatch
         XCTAssertTrue(description.exists)
-        XCTAssertGreaterThanOrEqual(description.frame.width, min(app.frame.width, 760) * 0.6,
-                                    "Large descriptions need a readable column instead of squeezing beside a fixed price")
+        capture(app, "Accessible customer invoice lines")
+        // Either the description has the readable column's width, or it has a line of its own with
+        // the price under it (the iPad's 720pt column: the words are shorter than the room).
+        let price = app.staticTexts.matching(NSPredicate(format: "label == %@", "$120.00")).firstMatch
+        let stacked = price.exists && price.frame.minY >= description.frame.maxY - 1
+        XCTAssertTrue(stacked || description.frame.width >= min(app.frame.width, 760) * 0.6,
+                      "Large descriptions need a readable column instead of squeezing beside a fixed price: \(description.frame), price \(price.frame)")
         capture(app, "Accessible customer invoice")
     }
 

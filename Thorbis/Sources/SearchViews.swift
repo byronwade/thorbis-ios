@@ -749,6 +749,7 @@ private struct SearchScreen: View {
                 }
                 .padding(.top, 4).padding(.bottom, 24)
             }
+            .accessibilityIdentifier("search-results")
             .onChange(of: model.selection) { _, selection in
                 guard let selection else { return }
                 let hits = visibleHits.filter { if case .none = $0.target { false } else { true } }
@@ -1034,6 +1035,7 @@ struct SearchKeyField: UIViewRepresentable {
         field.autocapitalizationType = .none
         field.spellCheckingType = .no
         field.accessibilityLabel = "Search"
+        field.accessibilityIdentifier = "search-field"
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         field.text = text
