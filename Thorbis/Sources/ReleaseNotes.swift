@@ -13,6 +13,15 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-01-ipad-back-swipe",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "arrow.left", title: "Swipe back beside the list",
+                      detail: "On iPad, swipe right from the left edge of a screen next to the list to go back."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
             id: "2026-11-01-team-goals",
             date: "2026-11-01",
             highlights: [

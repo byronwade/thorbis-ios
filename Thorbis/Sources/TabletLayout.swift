@@ -252,17 +252,19 @@ struct TabletRoot: View {
                 VStack(spacing: 0) {
                     if !inline { topBar(wide: geometry.size.width >= Self.inlineSidebarWidth) }
                     columns(width: geometry.size.width - (inline ? Self.sidebarWidth : 0))
-                }
-            }
-            .overlay(alignment: .leading) {
-                // As on the phone, a swipe from the left edge brings the sidebar in when it is hidden,
-                // on a column's first screen only: a pushed screen keeps the system back swipe.
-                if !inline && !sidebarOpen && path.isEmpty {
-                    Color.clear
-                        .frame(width: 18)
-                        .contentShape(Rectangle())
-                        .gesture(sidebarEdgeDrag(wide: geometry.size.width >= Self.inlineSidebarWidth))
-                        .accessibilityHidden(true)
+                        .overlay(alignment: .leading) {
+                            // As on the phone, a swipe from the left edge brings the sidebar in when it
+                            // is hidden, on a column's first screen only: a pushed screen keeps the back
+                            // swipe. The strip starts below the top bar, so Show sidebar keeps its
+                            // whole target.
+                            if !inline && !sidebarOpen && path.isEmpty {
+                                Color.clear
+                                    .frame(width: 18)
+                                    .contentShape(Rectangle())
+                                    .gesture(sidebarEdgeDrag(wide: geometry.size.width >= Self.inlineSidebarWidth))
+                                    .accessibilityHidden(true)
+                            }
+                        }
                 }
             }
             .overlay(alignment: .leading) {

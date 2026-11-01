@@ -118,13 +118,64 @@ extension View {
 
 /// Hiding the system back button switches off UIKit's edge-swipe pop. Re-enable it on every
 /// navigation controller: the gesture begins whenever there is a screen to go back to.
+///
+/// UIKit's swipe only listens at the screen's edge. A stack that starts further in — the iPad's
+/// detail column beside its list, a readable-width column, a form sheet — gets its own pan from
+/// its own leading edge (`columnBackSwipe`), so a swipe from where the screen visibly starts goes
+/// back there too. A stack at the screen's edge (every phone screen) keeps UIKit's alone.
 extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
+    private static let columnBackSwipeName = "thorbis.columnBackSwipe"
+    /// How far in from the stack's leading edge the swipe may start.
+    private static let columnEdgeWidth: CGFloat = 22
+
     override open func viewDidLoad() {
         super.viewDidLoad()
         interactivePopGestureRecognizer?.delegate = self
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(thorbisColumnBackSwipe(_:)))
+        pan.name = Self.columnBackSwipeName
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = self
+        view.addGestureRecognizer(pan)
+    }
+
+    private func isColumnBackSwipe(_ recognizer: UIGestureRecognizer) -> Bool {
+        recognizer.name == Self.columnBackSwipeName && recognizer.view === view
+    }
+
+    private var leadsRightToLeft: Bool { view.effectiveUserInterfaceLayoutDirection == .rightToLeft }
+
+    /// Whether the stack starts in from the window's edge, where UIKit's own swipe cannot reach.
+    private var startsInFromScreenEdge: Bool {
+        guard let window = view.window else { return false }
+        let frame = view.convert(view.bounds, to: window)
+        return leadsRightToLeft ? frame.maxX < window.bounds.maxX - 1 : frame.minX > 1
+    }
+
+    private var canGoBack: Bool { viewControllers.count > 1 && transitionCoordinator == nil }
+
+    @objc private func thorbisColumnBackSwipe(_ pan: UIPanGestureRecognizer) {
+        guard pan.state == .ended else { return }
+        let sign: CGFloat = leadsRightToLeft ? -1 : 1
+        let distance = pan.translation(in: view).x * sign
+        let speed = pan.velocity(in: view).x * sign
+        guard distance > 60 || (distance > 20 && speed > 500), canGoBack else { return }
+        popViewController(animated: true)
+    }
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard isColumnBackSwipe(gestureRecognizer) else { return true }
+        // Only touches in the stack's own leading edge, and only where UIKit's swipe cannot help.
+        guard canGoBack, startsInFromScreenEdge else { return false }
+        let x = touch.location(in: view).x
+        return leadsRightToLeft ? x > view.bounds.width - Self.columnEdgeWidth : x < Self.columnEdgeWidth
     }
 
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if isColumnBackSwipe(gestureRecognizer), let pan = gestureRecognizer as? UIPanGestureRecognizer {
+            let velocity = pan.velocity(in: view)
+            let inward = leadsRightToLeft ? -velocity.x : velocity.x
+            return canGoBack && inward > 0 && abs(velocity.x) > abs(velocity.y)
+        }
         guard gestureRecognizer === interactivePopGestureRecognizer else { return true }
         return viewControllers.count > 1 && transitionCoordinator == nil
     }
@@ -133,6 +184,13 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                   shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         gestureRecognizer === interactivePopGestureRecognizer
+    }
+
+    // A swipe that starts in the column's edge is the back swipe first: the content's own pans
+    // (a row's swipe actions, a horizontal scroller) wait for it to fail, as at the screen's edge.
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                                  shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+        isColumnBackSwipe(gestureRecognizer) && other.view?.isDescendant(of: view) == true
     }
 }
 
