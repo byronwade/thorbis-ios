@@ -125,6 +125,11 @@ struct SavedWorkSnapshot: Equatable {
             case .note: "note.text"
             case .followUp: "bell"
             case .progress: "arrow.triangle.2.circlepath"
+            case .acknowledgeCheck: "checklist"
+            case .complete: "checkmark.circle"
+            case .invoiceSignature: "signature"
+            case .payment: "dollarsign.circle"
+            case .organizationFact: "building.2"
             }
             rowsByJob[entry.jobID, default: []].append(.init(id: "command:\(entry.id)", originalID: entry.id,
                 title: entry.summary, date: entry.createdAt, state: state, isMedia: false, symbol: symbol))
@@ -140,6 +145,11 @@ struct SavedWorkSnapshot: Equatable {
                 symbol: item.kind == "document" ? "doc" : "photo"))
         }
         let groups = rowsByJob.map { jobID, rows -> SavedWorkGroup in
+            // Company details typed offline share one group; they belong to no job.
+            if jobID == OutboxEntry.organizationRecord {
+                return .init(jobID: jobID, title: String(localized: "Company details"), shortReference: String(localized: "Company"),
+                             rows: rows.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date < $1.date })
+            }
             let title = jobs.first(where: { $0.id == jobID })?.title.trimmingCharacters(in: .whitespacesAndNewlines)
             return .init(jobID: jobID, title: title.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "Job"),
                          shortReference: "JOB-" + String(jobID.suffix(4)).uppercased(),

@@ -3,7 +3,7 @@ import SwiftUI
 /// Everything an owner can place in the tab bar or the More menu. Search and More stay fixed so
 /// nothing can be lost: whatever is not in the tab bar is in More (or under Hidden in Customize).
 enum MenuItem: String, CaseIterable, Codable, Identifiable {
-    case home, schedule, jobs, customers, attention, inbox, estimates, invoices, billing, priceBook, money, reports, team, notices, drafts
+    case home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices, billing, priceBook, money, reports, scorecard, team, notices, drafts
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .schedule: "Schedule"
         case .jobs: "Jobs"
         case .customers: "Customers"
+        case .properties: "Properties"
         case .attention: "Needs attention"
         case .inbox: "Inbox"
         case .estimates: "Estimates"
@@ -21,6 +22,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .priceBook: "Price book"
         case .money: "Money"
         case .reports: "Reports"
+        case .scorecard: "My scorecard"
         case .team: "Team & permissions"
         case .notices: "Notification rules"
         case .drafts: "Message drafts"
@@ -53,6 +55,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .schedule: "calendar"
         case .jobs: "briefcase"
         case .customers: "person.2"
+        case .properties: "mappin.and.ellipse"
         case .attention: "exclamationmark.circle"
         case .inbox: "tray"
         case .estimates: "doc.text"
@@ -61,6 +64,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .priceBook: "book.closed"
         case .money: "chart.bar"
         case .reports: "chart.xyaxis.line"
+        case .scorecard: "target"
         case .team: "person.2.badge.gearshape"
         case .notices: "bell.badge"
         case .drafts: "bubble.left"
@@ -74,12 +78,12 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .jobs: Theme.markOlive
         case .home, .schedule: Theme.markAccent
         case .inbox: Theme.markPumpkin
-        case .customers: Theme.markForest
+        case .customers, .properties: Theme.markForest
         case .attention: Theme.markRed
         case .estimates: Theme.markPumpkin
         case .invoices, .billing, .money: Theme.markForest
         case .priceBook: Theme.markBurnt
-        case .reports: Theme.markOlive
+        case .reports, .scorecard: Theme.markOlive
         case .team, .notices, .drafts: Theme.markGrey
         }
     }
@@ -87,11 +91,13 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     var subtitle: String? {
         switch self {
         case .home: "Today at a glance, money and what needs you"
+        case .properties: "Every service address, across customers"
         case .attention: "Unpaid invoices, waiting estimates, jobs without a time"
         case .inbox: "Booked, changed and assigned jobs"
         case .billing: "Progress billing, deposits, retainage"
         case .money: "Revenue, overdue and reports"
         case .reports: "Estimate conversion and schedule"
+        case .scorecard: "What you sold this week"
         case .notices: "Who hears about booked and changed jobs"
         case .drafts: "Saved here, not sent"
         default: nil
@@ -113,6 +119,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .schedule, .jobs, .customers: nil
         case .home: .home
+        case .properties: .properties
         case .attention: .attention
         case .inbox: .inbox
         case .estimates: .estimates
@@ -121,6 +128,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .priceBook: .priceBook
         case .money: .revenue
         case .reports: .reports
+        case .scorecard: .scorecard
         case .team: .team
         case .notices: .notices
         case .drafts: .drafts
@@ -154,7 +162,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .schedule, .jobs: session.can("job.view", feature: "jobs")
         // The owner's day at a glance; other roles keep their menus exactly as they were.
         case .home: session.can("job.view", feature: "jobs") && WorkRole(session) == .owner
-        case .customers: session.can("customer.view", feature: "core_crm")
+        case .customers, .properties: session.can("customer.view", feature: "core_crm")
         case .attention: session.can("invoice.view", feature: "invoicing") || session.can("estimate.view", feature: "estimates")
         case .inbox: session.can("job.view", feature: "job_booking_notices")
         case .estimates: session.can("estimate.view", feature: "estimates")
@@ -163,8 +171,10 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .priceBook: session.can("pricebook.view", feature: "price_book")
         case .money: session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")
         case .reports: session.can("estimate.view", feature: "estimates") || session.can("job.view", feature: "jobs")
+        case .scorecard: session.can("job.view", feature: "jobs")
         case .team: session.can("organization.members.manage") || session.can("organization.permissions.manage")
         case .notices: session.can("organization.settings.edit", feature: "job_booking_notices")
+            || PushNotifications.receivesMorningDigest(session)
         case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil
         }
     }

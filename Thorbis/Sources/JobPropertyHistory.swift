@@ -320,7 +320,14 @@ struct JobPropertyHistorySection: View {
 
     private func loadEquipment() async {
         let generation = session.generation
+        // Read through the job first, so assigned technicians see the units too (job.view).
+        if let context = try? await JobServiceContextLoader.load(job.id, api: api) {
+            guard session.generation == generation else { return }
+            equipment = context.equipmentRecords.filter { $0.customerId == job.customerId }
+            return
+        }
         do {
+            // An older server without the job read, or a failed request: the customer read still serves office staff.
             let loaded = try await api.customerEquipment(job.customerId)
             guard session.generation == generation else { return }
             equipment = loaded.filter { $0.customerId == job.customerId }

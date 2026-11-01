@@ -187,6 +187,8 @@ struct ThorbisApp: App {
             .environmentObject(connectivity)
             .environmentObject(outbox)
             .environmentObject(pendingMedia)
+            // OF-03: media waiting on the phone counts in the sync line and holds a queued Complete.
+            .onReceive(pendingMedia.$items) { outbox.notePendingMedia($0) }
             .environmentObject(menuLayout)
             .environmentObject(whatsNew)
             .font(Theme.font(15))
@@ -268,10 +270,12 @@ extension ThorbisApp {
     @MainActor private func resync() async {
         await session.revalidate()
         guard session.phase == .ready, !session.isOffline else { return }
+        // Photos first: a queued Complete job may depend on them meeting the photo requirement.
+        await pendingMedia.drain(api: api, canUpload: { session.can("job.edit", feature: "jobs") })
+        outbox.notePendingMedia(pendingMedia.items)
         if !outbox.pending.isEmpty {
             await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
         }
-        await pendingMedia.drain(api: api, canUpload: { session.can("job.edit", feature: "jobs") })
         await store.refresh(api)
     }
 }
