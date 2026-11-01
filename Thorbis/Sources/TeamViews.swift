@@ -295,7 +295,7 @@ struct TeamView: View {
             RoleEditorView(roleID: id) { await load() }
         }
         .alert("New role", isPresented: $naming) {
-            TextField("Role name", text: $newRoleName)
+            TextField("Role name", text: $newRoleName, prompt: .placeholder("Role name"))
             Button("Create") { Task { await createRole() } }
             Button("Cancel", role: .cancel) {}
         } message: {

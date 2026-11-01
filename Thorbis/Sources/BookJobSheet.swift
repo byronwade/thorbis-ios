@@ -317,7 +317,7 @@ struct NewJobSheet: View {
                     HStack(spacing: 10) {
                         Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
                             .accessibilityHidden(true)
-                        TextField("", text: $query, prompt: Text("Mike Reyes or (916) 555-0142").foregroundStyle(Theme.subtle))
+                        TextField("", text: $query, prompt: .placeholder("Mike Reyes or (916) 555-0142"))
                             .font(Theme.font(16))
                             .textContentType(.name)
                             .autocorrectionDisabled()
@@ -464,7 +464,7 @@ struct NewJobSheet: View {
     private func inlineField(_ label: String, text: Binding<String>, prompt: String, focus field: Focus, problem: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("", text: text, prompt: Text(prompt).foregroundStyle(Theme.subtle))
+            TextField("", text: text, prompt: .placeholder(prompt))
                 .font(Theme.font(16))
                 .focused($focus, equals: field)
                 .accessibilityLabel(label)
@@ -498,7 +498,7 @@ struct NewJobSheet: View {
     private var problemSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             PaperFormField("What's wrong?") {
-                TextField("", text: $draft.title, prompt: Text("AC not cooling").foregroundStyle(Theme.subtle), axis: .vertical)
+                TextField("", text: $draft.title, prompt: .placeholder("AC not cooling"), axis: .vertical)
                     .font(Theme.font(16))
                     .lineLimit(1...3)
                     .focused($focus, equals: .title)
@@ -532,7 +532,7 @@ struct NewJobSheet: View {
                 }
             }
             PaperFormField("Notes for the tech", note: "Optional") {
-                TextField(text: $draft.notes, prompt: Text("Gate code 4412. Dog in the back yard.").foregroundStyle(Theme.subtle),
+                TextField(text: $draft.notes, prompt: .placeholder("Gate code 4412. Dog in the back yard."),
                           axis: .vertical) { Text("Job description") }
                     .font(Theme.font(15))
                     .lineLimit(2...6)

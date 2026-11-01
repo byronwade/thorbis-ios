@@ -111,6 +111,10 @@ struct EquipmentEditor: View {
     @State private var busy = false
     @State private var error: String?
     @State private var confirmRemove = false
+    /// Said under "What it is" when the commit is pressed without it; clears as they type.
+    @State private var nameProblem: String?
+    @FocusState private var nameFocused: Bool
+    private static let nameMissing = "Say what it is, like \u{201C}50-gal gas water heater.\u{201D}"
 
     var body: some View {
         NavigationStack {
@@ -118,14 +122,16 @@ struct EquipmentEditor: View {
             // above the keyboard (it was the toolbar's Save), Cancel stays in the toolbar.
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    PaperFormField("What it is") {
-                        TextField("e.g. 50-gal gas water heater", text: $input.name).font(Theme.font(16)).fieldWell()
+                    PaperFormField("What it is", error: nameProblem) {
+                        TextField("e.g. 50-gal gas water heater", text: $input.name, prompt: .placeholder("e.g. 50-gal gas water heater")).font(Theme.font(16)).fieldWell()
+                            .focused($nameFocused)
+                            .onChange(of: input.name) { _, _ in nameProblem = nil }
                     }
-                    PaperFormField("Type", note: "Optional") { TextField("Water heater", text: binding(\.kind)).font(Theme.font(16)).fieldWell() }
-                    PaperFormField("Brand", note: "Optional") { TextField("Brand", text: binding(\.brand)).font(Theme.font(16)).fieldWell() }
-                    PaperFormField("Model", note: "Optional") { TextField("Model", text: binding(\.model)).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Type", note: "Optional") { TextField("Water heater", text: binding(\.kind), prompt: .placeholder("Water heater")).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Brand", note: "Optional") { TextField("Brand", text: binding(\.brand), prompt: .placeholder("Brand")).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Model", note: "Optional") { TextField("Model", text: binding(\.model), prompt: .placeholder("Model")).font(Theme.font(16)).fieldWell() }
                     PaperFormField("Serial number", note: "Optional") {
-                        TextField("Serial number", text: binding(\.serialNumber)).textInputAutocapitalization(.characters)
+                        TextField("Serial number", text: binding(\.serialNumber), prompt: .placeholder("Serial number")).textInputAutocapitalization(.characters)
                             .font(Theme.font(16)).fieldWell()
                     }
                     if !locations.isEmpty {
@@ -145,7 +151,7 @@ struct EquipmentEditor: View {
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
                     PaperFormField("Notes", note: "Optional") {
-                        TextField("Filters, access, history…", text: binding(\.notes), axis: .vertical).lineLimit(2...6)
+                        TextField("Filters, access, history…", text: binding(\.notes), prompt: .placeholder("Filters, access, history…"), axis: .vertical).lineLimit(2...6)
                             .font(Theme.font(16)).fieldWell()
                     }
                     if let error { ListErrorRow(message: error) }
@@ -168,12 +174,28 @@ struct EquipmentEditor: View {
                 ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
             }
             .safeAreaInset(edge: .bottom) {
+                // Never pre-disabled: pressed without a name, it says so under the field.
                 PaperActionBar(title: existing == nil ? "Add equipment" : "Save equipment", busy: busy,
-                               disabled: input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await save() } }
+                               identifier: "equipment-commit") {
+                    if input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        nameProblem = Self.nameMissing
+                        nameFocused = true
+                    } else {
+                        Task { await save() }
+                    }
+                }
             }
             .thorbisConfirm("Remove this equipment?", isPresented: $confirmRemove,
                             actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await remove() } }])
             .onAppear(perform: fill)
+            #if DEBUG
+            // `--paper-preview-form-errors`: the commit pressed with the name blank.
+            .task {
+                guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-form-errors") else { return }
+                try? await Task.sleep(for: .milliseconds(600))
+                nameProblem = Self.nameMissing
+            }
+            #endif
         }
     }
 

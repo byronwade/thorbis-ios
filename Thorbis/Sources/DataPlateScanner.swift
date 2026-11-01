@@ -356,7 +356,7 @@ struct DataPlateScannerSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 Text(title).font(Theme.font(14)).foregroundStyle(Theme.muted).frame(width: 56, alignment: .leading)
-                TextField(placeholder ?? title, text: text)
+                TextField(placeholder ?? title, text: text, prompt: .placeholder(placeholder ?? title))
                     .font(Theme.font(16, weight: .medium)).monospacedDigit()
                     .textInputAutocapitalization(capitalization).autocorrectionDisabled()
                     .accessibilityLabel(title)
@@ -378,9 +378,14 @@ struct DataPlateScannerSheet: View {
     }
 
     private var commitBar: some View {
+        // Not pre-disabled when nothing has been read yet: pressing says what to do, under the
+        // fields. Without the note permission it stays off, and the sentence under it says why.
         PaperActionBar(title: saved ? "Done" : "Add to job notes", symbol: saved ? nil : "text.bubble",
-                       busy: busy, disabled: !saved && (noteText == nil || !JobNotePoster.canPost(session))) {
-            if saved { finish() } else { Task { await saveNote() } }
+                       busy: busy, disabled: !saved && !JobNotePoster.canPost(session),
+                       disabledReason: "Your role can't add job notes. Ask your office.") {
+            if saved { finish() }
+            else if noteText == nil { problem = "Scan the tag, or type the brand, model or serial, to add a note." }
+            else { Task { await saveNote() } }
         } secondary: {
             if canEditEquipment {
                 PaperSquareButton(symbol: "wrench.and.screwdriver", label: "Add as equipment") { Task { await openEquipment() } }

@@ -121,6 +121,8 @@ struct CustomerContactSheet: View {
     @State private var busy = false
     @State private var error: String?
     @FocusState private var focusedField: ContactField?
+    /// Said under the name when Save is pressed without one; clears as they type.
+    @State private var nameProblem: String?
 
     private enum ContactField: Hashable { case name, phone, email, customRole }
     private static let roles = ["Homeowner", "Spouse", "Tenant", "Property mgr"]
@@ -159,10 +161,9 @@ struct CustomerContactSheet: View {
         )
     }
 
+    /// The one reason Save is truly off; a missing name is said under the field when it's pressed.
     private var saveBlockedReason: String? {
-        guard !canSave else { return nil }
-        if !session.can("customer.edit", feature: "core_crm") { return "Your role can't change contacts. Ask your office." }
-        return "Add the contact's name to save."
+        session.can("customer.edit", feature: "core_crm") ? nil : "Your role can't change contacts. Ask your office."
     }
 
     private var canSave: Bool {
@@ -191,10 +192,12 @@ struct CustomerContactSheet: View {
                 }
             }
             .frame(height: 40)
+            .onChange(of: name) { _, _ in nameProblem = nil }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     contactField("Name", placeholder: "Full name", text: $name, field: .name)
+                    if let nameProblem { FieldProblem(message: nameProblem).padding(.top, -8) }
                     contactField("Phone", placeholder: "(555) 555-5555", text: $phone, field: .phone)
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -268,10 +271,12 @@ struct CustomerContactSheet: View {
                         if busy { ProgressView().tint(Theme.onInk) }
                         else { Text(contact == nil ? "Save contact" : "Save changes") }
                     }
-                    .inkCommit(enabled: canSave)
+                    .inkCommit(enabled: saveBlockedReason == nil)
                 }
                 .buttonStyle(PressStyle())
-                .disabled(!canSave)
+                // Never pre-disabled for a blank name (pressing says so under it); off only while
+                // saving or when this role can't change contacts, which the sentence below says.
+                .disabled(busy || saveBlockedReason != nil)
                 // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
                 if !busy, let reason = saveBlockedReason {
                     Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -304,7 +309,7 @@ struct CustomerContactSheet: View {
             Text(title)
                 .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(Theme.muted)
-            TextField(placeholder, text: text)
+            TextField(placeholder, text: text, prompt: .placeholder(placeholder))
                 // design.thorbis.com mobile: input type is at least 16.
                 .font(field == .phone ? Theme.monoFont(16) : Theme.font(16))
                 .keyboardType(field == .phone ? .phonePad : field == .email ? .emailAddress : .default)
@@ -354,7 +359,14 @@ struct CustomerContactSheet: View {
     }
 
     private func save() async {
-        guard !busy, canSave else { return }
+        guard !busy else { return }
+        guard canSave else {
+            if saveBlockedReason == nil {
+                nameProblem = "Add the contact's name, like Danielle Marlowe."
+                focusedField = .name
+            }
+            return
+        }
         busy = true
         defer { busy = false }
         do {

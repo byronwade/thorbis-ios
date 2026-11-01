@@ -19,11 +19,12 @@ struct JobStatusMenu<Label: View>: View {
     @State private var model = ThorbisMenuModel()
 
     var body: some View {
-        Button { model.isPresented = true } label: { label() }
+        Button { ThorbisKeyboard.dismiss { model.isPresented = true } } label: { label() }
             .buttonStyle(PressStyle())
             .sensoryFeedback(.selection, trigger: model.isPresented) { _, open in open }
             .accessibilityLabel(accessibilityLabel ?? title ?? "Status")
-            .popover(isPresented: $model.isPresented, arrowEdge: .top) {
+            // Down from a chip in the top half of the window, up from one in the bottom half.
+            .anchoredPopover(isPresented: $model.isPresented) {
                 JobStatusMenuPanel(groups: groups.filter { !$0.isEmpty }, title: title,
                                    onSelect: { model.choose($0) }, onClose: { model.isPresented = false })
                     .onDisappear { model.finish() }

@@ -90,7 +90,7 @@ struct InviteMemberSheet: View {
                           commitIdentifier: "team-invite-send", commit: { Task { await press() } }) {
             FormField(label: "Email", help: "They get an email to join and choose a password. Invites expire after 7 days.",
                       error: emailProblem) {
-                TextField("", text: $email, prompt: Text("mike@reyesplumbing.com").foregroundStyle(Theme.subtle))
+                TextField("", text: $email, prompt: .placeholder("mike@reyesplumbing.com"))
                     .font(Theme.font(16))
                     .keyboardType(.emailAddress).textContentType(.emailAddress)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()

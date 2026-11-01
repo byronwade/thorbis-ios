@@ -315,6 +315,9 @@ private struct LocalWorkspaceEditor: View {
     let onSave: (LocalWorkspaceDraft) throws -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var error: String?
+    /// Required fields left empty when Save was pressed, said under each; one clears as it is typed in.
+    @State private var missing: Set<String> = []
+    @FocusState private var focus: String?
 
     var body: some View {
         NavigationStack {
@@ -331,12 +334,14 @@ private struct LocalWorkspaceEditor: View {
                     }
                     ForEach(section.fields.indices, id: \.self) { index in
                         let field = section.fields[index]
-                        PaperFormField(field.label, note: field.required ? nil : "Optional") {
+                        PaperFormField(field.label, note: field.required ? nil : "Optional",
+                                       error: missing.contains(field.key) ? "Add the \(field.label.lowercased()) to save." : nil) {
                             TextField(field.label, text: Binding(
                                 get: { draft.value(field.key) },
-                                set: { draft.values[field.key] = $0 }
-                            ), axis: field.key == "notes" ? .vertical : .horizontal)
+                                set: { draft.values[field.key] = $0; missing.remove(field.key) }
+                            ), prompt: .placeholder(field.label), axis: field.key == "notes" ? .vertical : .horizontal)
                             .font(Theme.font(16)).fieldWell()
+                            .focused($focus, equals: field.key)
                         }
                     }
                     if section == .fleet {
@@ -351,7 +356,14 @@ private struct LocalWorkspaceEditor: View {
             .background(Theme.canvas)
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
-                PaperActionBar(title: "Save", disabled: section.fields.filter { $0.required }.contains { draft.required($0.key).isEmpty }) {
+                // Never pre-disabled: pressed with a required field empty, it says which under it.
+                PaperActionBar(title: "Save") {
+                    let empty = section.fields.filter { $0.required && draft.required($0.key).isEmpty }
+                    guard empty.isEmpty else {
+                        missing = Set(empty.map(\.key))
+                        focus = empty.first?.key
+                        return
+                    }
                     do { try onSave(draft); dismiss() }
                     catch { self.error = error.localizedDescription }
                 }

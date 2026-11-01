@@ -838,22 +838,32 @@ struct PriceBookItemEditor: View {
     @State private var busy = false
     @State private var error: String?
     @State private var createKey = UUID().uuidString
+    /// Problems shown under their fields after the commit is pressed (design.thorbis.com Forms:
+    /// validate on commit). Each clears as soon as its field changes.
+    @State private var nameProblem: String?
+    @State private var priceProblem: String?
+    @State private var unitProblem: String?
+    @FocusState private var focus: Field?
+    private enum Field: Hashable { case name, price, unit }
 
     var body: some View {
         NavigationStack {
             // design 2026-10-30: one column, labels above, field wells; Save is the ink commit.
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    PaperFormField("Name customers see") {
-                        TextField("Replace capacitor", text: $content.description, axis: .vertical).lineLimit(1...3)
+                    PaperFormField("Name customers see", error: nameProblem) {
+                        TextField("Replace capacitor", text: $content.description, prompt: .placeholder("Replace capacitor"), axis: .vertical).lineLimit(1...3)
                             .font(Theme.font(16)).fieldWell()
+                            .focused($focus, equals: .name)
                     }
-                    PaperFormField("Price") {
-                        TextField("0.00", text: $priceText).keyboardType(.decimalPad)
+                    PaperFormField("Price", error: priceProblem) {
+                        TextField("0.00", text: $priceText, prompt: .placeholder("0.00")).keyboardType(.decimalPad)
                             .font(Theme.font(16, weight: .medium)).monospacedDigit().fieldWell()
+                            .focused($focus, equals: .price)
                     }
-                    PaperFormField("Unit") {
-                        TextField("each, hour, foot…", text: $content.unit).font(Theme.font(16)).fieldWell()
+                    PaperFormField("Unit", error: unitProblem) {
+                        TextField("each, hour, foot…", text: $content.unit, prompt: .placeholder("each, hour, foot…")).font(Theme.font(16)).fieldWell()
+                            .focused($focus, equals: .unit)
                     }
                     PaperFormField("Kind") {
                         ThorbisSelect(options: PriceBookContent.kinds.map { ($0, $0.capitalized) },
@@ -870,10 +880,15 @@ struct PriceBookItemEditor: View {
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.canvas)
             .safeAreaInset(edge: .bottom) {
-                PaperActionBar(title: existing == nil ? "Add to price book" : "Save item", busy: busy, disabled: !valid) {
-                    Task { await save() }
+                // Never pre-disabled: pressed with something missing, it says what under the field.
+                PaperActionBar(title: existing == nil ? "Add to price book" : "Save item", busy: busy,
+                               identifier: "price-book-item-commit") {
+                    if valid { Task { await save() } } else { showProblems() }
                 }
             }
+            .onChange(of: content.description) { _, _ in nameProblem = nil }
+            .onChange(of: priceText) { _, _ in priceProblem = nil }
+            .onChange(of: content.unit) { _, _ in unitProblem = nil }
             .navigationTitle(existing == nil ? "New price book item" : "Edit item")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -886,7 +901,32 @@ struct PriceBookItemEditor: View {
                                            taxClassification: r.taxClassification, kind: r.kind)
                 priceText = paymentAmountText(r.sellPrice.amount)
             }
+            #if DEBUG
+            // `--paper-preview-form-errors`: the commit pressed with the form blank, so the errors show.
+            .task {
+                guard PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-form-errors") else { return }
+                try? await Task.sleep(for: .milliseconds(600))
+                showProblems()
+            }
+            #endif
         }
+    }
+
+    /// Says what's missing under each field, and moves to the first one.
+    private func showProblems() {
+        nameProblem = content.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Add the name customers see, like \u{201C}Replace capacitor.\u{201D}" : nil
+        let price = priceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if price.isEmpty {
+            priceProblem = "Add a price, like 125.00."
+        } else if MoneyInput.cents(price, maximumCents: .max) != nil, cents == nil {
+            priceProblem = "Keep the price to $1,000,000.00 or less."
+        } else {
+            priceProblem = cents == nil ? "Enter the price in dollars, like 125.00." : nil
+        }
+        unitProblem = content.unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Add a unit, like each or hour." : nil
+        if nameProblem != nil { focus = .name } else if priceProblem != nil { focus = .price } else if unitProblem != nil { focus = .unit }
     }
 
     private var cents: Int? { MoneyInput.cents(priceText, maximumCents: 100_000_000) }

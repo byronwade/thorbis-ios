@@ -91,7 +91,7 @@ struct LoginView: View {
                 }
 
                 PaperFormField("Email") {
-                    TextField("Email", text: $email, prompt: Text(verbatim: "you@company.com").foregroundStyle(Theme.muted))
+                    TextField("Email", text: $email, prompt: .placeholder("you@company.com"))
                         .textContentType(.username)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
@@ -123,10 +123,10 @@ struct LoginView: View {
                     HStack(spacing: 0) {
                         Group {
                             if showPassword {
-                                TextField("Password", text: $password)
+                                TextField("Password", text: $password, prompt: .placeholder("Password"))
                                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                             } else {
-                                SecureField("Password", text: $password)
+                                SecureField("Password", text: $password, prompt: .placeholder("Password"))
                             }
                         }
                         .textContentType(.password)
@@ -249,6 +249,8 @@ private struct PasswordResetRequestView: View {
     @State private var email: String
     @State private var busy = false
     @State private var outcome: String?
+    /// Said under the email when Send link is pressed without one; clears as they type.
+    @State private var emailProblem: String?
     @FocusState private var emailFocused: Bool
 
     init(initialEmail: String) { _email = State(initialValue: initialEmail) }
@@ -268,7 +270,7 @@ private struct PasswordResetRequestView: View {
                         .font(Theme.font(13, weight: .medium))
                         .foregroundStyle(Theme.muted)
                         .padding(.top, 32)
-                    TextField("Email", text: $email, prompt: Text(verbatim: "you@company.com").foregroundStyle(Theme.muted))
+                    TextField("Email", text: $email, prompt: .placeholder("you@company.com"))
                         .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
@@ -277,8 +279,10 @@ private struct PasswordResetRequestView: View {
                         .submitLabel(.send)
                         .onSubmit { Task { await requestReset() } }
                         .focused($emailFocused)
+                        .onChange(of: email) { _, _ in emailProblem = nil }
                         .paperField()
                         .padding(.top, 8)
+                    if let emailProblem { FieldProblem(message: emailProblem).padding(.top, 6) }
                     if let outcome {
                         Text(outcome)
                             .font(Theme.font(15))
@@ -300,8 +304,8 @@ private struct PasswordResetRequestView: View {
                     if busy {
                         ProgressView()
                     } else {
+                        // Not pre-disabled: pressed without an email, it says so under the field.
                         Button("Send link") { Task { await requestReset() } }
-                            .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
             }
@@ -310,7 +314,12 @@ private struct PasswordResetRequestView: View {
     }
 
     private func requestReset() async {
-        guard !busy, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !busy else { return }
+        guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            emailProblem = "Add the email you use for Thorbis, like you@company.com."
+            emailFocused = true
+            return
+        }
         busy = true
         defer { busy = false }
         struct Request: Encodable { let email: String }

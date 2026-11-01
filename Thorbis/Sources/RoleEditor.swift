@@ -82,6 +82,9 @@ struct RoleEditorView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var search = ""
+    /// Said under the name when Save is pressed without one; clears as they type.
+    @State private var nameProblem: String?
+    @FocusState private var nameFocused: Bool
 
     private var groups: [(String, [RoleBuilderCatalog.Capability])] {
         let visible = (catalog?.capabilities ?? []).filter {
@@ -95,8 +98,11 @@ struct RoleEditorView: View {
     var body: some View {
         List {
             Section {
-                TextField("Role name", text: $name)
-                TextField("What this role is for", text: $summary, axis: .vertical).lineLimit(1...3)
+                TextField("Role name", text: $name, prompt: .placeholder("Role name"))
+                    .focused($nameFocused)
+                    .onChange(of: name) { _, _ in nameProblem = nil }
+                if let nameProblem { FieldProblem(message: nameProblem) }
+                TextField("What this role is for", text: $summary, prompt: .placeholder("What this role is for"), axis: .vertical).lineLimit(1...3)
             }
             ForEach(groups, id: \.0) { resource, capabilities in
                 Section(resource.replacingOccurrences(of: "_", with: " ").capitalized) {
@@ -114,8 +120,17 @@ struct RoleEditorView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
             ThorbisToolbarItem(placement: .topBarTrailing) {
-                Button("Save") { Task { await save() } }
-                    .disabled(busy || detail == nil || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                // Not pre-disabled for a blank name: pressing says what's missing under it. It stays
+                // off only while the role is loading or saving.
+                Button("Save") {
+                    if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        nameProblem = "Name the role, like \u{201C}Lead technician.\u{201D}"
+                        nameFocused = true
+                    } else {
+                        Task { await save() }
+                    }
+                }
+                .disabled(busy || detail == nil)
             }
         }
         .task { await load() }
@@ -147,7 +162,7 @@ struct RoleEditorView: View {
                         Spacer()
                         TextField(condition.input.kind == "percentage" ? "No limit %" : "No limit $",
                                   text: Binding(get: { value.map { condition.input.kind == "percentage" ? "\($0)" : paymentAmountText($0) } ?? "" },
-                                                set: { text in setCondition(capability.id, condition, text) }))
+                                                set: { text in setCondition(capability.id, condition, text) }), prompt: .placeholder(condition.input.kind == "percentage" ? "No limit %" : "No limit $"))
                             .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
                             .font(Theme.monoFont(15)).frame(maxWidth: 120)
                     }

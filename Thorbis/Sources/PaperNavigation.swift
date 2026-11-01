@@ -27,6 +27,9 @@ struct RootView: View {
     /// The side drawer (2026-10-31, after the Claude and ChatGPT apps): open, and a drag in progress.
     @State private var drawerOpen = false
     @State private var drawerDrag: CGFloat = 0
+    /// True while the drawer slides shut (or springs back from a short edge drag). The state says
+    /// closed the moment that motion starts, so the drawer's contents stay built until it lands.
+    @State private var drawerSettling = false
     @AccessibilityFocusState private var drawerTitleFocus: Bool
     /// The drawer's Edit menu: the pinned places and their order.
     @State private var editingMenu = false
@@ -152,9 +155,14 @@ struct RootView: View {
             let progress = DrawerMotion.progress(open: drawerOpen, drag: drawerDrag, width: width)
             let insets = geometry.safeAreaInsets
             ZStack(alignment: .leading) {
-                // Kept built under the card so opening (from a root or a pushed screen) only slides.
+                // The drawer's frame stays under the card so opening (from a root or a pushed
+                // screen) only slides; its contents are built only while it can be seen — open, under
+                // a finger, or sliding shut — so a closed drawer leaves nothing in the accessibility
+                // tree (not even its empty scroll view). The edge swipe lives on the card, so it
+                // still opens a drawer whose contents are not built yet.
                 if !reduceMotion {
-                    drawer(width: width, full: typeSize.isAccessibilitySize, visible: progress > 0)
+                    drawer(width: width, full: typeSize.isAccessibilitySize,
+                           visible: drawerOpen || drawerDrag != 0 || drawerSettling)
                         .frame(width: width)
                         .simultaneousGesture(closeDrag(width: width))
                         .opacity(progress > 0 ? 1 : 0)
@@ -276,8 +284,18 @@ struct RootView: View {
             .onEnded { value in
                 let open = DrawerMotion.settlesOpen(wasOpen: false, translation: value.translation.width,
                                                     predicted: value.predictedEndTranslation.width, width: width)
-                if open { openDrawer() } else { withAnimation(drawerAnimation) { drawerDrag = 0 } }
+                if open { openDrawer() } else { settleShut { drawerDrag = 0 } }
             }
+    }
+
+    /// Runs the closing change on the drawer's spring and keeps the contents built until it lands.
+    private func settleShut(_ change: () -> Void) {
+        drawerSettling = true
+        withAnimation(drawerAnimation, completionCriteria: .removed) {
+            change()
+        } completion: {
+            if !drawerOpen && drawerDrag == 0 { drawerSettling = false }
+        }
     }
 
     private func closeDrag(width: CGFloat) -> some Gesture {
@@ -312,7 +330,7 @@ struct RootView: View {
     /// Closes the drawer, then runs `thenRun` (a sheet or search) once the card is back.
     private func closeDrawer(thenRun: (() -> Void)? = nil) {
         guard drawerOpen else { thenRun?(); return }
-        withAnimation(drawerAnimation) {
+        settleShut {
             drawerOpen = false
             drawerDrag = 0
         }

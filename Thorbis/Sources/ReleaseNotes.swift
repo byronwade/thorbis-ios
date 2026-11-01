@@ -13,6 +13,15 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-10-31-forms-say-whats-missing",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "text.cursor", title: "Forms say what's missing",
+                      detail: "Save buttons stay on. Press one early and the form names what's missing under the field."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
             id: "2026-10-31-row-swipes",
             date: "2026-10-31",
             highlights: [

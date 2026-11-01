@@ -297,7 +297,7 @@ struct InvoiceLineEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Reason for Price Book change")
                 .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-            TextField("Describe the approved change", text: $editor.priceBookOverrideReason, axis: .vertical)
+            TextField("Describe the approved change", text: $editor.priceBookOverrideReason, prompt: .placeholder("Describe the approved change"), axis: .vertical)
                 .lineLimit(2...4)
                 .font(Theme.font(14))
                 .padding(12)

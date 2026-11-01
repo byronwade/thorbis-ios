@@ -442,12 +442,12 @@ struct JobDetailView: View {
                               detents: [.medium, .large], commitTitle: "Pause job", busy: busy,
                               commitIdentifier: "pause-commit", commit: { attemptPause() }) {
                 ThorbisSheetField(label: "Why are you pausing?", error: pauseReasonProblem) {
-                    TextField("Waiting on a part from the supplier", text: $reason, axis: .vertical)
+                    TextField("Waiting on a part from the supplier", text: $reason, prompt: .placeholder("Waiting on a part from the supplier"), axis: .vertical)
                         .font(Theme.font(16)).lineLimit(2...5).fieldWell()
                 }
                 ThorbisSheetField(label: "What needs to happen next?", help: "The office sees both on the job.",
                                   error: pauseNextProblem ?? error) {
-                    TextField("Order the 40/5 capacitor and book a return", text: $nextAction, axis: .vertical)
+                    TextField("Order the 40/5 capacitor and book a return", text: $nextAction, prompt: .placeholder("Order the 40/5 capacitor and book a return"), axis: .vertical)
                         .font(Theme.font(16)).lineLimit(2...5).fieldWell()
                 }
             }
@@ -2028,7 +2028,7 @@ struct JobDetailView: View {
                 .disabled(dictation.isListening)
                 .padding(.horizontal, Theme.gutter)
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(dictation.isListening ? "Listening…" : "Add a note", text: $note, axis: .vertical)
+                TextField(dictation.isListening ? "Listening…" : "Add a note", text: $note, prompt: .placeholder(dictation.isListening ? "Listening…" : "Add a note"), axis: .vertical)
                     .font(Theme.font(16))
                     .lineLimit(1...6)
                     .focused($noteFocused)

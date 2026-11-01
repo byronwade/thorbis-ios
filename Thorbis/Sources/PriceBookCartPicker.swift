@@ -91,7 +91,7 @@ struct PriceBookCartPicker: View {
             HStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    TextField(canUsePriceBook ? "Search price book" : "Type a custom item", text: $query)
+                    TextField(canUsePriceBook ? "Search price book" : "Type a custom item", text: $query, prompt: .placeholder(canUsePriceBook ? "Search price book" : "Type a custom item"))
                         .font(Theme.font(17))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()

@@ -87,7 +87,7 @@ private struct SearchRouteContent: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
                 .accessibilityHidden(true)
-            TextField("Street, name, phone or number", text: $model.query)
+            TextField("Street, name, phone or number", text: $model.query, prompt: .placeholder("Street, name, phone or number"))
                 .font(Theme.font(16))
                 .focused($fieldFocused)
                 .submitLabel(.search)

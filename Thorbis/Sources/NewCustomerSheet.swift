@@ -120,7 +120,7 @@ struct NewCustomerSheet: View {
 
     /// A text input in the sunk well (design.thorbis.com Depth: the field sinks).
     private func input(_ text: Binding<String>, prompt: String, focus: Field, label: String) -> some View {
-        TextField("", text: text, prompt: Text(prompt).foregroundStyle(Theme.subtle))
+        TextField("", text: text, prompt: .placeholder(prompt))
             .font(Theme.font(16))
             .focused($focused, equals: focus)
             .accessibilityLabel(label)

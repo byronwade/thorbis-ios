@@ -579,7 +579,7 @@ struct PaperSearchField: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
-            TextField(prompt, text: $text).textInputAutocapitalization(.never).autocorrectionDisabled()
+            TextField(prompt, text: $text, prompt: .placeholder(prompt)).textInputAutocapitalization(.never).autocorrectionDisabled()
             if !text.isEmpty { Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Clear search") }
         }.font(Theme.font(16)).padding(.leading, 12).frame(minHeight: 44).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border)).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
@@ -899,7 +899,7 @@ struct LineNumberField: View {
     var body: some View {
         HStack(spacing: 4) {
             if let prefix { Text(prefix).font(Theme.monoFont(15)).foregroundStyle(Theme.muted) }
-            TextField(placeholder, text: $text)
+            TextField(placeholder, text: $text, prompt: .placeholder(placeholder))
                 .keyboardType(decimal ? .decimalPad : .numberPad)
                 .font(Theme.monoFont(15, weight: .medium))
                 .multilineTextAlignment(.trailing)
@@ -1560,15 +1560,18 @@ extension View {
     func fieldWell() -> some View { modifier(FieldWell()) }
 }
 
-/// A persistent 13pt label above its field, with an optional quiet note ("Optional") beside it.
+/// A persistent 13pt label above its field, with an optional quiet note ("Optional") beside it, and
+/// under it the field's problem once a commit was pressed with it missing (`FieldProblem`).
 struct PaperFormField<Content: View>: View {
     let label: String
     var note: String? = nil
+    var error: String? = nil
     @ViewBuilder var content: Content
 
-    init(_ label: String, note: String? = nil, @ViewBuilder content: () -> Content) {
+    init(_ label: String, note: String? = nil, error: String? = nil, @ViewBuilder content: () -> Content) {
         self.label = label
         self.note = note
+        self.error = error
         self.content = content()
     }
 
@@ -1580,6 +1583,7 @@ struct PaperFormField<Content: View>: View {
             }
             .accessibilityHidden(true)
             content
+            if let error { FieldProblem(message: error) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

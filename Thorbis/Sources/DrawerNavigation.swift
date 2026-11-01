@@ -130,9 +130,9 @@ struct AppDrawer: View {
     let settingsItems: [ThorbisMenuItem]
     /// At accessibility sizes the drawer is full width, so it carries its own close circle.
     let showsClose: Bool
-    /// False while the drawer sits closed under the card. The capsule's context menu and the gear's
-    /// popover are UIKit-hosted and stay in the accessibility tree even when the drawer is hidden,
-    /// so they are only built while the drawer can be seen.
+    /// False while the drawer sits closed under the card. Its scroll view, the capsule's context menu
+    /// and the gear's popover are UIKit-hosted and stay in the accessibility tree even when the
+    /// drawer is hidden, so nothing is built until the drawer can be seen.
     var showsControls = true
     var titleFocus: AccessibilityFocusState<Bool>.Binding
     let search: () -> Void
@@ -156,49 +156,56 @@ struct AppDrawer: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    ForEach(places.primary) { placeRow($0) }
-                    if hasMore { allPlacesRow }
-                    if allPlacesOpen, hasMore {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(places.more) { item in
-                                plainRow(id: "drawer-\(item.rawValue)", title: DrawerPlaces.title(item, role: role),
-                                         here: current == item.rawValue, dot: item == .inbox && inboxUnread) { openPlace(item) }
-                            }
-                            ForEach(local, id: \.self) { section in
-                                plainRow(id: "drawer-local-\(section.rawValue)", title: section.title,
-                                         here: current == "local-\(section.rawValue)", dot: false) { openLocal(section) }
-                            }
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                    if !places.pinned.isEmpty {
-                        sectionLabel("Pinned")
-                        ForEach(places.pinned) { placeRow($0) }
-                    }
-                    if !recents.isEmpty {
-                        sectionLabel("Recents")
-                        ForEach(recents.prefix(5)) { recentRow($0) }
-                    }
-                }
-                .padding(.horizontal, 12)
-                // Room for the capsule and gear so the last rows scroll clear of them.
-                .padding(.bottom, bottomClearance)
-            }
-            .scrollIndicators(.hidden)
-            #if DEBUG
-            .modifier(PaperPreviewScrollAnchor())
-            #endif
+            // Closed, nothing is built: an empty scroll view would still sit in the accessibility tree.
+            if showsControls { rows }
             if showsControls { bottomControls }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(Theme.foreground)
         .background(Theme.card.ignoresSafeArea())
         #if DEBUG
         .onAppear {
             if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-drawer-all-places") { allPlacesOpen = true }
         }
+        #endif
+    }
+
+    private var rows: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                ForEach(places.primary) { placeRow($0) }
+                if hasMore { allPlacesRow }
+                if allPlacesOpen, hasMore {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(places.more) { item in
+                            plainRow(id: "drawer-\(item.rawValue)", title: DrawerPlaces.title(item, role: role),
+                                     here: current == item.rawValue, dot: item == .inbox && inboxUnread) { openPlace(item) }
+                        }
+                        ForEach(local, id: \.self) { section in
+                            plainRow(id: "drawer-local-\(section.rawValue)", title: section.title,
+                                     here: current == "local-\(section.rawValue)", dot: false) { openLocal(section) }
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+                if !places.pinned.isEmpty {
+                    sectionLabel("Pinned")
+                    ForEach(places.pinned) { placeRow($0) }
+                }
+                if !recents.isEmpty {
+                    sectionLabel("Recents")
+                    ForEach(recents.prefix(5)) { recentRow($0) }
+                }
+            }
+            .padding(.horizontal, 12)
+            // Room for the capsule and gear so the last rows scroll clear of them.
+            .padding(.bottom, bottomClearance)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityIdentifier("drawer-rows")
+        #if DEBUG
+        .modifier(PaperPreviewScrollAnchor())
         #endif
     }
 
