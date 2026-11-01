@@ -73,4 +73,20 @@ final class CustomerPresentationTests: XCTestCase {
         XCTAssertFalse(SignatureInk.hasInk([[CGPoint(x: 1, y: 1)]]))
         XCTAssertTrue(SignatureInk.hasInk([[CGPoint(x: 1, y: 1), CGPoint(x: 4, y: 4)]]))
     }
+
+    func testSavingsCountOnlyPriceBookLinesChargedBelowList() {
+        let member = FieldLine(id: "m", description: "Tune-up", quantity: 2, unitPrice: FieldMoney(amount: 17_000, currency: "USD"),
+                               source: FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: 20_000, currency: "USD")))
+        let marked = FieldLine(id: "u", description: "Filter", quantity: 1, unitPrice: FieldMoney(amount: 5_000, currency: "USD"),
+                               source: FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: 4_000, currency: "USD")))
+        let invoiced = FieldLine(id: "i", description: "Tune-up", quantity: 1, unitPrice: FieldMoney(amount: 17_000, currency: "USD"),
+                                 source: FieldLineSource(kind: "estimate", estimateLineSource: FieldEstimateLineSourceSnapshot(
+                                     kind: "price_book", originalUnitPrice: FieldMoney(amount: 20_000, currency: "USD"))))
+        let lines = [member, marked, invoiced, line("x", 1, 9_000)]
+        XCTAssertEqual(customerSavings(lines), 9_000)
+        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: true),
+                       [CustomerAmountRow(label: "Member savings", amount: "−\(money(9_000, currency: "USD"))", emphasis: false)])
+        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: false).first?.label, "Savings")
+        XCTAssertTrue(customerSavingsRows([marked, line("x", 1, 9_000)], currency: "USD", isMember: true).isEmpty)
+    }
 }

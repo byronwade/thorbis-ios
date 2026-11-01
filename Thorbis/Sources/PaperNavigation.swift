@@ -343,8 +343,9 @@ struct RootView: View {
 
     private var barSync: AppBottomBar.Sync? {
         if !outbox.needsReview.isEmpty { return .needsReview(outbox.needsReview.count) }
-        if outbox.syncing { return .syncing(outbox.pending.count) }
-        if !outbox.pending.isEmpty { return .waiting(outbox.pending.count) }
+        // Waiting photos count beside queued changes, as in the offline line (OF-03).
+        if outbox.syncing { return .syncing(outbox.waitingCount) }
+        if outbox.waitingCount > 0 { return .waiting(outbox.waitingCount) }
         return nil
     }
 
@@ -787,6 +788,8 @@ enum PaperRoute: Hashable {
     case payments
     case businessSetup
     case companyDetails
+    case properties
+    case importCustomers
     case job(String)
     case media(jobID: String, assetID: String)
     case note(jobID: String, noteID: String)
@@ -815,7 +818,8 @@ struct PaperRouteView: View {
     var body: some View {
         switch route {
         case .inbox:
-            WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices")).id(session.generation)
+            WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices"),
+                                 calls: CallLogRules.available(session)).id(session.generation)
         case .estimates: EstimatesView()
         case .invoices: InvoicesView()
         case .priceBook:
@@ -842,6 +846,8 @@ struct PaperRouteView: View {
         case .payments: PaymentsSetupView()
         case .businessSetup: BusinessSetupView()
         case .companyDetails: CompanyDetailsView()
+        case .properties: PropertiesView()
+        case .importCustomers: CustomerImportView()
         case .job(let id): JobDetailView(jobId: id)
         case .media(let jobID, let assetID): JobMediaDetailView(jobID: jobID, assetID: assetID)
         case .note(let jobID, let noteID): JobNoteDetailView(jobID: jobID, noteID: noteID)

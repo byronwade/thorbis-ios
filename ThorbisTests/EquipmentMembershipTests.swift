@@ -31,4 +31,28 @@ final class EquipmentMembershipTests: XCTestCase {
         let day = EquipmentRecord.day("2029-06-12")!
         XCTAssertEqual(EquipmentRecord.dayString(day), "2029-06-12")
     }
+
+    func testJobServiceContextGivesTechsUnitsAndMemberPricing() async throws {
+        let jobID = "00000000-0000-4000-8000-000000002214"
+        let reply = #"{"jobId":"\#(jobID)","customerId":"\#(customerID)","locationId":"00000000-0000-4000-8000-000000007001","equipment":[{"id":"00000000-0000-4000-8000-000000006101","name":"Condenser","locationId":"00000000-0000-4000-8000-000000007001","kind":"AC","brand":"Carrier","model":"24ACC636","serialNumber":"2419E","installedOn":"2019-06-12","warrantyExpiresOn":"2029-06-12","notes":null}],"memberPricing":{"isMember":true,"discountPercent":15,"membership":{"id":"00000000-0000-4000-8000-000000006201","name":"Comfort Club","renewsOn":"2027-01-15"}}}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        let context = try await JobServiceContextLoader.load(jobID, api: client)
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.path, "/v1/jobs/\(jobID)/service-context")
+        let unit = try XCTUnwrap(context.equipmentRecords.first)
+        XCTAssertEqual(unit.customerId, customerID)
+        XCTAssertEqual(unit.detail, "Carrier · 24ACC636 · SN 2419E")
+        XCTAssertNil(unit.createdAt)
+        let membership = try XCTUnwrap(context.memberships.first)
+        XCTAssertEqual(membership.name, "Comfort Club")
+        XCTAssertEqual(membership.discountPercent, 15)
+        XCTAssertEqual(membership.status, "active")
+        XCTAssertEqual(context.memberPricing.memberPrice(10_000), 8_500)
+    }
+
+    func testANonMemberContextShowsNoMembership() throws {
+        let json = #"{"jobId":"j","customerId":"c","equipment":[],"memberPricing":{"isMember":false,"discountPercent":0,"membership":null}}"#
+        let context = try JSONDecoder().decode(JobServiceContext.self, from: Data(json.utf8))
+        XCTAssertTrue(context.memberships.isEmpty)
+        XCTAssertTrue(context.equipmentRecords.isEmpty)
+    }
 }

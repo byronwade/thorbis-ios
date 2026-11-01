@@ -51,7 +51,10 @@ struct MemberAccessView: View {
     let member: RoleMember
     let onChanged: () async -> Void
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
+    @State private var removing: RoleMember?
+    @State private var transferring: RoleMember?
     @State private var catalog: RoleBuilderCatalog?
     @State private var snapshot: PermissionOverrideSnapshot?
     @State private var choices: [String: Choice] = [:]
@@ -92,6 +95,24 @@ struct MemberAccessView: View {
                 Text("Role follows their role. Allow adds it for this person. Never blocks it even if their role allows it.")
             }
             if let error { Section { ListErrorRow(message: error) } }
+            if OwnershipTransferRules.canOffer(member, session: session) {
+                Section {
+                    Button("Make \(member.member.displayName) the owner", role: .destructive) { transferring = member }
+                        .frame(minHeight: 44)
+                } header: {
+                    Text("Ownership")
+                } footer: {
+                    Text("Only the owner can hand ownership over. You stay on as an admin, and they can give it back later.")
+                }
+            }
+            if MemberRemovalRules.canRemove(member, session: session) {
+                Section {
+                    Button("Remove from team", role: .destructive) { removing = member }
+                        .frame(minHeight: 44)
+                } footer: {
+                    Text("They lose access right away. Their account and past work stay, and you can invite them again.")
+                }
+            }
         }
         .searchable(text: $search, prompt: "Find a permission")
         .scrollContentBackground(.hidden)
@@ -104,6 +125,14 @@ struct MemberAccessView: View {
             ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(busy || !changed) }
         }
         .sheet(isPresented: $changingRole) { MemberRoleSheet(member: member) { await onChanged() } }
+        .transferOwnershipPrompt($transferring, onTransferred: {
+            await onChanged()
+            dismiss()
+        }, onError: { message in error = message })
+        .removeMemberPrompt($removing, onRemoved: { _ in
+            await onChanged()
+            dismiss()
+        }, onError: { message in error = message })
         .task { await load() }
     }
 
