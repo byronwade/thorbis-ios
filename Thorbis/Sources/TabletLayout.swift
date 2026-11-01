@@ -1,5 +1,33 @@
 import SwiftUI
 
+// MARK: - Keyboard
+
+/// What a hardware-keyboard command asks the shell showing to do. Posted by `KeyboardCommands`;
+/// the iPad layout and the phone layout each answer it with their own Search and creates.
+enum KeyboardCommand: String {
+    case search, newJob, create
+    static let notification = Notification.Name("ThorbisKeyboardCommand")
+    @MainActor func post() { NotificationCenter.default.post(name: Self.notification, object: rawValue) }
+    init?(_ note: Notification) {
+        guard let raw = note.object as? String, let command = Self(rawValue: raw) else { return nil }
+        self = command
+    }
+}
+
+/// ⌘F / ⌘K search, ⌘N new job, ⇧⌘N create, at every window size (sidebar, Slide Over, Split View).
+struct KeyboardCommands: Commands {
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New job") { KeyboardCommand.newJob.post() }.keyboardShortcut("n", modifiers: .command)
+            Button("Create…") { KeyboardCommand.create.post() }.keyboardShortcut("n", modifiers: [.command, .shift])
+        }
+        CommandGroup(after: .textEditing) {
+            Button("Search") { KeyboardCommand.search.post() }.keyboardShortcut("f", modifiers: .command)
+            Button("Search everything") { KeyboardCommand.search.post() }.keyboardShortcut("k", modifiers: .command)
+        }
+    }
+}
+
 // MARK: - Split selection
 
 /// Set by the iPad's split columns. When present, list rows select into the detail column
@@ -186,6 +214,14 @@ struct TabletRoot: View {
         .environment(\.paperMenuButton, false)
         .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
         .background { keyboardShortcuts }
+        .onReceive(NotificationCenter.default.publisher(for: KeyboardCommand.notification)) { note in
+            switch KeyboardCommand(note) {
+            case .search: search = true
+            case .newJob: if canCreateJob { createJob = true }
+            case .create: if !createChoices.isEmpty { createMenuOpen = true }
+            case nil: break
+            }
+        }
         .sheet(isPresented: $search, onDismiss: {
             searchSeed = ""
             let run = afterSearch
@@ -511,13 +547,10 @@ struct TabletRoot: View {
 
     // MARK: Keyboard
 
-    /// Always mounted, so the shortcuts work whether the sidebar is shown, folded or closed.
+    /// Always mounted, so the shortcuts work whether the sidebar is shown, folded or closed. Search
+    /// and the creates are scene commands (`KeyboardCommands`), shared with the phone layout.
     private var keyboardShortcuts: some View {
         ZStack {
-            Button("Search") { search = true }.keyboardShortcut("f", modifiers: .command)
-            Button("Search everything") { search = true }.keyboardShortcut("k", modifiers: .command)
-            if canCreateJob { Button("New job") { createJob = true }.keyboardShortcut("n", modifiers: .command) }
-            if !createChoices.isEmpty { Button("Create") { createMenuOpen = true }.keyboardShortcut("n", modifiers: [.command, .shift]) }
             Button("Toggle sidebar") { withAnimation(motion) { sidebarFolded.toggle(); sidebarOpen.toggle() } }
                 .keyboardShortcut("s", modifiers: [.command, .control])
             ForEach(Array(menuPlaces.prefix(9).enumerated()), id: \.element) { index, item in
@@ -528,9 +561,6 @@ struct TabletRoot: View {
         .opacity(0)
         .frame(width: 0, height: 0)
         .allowsHitTesting(false)
-        // Keyboard only: no element for VoiceOver or UI tests (a plain accessibilityHidden on the
-        // stack still left the zero-size buttons in the tree).
-        .accessibilityElement(children: .ignore)
         .accessibilityHidden(true)
     }
 

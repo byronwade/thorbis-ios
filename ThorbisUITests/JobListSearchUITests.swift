@@ -28,6 +28,18 @@ final class JobListSearchUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Filters"].exists)
     }
 
+    /// Hardware keyboard: ⌘N opens New job from the scene's commands (no hidden buttons in the
+    /// tree, so "New job" matches only the real ones).
+    func testKeyboardCommandOpensNewJob() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
+        app.launch()
+        XCTAssertTrue(app.buttons["header-create"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["New job"].exists, "No hidden shortcut button may be in the tree")
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(app.descendants(matching: .any)["book-job-caller"].waitForExistence(timeout: 10))
+    }
+
     func testPlusOpensCreateMenuAndNewJobStartsWithCustomer() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]

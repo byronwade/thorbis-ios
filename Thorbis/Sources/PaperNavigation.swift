@@ -193,29 +193,16 @@ struct RootView: View {
                 .presentationDetents([.large])
                 .thorbisSheetSurface()
         }
-        .background { keyboardShortcuts }
-    }
-
-    /// A hardware keyboard (iPad in Slide Over or a narrow Split View, or an iPhone with one) gets
-    /// the iPad sidebar's shortcuts: ⌘F / ⌘K search, ⌘N new job, ⇧⌘N the create menu.
-    private var keyboardShortcuts: some View {
-        ZStack {
-            Button("Search") { closeDrawer(thenRun: { openBarSearch() }) }.keyboardShortcut("f", modifiers: .command)
-            Button("Search everything") { closeDrawer(thenRun: { openBarSearch() }) }.keyboardShortcut("k", modifiers: .command)
-            if session.can("job.create", feature: "jobs") {
-                Button("New job") { createJob = true }.keyboardShortcut("n", modifiers: .command)
-            }
-            if !createChoices.isEmpty {
-                Button("Create") { createMenuOpen = true }.keyboardShortcut("n", modifiers: [.command, .shift])
+        // Hardware keyboard (Slide Over, a narrow Split View, an iPhone with one): the scene's
+        // ⌘F / ⌘K search, ⌘N new job and ⇧⌘N create (`KeyboardCommands`).
+        .onReceive(NotificationCenter.default.publisher(for: KeyboardCommand.notification)) { note in
+            switch KeyboardCommand(note) {
+            case .search: closeDrawer(thenRun: { openBarSearch() })
+            case .newJob: if session.can("job.create", feature: "jobs") { closeDrawer(thenRun: { createJob = true }) }
+            case .create: if !createChoices.isEmpty { closeDrawer(thenRun: { createMenuOpen = true }) }
+            case nil: break
             }
         }
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .allowsHitTesting(false)
-        // Keyboard only: no element for VoiceOver or UI tests (a plain accessibilityHidden on the
-        // stack still left the zero-size buttons in the tree).
-        .accessibilityElement(children: .ignore)
-        .accessibilityHidden(true)
     }
 
     private var drawerAnimation: Animation {
