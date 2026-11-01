@@ -692,6 +692,7 @@ struct OfflineBanner: View {
                      commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning)
     }
     var body: some View {
+        let waiting = outbox.waitingCount
         Group {
             if let state = snapshot, state.hasPendingWork {
                 Button {
@@ -746,6 +747,16 @@ struct OfflineBanner: View {
         .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 9).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// OF-02: the small mark under a step saved on this phone and not yet on the server.
+struct WaitingToSyncLabel: View {
+    var text = "Waiting to sync"
+    var body: some View {
+        Label(text, systemImage: "clock.arrow.circlepath")
+            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            .labelStyle(.titleAndIcon)
     }
 }
 

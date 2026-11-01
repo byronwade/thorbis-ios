@@ -14,14 +14,14 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "builder-options", "builder-picker", "builder-line", "invoice-editor-line", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "search-empty", "search-phone", "search-actions", "search-street", "search-offline", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections", "book-job", "book-job-filled", "dispatch-board", "owner-home", "glance-widgets", "glance-lock", "glance-island"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "builder-options", "builder-picker", "builder-line", "invoice-editor-line", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "search-empty", "search-phone", "search-actions", "search-street", "search-offline", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections", "book-job", "book-job-filled", "dispatch-board", "owner-home", "glance-widgets", "glance-lock", "glance-island", "present-estimate-financing", "present-invoice-pay"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
-    /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup.
+    /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup | onboard-trade | onboard-wizard.
     static var onboardingScreen: String? {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["onboard-signup", "onboard-company", "onboard-details", "onboard-setup"].contains(args[index + 1]) else { return nil }
+              ["onboard-signup", "onboard-company", "onboard-details", "onboard-setup", "onboard-trade", "onboard-wizard"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
     /// First-run and edge-state screens (2026-10-31): --paper-preview-screen state-login | state-login-error |
@@ -209,9 +209,11 @@ enum PaperPreview {
     }
     /// Good / better / best for the customer presentation screenshots.
     static var optionsEstimate: EstimateRecord {
-        func line(_ id: Int, _ text: String, _ quantity: Int, _ cents: Int) -> FieldLine {
+        // `list` marks a price book line the server member-priced, so the savings row shows.
+        func line(_ id: Int, _ text: String, _ quantity: Int, _ cents: Int, list: Int? = nil) -> FieldLine {
             FieldLine(id: String(format: "00000000-0000-4000-8000-0000000093%02d", id), description: text, quantity: quantity,
-                      unitPrice: FieldMoney(amount: cents, currency: "USD"), source: nil)
+                      unitPrice: FieldMoney(amount: cents, currency: "USD"),
+                      source: list.map { FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: $0, currency: "USD")) })
         }
         func option(_ id: Int, _ title: String, _ text: String, _ lines: [FieldLine]) -> FieldEstimateOption {
             FieldEstimateOption(id: String(format: "00000000-0000-4000-8000-0000000094%02d", id), title: title, description: text, lines: lines,
@@ -221,9 +223,9 @@ enum PaperPreview {
         let repair = [line(1, "Run capacitor, 45/5 µF. The part that helps the compressor and fan start. Yours tested well below its rating.", 1, 14_500),
                       line(2, "Coil cleaning. Clean the outdoor and indoor coils so the system moves heat efficiently.", 2, 12_000),
                       line(3, "Labor, licensed technician. Install, test and clean up, with a one-year labor warranty.", 1, 9_500)]
-        let better = repair + [line(4, "Surge protector, installed at the outdoor disconnect so a power spike can't take out the new parts.", 1, 39_500),
+        let better = repair + [line(4, "Surge protector, installed at the outdoor disconnect so a power spike can't take out the new parts.", 1, 39_500, list: 43_900),
                                line(5, "One-year parts warranty on everything in this visit.", 1, 151_000)]
-        let replace = [line(6, "3-ton high-efficiency condenser matched to your existing furnace and coil.", 1, 690_000),
+        let replace = [line(6, "3-ton high-efficiency condenser matched to your existing furnace and coil.", 1, 690_000, list: 766_700),
                        line(7, "Installation and haul-away of the old unit, permit and an efficiency check after install.", 1, 220_000),
                        line(8, "Ten-year warranty registration with the manufacturer.", 1, 75_000)]
         return EstimateRecord(id: estimate.id, organizationId: estimate.organizationId, customerId: customerID, createdByUserId: estimate.createdByUserId,
@@ -266,6 +268,13 @@ enum PaperPreview {
         let fixture = ProcessInfo.processInfo.arguments.contains("--paper-preview-large-invoice")
             ? json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":123456789") : json
         return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(fixture.utf8))
+    }
+    /// The issued invoice with a condenser replacement on it, inside the lender's range.
+    static var financingInvoice: InvoiceRecord {
+        let json = String(decoding: try! JSONEncoder().encode(issuedInvoice), as: UTF8.self)
+            .replacingOccurrences(of: #""amount":12000"#, with: #""amount":948000"#)
+            .replacingOccurrences(of: "Compressor diagnostic", with: "Condenser replacement, 3 ton")
+        return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
     }
     static var refundInvoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002219","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-refund-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"paid","lines":[{"id":"00000000-0000-4000-8000-000000009111","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":1500,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009112","description":"Refrigerant recharge","quantity":1,"unitPrice":{"amount":1000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":1,"amountPaid":2500,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":"2026-07-20T12:10:00Z","voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:10:00Z"}"#
@@ -755,6 +764,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   url.path == "/v1/estimates/00000000-0000-4000-8000-000000002238" {
             status = 503
             payload = ["status": 503, "title": "Preview estimate unavailable"]
+        } else if url.scheme == "https", url.host == "app.thorbis.com", url.path == "/v1/financing/offer" {
+            status = 200
+            payload = Self.financingOffer(url: url)
         } else if url.scheme == "https", url.host == "app.thorbis.com", let fixture = Self.fixture(path: url.path, queryItems: URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [], isFresh: request.cachePolicy == .reloadIgnoringLocalCacheData && request.value(forHTTPHeaderField: "Cache-Control") == "no-cache") {
             status = 200
             payload = fixture
@@ -1539,6 +1551,27 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         object["provenance"] = "command"
         return object
     }
+    /// Wisetack's shape for the financing previews: $500 to $25,000, 60 months at 9.99% APR.
+    private static func financingOffer(url: URL) -> [String: Any] {
+        guard PaperPreview.screen.contains("financing") || PaperPreview.screen == "present-invoice-pay" else { return ["available": false, "examples": []] }
+        let amounts = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .filter { $0.name == "amount" }.compactMap { $0.value.flatMap(Int.init) } ?? []
+        let rate = 0.0999 / 12
+        let examples: [[String: Any]] = amounts.map { cents in
+            let inRange = (50_000...2_500_000).contains(cents)
+            let monthly = Int((Double(cents) * rate / (1 - pow(1 + rate, -60))).rounded(.up))
+            return ["amount": ["amount": cents, "currency": "USD"], "available": inRange,
+                    "monthlyAmount": inRange ? ["amount": monthly, "currency": "USD"] as Any : NSNull(),
+                    "termMonths": inRange ? 60 as Any : NSNull(), "aprBasisPoints": inRange ? 999 as Any : NSNull(),
+                    "terms": inRange ? "60 months at 9.99% APR. Subject to approval." as Any : NSNull()]
+        }
+        return ["available": true, "provider": "wisetack", "providerName": "Wisetack",
+                "minimum": ["amount": 50_000, "currency": "USD"], "maximum": ["amount": 2_500_000, "currency": "USD"],
+                "disclosure": "Preview disclosure. The lender's own terms appear here, word for word.",
+                "creditCheckNote": "Checking your options will not affect your credit score.",
+                "examples": examples]
+    }
+
 
     /// List routes ignore unknown query keys. A customerId query keeps that customer's rows,
     /// matching the field list the records tab calls.

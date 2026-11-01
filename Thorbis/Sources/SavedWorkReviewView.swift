@@ -149,7 +149,11 @@ struct SavedWorkReviewView: View {
             Text(group.shortReference).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
         }
     }
+    @ViewBuilder
     private func openJob(_ group: SavedWorkGroup) -> some View {
+        if group.jobID != OutboxEntry.organizationRecord { openJobLink(group) }
+    }
+    private func openJobLink(_ group: SavedWorkGroup) -> some View {
         NavigationLink(value: PaperRoute.job(group.jobID)) {
             HStack(spacing: 8) { Text("Open job"); Image(systemName: "chevron.right") }
                 .font(Theme.font(15, weight: .medium)).frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())

@@ -775,6 +775,7 @@ struct RootView: View {
             selectedTab = MenuItem.home.rawValue
         case "estimate-detail", "estimate-draft-detail": previewPlace(.estimates, then: .estimate(PaperPreview.estimate.id))
         case "reports": previewPlace(.reports)
+        case "scorecard": previewPlace(.scorecard)
         case "billing": previewPlace(.billing)
         case "notices": previewPlace(.notices)
         case "payments": schedulePath.append(PaperRoute.payments)
@@ -1063,6 +1064,12 @@ enum PaperRoute: Hashable {
     case closeout(jobID: String)
     case team
     case reports
+    case scorecard
+    case teamGoals
+    /// Lists opened from the scorecard, filtered to the records behind a number (TG-19).
+    case filteredInvoices(RecordFilter)
+    case filteredEstimates(RecordFilter)
+    case filteredJobs(RecordFilter)
     case assign(jobID: String)
     case billing
     case billingSchedule(String)
@@ -1079,6 +1086,8 @@ enum PaperRoute: Hashable {
     case payments
     case businessSetup
     case companyDetails
+    case properties
+    case importCustomers
     case job(String)
     case media(jobID: String, assetID: String)
     case note(jobID: String, noteID: String)
@@ -1109,7 +1118,8 @@ struct PaperRouteView: View {
     var body: some View {
         switch route {
         case .inbox:
-            WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices")).id(session.generation)
+            WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices"),
+                                 calls: CallLogRules.available(session)).id(session.generation)
         case .estimates: EstimatesView()
         case .invoices: InvoicesView()
         case .priceBook:
@@ -1123,6 +1133,11 @@ struct PaperRouteView: View {
         case .closeout(let jobID): JobCloseoutView(jobID: jobID)
         case .team: TeamView()
         case .reports: ReportsView(includesRevenue: MenuItem.money.permitted(session), initialTab: "Operations")
+        case .scorecard: ScorecardView()
+        case .teamGoals: TeamGoalsView()
+        case .filteredInvoices(let filter): InvoicesView(filter: filter)
+        case .filteredEstimates(let filter): EstimatesView(filter: filter)
+        case .filteredJobs(let filter): FilteredJobsView(filter: filter)
         case .assign(let jobID): JobAssignmentView(jobID: jobID)
         case .billing: BillingSchedulesView()
         case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)
@@ -1138,6 +1153,8 @@ struct PaperRouteView: View {
         case .payments: PaymentsSetupView()
         case .businessSetup: BusinessSetupView()
         case .companyDetails: CompanyDetailsView()
+        case .properties: PropertiesView()
+        case .importCustomers: CustomerImportView()
         case .job(let id): JobDetailView(jobId: id)
         case .media(let jobID, let assetID): JobMediaDetailView(jobID: jobID, assetID: assetID)
         case .note(let jobID, let noteID): JobNoteDetailView(jobID: jobID, noteID: noteID)

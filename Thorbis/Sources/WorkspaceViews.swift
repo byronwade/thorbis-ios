@@ -3,6 +3,8 @@ import SwiftUI
 struct WorkspaceNoticesView: View {
     @ObservedObject var api: APIClient
     let available: Bool
+    /// The office call log (web Inbox calls), when call_recording is on for this role.
+    var calls = false
 
     @State private var items: [StaffNotice] = []
     @State private var nextCursor: String?
@@ -20,6 +22,13 @@ struct WorkspaceNoticesView: View {
     @Environment(\.locale) private var locale
     @Environment(\.timeZone) private var timeZone
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// Bumped by pull to refresh on the Calls tab, so the log reloads.
+    @State private var callsGeneration = 0
+
+    private var tabs: [String] {
+        guard available else { return calls ? ["Calls"] : [] }
+        return calls ? ["All", "Unread", "Calls"] : ["All", "Unread"]
+    }
 
     private var visible: [StaffNotice] { filter == "Unread" ? items.filter { !$0.read } : items }
 
@@ -33,12 +42,15 @@ struct WorkspaceNoticesView: View {
                     Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
-                if !available {
+                if !available && !calls {
                     // Permission names what is missing (design.thorbis.com States).
                     ListRoomEmpty(title: "Your role can\u{2019}t see notices.", message: "Ask your office for access to the Inbox.")
+                } else if filter == "Calls" || !available {
+                    if tabs.count > 1 { ListViewBar(options: tabs, selection: $filter) }
+                    CallLogList().id(callsGeneration)
                 } else {
-                    // v2 List room: All / Unread as text tabs on the view bar.
-                    ListViewBar(options: ["All", "Unread"], selection: $filter)
+                    // v2 List room: All / Unread (and Calls) as text tabs on the view bar.
+                    ListViewBar(options: tabs, selection: $filter)
                     if let error { ErrorBanner(message: error) { await refresh() } }
                     if loading && items.isEmpty && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
                     let notices = visible
@@ -98,7 +110,7 @@ struct WorkspaceNoticesView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if available && (unreadState == .present || readCursor != nil) {
+            if available && filter != "Calls" && (unreadState == .present || readCursor != nil) {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     PaperCircleButton(symbol: "checkmark.circle", label: readCursor == nil ? "Mark all read" : "Continue marking read",
                                       fill: Theme.card, bordered: true) { Task { await markReadBatch() } }
@@ -106,13 +118,16 @@ struct WorkspaceNoticesView: View {
                 }
             }
         }
-        .refreshable { await refresh() }
+        .refreshable {
+            if filter == "Calls" || !available { callsGeneration += 1 } else { await refresh() }
+        }
         .onScrollPhaseChange { _, phase in if phase != .idle { swipes.close() } }
         .thorbisDestination(item: $openingJob) { JobDetailView(jobId: $0).tabletReadable() }
         .task { await refresh() }
     }
 
     private var subtitle: String {
+        if filter == "Calls" || (!available && calls) { return "Calls to your business" }
         if !available { return "Job updates" }
         switch unreadState {
         case .present: return "Unread notices waiting"
