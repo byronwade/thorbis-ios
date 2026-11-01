@@ -244,6 +244,8 @@ struct TabletRoot: View {
     private var shell: some View {
         GeometryReader { geometry in
             let inline = geometry.size.width >= Self.inlineSidebarWidth && !sidebarFolded
+            // Same split as `columns`: the screen's leading edge is the list, which never pushes.
+            let listAtLeadingEdge = tab.isSplit && !(tab == .schedule && scheduleRange == "Week")
             HStack(spacing: 0) {
                 // The sidebar is the drawer's panel tone beside the cream columns: tone, not a rule.
                 if inline {
@@ -255,9 +257,9 @@ struct TabletRoot: View {
                 }
             }
             .overlay(alignment: .leading) {
-                // As on the phone, a swipe from the left edge brings the sidebar in when it is hidden,
-                // on a column's first screen only: a pushed screen keeps the system back swipe.
-                if !inline && !sidebarOpen && path.isEmpty {
+                // A swipe from the left edge brings the sidebar in when it is hidden. The strip sits
+                // on the list (which never pushes) or, with no list, on the detail's first screen only.
+                if !inline && !sidebarOpen && (listAtLeadingEdge || path.isEmpty) {
                     Color.clear
                         .frame(width: 18)
                         .contentShape(Rectangle())
