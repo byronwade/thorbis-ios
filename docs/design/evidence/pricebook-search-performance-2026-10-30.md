@@ -1,0 +1,9 @@
+# Price book picker search: performance checkpoint
+
+The estimate/invoice picker computes ranked search results from the complete local price book in its view body. Re-evaluating that body for the same search repeated matching and sorting across the full catalog, including when moving between result pages.
+
+The index now keeps only its most recently ranked query. Its key includes the query, category, usage snapshot, ranking time and excluded item IDs. Each catalog snapshot owns a distinct index and cache. A lock protects the bounded cache; pagination and display highlighting still use the original algorithm.
+
+An optimized macOS Swift 6.2.4 harness using the real search-index source and 600 synthetic items timed 100 requests for `copper fitting` across offsets 0–550. The cold run varied the ranking time for every request; the repeated run kept it fixed. Before the change (source SHA-256 `ca51ece5169c84450ca64a51cc651d1453ce9cdee453df3058cf39091dfcc8d7`), cold requests took 0.747 seconds and repeated requests 0.717 seconds. Afterward (source SHA-256 `d2e5ae471bad4b5ca8c6833e655fedd2d784fe5f10a6198a1196913cdc06d968`), cold requests took 0.745 seconds and repeated requests 0.028 seconds. The harness is `/private/tmp/thorbis-pricebook-bench.swift`. These are local synthetic measurements, not iPhone scrolling or real-network results. The first search, disk-cache read, catalog indexing and initial full-catalog download are not made faster by this change.
+
+The full catalog still downloads before a fresh snapshot is published so that current offline and fuzzy-search behavior remains available. A bounded server-search alternative needs an equivalent search contract; the current collection API's substring filters do not preserve model-number matching, typos, ranking or offline search.

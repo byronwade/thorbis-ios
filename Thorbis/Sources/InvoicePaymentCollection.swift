@@ -54,31 +54,27 @@ final class InvoicePaymentCollectionModel: ObservableObject {
 
     private let api: APIClient
     private let invoiceID: String
+    private let expectedJobScope: JobDocumentScope?
     private let intentStore: InvoicePaymentIntentStore
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
+    private var verifiedHistoryGeneration: UUID?
 
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
-         makeIdempotencyKey: @escaping () -> String = { UUID().uuidString.lowercased() }) {
+         makeIdempotencyKey: @escaping () -> String = { UUID().uuidString.lowercased() },
+         expectedJobScope: JobDocumentScope? = nil) {
         self.api = api
         self.invoiceID = invoiceID
+        self.expectedJobScope = expectedJobScope
         self.intentStore = intentStore
         self.makeIdempotencyKey = makeIdempotencyKey
     }
 
     var totalCents: Int? {
         guard let invoice, invoice.currency == "USD" else { return nil }
-        var total = 0
-        for line in invoice.lines {
-            guard line.quantity >= 0, line.unitPrice.amount >= 0,
-                  line.unitPrice.currency == invoice.currency else { return nil }
-            let (lineTotal, productOverflow) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
-            let (nextTotal, sumOverflow) = total.addingReportingOverflow(lineTotal)
-            guard !productOverflow, !sumOverflow else { return nil }
-            total = nextTotal
-        }
-        return total
+        return CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency,
+                                       amountPaid: invoice.amountPaid)?.total
     }
 
     var outstandingCents: Int? {
@@ -130,26 +126,79 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             (offlineCopy || (historyComplete && paymentTotalCents == invoice?.amountPaid))
     }
 
+    /// Why Collect payment is off, while nothing is running; nil when it can be pressed. Every
+    /// place that offers Collect payment shows it under the commit (design.thorbis.com Controls).
+    var collectBlockedReason: String? {
+        guard !canRecordPayment, !isRecording, !isLoading else { return nil }
+        if waitingForProjection { return "The last payment is still updating on this invoice." }
+        if loadError != nil { return "Payments need a fresh copy of this invoice. Pull down to refresh." }
+        if !historyComplete { return "Checking this invoice's payments first." }
+        return "Payment history is still syncing with the invoice. Pull down to refresh."
+    }
+
+    /// The server settles this attempt through its verified Stripe webhook. Neither another
+    /// receipt nor a zero invoice balance proves that this particular card was recorded.
+    func hasRecordedCardPresentPayment(_ intent: CardPresentIntent) -> Bool {
+        guard historyComplete, !isLoading, loadError == nil,
+              verifiedHistoryGeneration == api.requestGeneration, let invoice,
+              paymentTotalCents == invoice.amountPaid,
+              UUID(uuidString: intent.attemptId) != nil,
+              intent.amount.amount > 0, intent.amount.currency == invoice.currency else { return false }
+        // Compatibility with prepareInvoiceCardPresentIntent / recordSucceededAttempt:
+        // the deployed response omits its opaque key, but canonical history retains it.
+        // If the server changes this convention, stay pending rather than infer success.
+        let key = "tap:\(invoice.id):\(intent.attemptId)"
+        return payments.contains { payment in
+            payment.organizationId == invoice.organizationId && payment.invoiceId == invoice.id &&
+                payment.idempotencyKey == key && payment.method == "card" &&
+                payment.status == .recorded && payment.amount.amount == intent.amount.amount &&
+                payment.amount.currency == intent.amount.currency && (payment.refundedAmount ?? 0) == 0 &&
+                (payment.netAmount?.amount ?? payment.amount.amount) == intent.amount.amount
+        }
+    }
+
     func load() async {
         guard !isLoading else { return }
+        let generation = api.requestGeneration
         isLoading = true
         historyComplete = false
+        verifiedHistoryGeneration = nil
+        payments = []
         defer { isLoading = false }
         do {
             try Task.checkCancellation()
             let loadedInvoice = try await api.fieldInvoice(invoiceID)
-            invoice = loadedInvoice
+            try Task.checkCancellation()
+            guard generation == api.requestGeneration else { throw CancellationError() }
+            guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+            // A copy saved on this phone is never charged: card, link and Tap to Pay wait for a live
+            // read. Cash and check can still be taken and record once back online (OF-04, OF-08).
+            if api.savedCopyDate("/v1/invoices/\(invoiceID)") != nil {
+                guard outbox != nil else {
+                    loadError = "Saved on this phone. Payments need a connection."
+                    return
+                }
+                useOfflineCopy(loadedInvoice)
+                return
+            }
             offlineCopy = false
             JobDetailCache.save(invoice: loadedInvoice)
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
             try Task.checkCancellation()
-            payments = try await api.fieldPayments(invoiceID)
-            historyComplete = true
-            JobDetailCache.save(payments: payments, invoiceID: invoiceID)
+            let loadedPayments = try await api.fieldPayments(invoiceID)
+            try Task.checkCancellation()
+            guard generation == api.requestGeneration else { throw CancellationError() }
+            guard validHistory(loadedPayments, for: loadedInvoice) else {
+                throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
+            }
+            payments = loadedPayments
+            JobDetailCache.save(payments: loadedPayments, invoiceID: invoiceID)
             // Saved with the payments in it, so the saved copy now holds them (OF-08).
-            outbox?.forgetRecorded(seen: Set(payments.map(\.idempotencyKey)))
+            outbox?.forgetRecorded(seen: Set(loadedPayments.map(\.idempotencyKey)))
+            verifiedHistoryGeneration = generation
+            historyComplete = true
             loadError = nil
             if acceptedPaymentID == nil, let request = pendingRequest,
                let recovered = payments.first(where: { $0.idempotencyKey == request.idempotencyKey }) {
@@ -157,24 +206,33 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             reconcileAcceptedPayment()
         } catch is CancellationError {
+            invoice = nil
+            payments = []
+            pendingRequest = nil
+            historyComplete = false
         } catch {
-            if error.isConnectivityFailure, let cached = invoice ?? JobDetailCache.invoice(invoiceID) {
+            if error.isConnectivityFailure, outbox != nil,
+               let cached = invoice ?? JobDetailCache.invoice(invoiceID), acceptInvoiceMutationResponse(cached) {
                 // No signal: the last copy, so cash and check can still be taken (OF-04, OF-08).
-                invoice = cached
-                // A payment sent before the app lost signal keeps its key (OF-05).
-                if pendingRequest == nil {
-                    pendingRequest = intentStore.load(organizationID: cached.organizationId, invoiceID: invoiceID)
-                }
-                if let saved = JobDetailCache.payments(invoiceID) {
-                    payments = saved
-                    historyComplete = true
-                }
-                offlineCopy = true
-                loadError = nil
+                useOfflineCopy(cached)
                 return
             }
             loadError = error.localizedDescription
         }
+    }
+
+    /// Shows the copy saved on this phone so cash and check can go to the outbox (OF-08). A payment
+    /// sent before the app lost signal keeps its key (OF-05).
+    private func useOfflineCopy(_ cached: InvoiceRecord) {
+        if pendingRequest == nil {
+            pendingRequest = intentStore.load(organizationID: cached.organizationId, invoiceID: invoiceID)
+        }
+        if let saved = JobDetailCache.payments(invoiceID), validHistory(saved, for: cached) {
+            payments = saved
+            historyComplete = true
+        }
+        offlineCopy = true
+        loadError = nil
     }
 
     /// Saves a cash or check payment on the phone to record once online (OF-08).
@@ -190,9 +248,35 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         return true
     }
 
-    func acceptInvoiceMutationResponse(_ updated: InvoiceRecord) {
-        guard updated.id == invoiceID else { return }
+    private func validHistory(_ records: [FieldPaymentRecord], for invoice: InvoiceRecord) -> Bool {
+        var ids = Set<String>()
+        return records.allSatisfy { payment in
+            guard payment.invoiceId == invoice.id, payment.organizationId == invoice.organizationId,
+                  ids.insert(payment.id.lowercased()).inserted,
+                  payment.amount.currency == invoice.currency, payment.amount.amount > 0 else { return false }
+            let refunded = payment.refundedAmount ?? (payment.status == .refunded ? payment.amount.amount : 0)
+            guard refunded >= 0, refunded <= payment.amount.amount else { return false }
+            let received = payment.amount.amount - refunded
+            if payment.status == .refunded && received != 0 { return false }
+            if let net = payment.netAmount {
+                return net.currency == invoice.currency && net.amount == received
+            }
+            // Legacy full refunds can omit netAmount; a partial refund must supply it.
+            return refunded == 0 || payment.status == .refunded
+        }
+    }
+
+    @discardableResult
+    func acceptInvoiceMutationResponse(_ updated: InvoiceRecord) -> Bool {
+        guard updated.id == invoiceID, expectedJobScope?.contains(updated) != false else {
+            invoice = nil
+            payments = []
+            historyComplete = false
+            loadError = "This invoice couldn't be verified. Refresh the job before continuing."
+            return false
+        }
         invoice = updated
+        return true
     }
 
     @discardableResult
@@ -292,35 +376,13 @@ struct InvoicePaymentsSection: View {
     @State private var didOpenRefundPreview = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                // Same header grammar as "Line items" and "Activity" above and below it.
-                HStack(spacing: 6) {
-                    Text("Payments").font(Theme.font(13, weight: .medium))
-                    if !model.payments.isEmpty { Text("\(model.payments.count)").font(Theme.monoFont(12)) }
-                }
-                .foregroundStyle(Theme.muted)
-                .padding(.horizontal, 2)
-                Spacer()
-                // Collect payment lives in the bottom bar; one entry point, not two.
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            // Same header grammar as "Line items" above it (redesign: semibold header and count).
+            // Collect payment lives in the bottom bar; one entry point, not two.
+            SectionHeader(title: "Payments", count: model.payments.isEmpty ? nil : model.payments.count)
+                .padding(.bottom, 2)
 
-            VStack(spacing: 0) {
-                // OF-08: money taken without signal is a record waiting, never Paid.
-                ForEach(outbox.waitingPayments(invoiceID: invoice.id), id: \.idempotencyKey) { waiting in
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("\(waiting.method.capitalized) received").font(Theme.font(15, weight: .medium))
-                            WaitingToSyncLabel(text: "Records when you're back online")
-                        }
-                        Spacer(minLength: 8)
-                        Text(money(waiting.amountCents, currency: invoice.currency)).moneyStyle(.row).foregroundStyle(Theme.foreground)
-                    }
-                    .padding(.horizontal, 15)
-                    .frame(minHeight: 60)
-                    .accessibilityElement(children: .combine)
-                    Divider().overlay(Theme.border).padding(.leading, 15)
-                }
+            Well {
                 if let loadError = model.loadError {
                     VStack(alignment: .leading, spacing: 8) {
                         ErrorBanner(message: loadError) { await model.load() }
@@ -330,38 +392,38 @@ struct InvoicePaymentsSection: View {
                     SkeletonRows(count: 2, leading: false, inset: 15)
                         .padding(.vertical, 8)
                 } else if model.payments.isEmpty && outbox.waitingPayments(invoiceID: invoice.id).isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("No payments recorded yet.")
-                            .font(Theme.font(13))
-                            .foregroundStyle(Theme.muted)
-                        if invoice.status == "draft" {
-                            Text("Payments can be recorded once this invoice is issued.")
-                                .font(Theme.font(12))
-                                .foregroundStyle(Theme.subtle)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(15)
+                    // Empty names the one action (design.thorbis.com States).
+                    Text(invoice.status == "draft" ? "No payments. Issue the invoice to take one."
+                         : invoice.status == "issued" ? "No payments yet. Collect payment records the first one."
+                         : "No payments recorded.")
+                        .font(Theme.font(14))
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(PaperCardMetrics.inset)
                 } else {
-                    ForEach(Array(model.payments.enumerated()), id: \.element.id) { row in
-                        let index = row.offset
-                        let payment = row.element
-                        Button { selectedPayment = payment } label: {
-                            paymentRow(payment)
+                    VStack(spacing: 0) {
+                        // OF-08: money taken without signal is a record waiting, never Paid.
+                        ForEach(outbox.waitingPayments(invoiceID: invoice.id), id: \.idempotencyKey) { waiting in
+                            waitingRow(waiting)
+                                .padding(.horizontal, PaperCardMetrics.inset)
+                                .frame(minHeight: 56)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 15)
-                        .frame(minHeight: 60)
-                        if index < model.payments.count - 1 {
-                            Divider().overlay(Theme.border).padding(.leading, 15)
+                        ForEach(model.payments) { payment in
+                            Button { selectedPayment = payment } label: {
+                                paymentRow(payment)
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .padding(.horizontal, PaperCardMetrics.inset)
+                            .frame(minHeight: 56)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
 
             if let modelError = model.paymentError {
-                ErrorBanner(message: modelError)
+                ErrorBanner(message: modelError).padding(.top, 12)
             }
             if !model.isLoading, model.loadError == nil, model.historyComplete,
                model.paymentTotalCents != invoice.amountPaid {
@@ -369,7 +431,11 @@ struct InvoicePaymentsSection: View {
                     .font(Theme.font(12))
                     .foregroundStyle(Theme.warning)
                     .padding(.horizontal, 2)
+                    .padding(.top, 10)
             }
+        }
+        .onChange(of: model.invoice?.amountPaid) { _, _ in
+            if let updated = model.invoice { onInvoiceUpdated(updated) }
         }
         .onChange(of: outbox.syncGeneration) { _, _ in
             // A queued payment or signature may have just landed: show the server's invoice, its
@@ -379,10 +445,7 @@ struct InvoicePaymentsSection: View {
                 if let updated = model.invoice { onInvoiceUpdated(updated) }
             }
         }
-        .onChange(of: model.invoice?.amountPaid) { _, _ in
-            if let updated = model.invoice { onInvoiceUpdated(updated) }
-        }
-        .sheet(item: $selectedPayment) { payment in
+        .sheet(item: $selectedPayment) { payment in SheetSurface {
             InvoicePaymentDetailSheet(
                 payment: payment,
                 api: api,
@@ -393,7 +456,7 @@ struct InvoicePaymentsSection: View {
             )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-        }
+        } }
 #if DEBUG
         .task(id: model.historyComplete) {
             guard PaperPreview.enabled, PaperPreview.isPaymentRefundPreview,
@@ -405,32 +468,49 @@ struct InvoicePaymentsSection: View {
 #endif
     }
 
+    /// A cash or check payment taken on this phone and waiting to record: same row, no detail.
+    private func waitingRow(_ waiting: OutboxEntry.PaymentPayload) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(waiting.method.capitalized) received")
+                    .font(Theme.font(15, weight: .medium))
+                    .foregroundStyle(Theme.foreground)
+                WaitingToSyncLabel(text: "Records when you're back online")
+            }
+            Spacer(minLength: 8)
+            Text(money(waiting.amountCents, currency: invoice.currency))
+                .font(Theme.rowAmountFont(15))
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .foregroundStyle(Theme.foreground)
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// v2: the method and when on the left; the tabular amount over the status word on the right.
     private func paymentRow(_ payment: FieldPaymentRecord) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: payment.status == .refunded ? "arrow.uturn.backward.circle" : "checkmark.circle")
-                .font(.system(size: 20))
-                .foregroundStyle(payment.status == .refunded ? Theme.warning : Theme.success)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(payment.method.capitalized)
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(FieldPaymentMethod(rawValue: payment.method)?.displayName ?? payment.method.capitalized)
                     .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.foreground)
                 Text(paymentDate(payment.recordedAt))
-                    .font(Theme.font(12))
+                    .font(Theme.font(13))
+                    .monospacedDigit()
                     .foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: 3) {
                 let amount = payment.netAmount ?? payment.amount
                 Text(money(amount.amount, currency: amount.currency))
-                    .moneyStyle(.row)
+                    .font(Theme.rowAmountFont(15))
+                    .lineLimit(1).minimumScaleFactor(0.7)
                     .foregroundStyle(Theme.foreground)
-                if payment.status == .refunded {
-                    Text("Refunded").font(Theme.font(12)).foregroundStyle(Theme.warning)
-                }
+                StatusLabel(tone: payment.status == .refunded ? .cancelled : .done,
+                            word: payment.status == .refunded ? "Refunded" : "Received", emphasis: .quiet)
             }
-            PaperDisclosure()
         }
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint("Shows payment details")
@@ -454,10 +534,21 @@ struct InvoiceDetailFooter: View {
     let onIssue: () -> Void
 
     var body: some View {
-        Group {
+        if (model.canOfferCollection && canCollect) || (model.invoice?.status == "draft" && canIssue) { bar }
+    }
+
+    private var bar: some View {
+        VStack(alignment: .leading, spacing: 8) {
             if model.canOfferCollection && canCollect {
                 PrimaryButton(title: "Collect payment", busy: model.isRecording, action: onCollect)
                     .disabled(!model.canRecordPayment)
+                    .accessibilityHint(collectBlockedReason ?? "")
+                // A disabled commit says why (design.thorbis.com Controls).
+                if let collectBlockedReason {
+                    Text(collectBlockedReason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityHidden(true)
+                }
             } else if model.invoice?.status == "draft", canIssue {
                 PrimaryButton(title: issueTitle, busy: busy, action: onIssue)
             }
@@ -465,8 +556,10 @@ struct InvoiceDetailFooter: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 8)
-        .background(Theme.chrome)
+        .background(Theme.canvas)
     }
+
+    private var collectBlockedReason: String? { model.collectBlockedReason }
 }
 
 private struct InvoicePaymentDetailSheet: View {
@@ -501,18 +594,19 @@ private struct InvoicePaymentDetailSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
                         let received = refundModel.payment.netAmount ?? refundModel.payment.amount
-                        Text(money(received.amount, currency: received.currency))
-                            .moneyStyle(.hero)
-                            .tracking(-0.45)
                         Text("Net received")
-                            .font(Theme.font(13))
+                            .font(Theme.font(13, weight: .medium))
                             .foregroundStyle(Theme.muted)
+                        Text(money(received.amount, currency: received.currency))
+                            .font(Theme.moneyHeroFont).tracking(-0.6)
+                            .lineLimit(1).minimumScaleFactor(0.6)
                     }
+                    .accessibilityElement(children: .combine)
 
                     VStack(spacing: 0) {
-                        paymentDetail("Method", refundModel.payment.method.capitalized)
+                        paymentDetail("Method", FieldPaymentMethod(rawValue: refundModel.payment.method)?.displayName ?? refundModel.payment.method.capitalized)
                         paymentDetail("Status", refundModel.payment.status == .refunded ? "Refunded" : "Recorded")
                         paymentDetail("Amount recorded", money(refundModel.payment.amount.amount, currency: refundModel.payment.amount.currency))
                         if let refundedAmount = refundModel.payment.refundedAmount {
@@ -523,16 +617,11 @@ private struct InvoicePaymentDetailSheet: View {
                             paymentDetail("Refund date", paymentDate(refundedAt))
                         }
                     }
-                    .padding(.horizontal, 15)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 4)
+                    .panelBackground(cornerRadius: Theme.cardRadius)
 
                     if refundModel.didComplete {
-                        Label("Refund confirmed by Thorbis", systemImage: "checkmark.circle.fill")
-                            .font(Theme.font(15, weight: .medium))
-                            .foregroundStyle(Theme.success)
-                            .padding(15)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        StateNote(tone: .done, word: "Refunded", message: "Thorbis confirmed the refund.")
                     }
 
                     if let error = refundModel.errorMessage {
@@ -562,19 +651,19 @@ private struct InvoicePaymentDetailSheet: View {
                 }
                 .padding(20)
             }
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Payment details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .frame(minWidth: 44, minHeight: 44)
                         .disabled(refundModel.isSubmitting)
                 }
             }
             #if DEBUG
-            .navigationDestination(isPresented: $previewRefundForm) {
+            .thorbisDestination(isPresented: $previewRefundForm) {
                 InvoicePaymentRefundForm(model: refundModel, onRefundCompleted: onRefundCompleted)
             }
             #endif
@@ -594,32 +683,28 @@ private struct InvoicePaymentDetailSheet: View {
         #endif
     }
 
+    /// The way into a refund, in the danger tone with its consequence under it. No box (v2).
     private func refundLink(title: String) -> some View {
         NavigationLink {
-            InvoicePaymentRefundForm(model: refundModel, onRefundCompleted: onRefundCompleted)
+            InvoicePaymentRefundForm(model: refundModel, onRefundCompleted: onRefundCompleted).thorbisBackButton()
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "arrow.uturn.backward.circle")
-                    .font(.system(size: 20))
-                    .foregroundStyle(Theme.destructive)
-                    .frame(width: 26)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(Theme.font(15, weight: .medium))
-                    Text("Full payment · \(money(refundModel.payment.amount.amount, currency: refundModel.payment.amount.currency))")
-                        .font(Theme.font(15)).monospacedDigit()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+                    Text("Returns the full \(money(refundModel.payment.amount.amount, currency: refundModel.payment.amount.currency)) to the customer")
+                        .font(Theme.font(14)).monospacedDigit()
                         .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 PaperDisclosure()
             }
-            .foregroundStyle(Theme.foreground)
-            .padding(15)
-            .frame(minHeight: 58)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+            .frame(minHeight: 56)
+            .panelBackground(cornerRadius: Theme.cardRadius)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowPressStyle())
         .accessibilityHint("Refunds the entire recorded payment after you review and confirm it")
     }
 
@@ -643,6 +728,7 @@ private struct InvoicePaymentRefundForm: View {
     @FocusState private var reasonFocused: Bool
     @State private var confirmRefund = false
     @State private var confirmDiscard = false
+    @State private var reasonError: String?
 
     private var amountText: String {
         money(model.payment.amount.amount, currency: model.payment.amount.currency)
@@ -657,17 +743,7 @@ private struct InvoicePaymentRefundForm: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if model.didComplete {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Refund confirmed", systemImage: "checkmark.circle.fill")
-                            .font(Theme.font(17, weight: .medium))
-                            .foregroundStyle(Theme.success)
-                        Text("Thorbis confirmed the full refund of \(amountText).")
-                            .font(Theme.font(15))
-                            .foregroundStyle(Theme.muted)
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    StateNote(tone: .done, word: "Refunded", message: "Thorbis confirmed the full refund of \(amountText).")
                 } else if showsReasonForm {
                     reasonEntry
                 } else {
@@ -679,26 +755,35 @@ private struct InvoicePaymentRefundForm: View {
             }
             .padding(20)
         }
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom) {
             if showsReasonForm {
-                PrimaryButton(title: "Review full refund", busy: false) {
-                    reasonFocused = false
-                    confirmRefund = true
+                // Destructive is a tone (design.thorbis.com): the same commit in the danger colour, its
+                // word naming the consequence. Not pre-disabled: a short reason is said under the field.
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        reasonFocused = false
+                        if model.canSubmitRefund { reasonError = nil; confirmRefund = true }
+                        else { reasonError = refundBlockedReason }
+                    } label: {
+                        Text("Refund \(amountText)").dangerCommit()
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(model.isSubmitting)
+                    .accessibilityIdentifier("payment-refund-review")
                 }
-                .disabled(!model.canSubmitRefund)
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
-                .background(Theme.chrome)
+                .background(Theme.canvas)
             }
         }
         .navigationTitle("Refund payment")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ThorbisToolbarItem(placement: .topBarTrailing) {
                 Button("Done") { dismiss() }
                     .frame(minWidth: 44, minHeight: 44)
                     .disabled(model.isSubmitting)
@@ -731,50 +816,50 @@ private struct InvoicePaymentRefundForm: View {
                         actions: [ThorbisConfirmAction("Discard saved reason", role: .destructive) { model.discardSavedIntent() }])
     }
 
+    /// Why the refund can't be reviewed yet, said under the reason after they press.
+    private var refundBlockedReason: String {
+        let count = model.reasonDraft.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count
+        if count < 3 { return "Write why you're refunding, at least 3 characters, like \u{201C}Charged twice.\u{201D}" }
+        if count > 2_000 { return "Keep the reason under 2,000 characters." }
+        return "This refund can't be started right now. Check your connection and your role, then try again."
+    }
+
     private var reasonEntry: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                Label("Full payment", systemImage: "arrow.uturn.backward.circle")
-                    .font(Theme.font(13, weight: .medium))
-                    .foregroundStyle(Theme.warning)
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Full payment").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                 Text(amountText)
-                    .font(Theme.font(30, weight: .medium))
-                    .tracking(-0.45)
-                Text("This refunds the entire recorded payment. Partial refunds are not available here.")
-                    .font(Theme.font(13))
-                    .foregroundStyle(Theme.muted)
+                    .font(Theme.moneyHeroFont).tracking(-0.6)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                Text("Returns the entire recorded payment to the customer. Partial refunds aren't available here, and a refund can't be undone.")
+                    .font(Theme.font(14))
+                    .foregroundStyle(Theme.subtle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .accessibilityElement(children: .combine)
 
-            Text("Reason for refund")
-                .font(Theme.font(15, weight: .medium))
-                .accessibilityAddTraits(.isHeader)
-            TextEditor(text: Binding(
-                get: { model.reasonDraft },
-                set: { model.updateReasonDraft($0) }
-            ))
-            .font(Theme.font(15))
-            .frame(minHeight: 136)
-            .scrollContentBackground(.hidden)
-            .padding(10)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
-            .focused($reasonFocused)
-            .accessibilityLabel("Reason for refund")
-            .accessibilityHint("Enter between 3 and 2,000 characters")
-            .accessibilityIdentifier("payment-refund-reason")
-
-            HStack {
-                Text("3–2,000 characters")
-                    .foregroundStyle(Theme.muted)
-                Spacer()
-                Text("\(model.reasonDraft.utf16.count)/2,000")
-                    .foregroundStyle(model.reasonDraft.utf16.count > 2_000 ? Theme.destructive : Theme.muted)
-                    .monospacedDigit()
+            FormField(label: "Reason", help: "\(model.reasonDraft.utf16.count) of 2,000 characters. Saved on this phone until the refund is confirmed.",
+                      error: reasonError) {
+                TextEditor(text: Binding(
+                    get: { model.reasonDraft },
+                    set: { model.updateReasonDraft($0); reasonError = nil }
+                ))
+                .font(Theme.font(15))
+                .frame(minHeight: 120)
+                .scrollContentBackground(.hidden)
+                .fieldWell()
+                .overlay(alignment: .topLeading) {
+                    if model.reasonDraft.isEmpty {
+                        Text("Charged twice for the same visit").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 12).padding(.vertical, 12).allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+                .focused($reasonFocused)
+                .accessibilityLabel("Reason for refund")
+                .accessibilityHint("Enter between 3 and 2,000 characters")
+                .accessibilityIdentifier("payment-refund-reason")
             }
-            .font(Theme.font(12))
 
             if let error = model.errorMessage {
                 ErrorBanner(message: error)
@@ -793,15 +878,12 @@ private struct InvoicePaymentRefundStatusPanel: View {
     @ObservedObject var model: InvoicePaymentRefundModel
     let onRefundCompleted: () async -> Void
 
+    /// Pending is not success: the state as a word, what is known, and the way to check. No tinted box.
     var body: some View {
         if let intent = model.intent {
             VStack(alignment: .leading, spacing: 12) {
-                Label(title(for: intent.state), systemImage: symbol(for: intent.state))
-                    .font(Theme.font(15, weight: .medium))
-                    .foregroundStyle(Theme.warning)
-                Text(message(for: intent.state))
-                    .font(Theme.font(13))
-                    .foregroundStyle(Theme.muted)
+                StateNote(tone: intent.state == .draft ? .scheduled : .inProgress,
+                          word: title(for: intent.state), message: message(for: intent.state))
 
                 if let error = model.errorMessage {
                     ErrorBanner(message: error)
@@ -815,11 +897,8 @@ private struct InvoicePaymentRefundStatusPanel: View {
                     }
                 }
                 .disabled(!model.canCheckRefundStatus)
-
             }
-            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
         }
     }
 
@@ -858,18 +937,20 @@ struct InvoicePaymentCollectionSheet: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var outbox: FieldOutbox
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
     @FocusState private var amountFocused: Bool
     @State private var amountText: String
-    @State private var method: FieldPaymentMethod
     @State private var option: InvoiceCollectionOption
     @State private var showRecordConfirmation = false
     @State private var isCreatingPayLink = false
     @State private var payLink: FieldInvoicePayLink?
+    @State private var payLinkBalanceCents: Int?
     @State private var payLinkError: String?
     @State private var showPayLinkShare = false
     @State private var receiptDestination: String?
     @State private var receiptDestinationLoaded = false
+    @State private var amountError: String?
     @StateObject private var tapToPayController: TapToPayController
     private var tapToPay: TapToPayController? { tapToPayController }
 
@@ -881,17 +962,12 @@ struct InvoicePaymentCollectionSheet: View {
         // MF-09: open on the way this phone last collected (cash, check or link); otherwise on
         // the fastest path that actually takes money today. Tap to Pay is chosen in `.task`.
         let last = InvoiceCollectionOption.lastUsed
-        _method = State(initialValue: model.pendingRequest?.method ?? (last == .check ? .check : .cash))
-        // OF-09: without signal the sheet opens on cash, the way that still works.
-        // Cash or check still waiting to record also rules out the full-balance link (OF-08).
-        let opening = (model.offlineCopy || model.waitingCents > 0) && (last == nil || last == .paymentLink) ? .cash : (last ?? .paymentLink)
-        // A locked cash or check retry opens on its own tender, so it can still go to the queue offline.
-        let locked: InvoiceCollectionOption = switch model.pendingRequest?.method {
-        case .cash: .cash
-        case .check: .check
-        default: .alreadyCollected
-        }
-        _option = State(initialValue: model.pendingRequest == nil ? opening : locked)
+        // OF-09: without signal the sheet opens on cash, the way that still works. Cash or check
+        // still waiting to record also rules out the full-balance link (OF-08).
+        let offlineOpening = model.pendingRequest == nil && (model.offlineCopy || model.waitingCents > 0)
+            && (last == nil || last == .paymentLink)
+        _option = State(initialValue: offlineOpening ? .cash : InvoiceCollectionOption.initial(
+            pendingMethod: model.pendingRequest?.method, lastUsed: last))
         _tapToPayController = StateObject(wrappedValue: TapToPayController(invoiceID: invoice.id))
     }
 
@@ -905,75 +981,58 @@ struct InvoicePaymentCollectionSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    // v2 modal: the amount large, the method as quiet chips with the rest in a popover,
+                    // the custom amount in a sunk well with its $ inside, then the one ink commit.
+                    VStack(alignment: .leading, spacing: 24) {
                         amountHero
-                        if tapToPayAvailable && !hasLockedIntent && !offline && !paymentWaiting { tapToPayCard }
-                        paymentOptions
-                        receiptRow
-                        if option == .alreadyCollected {
-                            existingPaymentMethod
+                        if hasLockedIntent || model.waitingForProjection {
+                            VStack(alignment: .leading, spacing: 6) {
+                                pendingNote
+                                // What the last check said, quietly, so a second failed check still shows.
+                                if hasLockedIntent, let paymentError = model.paymentError {
+                                    Text("Last answer: \(paymentError)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
                         }
+                        paymentOptions
+                        if option.takesCustomAmount && !hasLockedIntent && !model.waitingForProjection { amountField }
+                        receiptRow
                         if let payLinkError { ErrorBanner(message: payLinkError) }
-                        if let paymentError = model.paymentError {
+                        if let paymentError = model.paymentError, !hasLockedIntent, !model.waitingForProjection {
                             ErrorBanner(message: paymentError)
                         }
                     }
                     .padding(.horizontal, 20)
-                    .padding(.top, 18)
+                    .padding(.top, 12)
                     .padding(.bottom, 24)
                 }
+                .scrollDismissesKeyboard(.interactively)
 
                 footer
             }
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.surface.ignoresSafeArea())
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Collect payment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }.frame(minWidth: 44, minHeight: 44)
+                // v2 sheet grammar: the close circle at top right.
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    PaperCircleButton(symbol: "xmark", label: "Close", size: 30, fill: Theme.fill) { dismiss() }
                 }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { amountFocused = false }.frame(minWidth: 44, minHeight: 44)
-                }
+                ThorbisKeyboardDoneBar { amountFocused = false }
             }
-            .navigationDestination(isPresented: $showPayLinkShare) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        if let payLink, let shareURL = payLink.shareURL {
-                            Text("Secure payment link ready")
-                                .font(Theme.font(17, weight: .medium))
-                            MoneyFigure(label: "Balance due", cents: model.outstandingCents ?? 0, currency: invoice.currency)
-                            Text("Share this link with \(customerName) to pay by card.")
-                                .font(Theme.font(15))
-                                .foregroundStyle(Theme.muted)
-                            ShareLink(item: shareURL) {
-                                Label("Share payment link", systemImage: "square.and.arrow.up")
-                                    .inkCommit()
-                            }
-                            .accessibilityIdentifier("share-invoice-payment-link")
-                            Button("Copy link") { UIPasteboard.general.string = shareURL.absoluteString }
-                                .font(Theme.font(15, weight: .medium))
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                            if let expiration = JobFiltering.date(payLink.expiresAt) {
-                                Text("Expires \(expiration.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(Theme.font(12))
-                                    .foregroundStyle(Theme.subtle)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(20)
-                    .background(Theme.background.ignoresSafeArea())
-                    .navigationTitle("Payment link")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            // MF-10: the link is made; Done goes back to the invoice.
-                            Button("Done") { dismiss() }
-                                .frame(minWidth: 44, minHeight: 44)
-                        }
-                    }
+            .thorbisDestination(isPresented: $showPayLinkShare) {
+                InvoicePaymentLinkView(
+                    model: model, payLink: payLink, requestedBalanceCents: payLinkBalanceCents,
+                    customerName: customerName, isCreating: isCreatingPayLink,
+                    canCreate: session.can("invoice.payment.create", feature: "payments") && model.canRecordPayment && !isCreatingPayLink,
+                    error: payLinkError,
+                    onCreate: {
+                        amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
+                        Task { await createPayLink() }
+                    },
+                    onDone: { dismiss() })
             }
             .thorbisConfirm(recordConfirmationTitle,
                             message: recordConfirmationMessage,
@@ -981,85 +1040,89 @@ struct InvoicePaymentCollectionSheet: View {
                             actions: [ThorbisConfirmAction(primaryTitle) { Task { await recordPayment() } }])
             .task {
                 // Open on the iPhone reader when this workspace and phone can take cards in person.
-                if tapToPayAvailable && model.pendingRequest == nil && !paymentWaiting && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
+                if tapToPayAvailable && model.pendingRequest == nil && !offline && !paymentWaiting
+                    && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
                 await loadReceiptDestination()
+#if DEBUG
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-timeout"),
+                   model.pendingRequest == nil {
+                    // Drives the real record path into a timeout (the preview answers POST …/payments with one).
+                    option = .cash
+                    amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+                    await recordPayment()
+                }
+                if let link = PaperPreview.paymentLinkPreview {
+                    option = .paymentLink
+                    payLink = link
+                    payLinkBalanceCents = model.outstandingCents
+                    showPayLinkShare = true
+                }
+#endif
             }
         }
     }
 
+    /// The amount being collected: who and which invoice, then the figure at 30pt, then what's due.
     private var amountHero: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 4) {
             PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
-            HStack(spacing: 3) {
-                // MF-01: the amount being collected is the screen.
-                Text("$")
-                    .font(Theme.moneyFont(.hero))
-                    .foregroundStyle(Theme.muted)
-                TextField("0.00", text: $amountText)
-                    .keyboardType(.decimalPad)
-                    .focused($amountFocused)
-                    .font(Theme.moneyFont(.hero))
-                    .monospacedDigit()
-                    .tracking(-0.7)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize()
-                    .accessibilityLabel("Amount to collect in dollars")
-                    .disabled(hasLockedIntent || model.waitingForProjection || option == .paymentLink || option == .tapToPay)
-                if !hasLockedIntent && !model.waitingForProjection && option != .paymentLink && option != .tapToPay {
-                    Button("Balance") {
-                        amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
-                    }
-                    .font(Theme.font(12, weight: .medium))
-                    .frame(minWidth: 44, minHeight: 44)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Balance due").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                Text(money(model.outstandingCents ?? 0, currency: invoice.currency)).moneyStyle(.row).foregroundStyle(Theme.foreground)
-            }
-            .accessibilityElement(children: .combine)
-            if amountCents == nil {
-                // MA-15: words in body colour; the amount rule is the exit.
-                Label("Enter an amount up to the balance due.", systemImage: "exclamationmark.circle")
-                    .font(Theme.font(15))
-                    .foregroundStyle(Theme.foreground)
+                .accessibilityIdentifier("collect-payment-invoice")
+            // MF-01: the amount being collected is the screen.
+            Text(money(amountCents ?? model.pendingRequest?.amount.amount ?? model.collectableCents ?? 0, currency: invoice.currency))
+                .font(Theme.moneyHeroFont).tracking(-0.6)
+                .lineLimit(1).minimumScaleFactor(0.6)
+                .contentTransition(.numericText())
+                .padding(.top, 4)
+                .accessibilityLabel("Collecting \(money(amountCents ?? model.collectableCents ?? 0, currency: invoice.currency))")
+            Text("Balance due \(money(model.outstandingCents ?? 0, currency: invoice.currency))")
+                .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            if model.waitingCents > 0 {
+                // OF-08: what's waiting to record isn't paid yet, but it can't be collected twice.
+                WaitingToSyncLabel(text: "\(money(model.waitingCents, currency: invoice.currency)) waiting to record")
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.top, 4)
     }
 
-    /// Paper 39: the card reader is the iPhone itself. Shown only when the workspace has Tap to Pay
-    /// and this iPhone supports it; everything else about the sheet is unchanged.
-    private var tapToPayCard: some View {
-        Button {
-            guard !hasLockedIntent && !model.waitingForProjection else { return }
-            option = .tapToPay
-            amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
-        } label: {
-            VStack(spacing: 10) {
-                Image(systemName: "wave.3.right")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Theme.brandText)
-                    .frame(width: 60, height: 60)
-                    .overlay(Circle().stroke(Theme.brand, lineWidth: 1.5))
-                Text(tapToPayHeadline)
-                    .font(Theme.font(17, weight: .medium))
+    /// The custom amount: a sunk well with the $ inside, the full balance one tap away, help under it
+    /// and the error in help's place. Checked when they press the commit, not on every key.
+    private var amountField: some View {
+        FormField(label: "Amount", help: "Up to the balance due. Take part now and the rest later.", error: amountError) {
+            HStack(spacing: 8) {
+                MoneyFieldWell {
+                    TextField(paymentAmountText(model.collectableCents ?? 0), text: $amountText, prompt: .placeholder(paymentAmountText(model.collectableCents ?? 0)))
+                        .keyboardType(.decimalPad)
+                        .focused($amountFocused)
+                        .font(Theme.monoFont(16))
+                        .accessibilityLabel("Amount to collect in dollars")
+                        .onChange(of: amountText) { _, _ in amountError = nil }
+                }
+                if amountCents != model.collectableCents {
+                    Button("Full balance") {
+                        amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
+                        amountError = nil
+                    }
+                    .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(Theme.foreground)
-                Text("Accepts contactless cards, Apple Pay and other wallets")
-                    .font(Theme.font(13))
-                    .foregroundStyle(Theme.muted)
-                    .multilineTextAlignment(.center)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .buttonStyle(PressStyle())
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 168)
-            .background(option == .tapToPay ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(option == .tapToPay ? Theme.brand.opacity(0.5) : Theme.border, lineWidth: 1))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Tap to Pay on iPhone")
-        .accessibilityAddTraits(option == .tapToPay ? .isSelected : [])
-        .accessibilityIdentifier("tap-to-pay")
+    }
+
+    /// Pending is not success (design.thorbis.com "Immediate acknowledgment is not confirmed success"):
+    /// a payment was sent and nothing has confirmed it. Say what is known and offer the check.
+    private var pendingNote: some View {
+        let amount = model.pendingRequest.map { money($0.amount.amount, currency: $0.amount.currency) }
+        return StateNote(
+            tone: .inProgress,
+            word: model.waitingForProjection ? "Recorded, updating" : "Not confirmed yet",
+            message: model.waitingForProjection
+                ? "Thorbis accepted the payment. The invoice and its payment history are still catching up. Check again in a moment."
+                : "The last attempt\(amount.map { " to record \($0)" } ?? "") didn't get a clear answer, so the result isn't known yet. Check its status before you take money again; checking uses the same request and can't record it twice.")
+        .accessibilityIdentifier("payment-pending")
     }
 
     private var tapToPayHeadline: String {
@@ -1069,22 +1132,25 @@ struct InvoicePaymentCollectionSheet: View {
         case .processing: "Processing…"
         case .recording: "Approved · recording payment"
         case .paid: "Paid"
+        case .unavailable: "Choose another payment method"
         default: "Tap to Pay on iPhone"
         }
     }
 
     private var tapToPayAvailable: Bool {
-        session.isFeatureOn(TapToPayController.feature) && TapToPayController.deviceSupported
-            && session.can("invoice.payment.create", feature: "payments")
+        TapToPayReadiness.allows(
+            buildEnabled: TapToPayController.buildEnabled,
+            deviceSupported: TapToPayController.deviceSupported,
+            featureEnabled: session.isFeatureOn(TapToPayController.feature),
+            canCollect: session.can("invoice.payment.create", feature: "payments")
+        )
     }
 
     private func charge() async {
-        guard !paymentWaiting else { return }
         let tapToPay = tapToPayController
-        let before = model.payments.count
-        await tapToPay.charge(api: api) { [model] in
+        await tapToPay.charge(api: api) { [model] intent in
             await model.load()
-            return model.payments.count > before || model.outstandingCents == 0
+            return model.hasRecordedCardPresentPayment(intent)
         }
         if tapToPay.phase == .paid {
             InvoiceCollectionOption.lastUsed = nil
@@ -1093,83 +1159,101 @@ struct InvoicePaymentCollectionSheet: View {
         }
     }
 
+    /// How they're paying: Tap to Pay (when this iPhone can), a payment link, check and cash as quiet
+    /// chips, and the other received methods in a popover from their chip. The help under the row
+    /// says what the chosen method does.
     private var paymentOptions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("How is the customer paying?")
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .padding(.horizontal, 2)
-            VStack(spacing: 0) {
-                optionRow(title: "Card · send payment link", subtitle: paymentLinkSubtitle,
-                          icon: "link", selected: option == .paymentLink, busy: isCreatingPayLink, needsSignal: true,
-                          unavailable: paymentWaiting) {
-                    guard !hasLockedIntent && !model.waitingForProjection else { return }
+        let locked = hasLockedIntent || model.waitingForProjection
+        let off = locked || !session.can("invoice.payment.create", feature: "payments") || !model.canRecordPayment
+        // OF-09: card, link and Tap to Pay need signal; they also wait while cash or check is
+        // still recording, since they charge the whole balance (OF-08).
+        let needsSignalOff = off || offline
+        return FormField(label: "Method", help: methodHelp) {
+            FlowRow(spacing: 8, lineSpacing: 8) {
+                if tapToPayAvailable && !hasLockedIntent && !offline && !paymentWaiting {
+                    methodChip("Tap to Pay", selected: option == .tapToPay, off: locked) {
+                        option = .tapToPay
+                        amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
+                    }
+                    .accessibilityIdentifier("tap-to-pay")
+                }
+                methodChip("Payment link", selected: option == .paymentLink, busy: isCreatingPayLink,
+                           off: needsSignalOff || paymentWaiting) {
                     option = .paymentLink
-                    amountText = paymentAmountText(min(model.outstandingCents ?? 0, 1_000_000_000_000))
+                    amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
                 }
-                Divider().overlay(Theme.border).padding(.leading, 48)
-                optionRow(title: "Check", subtitle: offline ? "Records when you're back online" : "Record a check already received", icon: "doc.text.viewfinder",
-                          selected: option == .check) {
-                    guard !hasLockedIntent && !model.waitingForProjection else { return }
-                    option = .check
-                    method = .check
+                .accessibilityLabel("Card · send payment link")
+                methodChip("Check", selected: option == .check, off: off) { option = .check }
+                methodChip("Cash", selected: option == .cash, off: off) { option = .cash }
+                ThorbisMenu(items: [
+                    ThorbisMenuItem("Bank transfer (ACH) received", icon: "building.columns", isSelected: option == .bankTransfer) { option = .bankTransfer },
+                    ThorbisMenuItem("Card collected elsewhere", icon: "creditcard", isSelected: option == .externalCard) { option = .externalCard }
+                ], title: "Payment received", accessibilityLabel: "Other payment received") {
+                    chipLabel(option.isExternalReceipt ? (option.recordedMethod?.displayName ?? "Other") : "Other",
+                              selected: option.isExternalReceipt, trailingSymbol: "chevron.down")
                 }
-                Divider().overlay(Theme.border).padding(.leading, 48)
-                optionRow(title: "Cash", subtitle: offline ? "Records when you're back online" : "Record cash received", icon: "banknote",
-                          selected: option == .cash) {
-                    guard !hasLockedIntent && !model.waitingForProjection else { return }
-                    option = .cash
-                    method = .cash
-                }
-                Divider().overlay(Theme.border).padding(.leading, 48)
-                optionRow(title: "Already collected", subtitle: offline ? "Needs signal" : "Record a card, ACH, or other tender", icon: "checkmark.circle",
-                          selected: option == .alreadyCollected, needsSignal: true) {
-                    guard !hasLockedIntent && !model.waitingForProjection else { return }
-                    option = .alreadyCollected
-                }
+                .disabled(needsSignalOff)
+                .accessibilityIdentifier("received-payment-methods")
             }
-            .padding(.horizontal, 12)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border, lineWidth: 1))
-            .disabled(hasLockedIntent || model.waitingForProjection)
         }
     }
 
-    private var existingPaymentMethod: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(hasLockedIntent ? "Payment already collected by" : "Tender already received")
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(Theme.muted)
-            ThorbisSelect(options: FieldPaymentMethod.allCases.map { ($0, $0.rawValue.uppercased()) },
-                          selection: $method, menuTitle: "Tender already received")
-                .disabled(hasLockedIntent || model.waitingForProjection)
-            Label("This records a payment collected elsewhere; it does not charge a card or bank account.", systemImage: "info.circle")
-                .font(Theme.font(12))
-                .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
+    private var methodHelp: String {
+        switch option {
+        case .tapToPay: tapToPayHeadline == "Tap to Pay on iPhone" ? "Contactless cards, Apple Pay and other wallets, on this iPhone." : tapToPayHeadline
+        case .paymentLink:
+            offline ? "Card payments need signal."
+                : paymentWaiting ? "Available after the waiting payment records."
+                : "Text or email a secure card checkout for the full balance."
+        case .check: offline ? "Records when you're back online." : "Record a check already in your hand."
+        case .cash: offline ? "Records when you're back online." : "Record cash already in your hand."
+        case .bankTransfer, .externalCard:
+            offline ? "Needs signal." : "Only record money already received. This doesn't charge a card or bank account."
         }
+    }
+
+    /// No signal, or only the copy saved on this phone: card, link and Tap to Pay can't work (OF-09).
+    private var offline: Bool { session.isOffline || model.offlineCopy }
+
+    /// Cash or check on this phone that hasn't recorded yet. Tap to Pay and the link charge the
+    /// whole balance, so they wait until it lands rather than charge money already taken (OF-08).
+    private var paymentWaiting: Bool { model.waitingCents > 0 }
+
+    private func methodChip(_ title: String, selected: Bool, busy: Bool = false, off: Bool,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            chipLabel(title, selected: selected, busy: busy)
+        }
+        .buttonStyle(PressStyle())
+        .disabled(off || busy)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// A method chip: a pill, ink when chosen (the one selected thing), quiet fill at rest.
+    private func chipLabel(_ title: String, selected: Bool, busy: Bool = false, trailingSymbol: String? = nil) -> some View {
+        HStack(spacing: 6) {
+            if busy { ProgressView().controlSize(.mini).tint(selected ? Theme.onInk : Theme.foreground) }
+            Text(title).font(Theme.font(14, weight: .medium)).lineLimit(1)
+            if let trailingSymbol {
+                Image(systemName: trailingSymbol).font(.system(size: 10, weight: .medium)).accessibilityHidden(true)
+            }
+        }
+        .foregroundStyle(selected ? Theme.onInk : Theme.foreground)
+        .padding(.horizontal, 14).frame(minHeight: 34)
+        .background(selected ? Theme.ink : Theme.fill, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+        .padding(.vertical, 5).contentShape(Rectangle()).padding(.vertical, -5)
+    }
+
+    private var receivedPaymentNote: some View {
+        Label("Only record money you have already received. This does not charge a card or bank account.", systemImage: "info.circle")
+            .font(Theme.font(13))
+            .foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var receiptRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "envelope")
-                .font(.system(size: 15))
-                .foregroundStyle(Theme.muted)
-                .frame(width: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Receipt destination")
-                    .font(Theme.font(12))
-                    .foregroundStyle(Theme.muted)
-                Text(receiptDestination ?? (receiptDestinationLoaded ? "No email on file" : "Loading contact…"))
-                    .font(Theme.font(13, weight: .medium))
-                    .foregroundStyle(Theme.foreground)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 2)
-        .frame(minHeight: 44)
-        .accessibilityElement(children: .combine)
+        EvidenceProperty(label: "Receipt to", value: receiptDestination ?? (receiptDestinationLoaded ? "No email on file" : "Loading contact…"))
     }
 
     private var footer: some View {
@@ -1185,73 +1269,57 @@ struct InvoicePaymentCollectionSheet: View {
                 Task { await submit() }
             }
             .disabled(!canSubmit)
+            .accessibilityHint(blockedReason ?? "")
+            // Money keeps its guard, but a disabled commit always says why.
+            if let blockedReason {
+                Text(blockedReason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 10)
-        .background(Theme.chrome)
-    }
-
-    /// No signal, or only the copy saved on this phone: card, link and Tap to Pay can't work (OF-09).
-    private var offline: Bool { session.isOffline || model.offlineCopy }
-
-    /// Cash or check on this phone that hasn't recorded yet. Tap to Pay and the link charge the
-    /// whole balance, so they wait until it lands rather than charge money already taken (OF-08).
-    private var paymentWaiting: Bool { model.waitingCents > 0 }
-
-    private var paymentLinkSubtitle: String {
-        if offline { return "Card payments need signal" }
-        if paymentWaiting { return "After the waiting payment records" }
-        return "Text or email a secure card checkout"
-    }
-
-    private func optionRow(title: String, subtitle: String, icon: String, selected: Bool,
-                           busy: Bool = false, needsSignal: Bool = false, unavailable: Bool = false,
-                           action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(selected ? Theme.brand : Theme.muted)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.font(15, weight: .medium))
-                    Text(subtitle).font(Theme.font(12)).foregroundStyle(Theme.muted)
-                }
-                Spacer(minLength: 4)
-                if busy {
-                    ProgressView().controlSize(.small)
-                } else if selected {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.brandText)
-                }
-                else {
-                    PaperDisclosure()
-                }
-            }
-            .frame(minHeight: 56)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(busy || !session.can("invoice.payment.create", feature: "payments") || !model.canRecordPayment || (needsSignal && offline) || unavailable)
-        .accessibilityHint(subtitle)
+        .background(Theme.surface)
     }
 
     private var primaryTitle: String {
         if model.waitingForProjection { return "Check payment status" }
-        if hasLockedIntent { return "Retry recording" }
+        if hasLockedIntent { return "Check payment status" }
         switch option {
         case .tapToPay:
             if case .failed = tapToPay?.phase { return "Try again" }
-            return "Charge \(money(model.outstandingCents ?? 0, currency: invoice.currency))"
+            return "Charge \(money(model.collectableCents ?? 0, currency: invoice.currency))"
         case .paymentLink:
             return "Create payment link"
         case .cash:
             return amountCents.map { "Record \(money($0, currency: invoice.currency)) cash received" } ?? "Record cash received"
         case .check:
             return amountCents.map { "Record \(money($0, currency: invoice.currency)) check received" } ?? "Record check received"
-        case .alreadyCollected:
-            return amountCents.map { "Record \(money($0, currency: invoice.currency)) already collected" } ?? "Record payment already collected"
+        case .bankTransfer:
+            return amountCents.map { "Record \(money($0, currency: invoice.currency)) bank transfer received" } ?? "Record bank transfer received"
+        case .externalCard:
+            return amountCents.map { "Record \(money($0, currency: invoice.currency)) card payment received" } ?? "Record card payment received"
         }
+    }
+
+    /// Why the commit is off, in a sentence (nil while it can be pressed or while work is running).
+    /// The amount is not a reason: it's checked when they press (design.thorbis.com "Don't lock the commit").
+    private var blockedReason: String? {
+        guard !canSubmit, !model.isRecording, !model.isLoading, !isCreatingPayLink, tapToPay?.busy != true else { return nil }
+        if !session.can("invoice.payment.create", feature: "payments") { return "Your role can't take payments. Ask your office." }
+        if !model.canRecordPayment { return "This invoice can't take a payment right now." }
+        if offline && option != .cash && option != .check { return "Without signal, record cash or check. They record when you're back online." }
+        if (option == .tapToPay || option == .paymentLink) && paymentWaiting {
+            return "A cash or check payment is still recording. Charge a card once it lands."
+        }
+        if option == .tapToPay {
+            if !tapToPayAvailable { return "Tap to Pay isn't ready on this iPhone. Pick another way to pay." }
+            return (model.collectableCents ?? 0) > 0 ? nil : "Nothing is due on this invoice."
+        }
+        if option == .paymentLink { return "A payment link is for the full balance due." }
+        return nil
     }
 
     private var canSubmit: Bool {
@@ -1262,24 +1330,35 @@ struct InvoicePaymentCollectionSheet: View {
         if (option == .tapToPay || option == .paymentLink) && paymentWaiting { return false }
         if option == .tapToPay { return tapToPayAvailable && (model.collectableCents ?? 0) > 0 && tapToPay?.busy != true }
         if option == .paymentLink { return model.collectableCents == amountCents }
-        guard let amountCents else { return false }
+        return true
+    }
+
+    /// The amount problem shown under the field after they press the commit; nil when it's fine.
+    private var amountProblem: String? {
         if hasLockedIntent {
-            return model.pendingRequest?.amount.amount == amountCents && model.pendingRequest?.method == method
+            let matches = model.pendingRequest?.amount.amount == amountCents && model.pendingRequest?.method == option.recordedMethod
+            return matches ? nil : "Finish the payment already started first, with the same amount and method."
         }
-        return amountCents <= (model.collectableCents ?? 0)
+        guard let amountCents else {
+            return "Enter an amount up to \(money(model.collectableCents ?? 0, currency: invoice.currency)), like \(paymentAmountText(model.collectableCents ?? 0))."
+        }
+        return amountCents > (model.collectableCents ?? 0)
+            ? "That's more than the balance left to collect, \(money(model.collectableCents ?? 0, currency: invoice.currency))." : nil
     }
 
     private var recordConfirmationTitle: String {
-        switch method {
+        switch option {
         case .cash: "Confirm cash received"
         case .check: "Confirm check received"
-        case .card, .ach: "Confirm payment already collected"
+        case .bankTransfer: "Confirm bank transfer received"
+        case .externalCard: "Confirm card payment received"
+        case .paymentLink, .tapToPay: "Confirm payment received"
         }
     }
 
     private var recordConfirmationMessage: String {
         guard let amountCents else { return "Confirm the payment was received before recording it." }
-        return "Confirm \(money(amountCents, currency: invoice.currency)) was already received by \(method.rawValue.uppercased()). This action records the payment; it does not charge the customer."
+        return "Confirm \(money(amountCents, currency: invoice.currency)) was already received by \(option.recordedMethod?.displayName ?? "the selected method"). This action records the payment; it does not charge the customer."
     }
 
     private func submit() async {
@@ -1296,7 +1375,10 @@ struct InvoicePaymentCollectionSheet: View {
             await charge()
             return
         }
-        guard amountCents != nil else { return }
+        if let problem = amountProblem {
+            amountError = problem
+            return
+        }
         // MF-08: the commit already says "Record $480.00 cash received", so cash and check record
         // at once. A payment collected elsewhere still confirms that nothing is charged here.
         if hasLockedIntent || option == .cash || option == .check {
@@ -1307,7 +1389,7 @@ struct InvoicePaymentCollectionSheet: View {
     }
 
     private func recordPayment() async {
-        guard let amountCents else { return }
+        guard let amountCents, let method = option.recordedMethod else { return }
         let accepted = await model.record(amountCents: amountCents, method: method)
         if accepted {
             if option == .cash || option == .check { InvoiceCollectionOption.lastUsed = option }
@@ -1323,7 +1405,9 @@ struct InvoicePaymentCollectionSheet: View {
         isCreatingPayLink = true
         defer { isCreatingPayLink = false }
         do {
+            let requestedBalance = model.outstandingCents
             payLink = try await api.openFieldPayLink(invoice.id)
+            payLinkBalanceCents = requestedBalance
             payLinkError = nil
             InvoiceCollectionOption.lastUsed = .paymentLink
             showPayLinkShare = true
@@ -1355,24 +1439,6 @@ struct InvoicePaymentCollectionSheet: View {
     }
 }
 
-private enum InvoiceCollectionOption: String, Equatable {
-    case tapToPay
-    case paymentLink
-    case cash
-    case check
-    case alreadyCollected
-
-    /// MF-09: the last way this phone collected, so the sheet opens on it. Nil means Tap to Pay
-    /// (when available) or the payment link. "Already collected" is never remembered.
-    static var lastUsed: InvoiceCollectionOption? {
-        get {
-            UserDefaults.standard.string(forKey: "thorbis.payment.lastOption")
-                .flatMap(InvoiceCollectionOption.init(rawValue:))
-                .flatMap { [InvoiceCollectionOption.cash, .check, .paymentLink].contains($0) ? $0 : nil }
-        }
-        set { UserDefaults.standard.set(newValue?.rawValue, forKey: "thorbis.payment.lastOption") }
-    }
-}
 
 @MainActor
 private func paymentDetail(_ label: String, _ value: String) -> some View {
@@ -1391,10 +1457,15 @@ private func paymentDetail(_ label: String, _ value: String) -> some View {
 }
 
 private func paymentDate(_ value: String) -> String {
-    guard let date = ISO8601DateFormatter().date(from: value) else { return value }
-    return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+    guard let date = JobFiltering.date(value) else { return value }
+    return date.stampLabel()
 }
 
 func paymentAmountText(_ cents: Int) -> String {
     "\(cents / 100).\(String(format: "%02d", cents % 100))"
+}
+
+private extension InvoiceCollectionOption {
+    /// Methods that record money already in hand, so the amount may be part of the balance.
+    var takesCustomAmount: Bool { self == .cash || self == .check || isExternalReceipt }
 }

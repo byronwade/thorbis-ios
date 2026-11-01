@@ -1,0 +1,9 @@
+# Customer and job clarity integration
+
+The customer Overview keeps the next visit and contact actions, with one Jobs tab for the complete list and a disclosure for customer details. The job Overview brings visit notes, photos and follow-ups ahead of longer account sections. The customer link on a job has a visible chevron and a minimum 44-by-44-point target. Status, balance, contact, directions, document tabs, payment and secondary actions are retained; the job location is not inferred.
+
+The initial integrated run had one failure: an accessibility test still expected the old 'Directions in Maps' label. The current 'Directions' menu and explicit location selection were verified separately; correcting the test produced 3/3 affected large-text tests in `/private/tmp/thorbis-glance-accessibility-retry.xcresult`. The initial run's 15 other UI tests and the selected unit tests passed; its full failed result remains `/private/tmp/thorbis-glance-integrated.xcresult`.
+
+The customer bottom-action layout initially clipped at the largest text size. A real UI regression reproduced the issue, then the adaptive layout and location journeys passed 7/7 at `/private/tmp/thorbis-glance-customer-accessibility-final.xcresult`. A flexible fallback subsequently passed on iPhone 17 Pro at the largest standard text size and iPhone SE (375 pt, iOS 18.2) at the same size, respectively `/private/tmp/thorbis-glance-standard-fallback.xcresult` and `/private/tmp/thorbis-glance-narrow-final.xcresult`. Screenshots are in `docs/design/evidence/2026-10-29-customer-job-glance/`. An independent reviewer found no new material blocker in the final narrow layout; the reviewer did not run tests.
+
+Physical-device VoiceOver, iPad, dark mode, and customer loading/error journeys remain unverified. The two sticky customer actions occupy substantial space at the largest accessibility size. No activity-selection or draft-save WIP is included.

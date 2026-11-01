@@ -11,7 +11,9 @@ final class ConnectivityMonitor: ObservableObject {
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
             let connected = path.status == .satisfied
+            let constrained = path.isConstrained
             Task { @MainActor in
+                DayPrefetch.shared.constrained = constrained
                 guard let self, self.isConnected != connected else { return }
                 self.isConnected = connected
                 if connected { self.onReconnect?() }
@@ -94,11 +96,17 @@ enum JobDetailCache {
     static func save(estimate: EstimateRecord) { write(estimate, "\(estimate.id).estimate.json") }
     static func save(payments: [FieldPaymentRecord], invoiceID: String) { write(payments, "\(invoiceID).payments.json") }
     static func job(_ id: String) -> JobRecord? { read(JobRecord.self, "\(id).job.json") }
+    static func save(stop: NextStopPlace) { write(stop, "\(stop.jobID).stop.json") }
+    static func stop(_ id: String) -> NextStopPlace? { read(NextStopPlace.self, "\(id).stop.json") }
     static func closeout(_ jobID: String) -> FieldCloseout? { read(FieldCloseout.self, "\(jobID).closeout.json") }
     static func invoices(_ jobID: String) -> [InvoiceRecord]? { read([InvoiceRecord].self, "\(jobID).invoices.json") }
     static func invoice(_ id: String) -> InvoiceRecord? { read(InvoiceRecord.self, "\(id).invoice.json") }
     static func estimate(_ id: String) -> EstimateRecord? { read(EstimateRecord.self, "\(id).estimate.json") }
     static func payments(_ invoiceID: String) -> [FieldPaymentRecord]? { read([FieldPaymentRecord].self, "\(invoiceID).payments.json") }
     static func notes(_ id: String) -> [JobNoteRecord] { read([JobNoteRecord].self, "\(id).notes.json") ?? [] }
+    /// "At this address": the last complete copy, so the section still shows without signal.
+    struct SavedHistory: Codable { let savedAt: Date; let history: JobPropertyHistory }
+    static func save(history: JobPropertyHistory) { write(SavedHistory(savedAt: .now, history: history), "\(history.jobId).history.json") }
+    static func history(_ jobID: String) -> SavedHistory? { read(SavedHistory.self, "\(jobID).history.json") }
     static func clearAll() { try? FileManager.default.removeItem(at: directory) }
 }

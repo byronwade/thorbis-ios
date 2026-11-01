@@ -196,6 +196,8 @@ struct JobBookingCallSection: View {
     @State private var showTranscript = false
     @State private var scrubbing: Double?
 
+    @Environment(\.paperRecordRoom) private var recordRoom
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PaperGroupHeader(title: title)
@@ -216,9 +218,9 @@ struct JobBookingCallSection: View {
                 if !call.transcript.isEmpty { transcript }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border))
+            // v2 Record room: no box around the section (never a 1px rim); its words meet the label.
+            .padding(.horizontal, recordRoom ? RecordRoom.labelInset : 14).padding(.vertical, recordRoom ? 6 : 14)
+            .background(recordRoom ? AnyShapeStyle(Color.clear) : AnyShapeStyle(ThorbisPanelStyle()), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
         .onDisappear { player.stop() }
     }
@@ -230,7 +232,7 @@ struct JobBookingCallSection: View {
                 .accessibilityHidden(true)
             Text(call.caller).font(Theme.font(15, weight: .medium))
             if let when = JobFiltering.date(call.startedAt) {
-                Text("· \(when.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
+                Text("· \(when.stampLabel(year: false))")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
@@ -254,7 +256,7 @@ struct JobBookingCallSection: View {
                             ProgressView().tint(Theme.background)
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.background)
+                                .font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.background)
                         }
                     }
                     .frame(width: 44, height: 44)

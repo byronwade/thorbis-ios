@@ -40,8 +40,7 @@ struct PublicEstimateActionView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     if model.isLoading && model.action == nil {
-                        ProgressView("Opening estimate…")
-                            .frame(maxWidth: .infinity, minHeight: 220)
+                        CustomerSkeleton(caption: "Opening your estimate…")
                     } else if let message = model.unavailableMessage {
                         unavailableState(message)
                     } else if let message = model.loadError {
@@ -49,7 +48,9 @@ struct PublicEstimateActionView: View {
                     } else if let action = model.action {
                         estimateContent(action)
                     } else {
-                        ContentUnavailableView("Estimate unavailable", systemImage: "doc.text.magnifyingglass", description: Text("This link could not be opened."))
+                        CustomerStateMessage(symbol: "doc.text.magnifyingglass", title: "This estimate isn’t available",
+                                             message: "This link couldn’t be opened. Ask the company for a new link.",
+                                             actionTitle: "Close", action: onClose)
                     }
                 }
                 .frame(maxWidth: 640, alignment: .leading)
@@ -60,7 +61,7 @@ struct PublicEstimateActionView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .safeAreaInset(edge: .bottom, spacing: 0) { approvalFooter }
         .task(id: token) { await model.load(api: api, token: token) }
         .thorbisConfirm("Decline this estimate?",
@@ -119,7 +120,7 @@ struct PublicEstimateActionView: View {
                 Button(action: approve) {
                     HStack(spacing: 8) {
                         if model.isSubmitting { ProgressView().tint(.white) }
-                        Text(approvalTitle(action)).font(Theme.font(15, weight: .semibold))
+                        Text(approvalTitle(action)).font(Theme.customerFont(15, weight: .semibold))
                     }
                     .foregroundStyle(approvalEnabled ? Color.white : Theme.muted)
                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -130,7 +131,7 @@ struct PublicEstimateActionView: View {
                 .accessibilityHint(approvalEnabled ? "Records approval of this issued estimate." : "Choose an option, enter your name, and provide consent to continue.")
                 if model.isSubmitting {
                     Text("Saving your decision. Wait for confirmation.")
-                        .font(Theme.font(12))
+                        .font(Theme.customerFont(12))
                         .foregroundStyle(Theme.muted)
                 }
             }
@@ -147,13 +148,13 @@ struct PublicEstimateActionView: View {
         VStack(alignment: .leading, spacing: 8) {
             statusLabel(action.status)
             Text(action.title)
-                .font(Theme.font(26, weight: .semibold))
+                .font(Theme.customerFont(26, weight: .semibold))
                 .tracking(-0.35)
                 .foregroundStyle(Theme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
             // MF-01/CP-02: the price is the biggest thing on the estimate, labelled.
             VStack(alignment: .leading, spacing: 2) {
-                Text("Total").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                Text("Total").font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
                 Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: action.currency))
                     .moneyStyle(.hero).foregroundStyle(Theme.foreground)
             }
@@ -162,12 +163,8 @@ struct PublicEstimateActionView: View {
         }
 
         if let message = model.actionError {
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(Theme.font(13))
-                .foregroundStyle(Theme.warning)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 12))
+            // The server's own words are for staff; a homeowner reads what happened and what to do.
+            CustomerProblemBanner(message: model.actionFailure?.customerSentence(.approve, handBack: false) ?? message)
         }
 
         if let preview = action.html {
@@ -186,9 +183,9 @@ struct PublicEstimateActionView: View {
                     ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(line.description).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                                Text(line.description).font(Theme.customerFont(14, weight: .medium)).foregroundStyle(Theme.foreground)
                                 Text("\(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each")
-                                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                                    .font(Theme.customerFont(15)).monospacedDigit().foregroundStyle(Theme.muted)
                             }
                             Spacer(minLength: 8)
                             Text(money(line.quantity * line.unitPrice, currency: action.currency))
@@ -232,15 +229,15 @@ struct PublicEstimateActionView: View {
             VStack(alignment: .leading, spacing: 14) {
                 sectionTitle("Review and approve")
                 Text("Approval uses the issued scope and price. Your name records who approved it.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .font(Theme.customerFont(13)).foregroundStyle(Theme.muted)
                 if let options = action.options, !options.isEmpty {
                     Text("Choose one complete option")
-                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .font(Theme.customerFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
                     ForEach(options) { option in optionButton(option) }
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Full name").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                    TextField("Type your name", text: $model.signerName)
+                    Text("Full name").font(Theme.customerFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                    TextField("Type your name", text: $model.signerName, prompt: .placeholder("Type your name"))
                         .textContentType(.name)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
@@ -254,7 +251,7 @@ struct PublicEstimateActionView: View {
                 }
                 if let consentText = action.consentText {
                     Toggle(isOn: $model.consent) {
-                        Text(consentText).font(Theme.font(13)).foregroundStyle(Theme.foreground)
+                        Text(consentText).font(Theme.customerFont(13)).foregroundStyle(Theme.foreground)
                     }
                     .tint(Theme.brand)
                     .padding(12)
@@ -269,10 +266,10 @@ struct PublicEstimateActionView: View {
             VStack(alignment: .leading, spacing: 12) {
                 sectionTitle("Approve without signing")
                 Text("This records your approval of the issued scope and price without an electronic signature.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .font(Theme.customerFont(13)).foregroundStyle(Theme.muted)
                 ForEach(action.scopeLines ?? []) { line in
                     Label("\(line.description) — \(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each", systemImage: "checkmark")
-                        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.foreground)
+                        .font(Theme.customerFont(15)).monospacedDigit().foregroundStyle(Theme.foreground)
                 }
             }
             .padding(16)
@@ -287,11 +284,11 @@ struct PublicEstimateActionView: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(option.title).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        Text(option.title).font(Theme.customerFont(14, weight: .semibold)).foregroundStyle(Theme.foreground)
                         Spacer(minLength: 6)
                         Text(money(option.totalAmount, currency: option.currency)).moneyStyle(.total).foregroundStyle(Theme.foreground)
                     }
-                    Text(option.description).font(Theme.font(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    Text(option.description).font(Theme.customerFont(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 20, weight: .regular))
@@ -316,7 +313,7 @@ struct PublicEstimateActionView: View {
             VStack(alignment: .leading, spacing: 12) {
                 if action.canRequestChanges {
                     sectionTitle("Request changes")
-                    TextField("Tell the company what needs clarification", text: $model.changeMessage, axis: .vertical)
+                    TextField("Tell the company what needs clarification", text: $model.changeMessage, prompt: .placeholder("Tell the company what needs clarification"), axis: .vertical)
                         .lineLimit(3...5)
                         .focused($focusedField, equals: .message)
                         .padding(12)
@@ -324,9 +321,9 @@ struct PublicEstimateActionView: View {
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
                         .accessibilityLabel("Message requesting estimate changes")
                     HStack {
-                        Text("The company will send a new estimate.").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                        Text("The company will send a new estimate.").font(Theme.customerFont(12)).foregroundStyle(Theme.muted)
                         Spacer()
-                        Text("\(model.changeMessage.count)/500").font(Theme.monoFont(11)).foregroundStyle(Theme.muted)
+                        Text("\(model.changeMessage.count)/500").font(Theme.customerMonoFont(11)).foregroundStyle(Theme.muted)
                     }
                     Button {
                         focusedField = nil
@@ -336,7 +333,7 @@ struct PublicEstimateActionView: View {
                         }
                     } label: {
                         Label(model.isSubmitting ? "Sending request…" : "Request changes", systemImage: "bubble.left")
-                            .font(Theme.font(14, weight: .medium))
+                            .font(Theme.customerFont(14, weight: .medium))
                             .frame(maxWidth: .infinity, minHeight: 46)
                             .background(Theme.fill, in: RoundedRectangle(cornerRadius: 11))
                     }
@@ -347,7 +344,7 @@ struct PublicEstimateActionView: View {
                 if action.canDecline {
                     Button(role: .destructive) { confirmsDecline = true } label: {
                         Label("Decline estimate", systemImage: "xmark.circle")
-                            .font(Theme.font(14, weight: .medium))
+                            .font(Theme.customerFont(14, weight: .medium))
                             .frame(maxWidth: .infinity, minHeight: 46)
                             .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 11))
                     }
@@ -370,7 +367,7 @@ struct PublicEstimateActionView: View {
         case .changesRequested: ("Changes requested", Theme.warning)
         }
         return Text(title.uppercased())
-            .font(Theme.monoFont(11, weight: .semibold))
+            .font(Theme.customerMonoFont(11, weight: .semibold))
             .tracking(0.6)
             .foregroundStyle(color)
             .padding(.horizontal, 9)
@@ -382,8 +379,8 @@ struct PublicEstimateActionView: View {
 
     private func statusCard<Content: View>(title: String, symbol: String, color: Color, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: symbol).font(Theme.font(15, weight: .semibold)).foregroundStyle(color)
-            content().font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Label(title, systemImage: symbol).font(Theme.customerFont(15, weight: .semibold)).foregroundStyle(color)
+            content().font(Theme.customerFont(13)).foregroundStyle(Theme.muted)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -392,28 +389,23 @@ struct PublicEstimateActionView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The link itself has ended: nothing here can fix it, so the one action is Close.
     private func unavailableState(_ message: String) -> some View {
-        ContentUnavailableView {
-            Label("Estimate approval unavailable", systemImage: "link.badge.exclamationmark")
-        } description: {
-            Text(message)
-        }
+        CustomerStateMessage(symbol: "link.badge.exclamationmark", title: "This estimate link has ended",
+                             message: message, actionTitle: "Close", action: onClose)
     }
 
     private func loadFailureState(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            ContentUnavailableView("Couldn’t load estimate", systemImage: "wifi.exclamationmark", description: Text(message))
-            Button("Try again") { Task { await model.load(api: api, token: token) } }
-                .font(Theme.font(14, weight: .semibold))
-                .frame(minWidth: 120, minHeight: 44)
-                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 10))
-                .disabled(model.isLoading)
-        }
-        .frame(maxWidth: .infinity, minHeight: 240)
+        CustomerStateMessage(symbol: (model.loadFailure.map { ProblemKind($0) } ?? .other).symbol,
+                             title: "We couldn’t open this estimate",
+                             message: model.loadFailure?.customerSentence(.openEstimate, handBack: false)
+                                ?? "Opening your estimate didn’t work. Try again in a moment.",
+                             actionTitle: "Try again") { Task { await model.load(api: api, token: token) } }
+            .disabled(model.isLoading)
     }
 
     private func sectionTitle(_ value: String) -> some View {
-        Text(value).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+        Text(value).font(Theme.customerFont(16, weight: .semibold)).foregroundStyle(Theme.foreground)
     }
 
     private func approvalTitle(_ action: PublicEstimateAction) -> String {

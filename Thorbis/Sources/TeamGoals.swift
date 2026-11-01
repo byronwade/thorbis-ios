@@ -441,8 +441,8 @@ private struct GoalSheet: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { submit() } }
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Save") { submit() } }
             }
             .onAppear {
                 if let current { text = NSDecimalNumber(decimal: Decimal(current) / 100).stringValue }

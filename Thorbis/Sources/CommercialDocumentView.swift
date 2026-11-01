@@ -8,7 +8,9 @@ struct CommercialDocumentView: View {
         Group {
             if let file = preview.url { NativeDocumentPreview(url: file) }
             else if let error = preview.error {
-                ContentUnavailableView { Label("Document unavailable", systemImage: "doc.badge.ellipsis") } description: { Text(error) } actions: { Button("Retry") { load() }.disabled(preview.loading) }
+                PaperEmptyState(symbol: "doc.badge.ellipsis", title: "Document unavailable", message: error,
+                                actionTitle: preview.loading ? nil : "Try again", action: { load() })
+                    .frame(maxHeight: .infinity).background(Theme.canvas)
             } else { ProgressView("Preparing document…") }
         }
         .navigationTitle("Document")

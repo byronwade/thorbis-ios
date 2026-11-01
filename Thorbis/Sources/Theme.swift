@@ -5,8 +5,9 @@ import UIKit
 enum Theme {
     /// Paper's type ramp at its default size. Each step scales with the
     /// Dynamic Type style closest to its size (HIG-008).
-    /// design.thorbis.com MA-09: weights 400 and 500 only, nothing smaller than 12. Heavier
-    /// requests resolve to 500 and smaller sizes to 12, so every call site follows the rule.
+    /// Weights 400 and 500 only (design.thorbis.com, v2 2026-10-31), nothing smaller than 12.
+    /// Semibold, bold, heavy and black resolve to Medium and smaller sizes to 12, so every call site
+    /// follows the rule. Medium is a heading, a row, a commit; Regular is the body of a note.
     static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         let size = onRamp(size)
         return Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
@@ -17,6 +18,15 @@ enum Theme {
         let size = onRamp(size)
         return Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size))
             .weight(allowed(weight)).monospacedDigit()
+    }
+    /// Customer-facing presentation (rule 13): the size asked for, on the older, larger ramp, so the
+    /// 17pt floor holds while staff screens use the compact v2 ramp. Still scales with Dynamic Type.
+    static func customerFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let size = customerRamp(size)
+        return Font.custom("Inter-Regular", size: size, relativeTo: textStyle(for: size)).weight(allowed(weight))
+    }
+    static func customerMonoFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        customerFont(size, weight: weight).monospacedDigit()
     }
     static let minimumSize: CGFloat = 12
     /// design.thorbis.com MF-02: four money sizes, nothing smaller. Hero is what the screen is
@@ -30,15 +40,36 @@ enum Theme {
         let weight: Font.Weight = regular || size == .line ? .regular : .medium
         switch size {
         case .hero:
-            return Font.custom("Inter-Regular", size: wide ? 40 : 34, relativeTo: .largeTitle).weight(weight).monospacedDigit()
+            // v2: 30 on a phone, 34 on iPad (design.thorbis.com keeps display for the hero only).
+            return Font.custom("Inter-Regular", size: wide ? 34 : 30, relativeTo: .largeTitle).weight(weight).monospacedDigit()
         case .total: return monoFont(24, weight: weight)
-        case .row: return monoFont(17, weight: weight)
+        case .row: return monoFont(16, weight: weight)
         case .line: return monoFont(15, weight: weight)
         }
     }
-    /// MA-09: every size lands on the ramp 12/13/15/17/20/24/30 (16 stays for inputs, so
-    /// iOS never zooms a field). Stray sizes like 14 or 26 snap to the nearest step.
+    /// v2 (owner, 31 Oct 2026: "the font size is too big"): staff screens use design.thorbis.com's
+    /// compact ramp at the default Dynamic Type size, and every requested size snaps onto it so call
+    /// sites shrink together. Body and row titles 15, supporting lines 14, chrome 13, captions 12,
+    /// sheet titles 16-17, detail titles 24, root titles 26 (the old 34 step is gone). All scale
+    /// with Dynamic Type through `textStyle(for:)`; hit targets stay 44pt where the type shrinks.
+    ///
+    /// requested: <13 → 12 · 13 → 13 · 14-15 → 14 · 16-17 → 15 · 18-19 → 16 · 20-21 → 17 ·
+    /// 22-26 → 20 · 27-31 → 24 · 32+ → 26.
     static func onRamp(_ size: CGFloat) -> CGFloat {
+        switch size {
+        case ..<13: minimumSize
+        case 13..<14: 13
+        case 14..<16: 14
+        case 16..<18: 15
+        case 18..<20: 16
+        case 20..<22: 17
+        case 22..<27: 20
+        case 27..<32: 24
+        default: 26
+        }
+    }
+    /// The pre-v2 ramp 12/13/15/17/20/24/30/34, kept for customer-facing presentation only.
+    static func customerRamp(_ size: CGFloat) -> CGFloat {
         switch size {
         case ..<13: minimumSize
         case 13..<14: 13
@@ -47,7 +78,8 @@ enum Theme {
         case 17..<18.5: 17
         case 18.5..<22: 20
         case 22..<27: 24
-        default: 30
+        case 27..<32: 30
+        default: 34
         }
     }
     static func allowed(_ weight: Font.Weight) -> Font.Weight {
@@ -56,8 +88,8 @@ enum Theme {
     }
     static func textStyle(for size: CGFloat) -> Font.TextStyle {
         switch size {
-        case 30...: .largeTitle
-        case 24..<30: .title
+        case 26...: .largeTitle
+        case 24..<26: .title
         case 20..<24: .title2
         case 17..<20: .headline
         case 15..<17: .subheadline
@@ -68,49 +100,118 @@ enum Theme {
     }
     /// Paper's screen gutter.
     static let gutter: CGFloat = 20
-    /// MA-10: controls and fields 12, cards and sheets 14; chips and pill tabs are capsules.
-    static let controlRadius: CGFloat = 12
+    /// design.thorbis.com Radius: commits and fields 10, sheets and panels 14, chips are pills,
+    /// icons are circles.
+    static let controlRadius: CGFloat = 10
     static let cardRadius: CGFloat = 14
-    /// MA-10: chips are 28 tall.
+    /// MA-10: chips start at 28 tall and grow with accessible text.
     static let chipHeight: CGFloat = 28
-    /// MA-08: the commit is 50 tall.
+    /// MA-08: the commit starts at 50 tall and grows with accessible text.
     static let commitHeight: CGFloat = 50
-    // Dark values retain the Paper Mobile palette. Light surfaces are the
-    // design.thorbis.com warm canvas/panel/well/ink tokens converted from OKLCH.
-    static let card = adaptive(light: 0xFDFCFA, dark: 0x232323)
-    static let subtle = adaptive(light: 0x59544D, dark: 0x949494, highLight: 0x201B14, highDark: 0xEDEDED)
-    static let successSurface = adaptive(light: 0xE5F3E9, dark: 0x122B1C)
-    static let destructiveSurface = adaptive(light: 0xFCE8E8, dark: 0x2A1414)
-    static let background = adaptive(light: 0xF7F4EE, dark: 0x1F1F1F)
-    static let surface = adaptive(light: 0xFDFCFA, dark: 0x191919)
-    static let chrome = adaptive(light: 0xF7F4EE, dark: 0x141414)
+    // v2 (2026-10-31): design.thorbis.com tokens on Linear's grammar. Dark is the first drawing:
+    // Linear's greys (canvas oklch 14.5%, panel 20.5%), cream type (oklch 96.8% 0.009 84.6) and a
+    // cool grey body. Light is the warm cream sheet that shipped before PR #200, a retune of
+    // lightness rather than an invert. Token names are unchanged, so every screen follows.
+    // `card`/`well` is the panel rows sit on; `surface` is a sheet's panel; `fill` is a chip or a
+    // circle (a step lighter than the panel in dark); `field` is the sunk well under a text field or
+    // a select (a step darker than the panel). Lightness was tuned, never saturation, so text holds
+    // 4.5:1 and marks 3:1 in both themes and in Increase Contrast (`scripts/tests/contrast.py`).
+    static let card = adaptive(light: 0xFDFCFA, dark: 0x171717)
+    /// The panel grouped rows sit on (radius 14). Same as `card`, named for what it is.
+    static let well = card
+    /// Body: the cool grey of supporting lines (light keeps the warm ink family).
+    static let subtle = adaptive(light: 0x4A453E, dark: 0xBFC5CC, highLight: 0x201B14, highDark: 0xF7F4EE)
+    static let successSurface = adaptive(light: 0xDFF6E2, dark: 0x0D2412)
+    static let destructiveSurface = adaptive(light: 0xFFE6E4, dark: 0x301514)
+    /// The canvas.
+    static let background = adaptive(light: 0xF7F4EE, dark: 0x0A0A0A)
+    /// A sheet's or an overlay's panel.
+    static let surface = adaptive(light: 0xFDFCFA, dark: 0x171717)
+    static let chrome = adaptive(light: 0xF7F4EE, dark: 0x0A0A0A)
+    /// A neutral step (kept for call sites); never the electric blue, which is `brand`.
     static let accent = adaptive(light: 0xEDE9E2, dark: 0x262626)
-    static let foreground = adaptive(light: 0x201B14, dark: 0xEDEDED, highLight: 0x000000, highDark: 0xFFFFFF)
-    static let muted = adaptive(light: 0x59544D, dark: 0xA0A0A0, highLight: 0x201B14, highDark: 0xEDEDED)
-    static let fill = adaptive(light: 0xEDE9E2, dark: 0x2A2A2A)
+    /// Type: ink on cream in light, cream on the dark greys.
+    static let foreground = adaptive(light: 0x201B14, dark: 0xF7F4EE, highLight: 0x000000, highDark: 0xFFFFFF)
+    /// The marker: times, counts, labels. Dimmer than body.
+    static let muted = adaptive(light: 0x66615A, dark: 0x9A9FA6, highLight: 0x201B14, highDark: 0xF7F4EE)
+    /// A chip's or a circle's ground.
+    static let fill = adaptive(light: 0xEDE9E2, dark: 0x262626)
+    /// Sink: the field well, one step darker than the panel, with a 1px rim (`fieldWell()`).
+    static let field = adaptive(light: 0xF1EDE6, dark: 0x0F0F0F)
+    /// The 1px rim. A border is a use case (a field, a commit, a chip, a photo), never a separator.
     static let border = Color(uiColor: UIColor { traits in
         let high = traits.accessibilityContrast == .high
         return (traits.userInterfaceStyle == .dark ? UIColor.white : UIColor.black)
-            .withAlphaComponent(high ? 0.6 : traits.userInterfaceStyle == .dark ? 0.08 : 0.12)
+            .withAlphaComponent(high ? 0.6 : traits.userInterfaceStyle == .dark ? 0.10 : 0.10)
     })
-    /// MA-08: a commit is ink (the type colour) with inverse type and a hairline rim.
+    /// Kept for call sites; draws the same 1px rim. Never a line between rows.
+    static let hairline = border
+    /// MA-08: a commit is ink (the type colour) with inverse type, a 1px rim and a short bevel.
     static let ink = foreground
-    static let onInk = adaptive(light: 0xFDFCFA, dark: 0x191919, highLight: 0xFFFFFF, highDark: 0x000000)
-    static let brand = Color(hex: 0x2F6BFF)
-    /// Brand used as text or a link; plain brand is below 4.5:1 on both grounds.
-    static let brandText = adaptive(light: 0x2558E0, dark: 0x5285FF)
-    static let brandSurface = adaptive(light: 0xE5ECFF, dark: 0x182642)
-    static let success = adaptive(light: 0x18743A, dark: 0x22C55E)
-    static let warning = adaptive(light: 0x895400, dark: 0xF59E0B)
-    static let warningSurface = adaptive(light: 0xFFF0CB, dark: 0x2A2008)
-    static let destructive = adaptive(light: 0xB3262D, dark: 0xEF4444)
-    /// Soft place-mark hues for menu icons (design.thorbis.com Color: olive, forest, pumpkin,
-    /// burnt, or accent mixed down). Only the mark is tinted; the word stays body.
-    static let markOlive = adaptive(light: 0x6E6A2E, dark: 0xB5B07A)
-    static let markForest = adaptive(light: 0x2F6B4A, dark: 0x7FB394)
-    static let markPumpkin = adaptive(light: 0x9A5A1E, dark: 0xD9A06A)
-    static let markBurnt = adaptive(light: 0x8E4630, dark: 0xC98A72)
-    static let markAccent = adaptive(light: 0x3D5FB8, dark: 0x8BA6E8)
+    static let onInk = adaptive(light: 0xFDFCFA, dark: 0x0A0A0A, highLight: 0xFFFFFF, highDark: 0x000000)
+    /// Electric blue, oklch(55.8% 0.188 264.4): selected, focus, the one live thing. Never a wash.
+    static let brand = Color(hex: 0x3A6AE0)
+    /// Brand used as text or a link: lightness tuned for 4.5:1 on the canvas, the panel and its surface.
+    static let brandText = adaptive(light: 0x3260D6, dark: 0x5387FF, highLight: 0x1A44B7, highDark: 0xBDD8FF)
+    static let brandSurface = adaptive(light: 0xE3EFFF, dark: 0x131D33)
+    /// success oklch(62.7% 0.17 149.2), as a word.
+    static let success = adaptive(light: 0x007B21, dark: 0x33B45A, highLight: 0x005E00, highDark: 0x94E4A3)
+    /// warning oklch(82.7% 0.171 80.5), as a word: darkened in light so it reads on cream.
+    static let warning = adaptive(light: 0x9A5900, dark: 0xFFB800, highLight: 0x7E3E00, highDark: 0xFFD27A)
+    static let warningSurface = adaptive(light: 0xFBEDD5, dark: 0x291B02)
+    /// error oklch(62.6% 0.193 23), as a word.
+    static let destructive = adaptive(light: 0xC82A36, dark: 0xF35659, highLight: 0xA10015, highDark: 0xFFB1AC)
+    /// Red as a fill under white type or a white glyph (a badge, a destructive commit): 4.5:1 or better.
+    static let destructiveFill = adaptive(light: 0xC82A36, dark: 0xB3262D)
+    /// The chosen segment's raised pill. In dark it sits lighter than the panel so the choice shows.
+    static let selectedSegment = adaptive(light: 0xFDFCFA, dark: 0x2E2E2E)
+
+    // Status hues: the site's four (success, error, info, warning) plus the marker grey and the
+    // accent. `status*` colours a mark (non-text, 3:1); `status*Text` is the word's twin (4.5:1 on
+    // canvas, panel and its own surface); `status*Surface` is a chip's tinted ground. A status is a
+    // word first (`StatusLabel`); the mark sits beside it, never alone.
+    static let statusUnscheduled = adaptive(light: 0x7C8186, dark: 0x82878C)
+    /// Scheduled reads as info, oklch(62.3% 0.188 259.8).
+    static let statusScheduled = adaptive(light: 0x3B82F6, dark: 0x3B82F6)
+    static let statusScheduledText = adaptive(light: 0x1C64D5, dark: 0x5C9BFF, highLight: 0x0047B7, highDark: 0xC1D9FF)
+    static let statusScheduledSurface = adaptive(light: 0xE1F0FF, dark: 0x111E33)
+    /// Dispatched (en route) is the one live thing: the accent.
+    static let statusDispatched = brand
+    static let statusDispatchedText = brandText
+    static let statusDispatchedSurface = brandSurface
+    static let statusInProgress = adaptive(light: 0xBE7A00, dark: 0xFFB800)
+    static let statusInProgressText = warning
+    static let statusInProgressSurface = warningSurface
+    static let statusDone = adaptive(light: 0x0DA047, dark: 0x16A34A)
+    static let statusDoneText = success
+    static let statusDoneSurface = successSurface
+    static let statusAttention = adaptive(light: 0xE5484D, dark: 0xE5484D)
+    static let statusAttentionText = destructive
+    static let statusAttentionSurface = destructiveSurface
+    /// Paid reads as success too; the word ("Paid", "Invoiced") tells it from Done.
+    static let statusInvoiced = adaptive(light: 0x0DA047, dark: 0x16A34A)
+    static let statusInvoicedText = adaptive(light: 0x007B21, dark: 0x33B45A, highLight: 0x005E00, highDark: 0x94E4A3)
+    static let statusInvoicedSurface = adaptive(light: 0xDFF6E2, dark: 0x0D2412)
+
+    /// The toast: a dark capsule in both themes. In dark it sits a step above the panel so it
+    /// still reads as raised; `toastText` and `toastMuted` hold 4.5:1 on it.
+    static let toastFill = adaptive(light: 0x201B14, dark: 0x2E2E2E, highLight: 0x000000, highDark: 0x3A3A3A)
+    static let toastText = adaptive(light: 0xF7F4EE, dark: 0xF7F4EE, highLight: 0xFFFFFF, highDark: 0xFFFFFF)
+    static let toastMuted = adaptive(light: 0xB5AFA6, dark: 0xA8ADB4, highLight: 0xE0DCD5, highDark: 0xD4D7DB)
+
+    /// Place marks (design.thorbis.com Color): olive, forest, pumpkin, burnt, and the accent mixed
+    /// down. Quiet colour on chrome: the mark is outlined at rest and filled when it is the place;
+    /// the word beside it stays cream or body. Dark lifts lightness so each mark holds 3:1.
+    static let markOlive = adaptive(light: 0x5C6140, dark: 0x979C79)
+    static let markForest = adaptive(light: 0x2F4A32, dark: 0x7E9B80)
+    static let markPumpkin = adaptive(light: 0xC45C19, dark: 0xDF8353)
+    static let markBurnt = adaptive(light: 0xA33B24, dark: 0xCA6F5A)
+    static let markAccent = adaptive(light: 0x5773AF, dark: 0x829ED7)
+    /// Older names, folded onto the five: blue is the accent mixed down, teal is forest, red is burnt.
+    static let markBlue = adaptive(light: 0x5773AF, dark: 0x829ED7)
+    static let markTeal = adaptive(light: 0x2F4A32, dark: 0x7E9B80)
+    static let markRed = adaptive(light: 0xA33B24, dark: 0xCA6F5A)
+    static let markGrey = adaptive(light: 0x7C8186, dark: 0x82878C)
 
     private static func adaptive(light: UInt32, dark: UInt32,
                                  highLight: UInt32? = nil, highDark: UInt32? = nil) -> Color {
@@ -143,11 +244,13 @@ struct Chip: View {
     var body: some View {
         HStack(spacing: 5) {
             if let icon { Image(systemName: icon).font(.system(size: 12, weight: .medium)).foregroundStyle(tint) }
-            Text(text).font(Theme.font(12, weight: .medium)).lineLimit(1).fixedSize()
+            Text(text).font(Theme.font(12, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(tint == Theme.muted ? Theme.muted : Theme.foreground)
         }
-        .padding(.horizontal, 10).frame(minHeight: Theme.chipHeight)
+        .padding(.horizontal, 10).padding(.vertical, 5).frame(minHeight: Theme.chipHeight)
         .background(Theme.fill, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
     }
 }
 
@@ -170,32 +273,142 @@ func initials(_ name: String) -> String {
     return s.isEmpty ? "?" : s.uppercased()
 }
 
-struct SectionHeader: View {
+/// v2: a grouped section's header, chrome 13 Medium in the marker colour with the
+/// count beside it ("Up next  2"), and an optional trailing accessory. Sits above a `Well`.
+struct SectionHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
+    var horizontalPadding: CGFloat = 4
+    @ViewBuilder var trailing: Trailing
+
     var body: some View {
-        HStack {
-            Text(title).font(Theme.font( 13, weight: .medium)).foregroundStyle(Theme.muted)
-            if let count { Text("\(count)").font(Theme.font( 12)).foregroundStyle(Theme.muted.opacity(0.7)) }
-            Spacer()
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title).font(Theme.font(13, weight: .medium))
+                .accessibilityAddTraits(.isHeader)
+            if let count, count > 0 {
+                Text("\(count)").font(Theme.font(13)).monospacedDigit()
+                    .accessibilityLabel("\(count)")
+            }
+            Spacer(minLength: 0)
+            trailing
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 6)
+        .foregroundStyle(Theme.muted)
+        .padding(.horizontal, horizontalPadding)
+        .frame(minHeight: 32)
+        .accessibilityElement(children: .contain)
     }
 }
 
+extension SectionHeader where Trailing == EmptyView {
+    init(title: String, count: Int? = nil, horizontalPadding: CGFloat = 4) {
+        self.init(title: title, count: count, horizontalPadding: horizontalPadding) { EmptyView() }
+    }
+}
+
+/// Lift (design.thorbis.com Depth): the commit is ink with inverse type, radius 10, a 1px rim, a
+/// short bevel (1px light from above, 1px drop) and it sinks while pressed (the drop goes, it settles
+/// 1px). Disabled fades the ink; a disabled commit should carry a reason (`PaperActionBar`).
 private struct InkCommit: ViewModifier {
     let enabled: Bool?
     let height: CGFloat
+    var fill: Color = Theme.ink
+    var type: Color = Theme.onInk
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.thorbisPressed) private var pressed
 
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+        let on = enabled ?? isEnabled
         content
             .font(Theme.font(17, weight: .medium))
-            .foregroundStyle(Theme.onInk)
-            .frame(maxWidth: .infinity).frame(height: height)
-            .background(Theme.ink.opacity((enabled ?? isEnabled) ? 1 : 0.35), in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
-            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .foregroundStyle(type)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: height)
+            .background(fill.opacity(on ? 1 : 0.35), in: shape)
+            // Light from above: a 1px highlight inside the top edge, gone while pressed.
+            .overlay(shape.inset(by: 0.5).stroke(LinearGradient(colors: [Color.white.opacity(pressed || !on ? 0 : 0.22), .clear],
+                                                                startPoint: .top, endPoint: .center), lineWidth: 1))
+            .overlay(shape.strokeBorder(Theme.border, lineWidth: 1))
+            // The 1px drop. Press sinks: the drop goes and the commit settles onto the page.
+            .shadow(color: .black.opacity(pressed || !on ? 0 : 0.28), radius: 0, x: 0, y: 1)
+            .offset(y: pressed ? 1 : 0)
+            .contentShape(shape)
+    }
+}
+
+// MARK: - Sheet surfaces
+
+private struct ThorbisSheetCanvasKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// True inside a sheet (and every screen pushed in it): the canvas is the panel, and groups of
+    /// rows sink one step below it (golden rules: a modal is "a clean system sheet on the panel").
+    var thorbisSheetCanvas: Bool {
+        get { self[ThorbisSheetCanvasKey.self] }
+        set { self[ThorbisSheetCanvasKey.self] = newValue }
+    }
+}
+
+/// The ground a screen is drawn on: the canvas on a route, the panel inside a sheet, so a screen
+/// shown in a sheet (Settings, an invoice's lines) matches the modals beside it.
+struct ThorbisCanvasStyle: ShapeStyle {
+    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        (environment.thorbisSheetCanvas ? Theme.surface : Theme.background).resolve(in: environment)
+    }
+}
+
+/// The ground a group of rows sits on: the panel (`Theme.well`) on a route; inside a sheet, where
+/// the canvas already is the panel, the sink (`Theme.field`), as `ThorbisSheetGroup` draws it.
+struct ThorbisPanelStyle: ShapeStyle {
+    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        (environment.thorbisSheetCanvas ? Theme.field : Theme.well).resolve(in: environment)
+    }
+}
+
+extension Theme {
+    /// A screen's ground: `background` on a route, `surface` in a sheet. Use for a screen's own
+    /// background and for bars pinned to it, so nothing shows as a band of another tone.
+    static let canvas = ThorbisCanvasStyle()
+}
+
+/// A group's rounded ground: the panel on a route (no rim, v2); in a sheet the sink with its 1px rim.
+private struct PanelBackground: ViewModifier {
+    let radius: CGFloat
+    @Environment(\.thorbisSheetCanvas) private var inSheet
+    func body(content: Content) -> some View {
+        content
+            .background(ThorbisPanelStyle(), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay {
+                if inSheet {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1)
+                }
+            }
+    }
+}
+
+extension View {
+    /// The rounded ground under a group of rows (`Well`, a card): see `PanelBackground`.
+    func panelBackground(cornerRadius: CGFloat = Theme.cardRadius) -> some View {
+        modifier(PanelBackground(radius: cornerRadius))
+    }
+
+    /// A sheet that shows whole screens (a NavigationStack, Settings, an editor): the panel behind it
+    /// (no Liquid Glass) and `thorbisSheetCanvas` for every screen inside, pushed ones included.
+    /// Put it outside the sheet's NavigationStack, at the `.sheet` content.
+    func thorbisSheetSurface() -> some View {
+        self
+            .environment(\.thorbisSheetCanvas, true)
+            .presentationBackground(Theme.surface)
+    }
+}
+
+private struct ThorbisPressedKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// True while the enclosing `PressStyle` button is held, so a lifted commit can sink.
+    var thorbisPressed: Bool {
+        get { self[ThorbisPressedKey.self] }
+        set { self[ThorbisPressedKey.self] = newValue }
     }
 }
 
@@ -219,11 +432,16 @@ struct PrimaryButton: View {
 }
 
 extension View {
-    /// MA-08: the screen's one commit. Ink fill, inverse type 17/500, 50 tall, radius 12, a
+    /// MA-08: the screen's one commit. Ink fill, inverse type 17/500, at least 50 tall, radius 12, a
     /// hairline rim so it holds its edge on the dark canvas. Disabled fades the ink, never turns it grey-blue.
     /// With `enabled` left nil the commit follows the button's own `.disabled(...)`.
     func inkCommit(enabled: Bool? = nil, height: CGFloat = Theme.commitHeight) -> some View {
         modifier(InkCommit(enabled: enabled, height: height))
+    }
+
+    /// The same lifted commit in the danger tone (Cancel job, Void invoice): white type on red.
+    func dangerCommit(enabled: Bool? = nil, height: CGFloat = Theme.commitHeight) -> some View {
+        modifier(InkCommit(enabled: enabled, height: height, fill: Theme.destructiveFill, type: .white))
     }
 
     /// MF-02..MF-06: an amount in one of the four money sizes. Ink unless the call site tints it
@@ -249,15 +467,17 @@ private struct MoneyStyle: ViewModifier {
     }
 }
 
-/// MA-07: every button answers the finger at once. It dips to 0.97 and 85% opacity while
-/// pressed and comes back in 120 ms; with Reduce Motion only the opacity changes.
+/// MA-07: every button answers the finger at once. It dips to 0.98 and 88% opacity while
+/// pressed and comes back in 120 ms ease-out; with Reduce Motion only the opacity changes. It also
+/// tells its label it is pressed (`thorbisPressed`) so a lifted commit sinks.
 struct PressStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
-            .opacity(configuration.isPressed ? 0.85 : 1)
+            .environment(\.thorbisPressed, configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
@@ -272,50 +492,33 @@ struct RowPressStyle: ButtonStyle {
     }
 }
 
-/// MA-13: the shape of what is coming. Rows the size of the real ones, static (no shimmer),
-/// so Reduce Motion needs nothing different; VoiceOver hears one "Loading" instead.
-struct SkeletonRows: View {
-    var count = 6
-    var leading = true
-    /// Zero when the parent already pads to the gutter.
-    var inset: CGFloat = Theme.gutter
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(0..<count, id: \.self) { index in
-                HStack(spacing: 12) {
-                    if leading { Circle().fill(Theme.fill).frame(width: 22, height: 22) }
-                    VStack(alignment: .leading, spacing: 7) {
-                        Capsule().fill(Theme.fill).frame(width: index.isMultiple(of: 2) ? 190 : 150, height: 12)
-                        Capsule().fill(Theme.fill.opacity(0.7)).frame(width: index.isMultiple(of: 3) ? 120 : 170, height: 10)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(minHeight: 52)
-            }
-        }
-        .padding(.horizontal, inset)
-        .padding(.top, 8)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Loading")
-    }
-}
-
 extension Date {
-    /// One way to say when a visit is, used on every list and header: "Today 4:00 PM",
-    /// "Tomorrow 9:00 AM", otherwise "Thu, Oct 30, 9:00 AM".
+    /// One way to say when a visit is, used on every list and header: "Today 4:00 p.m.",
+    /// "Tomorrow 9:00 a.m.", otherwise "Thu, Oct 30, 9:00 a.m.".
     func visitLabel(now: Date = .now, calendar: Calendar = .current) -> String {
-        let time = formatted(date: .omitted, time: .shortened)
+        let time = tradeTime
         if calendar.isDate(self, inSameDayAs: now) { return "Today \(time)" }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(self, inSameDayAs: tomorrow) {
             return "Tomorrow \(time)"
         }
-        return formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+        return weekdayStampLabel
     }
 }
 
 /// MA-03: with Reduce Motion on, every animation becomes a short 150ms ease-out
 /// with no spring or travel; otherwise the given animation runs as written.
+extension Theme {
+    /// Phase 4: the small spring a chosen pill, segment or chip settles with; a short fade under
+    /// Reduce Motion.
+    /// v2 (design.thorbis.com Motion): 120ms ease-out, no spring or bounce on routine work. The name
+    /// is kept so call sites follow; Reduce Motion gets the same short fade.
+    static func selectionSpring(reduceMotion: Bool) -> Animation {
+        .easeOut(duration: 0.12)
+    }
+    /// Menus, chips and segments: 120ms ease-out.
+    static let quick: Animation = .easeOut(duration: 0.12)
+}
+
 @MainActor func withMotion<Result>(_ animation: Animation = .default, _ body: () throws -> Result) rethrows -> Result {
     try withAnimation(UIAccessibility.isReduceMotionEnabled ? .easeOut(duration: 0.15) : animation, body)
 }

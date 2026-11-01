@@ -25,16 +25,22 @@ struct SignatureCaptureSheet: View {
     /// Kept across retries so a second tap reuses the same uploaded image.
     @State private var uploaded: (key: String, mediaID: String)?
     @State private var clientAssetID = UUID().uuidString
+    /// Set when the commit is pressed with the name or signature missing, so it says which.
+    @State private var attempted = false
+    @FocusState private var nameFocused: Bool
 
     private var hasInk: Bool { SignatureInk.hasInk(strokes) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var blockedReason: String? {
+        // A signature authorizes charges or approves work, so it is never kept to send later:
+        // say so before the customer signs, not after.
+        if session.isOffline { return "Signing needs a connection. The customer can sign once you have signal." }
         if trimmedName.isEmpty { return "Add the customer's name to continue." }
         if trimmedName.count > 120 { return "Shorten the name to 120 characters." }
         if !hasInk { return "Have the customer sign above the line." }
         return nil
     }
-    private var canSubmit: Bool { hasInk && !trimmedName.isEmpty && trimmedName.count <= 120 && !busy }
+    private var canSubmit: Bool { hasInk && !trimmedName.isEmpty && trimmedName.count <= 120 && !busy && !session.isOffline }
 
     var body: some View {
         NavigationStack {
@@ -43,7 +49,8 @@ struct SignatureCaptureSheet: View {
                     .font(Theme.font(15))
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                TextField("Customer's full name", text: $name)
+                TextField("Customer's full name", text: $name, prompt: .placeholder("Customer's full name"))
+                    .focused($nameFocused)
                     .textContentType(.name)
                     .submitLabel(.done)
                     .font(Theme.font(17))
@@ -54,14 +61,14 @@ struct SignatureCaptureSheet: View {
                     pad
                     // A signature line, like the paper form the customer expects.
                     HStack(alignment: .lastTextBaseline, spacing: 6) {
-                        Text("×").font(Theme.font(20)).foregroundStyle(.black.opacity(0.45))
+                        Text("×").font(Theme.font(20)).foregroundStyle(.black.opacity(0.62))
                         Rectangle().fill(.black.opacity(0.2)).frame(height: 1)
                     }
                     .padding(.horizontal, 18).padding(.bottom, 52)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                     HStack {
-                        Text("Sign above the line").font(Theme.font(13)).foregroundStyle(.black.opacity(0.45))
+                        Text("Sign above the line").font(Theme.font(13)).foregroundStyle(.black.opacity(0.62))
                         Spacer()
                         if hasInk {
                             Button("Clear") { strokes = []; uploaded = nil; clientAssetID = UUID().uuidString }
@@ -77,20 +84,34 @@ struct SignatureCaptureSheet: View {
                 .accessibilityLabel("Signature pad")
                 if let error { ListErrorRow(message: error) }
                 Spacer(minLength: 0)
-                PrimaryButton(title: title, busy: busy) { Task { await sign() } }
-                    .disabled(!canSubmit)
-                // MA-08: a disabled commit says why, in words under it.
-                if !canSubmit && !busy, let reason = blockedReason {
-                    Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity)
+                // Not pre-disabled for a missing name or signature: pressing says which, under it.
+                // Offline it stays off (a signature is never kept to send later), and says why.
+                PrimaryButton(title: title, busy: busy) {
+                    guard canSubmit else {
+                        attempted = true
+                        if trimmedName.isEmpty || trimmedName.count > 120 { nameFocused = true }
+                        return
+                    }
+                    Task { await sign() }
+                }
+                .disabled(busy || session.isOffline)
+                if !busy, session.isOffline || attempted, let reason = blockedReason {
+                    Group {
+                        if session.isOffline {
+                            Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        } else {
+                            FieldProblem(message: reason)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
             }
             .padding(20)
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .navigationTitle("Customer signature")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
             }
             .onAppear { if name.isEmpty { name = suggestedName } }
         }
@@ -213,7 +234,7 @@ struct SignatureBadge: View {
     let signature: FieldSignatureRecord
     var body: some View {
         Label {
-            Text("\(label) \(signature.signerName)\(JobFiltering.date(signature.signedAt).map { " · " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")")
+            Text("\(label) \(signature.signerName)\(JobFiltering.date(signature.signedAt).map { " · " + $0.stampLabel() } ?? "")")
         } icon: {
             Image(systemName: "signature")
         }
@@ -221,6 +242,6 @@ struct SignatureBadge: View {
         .foregroundStyle(Theme.success)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .panelBackground(cornerRadius: Theme.cardRadius)
     }
 }

@@ -112,47 +112,68 @@ struct InboxLocalDraftView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                Text("On this device · Current session only")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("Drafts and queued messages are not sent. Scheduling here does not start a timer or notify the recipient.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if let actionError { Text(actionError).foregroundStyle(.red) }
-            if inbox.actorID == actorID && inbox.organizationID == organizationID {
-                Section("Drafts and queued") {
-                    ForEach(inbox.messages) { message in
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
-                                Text(message.recipient).font(.headline)
-                                Spacer()
-                                Text(message.status.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
-                            }
-                            if message.channel == .email && !message.subject.isEmpty { Text(message.subject) }
-                            Text(message.body).lineLimit(2).font(.subheadline).foregroundStyle(.secondary)
-                            if let scheduledAt = message.scheduledAt {
-                                Text("Scheduled locally for \(scheduledAt) · Will not auto-send")
-                                    .font(.caption).foregroundStyle(.orange)
-                            }
-                            HStack {
-                                if message.status == .draft {
-                                    Button("Edit") { present(InboxComposer(message: message)) }
-                                    Button("Discard", role: .destructive) { inbox.discard(message.id) }
-                                } else if message.scheduledAt != nil {
-                                    Button("Cancel schedule") { inbox.cancelScheduled(message.id) }
+        // design 2026-10-30: the list system — each draft a row with its state as a word; its
+        // actions (Edit, Discard, Cancel schedule) moved into the row's ••• menu; New draft is the commit.
+        let bound = inbox.actorID == actorID && inbox.organizationID == organizationID
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Message drafts").font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("On this device · Current session only").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                if let actionError {
+                    Text(actionError).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                }
+                if bound {
+                    PaperSection("Drafts and queued", count: inbox.messages.isEmpty ? nil : inbox.messages.count) {
+                        if inbox.messages.isEmpty {
+                            Text("No drafts in this session").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                        } else {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(inbox.messages) { message in
+                                    HStack(alignment: .top, spacing: 0) {
+                                        PaperListRow(title: message.recipient,
+                                                     subtitle: [message.channel == .email && !message.subject.isEmpty ? message.subject : nil, message.body]
+                                                         .compactMap { $0 }.joined(separator: " · "),
+                                                     meta: message.scheduledAt.map { "Scheduled locally for \($0) · Will not auto-send" },
+                                                     subtitleLines: 2) {
+                                            StatusWord(text: message.status.rawValue.capitalized,
+                                                       tint: message.scheduledAt != nil ? Theme.warning : nil)
+                                        }
+                                        let items: [ThorbisMenuItem] = message.status == .draft
+                                            ? [ThorbisMenuItem("Edit", icon: "pencil") { present(InboxComposer(message: message)) },
+                                               ThorbisMenuItem("Discard", icon: "trash", role: .destructive) { inbox.discard(message.id) }]
+                                            : message.scheduledAt != nil
+                                                ? [ThorbisMenuItem("Cancel schedule", icon: "xmark.circle") { inbox.cancelScheduled(message.id) }]
+                                                : []
+                                        if !items.isEmpty {
+                                            ThorbisMenu(items: items, accessibilityLabel: "Options for the draft to \(message.recipient)") {
+                                                Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                                                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                                            }
+                                            .padding(.trailing, 4).padding(.top, 4)
+                                        }
+                                    }
                                 }
-                            }.buttonStyle(.borderless)
+                            }
+                            .padding(.vertical, PaperCardMetrics.edge)
                         }
                     }
-                    if inbox.messages.isEmpty { Text("No drafts in this session").foregroundStyle(.secondary) }
                 }
+                Text("Drafts and queued messages are not sent. Scheduling here does not start a timer or notify the recipient.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
             }
+            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
         }
-        .navigationTitle("Inbox drafts")
-        .toolbar {
-            Button("Compose", systemImage: "square.and.pencil") { present(InboxComposer()) }
-                .disabled(inbox.actorID != actorID || inbox.organizationID != organizationID)
+        .background(Theme.canvas)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            PaperActionBar(title: "New draft", symbol: "square.and.pencil", disabled: !bound) { present(InboxComposer()) }
         }
         .task(id: identityKey) {
             composer = nil
@@ -160,7 +181,7 @@ struct InboxLocalDraftView: View {
             actionError = nil
             inbox.bind(actorID: actorID, organizationID: organizationID)
         }
-        .sheet(item: $composer) { editing in
+        .sheet(item: $composer) { editing in SheetSurface {
             if composerOwner == identityKey && inbox.actorID == actorID && inbox.organizationID == organizationID {
                 InboxLocalComposerView(composer: editing) { saved, mode in
                     guard composerOwner == identityKey && inbox.actorID == actorID && inbox.organizationID == organizationID else {
@@ -175,7 +196,7 @@ struct InboxLocalDraftView: View {
             } else {
                 Text("Session changed").foregroundStyle(.secondary)
             }
-        }
+        } }
     }
 }
 
@@ -187,34 +208,64 @@ private struct InboxLocalComposerView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Message") {
-                    ThorbisSelect(options: InboxLocalMessage.Channel.allCases.map { ($0, $0.rawValue) },
-                                  selection: $composer.channel, label: "Channel")
-                    TextField(composer.channel == .sms ? "Phone number" : "Email address", text: $composer.recipient)
-                        .textInputAutocapitalization(.never)
-                    if composer.channel == .email { TextField("Subject", text: $composer.subject) }
-                    TextEditor(text: $composer.body).frame(minHeight: 130)
-                }
-                if composer.channel == .sms {
-                    Section("Optional local schedule") {
-                        Toggle("Queue for a time", isOn: $composer.scheduleText)
-                        if composer.scheduleText { DatePicker("Intended time", selection: $composer.scheduledDate) }
+            // design 2026-10-30: one column, labels above, field wells; Save draft is the ink
+            // commit, Queue locally the quiet text action beside it (was the bottom toolbar).
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    PaperFormField("Channel") {
+                        ThorbisSelect(options: InboxLocalMessage.Channel.allCases.map { ($0, $0.rawValue) },
+                                      selection: $composer.channel, label: "Channel").fieldWell()
                     }
+                    PaperFormField(composer.channel == .sms ? "Phone number" : "Email address") {
+                        TextField(composer.channel == .sms ? "Phone number" : "Email address", text: $composer.recipient, prompt: .placeholder(composer.channel == .sms ? "Phone number" : "Email address"))
+                            .textInputAutocapitalization(.never).font(Theme.font(16)).fieldWell()
+                    }
+                    if composer.channel == .email {
+                        PaperFormField("Subject") { TextField("Subject", text: $composer.subject, prompt: .placeholder("Subject")).font(Theme.font(16)).fieldWell() }
+                    }
+                    PaperFormField("Message") {
+                        TextEditor(text: $composer.body).font(Theme.font(16)).scrollContentBackground(.hidden)
+                            .frame(minHeight: 130).padding(8)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                    if composer.channel == .sms {
+                        PaperFormField("Optional local schedule") {
+                            VStack(spacing: 0) {
+                                Toggle("Queue for a time", isOn: $composer.scheduleText).font(Theme.font(16)).tint(Theme.brand)
+                                    .frame(minHeight: 44)
+                                if composer.scheduleText {
+                                    DatePicker("Intended time", selection: $composer.scheduledDate).font(Theme.font(16))
+                                        .frame(minHeight: 44)
+                                }
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 2)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        }
+                    }
+                    Text("Queued means held on this screen. No message will be delivered or sent automatically.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
                 }
-                Text("Queued means held on this screen. No message will be delivered or sent automatically.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let error { Text(error).foregroundStyle(.red) }
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.canvas)
             .navigationTitle("Compose")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save draft") { save(.draft) }
-                }
-                ToolbarItem(placement: .bottomBar) {
-                    Button(composer.channel == .sms ? "Queue locally" : "Queue email locally") { save(.queue) }
-                        .disabled(composer.channel == .sms && !composer.scheduleText)
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 0) {
+                    PaperActionBar(title: "Save draft") { save(.draft) }
+                    Button { save(.queue) } label: {
+                        Text(composer.channel == .sms ? "Queue locally" : "Queue email locally")
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(composer.channel == .sms && !composer.scheduleText)
+                    .background(Theme.canvas)
                 }
             }
         }

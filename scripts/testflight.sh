@@ -37,12 +37,40 @@ xcodebuild -project Thorbis.xcodeproj -scheme Thorbis -configuration Release \
   -archivePath "$archive" CURRENT_PROJECT_VERSION="$build_number" \
   -allowProvisioningUpdates archive
 
+app="$archive/Products/Applications/Thorbis.app"
+python3 scripts/audit_tap_to_pay_build.py "$app"
+
 cp docs/release/ExportOptions.plist "$options"
 /usr/libexec/PlistBuddy -c "Set :destination $destination" "$options"
 # Keep the number we chose; Xcode would otherwise renumber the upload.
 /usr/libexec/PlistBuddy -c "Set :manageAppVersionAndBuildNumber false" "$options"
 
-xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
-  -exportPath "$root/export" -allowProvisioningUpdates
+# A Tap-enabled build must prove distribution allowance on an exported, signed IPA
+# before upload. The marker expresses intent; it does not confer Apple approval.
+tap_enabled=$(/usr/libexec/PlistBuddy -c 'Print :ThorbisTapToPayEnabled' "$app/Info.plist")
+audit_export() {
+  local export_dir="$1"
+  ditto -xk "$export_dir/Thorbis.ipa" "$export_dir/audit"
+  python3 scripts/audit_tap_to_pay_build.py "$export_dir/audit/Payload/Thorbis.app" --distribution
+}
+if [[ "$tap_enabled" == "true" ]]; then
+  # Export once, audit that signed package, then transport that exact IPA. A second
+  # Xcode upload export could pick another profile and invalidate the audit.
+  /usr/libexec/PlistBuddy -c 'Set :destination export' "$options"
+  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
+    -exportPath "$root/export" -allowProvisioningUpdates
+  audit_export "$root/export"
+  if [[ "$destination" == "upload" ]]; then
+    : "${THORBIS_ASC_API_KEY_ID:?Set THORBIS_ASC_API_KEY_ID to upload the audited IPA with Transporter}"
+    : "${THORBIS_ASC_API_ISSUER_ID:?Set THORBIS_ASC_API_ISSUER_ID to upload the audited IPA with Transporter}"
+    # Transporter locates the existing AuthKey_<ID>.p8 in Apple's standard key
+    # directories. Never fall back to an unaudited Xcode re-export.
+    xcrun iTMSTransporter -m upload -assetFile "$root/export/Thorbis.ipa" \
+      -apiKey "$THORBIS_ASC_API_KEY_ID" -apiIssuer "$THORBIS_ASC_API_ISSUER_ID"
+  fi
+else
+  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$options" \
+    -exportPath "$root/export" -allowProvisioningUpdates
+fi
 
 echo "Build $build_number: $destination finished. Archive: $archive"

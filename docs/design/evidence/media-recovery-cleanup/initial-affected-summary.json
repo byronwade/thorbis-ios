@@ -1,0 +1,53 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "FA43B63E-98C9-4336-B1F7-A55E9D4B4B0A",
+        "deviceName" : "Thorbis Job Documents 2026-10-28",
+        "modelName" : "iPhone 17 Pro",
+        "osBuildNumber" : "23A343",
+        "osVersion" : "26.0",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 1,
+      "passedTests" : 71,
+      "skippedTests" : 1,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "Thorbis · Built with macOS 26.7.1",
+  "expectedFailures" : 0,
+  "failedTests" : 1,
+  "finishTime" : 1793251015.688,
+  "passedTests" : 71,
+  "result" : "Failed",
+  "skippedTests" : 1,
+  "startTime" : 1793250953.358,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "XCTAssertTrue failed - 2026-10-29-photo-recovery-cleanup: one to five highlights",
+      "targetName" : "ThorbisTests",
+      "testIdentifier" : 70,
+      "testIdentifierString" : "WhatsNewTests/testShippedNotesFollowTheWritingRules()",
+      "testIdentifierURL" : "test://com.apple.xcode/Thorbis/ThorbisTests/WhatsNewTests/testShippedNotesFollowTheWritingRules",
+      "testName" : "testShippedNotesFollowTheWritingRules()"
+    }
+  ],
+  "title" : "Test - Thorbis",
+  "topInsights" : [
+    {
+      "category" : "Longest Test Runs",
+      "impact" : "45% of duration",
+      "text" : "2 longest test runs with outlier durations exceeding 0.13s (three standard deviations)"
+    }
+  ],
+  "totalTestCount" : 73
+}

@@ -51,12 +51,11 @@ struct ScheduleMapView: View {
             .frame(height: 380)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5)
                 if !loaded {
                     Label("Finding today's stops…", systemImage: "mappin.and.ellipse")
                         .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 14).frame(height: Theme.chipHeight)
-                        .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                        .background(Theme.card, in: Capsule())
                 }
             }
             .padding(.horizontal, Theme.gutter)
@@ -66,8 +65,8 @@ struct ScheduleMapView: View {
                 card(stop).padding(.horizontal, Theme.gutter).padding(.top, 12)
             }
 
-            PaperGroupHeader(title: "Stops", count: stops.count)
-                .padding(.horizontal, Theme.gutter).padding(.top, 20)
+            SectionHeader(title: "Stops", count: stops.count, horizontalPadding: Theme.gutter)
+                .padding(.top, 24)
             ForEach(stops) { stop in
                 Button { select(stop) } label: { stopRow(stop) }.buttonStyle(.plain)
             }
@@ -88,7 +87,7 @@ struct ScheduleMapView: View {
     private func pin(_ stop: Stop, selected: Bool) -> some View {
         let (_, color) = statusIcon(stop.job.status)
         return Text("\(stop.number)")
-            .font(Theme.monoFont(12, weight: .semibold))
+            .font(Theme.monoFont(12, weight: .medium))
             .foregroundStyle(.white)
             .frame(width: selected ? 34 : 28, height: selected ? 34 : 28)
             .background(Circle().fill(stop.job.status == "completed" ? Theme.muted : (color == Theme.muted ? Theme.brand : color)))
@@ -98,53 +97,68 @@ struct ScheduleMapView: View {
             .accessibilityLabel("Stop \(stop.number), \(stop.job.title)")
     }
 
+    /// The stop's street line, the way every Today row leads.
+    private func street(_ stop: Stop) -> String {
+        NextStopPlace(jobID: stop.job.id, organizationID: "", customerID: "", address: stop.place.address).firstLine ?? stop.job.title
+    }
+
+    /// v2: the selected stop as one calm panel: the street, the problem and who, the status word
+    /// and the time, then the ink commit with a Directions circle beside it. No border box.
     private func card(_ stop: Stop) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(street(stop)).font(Theme.font(17, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+            Text("\(stop.job.title) · \(store.customerName(stop.job.customerId))")
+                .font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(2)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(JobFiltering.date(stop.job.scheduledFor)?.formatted(.dateTime.hour().minute()) ?? "Stop \(stop.number)")
-                    .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                Text(stop.job.status.statusLabel).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                Spacer()
-                Text(stop.job.shortRef).font(Theme.monoFont(11, weight: .medium)).foregroundStyle(Theme.muted)
+                StatusLabel(jobStatus: stop.job.status, hasTime: stop.job.scheduledFor != nil)
+                Text(JobFiltering.date(stop.job.scheduledFor)?.clockTime ?? "Stop \(stop.number)")
+                    .font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(stop.job.title).font(Theme.font(17, weight: .semibold)).lineLimit(2)
-                Text("\(store.customerName(stop.job.customerId)) · \(stop.place.address)")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
-            }
+            .padding(.top, 4)
             HStack(spacing: 8) {
                 NavigationLink(value: stop.job) {
-                    Text("Open job").inkCommit()
+                    Text("Open job").inkCommit(height: 44)
                 }
                 .buttonStyle(PressStyle())
                 if let url = Directions.url(address: stop.place.address, coordinates: stop.place.coordinates) {
-                    PaperSquareButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps") { openURL(url) }
+                    PaperCircleButton(symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps", size: 44) { openURL(url) }
                 }
             }
+            .padding(.top, 12)
         }
-        .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground(cornerRadius: Theme.cardRadius)
     }
 
+    /// A stop: its number on the route, the time in a tabular column, the street over the problem,
+    /// and the status word trailing. One VoiceOver item.
     private func stopRow(_ stop: Stop) -> some View {
-        HStack(spacing: 12) {
+        let selected = stop.id == selectedID
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text("\(stop.number)")
-                .font(Theme.monoFont(12, weight: .semibold))
-                .foregroundStyle(stop.id == selectedID ? .white : Theme.foreground)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(stop.id == selectedID ? Theme.brand : Theme.fill))
+                .font(Theme.monoFont(12, weight: .medium))
+                .foregroundStyle(selected ? Theme.onInk : Theme.foreground)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(selected ? Theme.ink : Theme.fill))
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
+            Text(JobFiltering.date(stop.job.scheduledFor)?.columnTime ?? "—")
+                .font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
+                .frame(minWidth: 40, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
-                Text(stop.job.title).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                Text(stop.place.address).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(street(stop)).font(Theme.font(16, weight: .medium)).lineLimit(2)
+                Text(stop.job.title).font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(1)
             }
-            Spacer(minLength: 8)
-            Text(JobFiltering.date(stop.job.scheduledFor)?.formatted(.dateTime.hour().minute()) ?? "")
-                .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            StatusLabel(jobStatus: stop.job.status, hasTime: stop.job.scheduledFor != nil, emphasis: .quiet)
+                .fixedSize()
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+        .padding(.horizontal, Theme.gutter).padding(.vertical, 9)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Stop \(stop.number), \(street(stop)), \(stop.job.title), \(JobFiltering.date(stop.job.scheduledFor)?.tradeTime ?? "no time"), \(stop.job.status.statusLabel)")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
     private func select(_ stop: Stop) {

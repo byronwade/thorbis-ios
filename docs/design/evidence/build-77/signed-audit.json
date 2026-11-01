@@ -1,0 +1,21 @@
+{
+  "build": 77,
+  "runtimeSource": "0ffd5773bfd2ebca99f7abbed7d5b34c561e920c",
+  "bundle": "com.thorbis.field",
+  "version": "1.0",
+  "team": "T677262U5B",
+  "deviceFamilies": [
+    1,
+    2
+  ],
+  "minimumOS": "18.0",
+  "widgetBundle": "com.thorbis.field.widgets",
+  "widgetBuild": "77",
+  "tapEnabled": false,
+  "strictCodesign": true,
+  "frozenSwiftFiles": 177,
+  "sourceMismatches": 0,
+  "previewFlagsExcluded": 23,
+  "binarySHA256": "de28e4ff1261965c751f7ac96587774c778f4ef193e00019cf28e9a2263de472",
+  "archive": "/private/tmp/thorbis-77.RkzjtWJA/Thorbis.xcarchive"
+}

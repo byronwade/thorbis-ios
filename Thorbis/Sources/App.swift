@@ -1,3 +1,4 @@
+import CoreSpotlight
 import SwiftUI
 
 @main
@@ -10,12 +11,17 @@ struct ThorbisApp: App {
     @StateObject private var session: SessionController
     @StateObject private var inboxBoard: InboxLocalDrafts
     @StateObject private var connectivity = ConnectivityMonitor()
+    @StateObject private var pendingMedia: PendingMediaStore
     @StateObject private var outbox: FieldOutbox
     @StateObject private var menuLayout = MenuLayout()
     @StateObject private var whatsNew: WhatsNew
     @State private var publicEstimateToken: String?
+    @State private var lastSavedCopyCheck = Date.distantPast
+    @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
 
     init() {
+        // Popovers put the keyboard away before opening; they need to know whether it is up.
+        ThorbisKeyboard.watch()
         #if DEBUG
         let api = PaperPreview.enabled ? PaperPreview.api() : APIClient()
         let session = SessionController(api: api, defaults: PaperPreview.enabled ? PaperPreview.defaults() : .standard)
@@ -25,41 +31,86 @@ struct ThorbisApp: App {
         #endif
         let inboxBoard = InboxLocalDrafts()
         #if DEBUG
-        let outbox = PaperPreview.enabled ? FieldOutbox(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), defaults: PaperPreview.defaults()) : FieldOutbox()
+        let outbox = PaperPreview.enabled ? PaperPreview.outbox() : FieldOutbox()
         #else
         let outbox = FieldOutbox()
+        #endif
+        #if DEBUG
+        let pendingMedia = PaperPreview.enabled ? PaperPreview.mediaStore() : PendingMediaStore.shared
+        #else
+        let pendingMedia = PendingMediaStore.shared
         #endif
         let store = Store { [weak session] api in
             guard let session else { throw CancellationError() }
             return try await Store.fetchAuthorized(api: api, session: session)
         }
-        session.onInvalidate = { [weak store] in store?.invalidate() }
-        session.onSignedOut = { [weak store, weak outbox] in
+        session.onInvalidate = { [weak store, weak pendingMedia] in
+            DayPrefetch.shared.cancel()
+            store?.invalidate()
+            pendingMedia?.bind(nil)
+            JobLiveActivity.retire()
+        }
+        session.onJobAuthorityRevoked = { JobLiveActivity.retire() }
+        session.onSignedOut = { [weak store, weak outbox, weak pendingMedia, weak api] in
+            DayPrefetch.shared.cancel()
+            api?.savedCopyScope = nil
+            SavedCopyStore.shared.clearAll()
             store?.cache.clearAll()
             outbox?.clearAll()
-            PendingPhotoStore.clearAll()
+            pendingMedia?.clearAll()
             JobDetailCache.clearAll()
-            Task { await JobLiveActivity.endAll() }
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
-            Task { @MainActor in RecentItems.shared.clear() }
+            JobChecklistStore.clearAll()
+            OfficeContact.clearAll()
+            Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }
         }
-        session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox] actorID, organizationID in
+        session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox, weak pendingMedia, weak api] actorID, organizationID in
             if let actorID, let organizationID {
                 inboxBoard?.bind(actorID: actorID, organizationID: organizationID)
             } else {
                 inboxBoard?.clear()
             }
             store?.bindCache(actorID: actorID, organizationID: organizationID)
+            if let actorID, let organizationID {
+                let scope = SavedCopies.scope(actorID: actorID, organizationID: organizationID)
+                if api?.savedCopyScope != scope { SavedCopyStore.shared.prune(scope: scope) }
+                api?.savedCopyScope = scope
+            } else {
+                DayPrefetch.shared.cancel()
+                api?.savedCopyScope = nil
+            }
             PushNotifications.shared.identityChanged(signedIn: actorID != nil && organizationID != nil)
             outbox?.bind(actorID: actorID, organizationID: organizationID)
-            Task { @MainActor in RecentItems.shared.bind(actorID: actorID, organizationID: organizationID) }
+            if let actorID, let organizationID, let origin = api?.normalizedOrigin {
+                pendingMedia?.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: origin))
+            } else { pendingMedia?.bind(nil) }
+            Task { @MainActor in
+                RecentItems.shared.bind(actorID: actorID, organizationID: organizationID)
+                SpotlightIndex.shared.bind(actorID: actorID, organizationID: organizationID)
+            }
         }
+        store.onRefreshed = { [weak session, weak api] jobs, customers in
+            guard let session, session.phase == .ready else { return }
+            if let api { DayPrefetch.shared.start(jobs: jobs, api: api, session: session) }
+            SpotlightIndex.shared.replace(jobs: jobs, customers: customers,
+                                          includeJobs: session.can("job.view", feature: "jobs"),
+                                          includeCustomers: session.can("customer.view", feature: "core_crm"))
+        }
+        SpotlightIndex.shared.onOpen = { [weak store] target in
+            switch target {
+            case .job(let id): store?.requestedJobID = id
+            case .customer(let id): store?.requestedRecord = .customer(id)
+            }
+        }
+        // Lock Screen and Dynamic Island step buttons run here, through the same session and outbox.
+        JobStepIntentRunner.configure(api: api, session: session, outbox: outbox, store: store)
         PushNotifications.shared.start(api: api, store: store)
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
         #if DEBUG
+        PerfProbe.runDateBenchmark()
         _whatsNew = StateObject(wrappedValue: PaperPreview.enabled ? WhatsNew(defaults: PaperPreview.defaults()) : WhatsNew())
         #else
         _whatsNew = StateObject(wrappedValue: WhatsNew())
@@ -69,6 +120,7 @@ struct ThorbisApp: App {
         _session = StateObject(wrappedValue: session)
         _inboxBoard = StateObject(wrappedValue: inboxBoard)
         _outbox = StateObject(wrappedValue: outbox)
+        _pendingMedia = StateObject(wrappedValue: pendingMedia)
         #if DEBUG
         _publicEstimateToken = State(initialValue: PaperPreview.enabled && PaperPreview.screen == "public-estimate" ? "preview-estimate" : nil)
         #else
@@ -85,7 +137,7 @@ struct ThorbisApp: App {
         } else {
             switch session.phase {
             case .restoring:
-                ProgressView("Opening your workspace…")
+                SessionLoadingView(message: session.signingOut ? String(localized: "Signing out…") : String(localized: "Opening your workspace…"))
             case .signedOut, .failed:
                 LoginView()
                     .onAppear { whatsNew.signedInThisLaunch = true }
@@ -99,12 +151,19 @@ struct ThorbisApp: App {
 
     var body: some Scene {
         WindowGroup {
+            ZStack {
             Group {
                 #if DEBUG
                 if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
                     CustomerPresentationPreview(screen: PaperPreview.screen)
+                } else if PaperPreview.enabled, PaperPreview.screen.hasPrefix("glance-") {
+                    GlanceGallery(screen: PaperPreview.screen)
+                } else if PaperPreview.enabled, PaperPreview.screen.hasPrefix("tool-") {
+                    OnsiteToolsPreview(screen: PaperPreview.screen)
                 } else if PaperPreview.enabled, let screen = PaperPreview.onboardingScreen {
                     OnboardingPreview(screen: screen)
+                } else if PaperPreview.enabled, let screen = PaperPreview.statesScreen {
+                    StatesPreview(screen: screen)
                 } else {
                     appContent
                 }
@@ -112,14 +171,24 @@ struct ThorbisApp: App {
                 appContent
                 #endif
             }
+            }
+            .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil }, set: { _ in })) {
+                if let model = estimateHandoff.active {
+                    JobEstimateProtectedOwner(model: model, presenter: estimateHandoff)
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.background)
+            .background(Theme.canvas)
+            .environmentObject(estimateHandoff)
             .environmentObject(api)
             .environmentObject(store)
             .environmentObject(session)
             .environmentObject(inboxBoard)
             .environmentObject(connectivity)
             .environmentObject(outbox)
+            .environmentObject(pendingMedia)
+            // OF-03: media waiting on the phone counts in the sync line and holds a queued Complete.
+            .onReceive(pendingMedia.$items) { outbox.notePendingMedia($0) }
             .environmentObject(menuLayout)
             .environmentObject(whatsNew)
             .font(Theme.font(15))
@@ -127,11 +196,25 @@ struct ThorbisApp: App {
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .tint(Theme.brandText)
             #if DEBUG
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-review-failure") {
+                    PaperPreview.reviewConnectionControl
+                }
+            }
             // Takes its own room at the top so it never covers a screen's back button or title.
             .safeAreaInset(edge: .top, spacing: 0) { if PaperPreview.enabled { PaperPreview.banner.allowsHitTesting(false) } }
+            // `--paper-preview-scroll center|bottom`: opens scroll views part-way so lower sections can be captured.
+            .modifier(PaperPreviewScrollAnchor())
             #endif
             .task {
                 connectivity.onReconnect = { Task { await resync() } }
+                api.onSavedCopyServed = {
+                    // A read fell back to the phone's copy: let the session confirm it is offline,
+                    // so the banner says so. At most once a minute.
+                    guard !session.isOffline, Date().timeIntervalSince(lastSavedCopyCheck) > 60 else { return }
+                    lastSavedCopyCheck = Date()
+                    Task { await session.revalidate() }
+                }
                 store.onServerReached = {
                     // Any answer from the server (including pull to refresh) ends offline mode.
                     guard session.isOffline else { return }
@@ -140,6 +223,8 @@ struct ThorbisApp: App {
                 await session.restore()
             }
             .task(id: session.isOffline) {
+                // Kept reads answer from the phone at once while the session knows it is offline.
+                api.knownOffline = session.isOffline
                 // While offline, keep checking with backoff in case no network event fires
                 // (captive Wi-Fi, a server outage, a cellular hand-off).
                 var delay: UInt64 = 15
@@ -159,6 +244,8 @@ struct ThorbisApp: App {
                 whatsNew.skipThisLaunch = true
                 if let token = PublicEstimateActionLink.token(from: url) {
                     publicEstimateToken = token
+                } else if let query = SearchLink.query(from: url) {
+                    store.requestedSearch = query
                 } else if let jobID = JobActivityLink.jobID(from: url) {
                     store.requestedJobID = jobID
                 } else if let record = RecordLink(url: url) {
@@ -167,7 +254,15 @@ struct ThorbisApp: App {
                     store.requestedSchedule += 1
                 }
             }
+            .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
+                whatsNew.skipThisLaunch = true
+                SpotlightIndex.shared.open(identifier: identifier)
+            }
         }
+        // Hardware keyboard: the menu bar's commands, so no hidden buttons sit in the view tree
+        // (they showed up as extra "New job" / "Search" buttons for VoiceOver and UI tests).
+        .commands { KeyboardCommands() }
     }
 }
 
@@ -176,8 +271,8 @@ extension ThorbisApp {
         await session.revalidate()
         guard session.phase == .ready, !session.isOffline else { return }
         // Photos first: a queued Complete job may depend on them meeting the photo requirement.
-        await PendingPhotoStore.uploadAll(api: api)
-        outbox.countPhotos()
+        await pendingMedia.drain(api: api, canUpload: { session.can("job.edit", feature: "jobs") })
+        outbox.notePendingMedia(pendingMedia.items)
         if !outbox.pending.isEmpty {
             await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
         }
@@ -209,6 +304,10 @@ final class Store: ObservableObject {
     @Published var requestedRecord: RecordLink? {
         didSet { if requestedRecord != nil { openedForRecord = true } }
     }
+    /// Words a "Search Thorbis" shortcut asked to look for; RootView opens search and clears this.
+    @Published var requestedSearch: String? {
+        didSet { if requestedSearch != nil { openedForRecord = true } }
+    }
     @Published var customers: [Customer] = []
     @Published var error: String?
     @Published var loading = false
@@ -216,6 +315,8 @@ final class Store: ObservableObject {
     @Published private(set) var cachedAt: Date?
     /// Called after the server answered a refresh, proof that it is reachable again.
     var onServerReached: (() -> Void)?
+    /// Called with the server's lists after a refresh applied for the bound identity (Spotlight).
+    var onRefreshed: (([Job], [Customer]) -> Void)?
 
     private var generation = UUID()
     private var cacheIdentity: (actorID: String, organizationID: String)?
@@ -243,11 +344,10 @@ final class Store: ObservableObject {
         // assigned job, so fill in the names their jobs need one by one.
         if session.can("customer.view", feature: "core_crm") {
             let known = Set(customers.map(\.id))
-            let missing = Array(Set(jobs.compactMap(\.customerId)).subtracting(known)).sorted().prefix(40)
-            for id in missing {
-                guard let record = try? await api.fieldCustomer(id) else { continue }
-                customers.append(Customer(id: record.id, name: record.name, archived: nil, createdAt: nil))
-            }
+            let missing = Array(Array(Set(jobs.compactMap(\.customerId)).subtracting(known)).sorted().prefix(40))
+            // Six at a time instead of one after another: up to 40 round trips on every refresh.
+            let found = await api.customerNames(missing)
+            customers += missing.compactMap { found[$0] }
             guard session.generation == identity, session.phase == .ready else { throw CancellationError() }
         }
         return (jobs, customers)
@@ -287,7 +387,10 @@ final class Store: ObservableObject {
         loading = true
         defer { if refreshID == requestID { loading = false } }
         do {
-            let (newJobs, newCustomers) = try await fetch(api)
+            // The schedule's own refresh always asks the server (never a read from moments ago).
+            let (newJobs, newCustomers) = try await PerfProbe.measure("store-refresh") {
+                try await SavedCopies.$liveOnly.withValue(true) { try await fetch(api) }
+            }
             guard generation == currentGeneration, refreshID == requestID else { return .superseded }
             jobs = newJobs
             customers = newCustomers
@@ -297,6 +400,7 @@ final class Store: ObservableObject {
             if let identity = cacheIdentity {
                 cache.save(.init(savedAt: Date(), jobs: newJobs, customers: newCustomers),
                            actorID: identity.actorID, organizationID: identity.organizationID)
+                onRefreshed?(newJobs, newCustomers)
             }
             return .applied
         } catch is CancellationError {
@@ -311,7 +415,7 @@ final class Store: ObservableObject {
                 self.error = nil
                 return .failed
             } else {
-                self.error = error.localizedDescription
+                self.error = error.plainMessage(subject: "your jobs")
                 return .failed
             }
             return .superseded
@@ -330,12 +434,18 @@ enum StoreRefreshResult: Equatable {
 }
 
 /// iPad sidebar sections.
-enum TabletSection: Hashable { case schedule, jobs, customers, more }
+enum TabletSection: Hashable {
+    case schedule, jobs, customers, more
+    /// Any other place from the phone menu, so the sidebar lists the same places.
+    case place(MenuItem)
+    /// A record kept only on this device (Fleet, Equipment, Agreements, ...).
+    case local(LocalWorkspaceSection)
+}
 
-/// iPhone tab bar: Paper's technician dock as native destinations (HIG-005).
-/// Search uses the system search tab role.
+/// The phone's three built-in place roots (Schedule reads as Today in the drawer). Every other
+/// place opens from the drawer as a root of its own; search opens from the drawer's search circle.
 enum PrimaryTab: String, CaseIterable, Identifiable {
-    case schedule, jobs, customers, more, search
+    case schedule, jobs, customers
 
     static let initial: PrimaryTab = .schedule
 
@@ -347,8 +457,6 @@ enum PrimaryTab: String, CaseIterable, Identifiable {
         case .schedule: "calendar"
         case .jobs: "briefcase"
         case .customers: "person.2"
-        case .more: "ellipsis"
-        case .search: "magnifyingglass"
         }
     }
 }
@@ -361,7 +469,6 @@ struct PrimaryTabAccess {
         switch tab {
         case .schedule, .jobs: canViewJobs
         case .customers: canViewCustomers
-        case .more, .search: true
         }
     }
 
@@ -369,42 +476,6 @@ struct PrimaryTabAccess {
         switch tab {
         case .schedule, .jobs: "Your role does not allow access to jobs."
         case .customers: "Your role does not allow access to customers."
-        case .more, .search: ""
         }
-    }
-}
-
-/// MA-15: errors name the exit. The words stay body colour, only the mark is tinted, and
-/// when the screen can try again it offers one "Try again".
-struct ErrorBanner: View {
-    let message: String
-    var retry: (() async -> Void)? = nil
-    @State private var retrying = false
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning)
-                .accessibilityHidden(true)
-            Text(message).foregroundStyle(Theme.foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let retry {
-                Button {
-                    Task { retrying = true; await retry(); retrying = false }
-                } label: {
-                    Text("Try again").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 12).frame(minHeight: 32)
-                        .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
-                        .frame(minHeight: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(retrying)
-            }
-        }
-        .font(Theme.font(13))
-        .padding(.horizontal, 12).padding(.vertical, retry == nil ? 12 : 0)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-        .padding(.horizontal, Theme.gutter).padding(.top, 8)
-        .accessibilityElement(children: .contain)
     }
 }

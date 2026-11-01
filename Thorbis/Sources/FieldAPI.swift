@@ -56,6 +56,8 @@ struct FieldJobDraft: Equatable {
     var customerID = ""
     var title = ""
     var notes = ""
+    /// The service location the job happens at, when one was picked.
+    var locationID: String? = nil
 
     init(customerID: String = "", title: String = "", notes: String = "") {
         self.customerID = customerID
@@ -75,6 +77,7 @@ struct FieldJobDraft: Equatable {
         return FieldJobCreate(
             customerId: customerID,
             title: trimmedTitle,
+            locationId: locationID,
             notes: trimmedNotes.isEmpty ? nil : trimmedNotes
         )
     }
@@ -986,6 +989,11 @@ private struct FieldPage<T: Decodable>: Decodable {
     let nextCursor: String?
 }
 
+struct JobMediaPage: Decodable {
+    let items: [MediaAssetRecord]
+    let nextCursor: String?
+}
+
 @MainActor
 extension APIClient {
     private func fieldPath(_ base: String, id: String, suffix: String = "") throws -> String {
@@ -1018,7 +1026,7 @@ extension APIClient {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await allFieldPages("/v1/jobs", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
     }
-    func fieldJob(_ id: String) async throws -> JobRecord { try await send("GET", fieldPath("/v1/jobs", id: id)) }
+    func fieldJob(_ id: String, requireFresh: Bool = false) async throws -> JobRecord { try await send("GET", fieldPath("/v1/jobs", id: id), requireFresh: requireFresh) }
     func createFieldJob(_ request: FieldJobCreate) async throws -> JobRecord {
         try await send("POST", "/v1/jobs", body: request)
     }
@@ -1133,8 +1141,17 @@ extension APIClient {
         try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/completion-invoice"), body: EmptyObject())
     }
 
-    func fieldMedia(_ jobID: String) async throws -> [MediaAssetRecord] {
-        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"))
+    func fieldMedia(_ jobID: String, includeArchived: Bool = false) async throws -> [MediaAssetRecord] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : [])
+    }
+
+    func fieldMediaPage(_ jobID: String, cursor: String? = nil, kind: String? = nil) async throws -> JobMediaPage {
+        guard cursor.map({ !$0.isEmpty }) ?? true else {
+            throw Problem(title: "Invalid media cursor", status: nil, detail: "The continuation is empty.")
+        }
+        var query = [URLQueryItem(name: "limit", value: "50")]
+        if let kind { query.append(URLQueryItem(name: "kind", value: kind)) }
+        return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: query, cursor: cursor)
     }
 
     func registerFieldMedia(_ jobID: String, request: FieldMediaRegistrationRequest) async throws -> FieldMediaRegistration {
@@ -1143,6 +1160,15 @@ extension APIClient {
 
     func confirmFieldMedia(_ mediaID: String) async throws -> MediaAssetRecord {
         try await send("POST", fieldPath("/v1/media", id: mediaID, suffix: "/confirm"), body: EmptyObject())
+    }
+
+    /// Archive a stored photo or document (`POST /v1/media/{id}/archive`, no body, `job.edit`).
+    /// Field media is archive-only: the server keeps the asset and can unarchive it.
+    func archiveFieldMedia(_ mediaID: String) async throws -> MediaAssetRecord {
+        guard UUID(uuidString: mediaID) != nil else {
+            throw Problem(title: "Invalid media ID", status: nil, detail: mediaID)
+        }
+        return try await send("POST", fieldPath("/v1/media", id: mediaID, suffix: "/archive"), body: EmptyObject())
     }
 
     /// Replace the tags on a stored photo (`POST /v1/media/{id}/tags`). A blank caption is omitted.

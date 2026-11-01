@@ -81,7 +81,7 @@ struct MemberAccessView: View {
                         Text("Role").foregroundStyle(Theme.foreground)
                         Spacer()
                         Text(member.roleLabel).foregroundStyle(Theme.muted)
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle)
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.subtle)
                     }
                 }
             } header: {
@@ -116,15 +116,15 @@ struct MemberAccessView: View {
         }
         .searchable(text: $search, prompt: "Find a permission")
         .scrollContentBackground(.hidden)
-        .background(Theme.background)
-        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.background) } }
+        .background(Theme.canvas)
+        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.canvas) } }
         .navigationTitle(member.member.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(busy || !changed) }
+            ThorbisToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await save() } }.disabled(busy || !changed) }
         }
-        .sheet(isPresented: $changingRole) { MemberRoleSheet(member: member) { await onChanged() } }
+        .sheet(isPresented: $changingRole) { SheetSurface { MemberRoleSheet(member: member) { await onChanged() } } }
         .transferOwnershipPrompt($transferring, onTransferred: {
             await onChanged()
             dismiss()

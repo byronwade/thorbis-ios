@@ -23,13 +23,25 @@ struct TeamInvitation: Codable, Identifiable, Hashable {
 private struct InvitationPage: Decodable { let items: [TeamInvitation]; let nextCursor: String? }
 
 extension APIClient {
-    func pendingInvitations() async throws -> [TeamInvitation] {
+    func pendingInvitations(requireComplete: Bool = false, whileCurrent: (() -> Bool)? = nil) async throws -> [TeamInvitation] {
         var items: [TeamInvitation] = []
         var cursor: String?
+        var seen: Set<String> = []
+        var pages = 0
         repeat {
             let page: InvitationPage = try await send("GET", "/v1/organization/invitations",
-                                                      queryItems: [URLQueryItem(name: "limit", value: "100")], cursor: cursor)
-            items += page.items
+                                                      queryItems: [URLQueryItem(name: "limit", value: "100")], cursor: cursor, requireFresh: requireComplete)
+            guard whileCurrent?() ?? true else {
+                throw CancellationError()
+            }
+            pages += 1
+            items += requireComplete ? page.items.filter { $0.status == "pending" } : page.items
+            if requireComplete && !items.isEmpty { return items }
+            if let next = page.nextCursor, requireComplete {
+                guard pages < 500, seen.insert(next).inserted, items.count < 500 else {
+                    throw Problem(title: "Incomplete invitations", status: nil, detail: "Could not check every invitation.")
+                }
+            }
             guard page.nextCursor != cursor else { break }
             cursor = page.nextCursor
         } while cursor != nil && items.count < 500
@@ -59,6 +71,7 @@ struct InviteMemberSheet: View {
     @State private var role = "technician"
     @State private var busy = false
     @State private var error: String?
+    @State private var emailProblem: String?
     @FocusState private var emailFocused: Bool
 
     private var roles: [(id: String, label: String)] {
@@ -69,37 +82,43 @@ struct InviteMemberSheet: View {
         return trimmed.contains("@") && trimmed.contains(".") && trimmed.count <= 254
     }
 
+    /// v2 modal: one task, the email in a sunk well with help under it and the error in its place,
+    /// the role as a select well, and one ink commit that is never pre-disabled.
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Email", text: $email)
-                        .keyboardType(.emailAddress).textContentType(.emailAddress)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .focused($emailFocused)
-                        .submitLabel(.send)
-                        .onSubmit { if valid { Task { await send() } } }
-                    ThorbisSelect(options: roles.map { ($0.id, $0.label) }, selection: $role, label: "Role")
-                } footer: {
-                    Text("They get an email to join and choose a password. Invites expire after 7 days.")
-                }
-                if let error { Section { ListErrorRow(message: error) } }
+        ThorbisModalSheet(title: "Invite to team", onClose: busy ? nil : { dismiss() },
+                          commitTitle: "Send invite", commitSymbol: "paperplane", busy: busy,
+                          commitIdentifier: "team-invite-send", commit: { Task { await press() } }) {
+            FormField(label: "Email", help: "They get an email to join and choose a password. Invites expire after 7 days.",
+                      error: emailProblem) {
+                TextField("", text: $email, prompt: .placeholder("mike@reyesplumbing.com"))
+                    .font(Theme.font(16))
+                    .keyboardType(.emailAddress).textContentType(.emailAddress)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($emailFocused)
+                    .submitLabel(.send)
+                    .onSubmit { Task { await press() } }
+                    .onChange(of: email) { _, _ in emailProblem = nil }
+                    .accessibilityLabel("Email")
+                    .fieldWell()
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.background)
-            .navigationTitle("Invite to team")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ToolbarItem(placement: .confirmationAction) {
-                    if busy { ProgressView() } else { Button("Send invite") { Task { await send() } }.disabled(!valid) }
-                }
+            FormField(label: "Role", help: "What they can see and do. You can change it later in Team.") {
+                ThorbisSelect(options: roles.map { ($0.id, $0.label) }, selection: $role, menuTitle: "Role")
             }
-            .onAppear { emailFocused = true }
+            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
         }
-        .presentationDetents([.medium, .large])
+        .onAppear { emailFocused = true }
         // MA-16: a typed address is not lost to a stray swipe.
         .interactiveDismissDisabled(busy || !email.isEmpty)
+    }
+
+    /// Validate on commit: say what's wrong under the email instead of locking Send.
+    private func press() async {
+        guard valid else {
+            emailProblem = email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Add their email, like mike@reyesplumbing.com." : "Check the email address, like mike@reyesplumbing.com."
+            return
+        }
+        await send()
     }
 
     private func send() async {

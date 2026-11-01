@@ -92,14 +92,16 @@ struct BillingSchedulesView: View {
                     Text("Billing").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text("Progress billing and deposits by job").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
+                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 .padding(.bottom, 12)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
                 if loading && schedules.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 ForEach(paperDocumentGroups(schedules, status: \.status, order: ["open", "closed"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status == "open" ? "Open" : "Closed", count: group.count).padding(.top, 6)
-                    ForEach(group) { schedule in
+                    PaperGroupHeader(title: status == "open" ? "Open" : "Closed", count: group.count).padding(.top, 10)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                    PaperCardList(data: group) { schedule in
                         NavigationLink(value: PaperRoute.billingSchedule(schedule.id)) {
-                            PaperDocumentRow(reference: "SOV-\(schedule.id.suffix(4).uppercased())",
+                            PaperDocumentRow(kind: .billingSchedule, reference: "SOV-\(schedule.id.suffix(4).uppercased())",
                                              title: store.customerName(schedule.customerId),
                                              subtitle: "\(schedule.lines.count) line\(schedule.lines.count == 1 ? "" : "s")\(schedule.retainageRateBps > 0 ? " · \(schedule.retainageRateBps / 100)% retainage" : "")",
                                              status: schedule.status, amount: money(schedule.total, currency: "USD"))
@@ -108,14 +110,14 @@ struct BillingSchedulesView: View {
                     }
                 }
                 if !loading && schedules.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "list.bullet.rectangle", title: "No billing schedules",
-                                    message: "A schedule appears when a job is billed in stages or takes a deposit.")
+                    PaperEmptyState(symbol: "list.bullet.rectangle", title: "No billing schedules yet",
+                                    message: "A schedule starts when a job is billed in stages or takes a deposit.")
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
@@ -161,54 +163,65 @@ struct BillingScheduleDetailView: View {
                         Text("SOV-\(progress.schedule.id.suffix(4).uppercased()) · \(store.customerName(progress.schedule.customerId))")
                             .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
                         Text("Billing schedule").font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
-                        PaperStatusChip(status: progress.schedule.status == "open" ? "open" : "closed")
+                        StatusWord(text: progress.schedule.status == "open" ? "Open" : "Closed",
+                                   tint: progress.schedule.status == "open" ? Theme.warning : nil)
                     }
                     .padding(.bottom, 14)
-                    HStack(spacing: 0) {
-                        figure("Billed", money(progress.billedToDate, currency: "USD"))
-                        Rectangle().fill(Theme.border).frame(width: 1, height: 40).padding(.horizontal, 16)
-                        figure("Remaining", money(progress.remaining, currency: "USD"))
-                    }
-                    .padding(.bottom, 8)
-                    if progress.depositsBilled > 0 || progress.retainedToDate > 0 {
-                        PaperGroupHeader(title: "Deposits and retainage").padding(.top, 8)
-                        if progress.depositsBilled > 0 {
-                            PaperDetailRow("Deposits billed", money: money(progress.depositsBilled, currency: "USD"))
-                            PaperDetailRow("Not yet applied", money: money(progress.depositOutstanding, currency: "USD"))
-                        }
-                        if progress.retainedToDate > 0 {
-                            PaperDetailRow("Retained", money: money(progress.retainedToDate, currency: "USD"))
-                            PaperDetailRow("Releasable now", money: money(progress.retainageOutstanding, currency: "USD"))
-                        }
-                    }
-                    PaperGroupHeader(title: "Schedule of values", count: progress.schedule.lines.count).padding(.top, 8)
-                    ForEach(progress.schedule.lines.sorted { $0.position < $1.position }) { line in
-                        let lineProgress = progress.lines.first { $0.lineId == line.id }
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(line.description).font(Theme.font(15, weight: .medium))
-                                Spacer(minLength: 8)
-                                Text(money(line.scheduledAmount.amount, currency: "USD")).moneyStyle(.row)
-                            }
-                            if let lineProgress {
-                                ProgressView(value: Double(lineProgress.billedToDate), total: Double(max(line.scheduledAmount.amount, 1)))
-                                    .tint(Theme.brand)
-                                Text("\(money(lineProgress.billedToDate, currency: "USD")) billed · \(money(lineProgress.remaining, currency: "USD")) left")
-                                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                    // design 2026-10-30: figures on one panel, every group on its own panel, no rules.
+                    VStack(alignment: .leading, spacing: 22) {
+                        PaperStatRow(stats: [
+                            .init(label: "Billed", value: money(progress.billedToDate, currency: "USD")),
+                            .init(label: "Remaining", value: money(progress.remaining, currency: "USD")),
+                        ])
+                        if progress.depositsBilled > 0 || progress.retainedToDate > 0 {
+                            PaperSection("Deposits and retainage") {
+                                VStack(spacing: 0) {
+                                    if progress.depositsBilled > 0 {
+                                        PaperDetailRow("Deposits billed", money: money(progress.depositsBilled, currency: "USD")).cardRow()
+                                        PaperDetailRow("Not yet applied", money: money(progress.depositOutstanding, currency: "USD")).cardRow()
+                                    }
+                                    if progress.retainedToDate > 0 {
+                                        PaperDetailRow("Retained", money: money(progress.retainedToDate, currency: "USD")).cardRow()
+                                        PaperDetailRow("Releasable now", money: money(progress.retainageOutstanding, currency: "USD")).cardRow()
+                                    }
+                                }
+                                .padding(.vertical, PaperCardMetrics.edge)
                             }
                         }
-                        .padding(.vertical, 8)
-                        .accessibilityElement(children: .combine)
+                        PaperSection("Schedule of values", count: progress.schedule.lines.count) {
+                            VStack(spacing: 0) {
+                                ForEach(progress.schedule.lines.sorted { $0.position < $1.position }) { line in
+                                    let lineProgress = progress.lines.first { $0.lineId == line.id }
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(alignment: .firstTextBaseline) {
+                                            Text(line.description).font(Theme.font(16, weight: .medium))
+                                            Spacer(minLength: 8)
+                                            Text(money(line.scheduledAmount.amount, currency: "USD")).moneyStyle(.row)
+                                        }
+                                        if let lineProgress {
+                                            ProgressView(value: Double(lineProgress.billedToDate), total: Double(max(line.scheduledAmount.amount, 1)))
+                                                .tint(Theme.foreground)
+                                            Text("\(money(lineProgress.billedToDate, currency: "USD"))\u{00A0}billed · \(money(lineProgress.remaining, currency: "USD"))\u{00A0}left")
+                                                .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                                        }
+                                    }
+                                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                                    .accessibilityElement(children: .combine)
+                                }
+                            }
+                            .padding(.vertical, PaperCardMetrics.edge)
+                        }
                     }
+                    .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
                     if let createdInvoiceID {
-                        NavigationLink { InvoiceDetailView(id: createdInvoiceID) } label: {
+                        NavigationLink { InvoiceDetailView(id: createdInvoiceID).thorbisBackButton() } label: {
                             PaperMenuRow("Open the new draft invoice", symbol: "doc.plaintext")
                         }
                         .buttonStyle(.plain).padding(.top, 8)
                     }
                     if progress.retainageOutstanding > 0, canBill {
                         Button("Release retainage · \(money(progress.retainageOutstanding, currency: "USD"))") { confirm = "release-retainage" }
-                            .font(Theme.font(15, weight: .medium)).monospacedDigit().foregroundStyle(Theme.brandText)
+                            .font(Theme.font(15, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
                             .frame(minHeight: 44).padding(.top, 8).disabled(busy)
                     }
                 } else if error == nil {
@@ -219,7 +232,7 @@ struct BillingScheduleDetailView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if let progress, progress.schedule.status == "open", progress.remaining > 0, canBill {
@@ -238,13 +251,6 @@ struct BillingScheduleDetailView: View {
     }
 
     private var canBill: Bool { session.can("invoice.create", feature: "progress_billing") }
-
-    private func figure(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            Text(value).moneyStyle(.total)
-        }
-    }
 
     private func load() async {
         let generation = session.generation
@@ -287,6 +293,8 @@ struct JobDepositSheet: View {
     @State private var key = UUID().uuidString
     @State private var busy = false
     @State private var error: String?
+    /// What's missing in the amount, under the field (design.thorbis.com "Help under the field").
+    @State private var amountError: String?
 
     private var cents: Int? { MoneyInput.cents(amount).flatMap { $0 > 0 ? $0 : nil } }
 
@@ -296,24 +304,29 @@ struct JobDepositSheet: View {
                 Text("Request a deposit").font(Theme.font(24, weight: .medium)).tracking(-0.36)
                 Text("Creates a deposit invoice from the job's approved estimate. It's credited against later bills.")
                     .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                HStack(spacing: 8) {
-                    Text("$").font(Theme.monoFont(28, weight: .semibold)).foregroundStyle(Theme.muted)
-                    TextField("0.00", text: $amount).keyboardType(.decimalPad).font(Theme.monoFont(28, weight: .semibold))
-                        .onChange(of: amount) { _, _ in key = UUID().uuidString }
+                VStack(alignment: .leading, spacing: 6) {
+                    // The affix lives inside the well (design.thorbis.com "Affixes in the well").
+                    HStack(spacing: 8) {
+                        Text("$").font(Theme.monoFont(28)).foregroundStyle(Theme.muted)
+                        TextField("150.00", text: $amount, prompt: .placeholder("150.00")).keyboardType(.decimalPad).font(Theme.monoFont(28))
+                            .onChange(of: amount) { _, _ in key = UUID().uuidString; amountError = nil }
+                            .accessibilityLabel("Deposit amount")
+                    }
+                    .fieldWell()
+                    if let amountError { FieldProblem(message: amountError) }
                 }
-                .padding(.horizontal, 14).frame(minHeight: 60)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
                 Spacer()
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 8)
             .foregroundStyle(Theme.foreground)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .safeAreaInset(edge: .bottom) {
-                PaperActionBar(title: cents.map { "Create \(money($0, currency: "USD")) deposit invoice" } ?? "Enter an amount",
-                               symbol: "banknote", busy: busy, disabled: cents == nil) { Task { await create() } }
+                // Never pre-disabled: pressing it with no amount says what's missing under the field.
+                PaperActionBar(title: cents.map { "Create \(money($0, currency: "USD")) deposit invoice" } ?? "Create deposit invoice",
+                               symbol: "banknote", busy: busy) { Task { await create() } }
             }
             .interactiveDismissDisabled(busy)
         }
@@ -321,7 +334,8 @@ struct JobDepositSheet: View {
     }
 
     private func create() async {
-        guard let cents, !busy else { return }
+        guard !busy else { return }
+        guard let cents else { amountError = "Add the deposit amount, like 150.00."; return }
         busy = true
         defer { busy = false }
         do {

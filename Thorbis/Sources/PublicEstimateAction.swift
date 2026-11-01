@@ -130,6 +130,10 @@ final class PublicEstimateActionModel: ObservableObject {
     @Published private(set) var loadError: String?
     @Published private(set) var actionError: String?
     @Published private(set) var unavailableMessage: String?
+    /// The failure behind `loadError` / `actionError` when it came from the server or the network,
+    /// so the screen can say it in the customer's words instead of the raw text.
+    private(set) var loadFailure: Error?
+    private(set) var actionFailure: Error?
     @Published var selectedOptionID: String?
     @Published var signerName = ""
     @Published var consent = false
@@ -157,7 +161,9 @@ final class PublicEstimateActionModel: ObservableObject {
         let requestGeneration = loadGeneration
         isLoading = true
         loadError = nil
+        loadFailure = nil
         actionError = nil
+        actionFailure = nil
         unavailableMessage = nil
         defer {
             if requestGeneration == loadGeneration {
@@ -175,6 +181,7 @@ final class PublicEstimateActionModel: ObservableObject {
             if Self.isUnavailable(error) {
                 unavailableMessage = "This estimate link is expired, replaced, or no longer current. Ask the company for a new link."
             } else {
+                loadFailure = error
                 loadError = error.localizedDescription
             }
             action = nil
@@ -184,12 +191,14 @@ final class PublicEstimateActionModel: ObservableObject {
     func submit(_ decision: PublicEstimateActionDecision, api: APIClient, token: String) async {
         guard !isSubmitting, currentToken == token, let current = action else { return }
         guard Self.matchesCurrentRevision(decision, action: current), Self.isAllowed(decision, by: current) else {
+            actionFailure = nil
             actionError = "This estimate no longer allows that action. Reload the link and review the current estimate."
             return
         }
         let requestGeneration = flowGeneration
         isSubmitting = true
         actionError = nil
+        actionFailure = nil
         defer {
             if requestGeneration == flowGeneration {
                 isSubmitting = false
@@ -214,6 +223,7 @@ final class PublicEstimateActionModel: ObservableObject {
                 consent = false
                 unavailableMessage = "This estimate changed or this link can no longer be used. Ask the company for a current estimate link."
             } else {
+                actionFailure = error
                 actionError = error.localizedDescription
             }
         }

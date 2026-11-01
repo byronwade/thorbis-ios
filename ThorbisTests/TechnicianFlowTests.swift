@@ -48,7 +48,7 @@ final class TechnicianFlowTests: XCTestCase {
 
     func testAPendingEstimateIsShownToTheCustomerSentBeforeDraft() {
         XCTAssertEqual(next("in_progress", estimates: [estimate("d", "draft")]), .showEstimate(id: "d"))
-        XCTAssertEqual(next("in_progress", estimates: [estimate("d", "draft"), estimate("s", "sent")]), .showEstimate(id: "s"))
+        XCTAssertEqual(next("in_progress", estimates: [estimate("d", "draft"), estimate("s", "sent")]), .presentEstimates)
     }
 
     func testAnEstimateWithOptionsNeedsSendToBeHandedOver() {
@@ -62,6 +62,14 @@ final class TechnicianFlowTests: XCTestCase {
         XCTAssertEqual(next("in_progress", estimates: [estimate("d", "draft")], can: can), .createInvoice)
     }
 
+    func testApprovedAndSentStillOffersRemainingCustomerPresentation() {
+        XCTAssertEqual(next("in_progress", estimates: [estimate("approved", "approved"), estimate("sent", "sent")]), .presentEstimates)
+    }
+    func testIneligibleFirstSentDoesNotHideAnotherEligibleEstimate() {
+        let option = FieldEstimateOption(id: "option", title: "Package", description: "", lines: [], totalAmount: 100, currency: "USD")
+        var can = TechJobAbilities.all; can.sendEstimate = false
+        XCTAssertEqual(next("in_progress", estimates: [estimate("options", "sent", options: [option]), estimate("plain", "sent")], can: can), .presentEstimates)
+    }
     func testApprovedWorkBecomesTheInvoice() {
         XCTAssertEqual(next("in_progress", estimates: [estimate("a", "approved"), estimate("d", "declined")]), .createInvoice)
     }

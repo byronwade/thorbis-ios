@@ -1,0 +1,3 @@
+2026-10-29 11:38:40.723 xcodebuild[20781:25991974] Progress 100%: Upload succeeded.
+Uploaded Thorbis
+** EXPORT SUCCEEDED **

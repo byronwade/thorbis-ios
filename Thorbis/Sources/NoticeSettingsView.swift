@@ -20,7 +20,7 @@ extension APIClient {
     }
 }
 
-/// Web Settings › Job notices: who is told when a job is booked, changed or canceled.
+/// Settings › Notification rules (web Settings › Job notices): who is told when a job is booked, changed or canceled.
 struct NoticeSettingsView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
@@ -38,7 +38,7 @@ struct NoticeSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Notices").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
+                    Text("Notification rules").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
                     Text(managesRoles ? "Who hears when a job is booked, changed or canceled" : "What this phone tells you")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
@@ -90,7 +90,7 @@ struct NoticeSettingsView: View {
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { if managesRoles { await load() } }
         .task { if managesRoles { await load() } }

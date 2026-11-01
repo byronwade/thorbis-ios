@@ -101,6 +101,7 @@ struct WhatsNewSheetContent: Identifiable, Equatable {
 }
 
 /// MA-20: build line, title, up to five highlights, the count of the rest, one ink Continue.
+/// 2026-10-31: the highlights sit on one white panel over the cream ground, like every list.
 struct WhatsNewSheet: View {
     let content: WhatsNewSheetContent
     let onContinue: () -> Void
@@ -111,19 +112,20 @@ struct WhatsNewSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text(content.buildLine)
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
                 Text("What's new")
                     .font(Theme.font(24, weight: .medium)).foregroundStyle(Theme.foreground)
                     .padding(.top, 4)
                     .accessibilityAddTraits(.isHeader)
-                VStack(alignment: .leading, spacing: 16) {
+                PaperCard {
                     ForEach(Array(content.highlights.enumerated()), id: \.offset) { _, item in
                         WhatsNewHighlightRow(item: item)
                     }
                 }
-                .padding(.top, 20)
+                .padding(.top, 16)
+                .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
                 if let more = content.moreLine {
-                    Text(more).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 16)
+                    Text(more).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 12).padding(.horizontal, 4)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -132,15 +134,15 @@ struct WhatsNewSheet: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaInset(edge: .bottom) {
-            PrimaryButton(title: "Continue", action: onContinue)
+            PrimaryButton(title: "Got it", action: onContinue)
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 8)
-                .background(Theme.surface)
+                .background(Theme.canvas)
         }
-        .background(Theme.surface)
+        .background(Theme.canvas)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(Theme.cardRadius)
-        .presentationBackground(Theme.surface)
+        .thorbisSheetSurface()
         .onAppear {
             // MA-22: large type and long notes start at the large detent, so nothing hides below.
             if typeSize.isAccessibilitySize || content.highlights.count > 3 { detent = .large }
@@ -148,53 +150,57 @@ struct WhatsNewSheet: View {
     }
 }
 
+/// One highlight: a neutral glyph, what you can now do (16/500) and one sentence under it.
 struct WhatsNewHighlightRow: View {
     let item: ReleaseNote.Highlight
+    @Environment(\.paperRowInset) private var inset
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
             Image(systemName: item.symbol)
-                .font(.system(size: 15, weight: .regular))
+                .font(.system(size: 17, weight: .regular))
                 .foregroundStyle(Theme.muted)
-                .frame(width: 36, height: 36)
-                .background(Theme.fill, in: Circle())
+                .frame(width: 24)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text(item.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                 Text(item.detail).font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 1)
+            Spacer(minLength: 0)
         }
+        .padding(.horizontal, inset).padding(.vertical, 12)
         .accessibilityElement(children: .combine)
     }
 }
 
 /// Settings > What's new: every entry, newest first, so the sheet is never the only way to read
-/// the notes (MA-19).
+/// the notes (MA-19). Each day is one section, like the sheet.
 struct WhatsNewHistoryView: View {
     var notes: [ReleaseNote] = ReleaseNotes.all
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 ForEach(notes) { note in
-                    SectionHeader(title: note.dayLabel).padding(.horizontal, -Theme.gutter)
-                    VStack(alignment: .leading, spacing: 16) {
-                        ForEach(Array(note.highlights.enumerated()), id: \.offset) { _, item in
-                            WhatsNewHighlightRow(item: item)
+                    VStack(alignment: .leading, spacing: 6) {
+                        PaperSection(note.dayLabel) {
+                            ForEach(Array(note.highlights.enumerated()), id: \.offset) { _, item in
+                                WhatsNewHighlightRow(item: item)
+                            }
                         }
                         if note.fixes > 0 {
                             Text("Also: \(note.fixes) smaller \(note.fixes == 1 ? "fix" : "fixes")")
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 4)
                         }
                     }
-                    .padding(.bottom, 12)
                 }
             }
-            .padding(.horizontal, Theme.gutter)
+            .paperCardMargin()
+            .padding(.top, 8).padding(.bottom, 24)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("What's new")
         .navigationBarTitleDisplayMode(.inline)
     }

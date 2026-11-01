@@ -25,6 +25,7 @@ enum TechJobStep: Equatable {
     case buildEstimate
     /// The estimate to hand the customer: a draft is issued first, then shown (TF-05).
     case showEstimate(id: String)
+    case presentEstimates
     case createInvoice
     case reviewInvoice(id: String)
     case collect(invoiceID: String, due: Int, currency: String)
@@ -36,13 +37,14 @@ enum TechJobStep: Equatable {
         case .transition(let target):
             switch target {
             case "en_route": "On my way"
-            case "arrived": "Mark arrived"
+            case "arrived": "Arrive"
             case "in_progress": resuming ? "Resume work" : "Start work"
             case "dispatched": "Dispatch"
             default: "Mark \(target.statusLabel.lowercased())"
             }
         case .buildEstimate: "Build estimate"
         case .showEstimate: "Show estimate to customer"
+        case .presentEstimates: "Approve estimates"
         case .createInvoice: "Create invoice"
         case .reviewInvoice: "Review invoice"
         case .collect(_, let due, let currency): "Collect \(money(due, currency: currency))"
@@ -60,7 +62,7 @@ enum TechJobStep: Equatable {
             default: "paperplane"
             }
         case .buildEstimate: "doc.badge.plus"
-        case .showEstimate: "person.crop.rectangle"
+        case .showEstimate, .presentEstimates: "person.crop.rectangle"
         case .createInvoice: "doc.plaintext"
         case .reviewInvoice: "doc.text.magnifyingglass"
         case .collect: "creditcard"
@@ -107,11 +109,15 @@ enum TechJobFlow {
         }
         if status == "completed" { return nil }
 
+        // Each sent estimate can represent independent work, even after another was approved.
+        if estimates.contains(where: { $0.status == "sent" && canShow($0, can: can) }) {
+            return .presentEstimates
+        }
         // Not billed yet. Approved work becomes the invoice; otherwise the estimate comes first.
         if estimates.contains(where: { $0.status == "approved" }) {
             return can.createInvoice ? .createInvoice : (can.completeJob ? .wrapUp : nil)
         }
-        if let pending = estimates.first(where: { $0.status == "sent" }) ?? estimates.first(where: { $0.status == "draft" }),
+        if let pending = estimates.first(where: { $0.status == "draft" }),
            canShow(pending, can: can) {
             return .showEstimate(id: pending.id)
         }

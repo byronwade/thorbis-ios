@@ -197,6 +197,38 @@ struct EstimateRevisionEditorState: Equatable {
         ))
     }
 
+    /// A new option with these lines (none: filled from the price book next). Returns its id,
+    /// or nil at eight options.
+    @discardableResult
+    mutating func addOption(title: String, description: String = "", lines: [EstimateRevisionLineDraft]) -> String? {
+        guard options.count < 8 else { return nil }
+        let id = UUID().uuidString.lowercased()
+        options.append(EstimateRevisionOptionDraft(id: id, title: String(title.prefix(200)),
+                                                   description: String(description.prefix(500)),
+                                                   lines: Array(lines.copiedForNewOption().prefix(500))))
+        return id
+    }
+
+    /// "Copy option": a new option right after the original, with fresh line identities so it
+    /// can become Better from Good. Returns its id, or nil at eight options.
+    @discardableResult
+    mutating func copyOption(id: String) -> String? {
+        guard options.count < 8, let index = options.firstIndex(where: { $0.id == id }) else { return nil }
+        let original = options[index]
+        let base = Self.cleaned(original.title)
+        let copy = EstimateRevisionOptionDraft(id: UUID().uuidString.lowercased(),
+                                               title: base.isEmpty ? "" : String("\(base) copy".prefix(200)),
+                                               description: original.description,
+                                               lines: original.lines.copiedForNewOption())
+        options.insert(copy, at: index + 1)
+        return copy.id
+    }
+
+    mutating func moveOption(id: String, by offset: Int) {
+        guard let index = options.firstIndex(where: { $0.id == id }), options.indices.contains(index + offset) else { return }
+        options.swapAt(index, index + offset)
+    }
+
     mutating func removeOption(id: String) {
         options.removeAll { $0.id == id }
     }

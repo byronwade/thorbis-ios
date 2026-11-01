@@ -13,6 +13,10 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         case invoiceSignature(SignaturePayload)
         case payment(PaymentPayload)
         case organizationFact(FactPayload)
+        /// A follow-up for the office (`POST /v1/jobs/{id}/followups`). That route takes no
+        /// idempotency key and the command endpoint has no such command, so it is sent through
+        /// REST only, and any resend first checks the job's follow-ups for one already made.
+        case followUp(FollowUpPayload)
     }
 
     /// `jobs.progress` input (domains/jobs progressJobInputSchema, a strict object).
@@ -28,6 +32,14 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     struct NotePayload: Codable, Equatable {
         let jobId: String
         let body: String
+    }
+
+    /// `POST /v1/jobs/{id}/followups` input (FieldFollowUpRequest), kind as its wire value.
+    struct FollowUpPayload: Codable, Equatable {
+        let jobId: String
+        let kind: String
+        let reason: String
+        let nextAction: String
     }
 
     /// `jobs.acknowledgeCheck` input (acknowledgeCloseoutCheckInputSchema).
@@ -101,6 +113,9 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     var restOnly: Bool? = nil
     /// What the person saw when they made it, for Review ("Confirmed: Area cleaned up").
     var label: String? = nil
+    /// Set before a send that may have reached the server without an answer; the next send of
+    /// a follow-up then checks the server first, since that route cannot dedupe on its own.
+    var attempted: Bool? = nil
 
     /// The record whose changes land in order (OF-06): the job, or the invoice for a payment
     /// on an invoice with no job.
@@ -113,6 +128,7 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         case .invoiceSignature(let payload): payload.jobId
         case .payment(let payload): payload.jobId ?? payload.invoiceId
         case .organizationFact: Self.organizationRecord
+        case .followUp(let payload): payload.jobId
         }
     }
 
@@ -126,7 +142,8 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         case .note: "jobs.addNote"
         case .acknowledgeCheck: "jobs.acknowledgeCheck"
         case .complete: "jobs.complete"
-        case .invoiceSignature, .payment, .organizationFact: nil
+        // Follow-ups are never sent to /v1/commands (restOnly).
+        case .invoiceSignature, .payment, .organizationFact, .followUp: nil
         }
     }
 
@@ -164,6 +181,8 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
         case .invoiceSignature(let payload): "Signature from \(payload.signerName)"
         case .payment(let payload): "\(payload.method.capitalized) \(money(payload.amountCents, currency: "USD"))"
         case .organizationFact(let payload): payload.label
+        case .followUp(let payload): payload.kind == FieldFollowUpRequest.Kind.officeScheduling.rawValue
+            ? "Follow-up for scheduling" : "Notify office"
         }
     }
 }
@@ -194,8 +213,10 @@ final class FieldOutbox: ObservableObject {
     @Published private(set) var syncing = false
     /// How many changes the last sync sent, for the "back online" banner.
     @Published private(set) var lastSyncSent = 0
-    /// Photos waiting in `PendingPhotoStore`, counted in the one sync line (OF-03).
+    /// Photos and files waiting in `PendingMediaStore`, counted in the one sync line (OF-03).
     @Published private(set) var waitingPhotos = 0
+    /// Jobs that still have media on this phone; a queued Complete on one of them waits.
+    private var photoJobIDs: Set<String> = []
     /// Bumped after a sync sends anything, so open screens reload what the server now has.
     @Published private(set) var syncGeneration = 0
     /// Payments this session recorded from the queue. They keep holding their amount on an
@@ -211,7 +232,7 @@ final class FieldOutbox: ObservableObject {
     /// design.thorbis.com MA-17: signing out deletes this phone's saved work, so the dialog says
     /// what would be lost.
     var signOutWarning: String {
-        let waiting = entries.count + otherWorkspaceEntryCount + waitingPhotos
+        let waiting = entries.count + otherWorkspaceEntryCount
         return waiting == 0
             ? "Jobs and customers saved on this phone are removed. You can sign back in at any time."
             : "\(waiting) change\(waiting == 1 ? "" : "s") on this phone \(waiting == 1 ? "hasn't" : "haven't") synced yet. Signing out deletes \(waiting == 1 ? "it" : "them")."
@@ -219,6 +240,18 @@ final class FieldOutbox: ObservableObject {
 
     private let directory: URL
     private var identity: (actorID: String, organizationID: String)?
+    private var binding = UUID()
+    private var activeDrain: UUID?
+    /// Opaque read-only proof of the current verified queue binding.
+    struct CaptureContext: Equatable {
+        fileprivate let actorID: String
+        fileprivate let organizationID: String
+        fileprivate let binding: UUID
+    }
+    func captureContext(matchingActorID actorID: String, organizationID: String) -> CaptureContext? {
+        guard identity?.actorID == actorID, identity?.organizationID == organizationID else { return nil }
+        return .init(actorID: actorID, organizationID: organizationID, binding: binding)
+    }
     private let deviceID: String
     private let defaults: UserDefaults
     /// Server-served legal moves seen per status, so an offline chain (On my way, then
@@ -277,33 +310,37 @@ final class FieldOutbox: ObservableObject {
     /// Bound to the verified actor and workspace; another identity never sees these changes.
     func bind(actorID: String?, organizationID: String?) {
         guard let actorID, let organizationID else {
+            binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
             identity = nil
             entries = []
             recordedPayments = []
             return
         }
         guard identity?.actorID != actorID || identity?.organizationID != organizationID else { return }
+        binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = (actorID, organizationID)
         entries = file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) } ?? []
         recordedPayments = recordedFile.flatMap { try? Data(contentsOf: $0) }
             .flatMap { try? JSONDecoder().decode([OutboxEntry.PaymentPayload].self, from: $0) } ?? []
-        countPhotos()
     }
 
-    /// Re-reads the waiting photo count after a photo is saved or sent.
-    func countPhotos() {
-        let count = PendingPhotoStore.list().count
+    /// Follows the media waiting on this phone (`PendingMediaStore.items`) after it changes.
+    func notePendingMedia(_ items: [PendingMedia]) {
+        let jobs = Set(items.map(\.jobID))
+        if photoJobIDs != jobs { photoJobIDs = jobs }
         // Photos left the phone: open screens reload, so a closeout sees the server's photo count.
-        if count < waitingPhotos { syncGeneration += 1 }
-        if waitingPhotos != count { waitingPhotos = count }
+        if items.count < waitingPhotos { syncGeneration += 1 }
+        if waitingPhotos != items.count { waitingPhotos = items.count }
     }
 
     /// Sign-out: unsent changes for this phone are deleted with the session.
     func clearAll() {
+        binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = nil
         entries = []
         recordedPayments = []
         waitingPhotos = 0
+        photoJobIDs = []
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -318,7 +355,7 @@ final class FieldOutbox: ObservableObject {
     }
 
     @discardableResult
-    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, label: String? = nil) -> OutboxEntry? {
+    func enqueue(_ action: OutboxEntry.Action, policyVersion: Int, label: String? = nil, attempted: Bool = false) -> OutboxEntry? {
         guard let identity else { return nil }
         // A second tap on the same collected payment is the same payment, not another one.
         if case .payment(let payment) = action,
@@ -335,6 +372,10 @@ final class FieldOutbox: ObservableObject {
                                 organizationId: identity.organizationID, policyVersion: policyVersion,
                                 createdAt: Date(), action: action)
         entry.label = label
+        if case .followUp = action {
+            entry.restOnly = true
+            entry.attempted = attempted ? true : nil
+        }
         entries.append(entry)
         // Money and ink only count as saved once they are on disk; the caller keeps its own copy otherwise.
         if !persist(), entry.isDurableOnly {
@@ -426,25 +467,28 @@ final class FieldOutbox: ObservableObject {
 
     /// A change that timed out on the phone may still have reached the server. If the server
     /// already shows it, the change is done, not refused.
-    private func alreadyApplied(_ entry: OutboxEntry, api: APIClient) async -> Bool {
+    private func alreadyApplied(_ entry: OutboxEntry, api: APIClient, current: @MainActor () -> Bool) async -> Bool {
+        guard current() else { return false }
+        let applied: Bool
         switch entry.action {
         case .progress(let payload):
             guard let target = Self.lifecycleRank[payload.to], let job = try? await api.fieldJob(payload.jobId),
-                  let current = Self.lifecycleRank[job.status] else { return false }
-            return current >= target
+                  let rank = Self.lifecycleRank[job.status] else { return false }
+            applied = rank >= target
         case .complete(let payload):
-            return (try? await api.fieldJob(payload.jobId))?.status == "completed"
+            applied = (try? await api.fieldJob(payload.jobId))?.status == "completed"
         case .acknowledgeCheck(let payload):
-            return (try? await api.fieldCloseout(payload.jobId))?.facts.acknowledgedCheckKeys.contains(payload.checkKey) == true
+            applied = (try? await api.fieldCloseout(payload.jobId))?.facts.acknowledgedCheckKeys.contains(payload.checkKey) == true
         case .invoiceSignature(let payload):
-            return (try? await api.fieldInvoice(payload.invoiceId))?.customerAuthorization?.linesRevision == payload.expectedLinesRevision
+            applied = (try? await api.fieldInvoice(payload.invoiceId))?.customerAuthorization?.linesRevision == payload.expectedLinesRevision
         case .payment(let payload):
-            return (try? await api.fieldPayments(payload.invoiceId))?.contains { $0.idempotencyKey == payload.idempotencyKey } == true
+            applied = (try? await api.fieldPayments(payload.invoiceId))?.contains { $0.idempotencyKey == payload.idempotencyKey } == true
         case .organizationFact(let payload):
-            return (try? await api.organizationProfile())?.value(payload.factKey) == payload.value
-        case .note:
+            applied = (try? await api.organizationProfile())?.value(payload.factKey) == payload.value
+        case .note, .followUp:
             return false
         }
+        return applied && current()
     }
 
     /// The status this phone expects a job to have once its queued changes land.
@@ -459,39 +503,52 @@ final class FieldOutbox: ObservableObject {
     /// Sends queued changes oldest first, in order (OF-06). Runs of offline commands go to the
     /// command endpoint when the workspace has it; signatures, payments and everything on a
     /// workspace without it go through the same REST routes the app uses online.
-    func drain(api: APIClient, useCommandEndpoint: Bool) async {
-        guard !syncing, !pending.isEmpty else { return }
-        syncing = true
-        defer { syncing = false; if lastSyncSent > 0 { syncGeneration += 1 } }
+    func drain(api: APIClient, useCommandEndpoint: Bool, canSend: @MainActor () -> Bool = { true }) async {
+        guard !syncing, !pending.isEmpty, let owner = identity, let origin = api.normalizedOrigin, canSend(), !Task.isCancelled else { return }
+        let token = binding, generation = api.requestGeneration, operation = UUID()
+        func current() -> Bool {
+            binding == token && identity?.actorID == owner.actorID && identity?.organizationID == owner.organizationID &&
+            api.requestGeneration == generation && api.normalizedOrigin == origin && canSend() && !Task.isCancelled
+        }
+        activeDrain = operation; syncing = true
+        defer {
+            if activeDrain == operation {
+                activeDrain = nil; syncing = false
+                if lastSyncSent > 0 { syncGeneration += 1 }
+            }
+        }
         var sent = 0
         // A completion waits while its job still has photos on this phone: the closeout may count them.
-        let photoJobs = Set(PendingPhotoStore.list().map(\.jobID))
+        let photoJobs = photoJobIDs
         func waitsOnPhotos(_ entry: OutboxEntry) -> Bool {
             if case .complete = entry.action { photoJobs.contains(entry.jobID) } else { false }
         }
         // A job held for its photos keeps its later changes in order; other jobs keep syncing.
         var heldJobs = Set<String>()
         var queue: [OutboxEntry] { pending.filter { !heldJobs.contains($0.jobID) } }
-        while let first = queue.first {
+        while current(), let first = queue.first {
             if waitsOnPhotos(first) { heldJobs.insert(first.jobID); continue }
             if useCommandEndpoint && first.viaCommand {
                 let run = Array(queue.prefix { $0.viaCommand && !waitsOnPhotos($0) }.prefix(50))
-                guard let applied = await sendCommands(run, api: api) else { break }
+                guard let applied = await sendCommands(run, api: api, current: current) else { break }
                 sent += applied
             } else {
-                switch await sendREST(first, api: api) {
+                switch await sendREST(first, api: api, current: current) {
                 case .sent: sent += 1
                 case .refused: continue
-                case .stop: lastSyncSent = sent; return
+                case .stop:
+                    if current() { lastSyncSent = sent }
+                    return
                 }
             }
         }
+        guard current() else { return }
         lastSyncSent = sent
     }
 
     /// Sends one batch; nil means stop (no signal, a server error, or a batch the server did
     /// not fully answer, which stops the loop rather than spinning).
-    private func sendCommands(_ batch: [OutboxEntry], api: APIClient) async -> Int? {
+    private func sendCommands(_ batch: [OutboxEntry], api: APIClient, current: @MainActor () -> Bool) async -> Int? {
         struct Envelope: Encodable {
             let commandId, deviceId, actorId, organizationId: String
             let policyVersion: Int
@@ -507,7 +564,7 @@ final class FieldOutbox: ObservableObject {
                 case .note(let payload): try payload.encode(to: encoder)
                 case .acknowledgeCheck(let payload): try payload.encode(to: encoder)
                 case .complete(let payload): try payload.encode(to: encoder)
-                case .invoiceSignature, .payment, .organizationFact: break // Never batched: `command` is nil.
+                case .invoiceSignature, .payment, .organizationFact, .followUp: break // Never batched: `command` is nil.
                 }
             }
         }
@@ -524,22 +581,31 @@ final class FieldOutbox: ObservableObject {
         }
         var sent = 0
         do {
+            guard current() else { return nil }
             let result: Result = try await api.send("POST", "/v1/commands", body: Batch(commands: envelopes))
+            guard current() else { return nil }
             for outcome in result.outcomes {
+                guard current() else { return nil }
                 if outcome.status == "applied" || outcome.status == "duplicate" {
                     finish(outcome.commandId)
                     sent += 1
                 } else if outcome.category == "policy_superseded",
                           let index = entries.firstIndex(where: { $0.id == outcome.commandId }) {
                     entries[index].restOnly = true
-                } else if let entry = entries.first(where: { $0.id == outcome.commandId }), outcome.category == "conflict",
-                          await alreadyApplied(entry, api: api) {
-                    finish(outcome.commandId)
-                    sent += 1
+                } else if let entry = entries.first(where: { $0.id == outcome.commandId }), outcome.category == "conflict" {
+                    let applied = await alreadyApplied(entry, api: api, current: current)
+                    guard current() else { return nil }
+                    if applied {
+                        finish(outcome.commandId)
+                        sent += 1
+                    } else {
+                        reject(outcome.commandId, reason: outcome.detail ?? outcome.category ?? "The server refused this change.")
+                    }
                 } else {
                     reject(outcome.commandId, reason: outcome.detail ?? outcome.category ?? "The server refused this change.")
                 }
             }
+            guard current() else { return nil }
             persist()
             let answered = Set(result.outcomes.map(\.commandId))
             return batch.allSatisfy { answered.contains($0.id) } ? sent : nil
@@ -550,7 +616,8 @@ final class FieldOutbox: ObservableObject {
 
     private enum RESTResult { case sent, refused, stop }
 
-    private func sendREST(_ entry: OutboxEntry, api: APIClient) async -> RESTResult {
+    private func sendREST(_ entry: OutboxEntry, api: APIClient, current: @MainActor () -> Bool) async -> RESTResult {
+        guard current() else { return .stop }
         do {
             switch entry.action {
             case .progress(let payload):
@@ -586,6 +653,25 @@ final class FieldOutbox: ObservableObject {
             case .organizationFact(let payload):
                 try await api.confirmOrganizationFact(payload.factKey, value: payload.value,
                                                       actorID: entry.actorId, organizationID: entry.organizationId)
+            case .followUp(let payload):
+                if entry.attempted == true {
+                    let earlier = await followUpExists(payload, since: entry.createdAt, actorID: entry.actorId, api: api)
+                    guard current() else { return .stop }
+                    // Unknown (no live answer): keep it queued rather than risk sending it twice.
+                    guard let earlier else { return .stop }
+                    if earlier { break } // An earlier send reached the server; it is done.
+                }
+                if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                    entries[index].attempted = true
+                    persist()
+                }
+                guard let kind = FieldFollowUpRequest.Kind(rawValue: payload.kind) else {
+                    reject(entry.id, reason: "This follow-up type is not supported.")
+                    persist()
+                    return .refused
+                }
+                _ = try await api.requestFieldFollowUp(payload.jobId, request: .init(kind: kind, reason: payload.reason,
+                                                                                   nextAction: payload.nextAction))
             case .payment(let payload):
                 guard let method = FieldPaymentMethod(rawValue: payload.method) else {
                     reject(entry.id, reason: "This payment method can't be recorded from the phone.")
@@ -595,15 +681,19 @@ final class FieldOutbox: ObservableObject {
                 _ = try await api.recordFieldPayment(payload.invoiceId, request: .init(
                     amount: .init(amount: payload.amountCents, currency: "USD"), method: method, idempotencyKey: payload.idempotencyKey))
             }
+            guard current() else { return .stop }
             finish(entry.id)
             persist()
             return .sent
         } catch is CancellationError {
             return .stop
         } catch {
+            guard current() else { return .stop }
             if error.isConnectivityFailure { return .stop }
             if let problem = error as? Problem, let status = problem.status, (400..<500).contains(status), status != 401, status != 429 {
-                if status == 409, await alreadyApplied(entry, api: api) {
+                let applied = status == 409 ? await alreadyApplied(entry, api: api, current: current) : false
+                guard current() else { return .stop }
+                if applied {
                     finish(entry.id)
                     persist()
                     return .sent
@@ -627,6 +717,24 @@ final class FieldOutbox: ObservableObject {
             persistRecorded()
         }
         entries.remove(at: index)
+    }
+
+    /// Whether the job already has this follow-up from this person, made around or after it was
+    /// queued (ten minutes of slack for the phone's clock). Nil when there is no live answer:
+    /// a failed read, or one answered by the copy saved on this phone.
+    private func followUpExists(_ payload: OutboxEntry.FollowUpPayload, since queued: Date, actorID: String, api: APIClient) async -> Bool? {
+        guard let records = try? await SavedCopies.$liveOnly.withValue(true, operation: { try await api.fieldFollowUps(payload.jobId) }),
+              api.savedCopyDate("/v1/jobs/\(payload.jobId)/followups") == nil
+        else { return nil }
+        let earliest = queued.addingTimeInterval(-600)
+        return records.contains { record in
+            record.kind == payload.kind && record.reason == payload.reason && record.nextAction == payload.nextAction &&
+                record.createdByUserId == actorID && (JobFiltering.date(record.createdAt).map { $0 >= earliest } ?? true)
+        }
+    }
+
+    func pendingFollowUps(for jobID: String) -> [OutboxEntry] {
+        entries.filter { $0.jobID == jobID && { if case .followUp = $0.action { true } else { false } }($0) }
     }
 
     #if DEBUG

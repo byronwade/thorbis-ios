@@ -8,6 +8,7 @@ struct InvoiceLineEditorView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var editor: InvoiceLineEditorState
     @State private var showPriceBook = false
     @State private var confirmReload = false
@@ -17,11 +18,13 @@ struct InvoiceLineEditorView: View {
     @State private var error: String?
     @State private var staleRevision = false
     @ObservedObject private var catalog = PriceBookCatalog.shared
-    @State private var query = ""
-    @State private var kind = PriceBookKindFilter.all
+    @State private var addedLineSelection: InvoiceCatalogLineSelection?
+    @State private var expandedLine: UUID?
     @FocusState private var focus: EstimateBuilderFocus?
 
-    private var searching: Bool { canEdit && (focus == .search || !query.isEmpty) }
+    private var catalogContext: PriceBookCatalogContext {
+        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
+    }
 
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
@@ -34,194 +37,275 @@ struct InvoiceLineEditorView: View {
     }
 
     private var canUsePriceBook: Bool {
-        session.can("pricebook.view", feature: "price_book")
+        session.can("pricebook.view", feature: "price_book") && invoice.currency == "USD"
     }
 
     private var canIssue: Bool {
         editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
     }
 
+    private var linesDisabled: Bool { busy || !canEdit || editor.hasUnsupportedLineSources }
+
     var body: some View {
-        ScrollView {
-            if let error {
-                ErrorBanner(message: error).padding(.horizontal, 20).padding(.top, 12)
-            }
-            if staleRevision {
-                Button { confirmReload = true } label: {
-                    Label("Review latest invoice", systemImage: "arrow.clockwise")
-                        .font(Theme.font(14, weight: .medium))
-                        .foregroundStyle(Theme.brandText)
+        ScrollViewReader { proxy in
+            ScrollView { content }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: focus) { _, value in
+                    guard let id = value?.lineID else { return }
+                    expandedLine = id
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
                 }
-                .accessibilityHint("Reloads the current server version and discards these unsaved edits")
-                .padding(.horizontal, 20)
-            }
-            if searching {
-                PriceBookResultsList(
-                    catalog: catalog, query: query, kind: kind, canUsePriceBook: canUsePriceBook,
-                    quantityOnEstimate: priceBookQuantity, addItem: addCatalogItem, addCustom: addCustomLine,
-                    retry: { Task { await refreshCatalog(force: true) } }
-                )
-                .disabled(busy)
-            } else {
-            VStack(alignment: .leading, spacing: 18) {
-                if editor.invoice.status != "draft" {
-                    ErrorBanner(message: "This invoice is now \(editor.invoice.status.statusLabel.lowercased()); its line items are final.")
+                .onChange(of: expandedLine) { _, id in
+                    guard let id else { return }
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
                 }
-                if editor.hasUnsupportedLineSources {
-                    ErrorBanner(message: "This invoice has line provenance this app cannot safely retain. Review it in Thorbis web before editing.")
-                }
-
-                invoiceEditorHeading
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Details").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 2).padding(.bottom, 4)
-                    editorDetail("Customer", store.customerName(invoice.customerId))
-                    if let job = store.jobs.first(where: { $0.id == invoice.jobId }) {
-                        editorDetail("Job", "\(job.title) · \(job.shortRef)")
-                    }
-                }
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Line items").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        Spacer()
-                        if canUsePriceBook {
-                            Button { showPriceBook = true } label: {
-                                Label("Add from price book", systemImage: "book.closed")
-                                    .font(Theme.font(13, weight: .medium))
-                            }
-                            .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
-                        }
-                    }
-
-                    VStack(spacing: 0) {
-                        ForEach($editor.lines) { $line in
-                            EditableInvoiceLineRow(
-                                line: committedLine($line),
-                                canMoveUp: editor.lines.first?.id != line.id,
-                                canMoveDown: editor.lines.last?.id != line.id,
-                                moveUp: { moveLine(line.id, offset: -1) },
-                                moveDown: { moveLine(line.id, offset: 1) },
-                                remove: {
-                                    do {
-                                        try editor.removeLine(id: line.id)
-                                        error = nil
-                                    } catch {
-                                        self.error = error.localizedDescription
-                                    }
-                                }
-                            )
-                            .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
-                            if line.id != editor.lines.last?.id {
-                                Rectangle().fill(Theme.border).frame(height: 1).padding(.leading, 14)
-                            }
-                        }
-                        Button {
-                            editor.addManualLine()
-                        } label: {
-                            Label("Add line item", systemImage: "plus")
-                                .font(Theme.font(13, weight: .medium))
-                                .foregroundStyle(Theme.muted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 14).frame(minHeight: 46)
-                        }
-                        .disabled(busy || !canEdit || editor.hasUnsupportedLineSources || editor.lines.count >= 500)
-                    }
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
-
-                    if editor.needsPriceBookOverrideReason {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Reason for Price Book change")
-                                .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                            TextField("Describe the approved change", text: $editor.priceBookOverrideReason, axis: .vertical)
-                                .lineLimit(2...4)
-                                .font(Theme.font(14))
-                                .padding(12)
-                                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
-                                .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
-                                .accessibilityLabel("Reason for Price Book change")
-                        }
-                    }
-
-                    Text("Line changes are checked against the current invoice revision before saving.")
-                        .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 24)
-            .frame(maxWidth: 640)
-            .frame(maxWidth: .infinity)
-            }
         }
-        .scrollDismissesKeyboard(.interactively)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Edit invoice")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
+            ThorbisToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
             }
         }
         .keyboardDoneButton()
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if canEdit && !editor.hasUnsupportedLineSources {
-                EstimateSearchBar(query: $query, kind: $kind, focus: $focus, searching: searching,
-                                  prompt: "Search price book or type a line", finish: finishSearch)
-                    .disabled(busy)
-            }
-        }
-        .task { await refreshCatalog() }
+        .task(id: catalogContext) { await refreshCatalog() }
+        .onChange(of: catalogContext) { _, _ in addedLineSelection = nil; showPriceBook = false }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 10) {
-                if canIssue {
-                    Button("Save draft") { Task { await save() } }
-                        .font(Theme.font(17, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                        .frame(width: 132, height: Theme.commitHeight)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                        .buttonStyle(PressStyle())
-                        .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
-                    PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
-                        .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
-                } else {
-                    PrimaryButton(title: "Save draft", busy: busy) { Task { await save() } }
-                        .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
-                }
-            }
-            .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
-            .background(Theme.chrome)
-        }
+        .safeAreaInset(edge: .bottom) { invoiceCommitActions }
         .thorbisConfirm("Issue invoice?",
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
                         actions: [ThorbisConfirmAction("Issue invoice", role: .destructive) { Task { await issue() } }])
-        .sheet(isPresented: $showPriceBook) {
-            NavigationStack {
-                PaperPriceBookPicker(api: api, currency: invoice.currency, customerID: invoice.customerId) { item in
-                    do {
-                        try editor.addPriceBookItem(item)
-                        error = nil
-                    } catch {
-                        self.error = error.localizedDescription
-                    }
-                }
-                .environmentObject(session)
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showPriceBook, onDismiss: openAddedLine) { SheetSurface {
+            PriceBookCartPicker(
+                destination: "INV-\(invoice.id.suffix(4).uppercased())",
+                canUsePriceBook: canUsePriceBook,
+                unavailableReason: invoice.currency == "USD" ? nil : "Catalog selection requires a USD invoice.",
+                searchIdentifier: "invoice-catalog-search",
+                quantityInDraft: { editor.quantity(ofPriceBookItem: $0) },
+                secondaryPriceText: { memberPricing?.secondaryPriceText($0) },
+                addItem: addCatalogItem,
+                addCustomLine: addCustomLine,
+                refresh: { await refreshCatalog(force: $0) }
+            )
+            .environmentObject(session).environmentObject(api)
+        } }
+        .task(id: "\(catalogContext.organizationID ?? "")|\(catalogContext.sessionGeneration)|\(invoice.customerId)") {
+            memberPricing = nil
+            guard canUsePriceBook else { return }
+            let expected = catalogContext
+            let pricing = try? await api.memberPricing(invoice.customerId)
+            guard !Task.isCancelled, catalogContext == expected else { return }
+            memberPricing = pricing
         }
         .thorbisConfirm("Reload the latest invoice?",
                         message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
                         isPresented: $confirmReload,
                         actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+        #if DEBUG
+        .task {
+            if PaperPreview.enabled, PaperPreview.screen == "invoice-editor-line" { expandedLine = editor.lines.first?.id }
+        }
+        #endif
+    }
+
+    @State private var memberPricing: MemberPricing?
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+            if staleRevision {
+                Button { confirmReload = true } label: {
+                    Label("Review latest invoice", systemImage: "arrow.clockwise")
+                        .font(Theme.font(14, weight: .medium))
+                        .foregroundStyle(Theme.brandText)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityHint("Reloads the current server version and discards these unsaved edits")
+            }
+            if editor.invoice.status != "draft" {
+                ErrorBanner(message: "This invoice is now \(editor.invoice.status.statusLabel.lowercased()); its line items are final.")
+            }
+            if editor.hasUnsupportedLineSources {
+                ErrorBanner(message: "This invoice has line provenance this app cannot safely retain. Review it in Thorbis web before editing.")
+            }
+
+            invoiceEditorHeading
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(editor.lines.isEmpty ? "Line items" : "Line items · \(editor.lines.count)")
+                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("invoice-line-count")
+                    .padding(.horizontal, 4)
+                PaperCard {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(editor.lines) { line in
+                            lineRow(line)
+                        }
+                        Button { showPriceBook = true } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "plus").font(.system(size: 15, weight: .medium))
+                                Text("Add item").font(Theme.font(16, weight: .medium))
+                                Spacer(minLength: 0)
+                            }
+                            .foregroundStyle(Theme.foreground)
+                            .padding(.horizontal, 14).frame(minHeight: 52).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(linesDisabled || editor.lines.count >= 500)
+                        .accessibilityHint(canUsePriceBook ? "Opens the price book" : "Adds a custom line item")
+                        .accessibilityIdentifier("invoice-add-item")
+                    }
+                }
+            }
+
+            if editor.needsPriceBookOverrideReason {
+                priceBookOverrideReasonField
+            }
+
+            Text("Line changes are checked against the current invoice revision before saving.")
+                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4)
+        }
+        .padding(.horizontal, Theme.gutter)
+        .padding(.top, 12)
+        .padding(.bottom, 24)
+        .frame(maxWidth: 640)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The shared builder line, over an invoice draft line. Quantities still go through
+    /// `committedLine` so the editor's own validation runs.
+    private func lineRow(_ line: InvoiceLineDraft) -> some View {
+        let binding = committedLine(lineBinding(line.id))
+        let canMoveUp = editor.lines.first?.id != line.id
+        let canMoveDown = editor.lines.last?.id != line.id
+        var items: [ThorbisMenuItem] = []
+        if canMoveUp { items.append(ThorbisMenuItem("Move up", icon: "arrow.up") { moveLine(line.id, offset: -1) }) }
+        if canMoveDown { items.append(ThorbisMenuItem("Move down", icon: "arrow.down") { moveLine(line.id, offset: 1) }) }
+        items.append(ThorbisMenuItem("Remove line", icon: "trash", role: .destructive) { removeLine(line.id) })
+        let total: Int? = {
+            guard let cents = InvoiceLineEditorState.priceCents(line.unitPrice),
+                  let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+            let (amount, overflow) = cents.multipliedReportingOverflow(by: quantity)
+            return overflow ? nil : amount
+        }()
+        return BuilderLineRow(
+            description: binding.description, quantity: binding.quantity, unitPrice: binding.unitPrice,
+            lineID: line.id, currency: invoice.currency, lineTotal: total, unitLabel: line.unitLabel,
+            note: sourceNote(line), menuItems: items, expanded: expandedLine == line.id,
+            toggle: { withAnimation(EstimateLineGroupsEditor.spring) { expandedLine = expandedLine == line.id ? nil : line.id } },
+            remove: { removeLine(line.id) }, focus: $focus,
+            descriptionIdentifier: "invoice-line-description-\(line.id)",
+            quantityIdentifier: "invoice-line-quantity-\(line.id)",
+            priceIdentifier: "invoice-line-price-\(line.id)"
+        )
+        .disabled(linesDisabled)
+        .accessibilityAction(named: "Move up") { if canMoveUp { moveLine(line.id, offset: -1) } }
+        .accessibilityAction(named: "Move down") { if canMoveDown { moveLine(line.id, offset: 1) } }
+    }
+
+    private func sourceNote(_ line: InvoiceLineDraft) -> String? {
+        switch line.source {
+        case .priceBookSelection: "Price Book selection · server verifies the revision"
+        case .retainedPriceBook: "Price Book source retained"
+        case .estimate: "Estimate source retained"
+        default: nil
+        }
+    }
+
+    private func lineBinding(_ id: UUID) -> Binding<InvoiceLineDraft> {
+        Binding(
+            get: { editor.lines.first { $0.id == id } ?? InvoiceLineDraft(id: id, description: "", quantity: "1", unitPrice: "") },
+            set: { value in if let index = editor.lines.firstIndex(where: { $0.id == id }) { editor.lines[index] = value } }
+        )
+    }
+
+    private func removeLine(_ id: UUID) {
+        do {
+            try editor.removeLine(id: id)
+            if expandedLine == id { expandedLine = nil }
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// After the picker closes, the last catalog line it added opens for a price or wording check.
+    private func openAddedLine() {
+        guard canEdit, canUsePriceBook, !editor.hasUnsupportedLineSources,
+              invoice.organizationId == catalogContext.organizationID,
+              let id = addedLineSelection?.resolvedLineID(in: editor.lines, context: catalogContext) else { return }
+        addedLineSelection = nil
+        withAnimation(EstimateLineGroupsEditor.spring) { expandedLine = id }
+    }
+
+    /// Why the commits are off, in words under them (design.thorbis.com "Disabled needs a reason").
+    private var commitBlockedReason: String? {
+        guard !busy else { return nil }
+        if !canEdit { return "Your role can't change this invoice." }
+        if editor.hasUnsupportedLineSources { return "Some lines came from somewhere this phone can't edit. Change them on the web." }
+        if !canIssue && !editor.hasChanges { return "No changes to save yet." }
+        return nil
+    }
+
+    private var invoiceCommitActions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            invoiceCommitButtons
+            if let reason = commitBlockedReason {
+                Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
+        .background(Theme.canvas)
+    }
+
+    private var invoiceCommitButtons: some View {
+        let accessible = dynamicTypeSize.isAccessibilitySize
+        let layout = accessible ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
+            if canIssue {
+                Button { Task { await save() } } label: {
+                    Text("Save draft")
+                    .font(Theme.font(17, weight: .medium))
+                    .foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, accessible ? 16 : 0)
+                    .padding(.vertical, accessible ? 12 : 0)
+                    .frame(width: accessible ? nil : 132, height: accessible ? nil : Theme.commitHeight)
+                    .frame(maxWidth: accessible ? .infinity : nil, minHeight: Theme.commitHeight)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+                }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
+                PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
+                    .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
+            } else {
+                PrimaryButton(title: "Save draft", busy: busy) { Task { await save() } }
+                    .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
+            }
+        }
+    }
+
+    private var priceBookOverrideReasonField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Reason for Price Book change")
+                .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+            TextField("Describe the approved change", text: $editor.priceBookOverrideReason, prompt: .placeholder("Describe the approved change"), axis: .vertical)
+                .lineLimit(2...4)
+                .font(Theme.font(14))
+                .padding(12)
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
+                .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
+                .accessibilityLabel("Reason for Price Book change")
+        }
     }
 
     private func committedLine(_ line: Binding<InvoiceLineDraft>) -> Binding<InvoiceLineDraft> {
@@ -243,22 +327,29 @@ struct InvoiceLineEditorView: View {
     }
 
     private func priceBookQuantity(_ itemID: String) -> Int? {
-        editor.catalogQuantity(for: itemID)
+        editor.quantity(ofPriceBookItem: itemID)
     }
 
-    private func addCatalogItem(_ item: PriceBookListItem) {
-        guard !busy else { return }
+    /// One more of a price book item; returns why it couldn't be added, or nil.
+    private func addCatalogItem(_ item: PriceBookListItem) -> String? {
+        guard !busy, canEdit, !editor.hasUnsupportedLineSources, canUsePriceBook,
+              invoice.organizationId == catalogContext.organizationID,
+              catalog.context == catalogContext else { return "This invoice can't take price book items right now." }
         do {
+            let before = editor.lines.map(\.id)
             try editor.addPriceBookItem(item)
+            if let added = editor.lines.first(where: { !before.contains($0.id) }) ?? editor.lines.last {
+                addedLineSelection = InvoiceCatalogLineSelection(lineID: added.id, context: catalogContext)
+            }
             error = nil
-            catalog.recordUse(item.id)
+            return nil
         } catch {
-            self.error = error.localizedDescription
+            return error.localizedDescription
         }
     }
 
     private func addCustomLine(_ text: String) {
-        guard !busy else { return }
+        guard !busy, canEdit, !editor.hasUnsupportedLineSources else { return }
         let before = editor.lines.count
         editor.addManualLine()
         guard editor.lines.count > before, let index = editor.lines.indices.last else {
@@ -266,18 +357,20 @@ struct InvoiceLineEditorView: View {
             return
         }
         editor.lines[index].description = text
-        finishSearch()
-    }
-
-    private func finishSearch() {
-        query = ""
-        kind = .all
-        focus = nil
+        let id = editor.lines[index].id
+        addedLineSelection = nil
+        expandedLine = id
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            focus = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .description(id) : .price(id)
+        }
     }
 
     private func refreshCatalog(force: Bool = false) async {
         guard canUsePriceBook else { return }
-        await catalog.refresh(api: api, organizationID: session.activeOrganization?.id, force: force)
+        let expected = catalogContext
+        await catalog.refresh(api: api, organizationID: expected.organizationID,
+                              sessionGeneration: expected.sessionGeneration, force: force)
     }
 
     private var invoiceEditorHeading: some View {
@@ -318,6 +411,7 @@ struct InvoiceLineEditorView: View {
             commitPrices()
             let request = try editor.makeRequest()
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
+            addedLineSelection = nil
             onSaved(updated)
             dismiss()
         } catch is CancellationError {
@@ -344,7 +438,8 @@ struct InvoiceLineEditorView: View {
         busy = true
         defer { busy = false }
         do {
-            let current = try await api.fieldInvoice(invoice.id)
+            let current = try await api.liveFieldInvoice(invoice.id)
+            addedLineSelection = nil
             editor = InvoiceLineEditorState(invoice: current)
             staleRevision = false
             error = nil
@@ -366,6 +461,7 @@ struct InvoiceLineEditorView: View {
             var current = editor.invoice
             if editor.hasChanges {
                 current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())
+                addedLineSelection = nil
                 editor = InvoiceLineEditorState(invoice: current)
                 onSaved(current)
             }
@@ -380,175 +476,14 @@ struct InvoiceLineEditorView: View {
     }
 }
 
-private struct EditableInvoiceLineRow: View {
-    @Binding var line: InvoiceLineDraft
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-    let moveUp: () -> Void
-    let moveDown: () -> Void
-    let remove: () -> Void
+/// A catalogue quick editor never resolves by description, source item, or array position.
+struct InvoiceCatalogLineSelection: Equatable {
+    let lineID: UUID
+    let context: PriceBookCatalogContext
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .center, spacing: 8) {
-                TextField("Line item description", text: $line.description, axis: .vertical)
-                    .font(Theme.font(15, weight: .medium))
-                    .lineLimit(1...3)
-                    .accessibilityLabel("Line item description")
-                LineItemActions(name: line.description, canMoveUp: canMoveUp, canMoveDown: canMoveDown,
-                                moveUp: moveUp, moveDown: moveDown, remove: remove)
-            }
-            HStack(spacing: 8) {
-                Text("Qty").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                LineNumberField(label: "Quantity", placeholder: "1", text: $line.quantity)
-                if let unit = line.unitLabel, !unit.isEmpty {
-                    Text("/ \(unit)").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                }
-                Spacer(minLength: 8)
-                LineNumberField(label: "Unit price in dollars", placeholder: "0.00", text: $line.unitPrice,
-                                prefix: "$", decimal: true, width: 128)
-            }
-            if case .priceBookSelection = line.source {
-                Text("Price Book selection · server verifies the revision")
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
-            } else if case .retainedPriceBook = line.source {
-                Text("Price Book source retained")
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
-            } else if case .estimate = line.source {
-                Text("Estimate source retained")
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
-            }
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-    }
-}
-
-struct PaperPriceBookPicker: View {
-    @ObservedObject var api: APIClient
-    @EnvironmentObject private var session: SessionController
-    @Environment(\.dismiss) private var dismiss
-    let currency: String
-    /// When set and the customer is a member, each item also shows the member price.
-    var customerID: String? = nil
-    let onSelect: (PriceBookListItem) -> Void
-
-    @State private var memberPricing: MemberPricing?
-    @State private var items: [PriceBookListItem] = []
-    @State private var cursor: String?
-    @State private var search = ""
-    @State private var loading = false
-    @State private var error: String?
-
-    private var visibleItems: [PriceBookListItem] {
-        items.filter { item in
-            item.archivedAt == nil && item.sellPrice.currency == currency &&
-            (search.isEmpty || item.description.localizedCaseInsensitiveContains(search) ||
-             item.kind.localizedCaseInsensitiveContains(search) || item.unit.localizedCaseInsensitiveContains(search))
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if !session.can("pricebook.view", feature: "price_book") {
-                ContentUnavailableView("Price Book unavailable", systemImage: "book.closed",
-                    description: Text("This account cannot select Price Book items."))
-            } else {
-                PaperSearchField(text: $search, prompt: "Search loaded items")
-                List {
-                    if let error { ErrorBanner(message: error) }
-                    ForEach(visibleItems) { item in
-                        Button {
-                            onSelect(item)
-                            dismiss()
-                        } label: {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.description).font(Theme.font(14, weight: .medium))
-                                        .foregroundStyle(Theme.foreground)
-                                    Text("\(item.kind.capitalized) · \(item.unit) · Revision \(item.revision)")
-                                        .font(Theme.font(12)).foregroundStyle(Theme.muted)
-                                }
-                                Spacer(minLength: 8)
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                                        .moneyStyle(.row).foregroundStyle(Theme.foreground)
-                                    if let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0 {
-                                        // MF-05: no green on money; the word "Member" carries it.
-                                        Text("Member \(money(memberPricing.memberPrice(item.sellPrice.amount), currency: item.sellPrice.currency))")
-                                            .font(Theme.moneyFont(.line)).foregroundStyle(Theme.foreground)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 5)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Theme.card)
-                    }
-                    if cursor != nil {
-                        Button { Task { await loadMore() } } label: {
-                            HStack {
-                                Spacer()
-                                if loading { ProgressView() } else { Text("Load more items") }
-                                Spacer()
-                            }
-                        }
-                        .disabled(loading)
-                        .listRowBackground(Theme.card)
-                    }
-                    if visibleItems.isEmpty && !loading && error == nil {
-                        ContentUnavailableView(items.isEmpty ? "No active Price Book items" : "No matching items",
-                                               systemImage: "book.closed")
-                            .listRowBackground(Theme.background)
-                    }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .background(Theme.background)
-                .refreshable { await refresh() }
-                .task { await refresh() }
-                .task(id: customerID) {
-                    guard let customerID else { return }
-                    memberPricing = try? await api.memberPricing(customerID)
-                }
-            }
-        }
-        .background(Theme.background)
-        .navigationTitle("Add from Price Book")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-        }
-    }
-
-    private func refresh() async {
-        guard !loading else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await api.priceBookItems(limit: 50)
-            items = page.items
-            cursor = page.nextCursor
-            error = nil
-        } catch is CancellationError {
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    private func loadMore() async {
-        guard !loading, let cursor else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let page = try await api.priceBookItems(limit: 50, cursor: cursor)
-            let existing = Set(items.map(\.id))
-            items.append(contentsOf: page.items.filter { !existing.contains($0.id) })
-            self.cursor = page.nextCursor
-            error = nil
-        } catch is CancellationError {
-        } catch {
-            self.error = error.localizedDescription
-        }
+    func resolvedLineID(in lines: [InvoiceLineDraft], context current: PriceBookCatalogContext) -> UUID? {
+        guard context == current, current.organizationID?.isEmpty == false,
+              lines.filter({ $0.id == lineID }).count == 1 else { return nil }
+        return lineID
     }
 }

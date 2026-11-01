@@ -1,0 +1,7 @@
+# Job photo date grouping
+
+Paper 21A groups photos by date over a two-column grid. This change groups only by the actual `capturedAt` instant in the user's calendar/time zone, newest local day first. Missing or invalid timestamps remain in a clearly labelled group; within a day, server order is preserved. Waiting uploads, photo actions, tag filters, documents, permissions, and data fetching are not changed.
+
+Focused iPhone 16 Pro simulator run: 3 grouping unit cases, 9 release-note unit cases, and 3 UI cases passed. These cover fractional/standard ISO timestamps, offset and daylight saving, missing/malformed dates, filter group membership, tile visibility and existing tag control. The prior UI attempt failed before scrolling to a lazily instantiated photo, followed by a successful test with a scroll. The first launch attempt failed before test execution with simulator Mach -308; retry executed successfully.
+
+The snapshots use deliberately unavailable sample image downloads, so they demonstrate section layout, not photo transfer. Actual opening/retag success was not validated with the read-only preview. Physical device, iPad, RTL, VoiceOver, and high-count performance are untested. The largest-text screenshot exposes pre-existing clipped filter labels and oversized sticky capture controls that reduce the reading area; a separate follow-up is required. Release must exclude `--paper-preview-media-dates` and sample fixture literals.

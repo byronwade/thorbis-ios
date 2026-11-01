@@ -275,7 +275,7 @@ struct OperatingDetailsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if canEdit, model.profile != nil {
-                ToolbarItem(placement: .confirmationAction) {
+                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                     if model.saving { ProgressView() } else { Button("Save") { Task { await save() } } }
                 }
             }

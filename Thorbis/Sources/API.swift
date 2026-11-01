@@ -72,6 +72,7 @@ final class APIClient: ObservableObject {
 
     @Published var baseURL: String {
         didSet {
+            if baseURL != oldValue { invalidateRequests() }
             #if DEBUG
             if Self.validatedOrigin(baseURL) != nil {
                 UserDefaults.standard.set(baseURL, forKey: "thorbis.apiBaseURL")
@@ -83,10 +84,47 @@ final class APIClient: ObservableObject {
     @Published var displayName = ""
 
     private let session: URLSession
-    private(set) var requestGeneration = UUID()
+    @Published private(set) var requestGeneration = UUID()
     var onUnauthorized: (() -> Void)?
 
-    func invalidateRequests() { requestGeneration = UUID() }
+    func invalidateRequests() {
+        requestGeneration = UUID()
+        recentReads = [:]
+        if !savedCopyPaths.isEmpty { savedCopyPaths = [:] }
+    }
+
+    // MARK: Saved copies and repeat reads (offline + performance pass)
+
+    /// The verified actor and workspace whose saved copies this client reads and writes; nil
+    /// while signed out, which turns saved copies off entirely.
+    var savedCopyScope: String?
+    /// Set while the session knows there is no signal: kept reads answer from the phone at once
+    /// instead of waiting on a request that cannot finish.
+    var knownOffline = false
+    /// Reads whose answer on screen came from this phone, keyed by path, with when it was saved.
+    /// Published only when it changes, so live reads never re-render the app.
+    @Published private(set) var savedCopyPaths: [String: Date] = [:]
+    /// Called when a saved copy answered for lack of signal, so the session can re-check.
+    var onSavedCopyServed: (() -> Void)?
+    func savedCopyDate(_ path: String) -> Date? { savedCopyPaths[path] }
+
+    /// The same GET answered moments ago is reused instead of sent again (switching tabs or
+    /// returning to a screen re-runs its loads). Any change sent to the server clears it.
+    private struct RecentRead { let response: DataResponse; let at: Date; let epoch: Int; let generation: UUID }
+    private var recentReads: [String: RecentRead] = [:]
+    private var mutationEpoch = 0
+    private static let recentReadWindow: TimeInterval = 10
+    /// Reads that decide money, a signature, a permission or a price are never answered from the
+    /// recent-read reuse: a re-read there must see the server (a payment taken on the reader or a pay
+    /// link, a customer's approval, a stale document being re-checked, an edited price book item).
+    private static let freshOnlyReadMarkers = ["/invoices", "/estimates", "/payments", "/pay-link", "/refund",
+                                               "/public/", "/billing-schedules", "/closeout", "/price-book",
+                                               "/merchant", "/money-availability", "/permission", "/roles",
+                                               "/role-members", "/features", "/document"]
+    static func reusesRecentRead(_ path: String, query: [URLQueryItem] = []) -> Bool {
+        if path == "/v1/query", query.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }) { return false }
+        return !freshOnlyReadMarkers.contains { path.contains($0) }
+    }
 
     func clearSessionCookies() {
         guard let origin = Self.validatedOrigin(baseURL)?.url,
@@ -129,6 +167,16 @@ final class APIClient: ObservableObject {
         #endif
         return nil
     }
+
+    /// Canonical origin identity, using the same trust rules as every API request.
+    static func normalizedOrigin(_ raw: String) -> String? {
+        guard var origin = validatedOrigin(raw) else { return nil }
+        origin.host = origin.host?.lowercased()
+        origin.path = ""
+        return origin.string
+    }
+
+    var normalizedOrigin: String? { Self.normalizedOrigin(baseURL) }
 
     var isLoopback: Bool {
         #if DEBUG
@@ -191,8 +239,10 @@ final class APIClient: ObservableObject {
         return all
     }
 
-    func send<T: Decodable>(_ method: String, _ path: String, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
-        try await send(method, path, body: Optional<String>.none, queryItems: queryItems, cursor: cursor, authed: authed)
+    func send<T: Decodable>(_ method: String, _ path: String, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, requireFresh: Bool = false) async throws -> T {
+        let response = try await sendData(method, path, body: Optional<String>.none, queryItems: queryItems,
+                                          cursor: cursor, authed: authed, requireFresh: requireFresh)
+        return try decodeResponse(response)
     }
 
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
@@ -221,6 +271,90 @@ final class APIClient: ObservableObject {
         let response = try await sendData(method, path, body: body, authed: false, handleCookies: false)
         do { return try JSONDecoder().decode(T.self, from: response.data) }
         catch { throw Problem(title: "Invalid API response", status: response.status, detail: error.localizedDescription) }
+    }
+
+    /// Read a single authorized historical photo without materializing an unbounded response.
+    func legacyJobPhotoData(_ photo: JobPhotoRecord, organizationID: String, jobID: String) async throws -> Data {
+        let maxBytes = 15 * 1024 * 1024
+        let allowed = Set(["image/jpeg", "image/png", "image/webp", "image/heic"])
+        guard photo.organizationId == organizationID, photo.jobId == jobID,
+              UUID(uuidString: organizationID) != nil, UUID(uuidString: jobID) != nil,
+              UUID(uuidString: photo.id) != nil, allowed.contains(photo.contentType),
+              (1...maxBytes).contains(photo.byteSize),
+              var origin = Self.validatedOrigin(baseURL) else {
+            throw Problem(title: "Invalid photo", status: nil, detail: "The photo metadata is not supported.")
+        }
+        origin.path = "/v1/jobs/\(jobID)/photos/\(photo.id)"
+        guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: nil) }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.httpMethod = "GET"
+        request.setValue(photo.contentType, forHTTPHeaderField: "Accept")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        #if DEBUG
+        if isLoopback, case let .devHeaders(user, org, roles) = auth {
+            request.setValue(user, forHTTPHeaderField: "x-thorbis-user")
+            request.setValue(org, forHTTPHeaderField: "x-thorbis-org")
+            request.setValue(roles, forHTTPHeaderField: "x-thorbis-roles")
+        }
+        #endif
+        let generation = requestGeneration
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            defer { bytes.task.cancel() }
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { throw CancellationError() }
+            guard let http = response as? HTTPURLResponse else {
+                throw Problem(title: "Invalid photo", status: nil, detail: "The server response was invalid.")
+            }
+            if http.statusCode == 401 { onUnauthorized?() }
+            guard (200..<300).contains(http.statusCode) else {
+                throw Problem(title: "Photo unavailable", status: http.statusCode, detail: "Try again when the photo is available.")
+            }
+            let actualType = http.value(forHTTPHeaderField: "Content-Type")?.lowercased().split(separator: ";").first.map(String.init)
+            guard actualType == photo.contentType,
+                  response.expectedContentLength < 0 || response.expectedContentLength == Int64(photo.byteSize) else {
+                throw Problem(title: "Invalid photo", status: http.statusCode, detail: "The photo response did not match its metadata.")
+            }
+            let data = try await Self.readLegacyPhotoBytes(bytes, expectedSize: photo.byteSize, status: http.statusCode) { [weak self] in
+                await self?.requestGeneration == generation
+            }
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { throw CancellationError() }
+            guard data.count == photo.byteSize else {
+                throw Problem(title: "Invalid photo", status: http.statusCode, detail: "The photo response was incomplete.")
+            }
+            return data
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let problem as Problem {
+            throw problem
+        } catch {
+            throw Problem(title: "Photo unavailable", status: nil, detail: error.localizedDescription)
+        }
+    }
+
+    // AsyncBytes yields individual bytes. Buffer them on the generic executor so a
+    // large photo does not monopolize the main actor; check the actor-owned session
+    // generation periodically and again before returning the result to the caller.
+    nonisolated private static func readLegacyPhotoBytes(
+        _ bytes: URLSession.AsyncBytes, expectedSize: Int, status: Int,
+        isCurrent: @Sendable () async -> Bool
+    ) async throws -> Data {
+        var data = Data()
+        data.reserveCapacity(expectedSize)
+        for try await byte in bytes {
+            guard data.count < expectedSize else {
+                throw Problem(title: "Invalid photo", status: status, detail: "The photo response exceeded its declared size.")
+            }
+            data.append(byte)
+            if data.count.isMultiple(of: 8192) {
+                try Task.checkCancellation()
+                guard await isCurrent() else { throw CancellationError() }
+            }
+        }
+        return data
     }
 
     func documentData(_ path: String) async throws -> Data {
@@ -281,7 +415,7 @@ final class APIClient: ObservableObject {
         let contentType: String?
     }
 
-    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, raw: (data: Data, contentType: String)? = nil) async throws -> DataResponse {
+    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil) async throws -> DataResponse {
         let generation = requestGeneration
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
@@ -294,8 +428,39 @@ final class APIClient: ObservableObject {
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: url, cachePolicy: requireFresh ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
+        if requireFresh { req.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
         req.httpMethod = method
+        let isGET = method.uppercased() == "GET"
+        if !isGET, !["HEAD", "OPTIONS"].contains(method.uppercased()) {
+            // Anything sent to the server may change what a read returns.
+            mutationEpoch += 1
+            recentReads = [:]
+        }
+        let pageQuery = requestQueryItems.filter { $0.name != "cursor" }
+        let isJSONRead = isGET && authed && body == nil && accept == "application/json" && !requireFresh
+        let readKey = isJSONRead ? SavedCopies.key(origin: requestOrigin, path: path, query: requestQueryItems) : nil
+        let epoch = mutationEpoch
+        let reuseKey = readKey.flatMap { Self.reusesRecentRead(path, query: requestQueryItems) ? $0 : nil }
+        if let reuseKey, !SavedCopies.liveOnly, let recent = recentReads[reuseKey], recent.epoch == epoch,
+           recent.generation == generation, Date().timeIntervalSince(recent.at) < Self.recentReadWindow {
+            PerfProbe.request(method, path, note: "reused")
+            return recent.response
+        }
+        let copyScope = savedCopyScope
+        let keptKey = isJSONRead && copyScope != nil && SavedCopies.isKept(path, query: pageQuery) ? readKey : nil
+        func savedCopy() -> DataResponse? {
+            guard let copyScope, let keptKey, generation == requestGeneration, savedCopyScope == copyScope,
+                  let copy = SavedCopyStore.shared.read(scope: copyScope, key: keptKey) else { return nil }
+            if savedCopyPaths[path] != copy.savedAt { savedCopyPaths[path] = copy.savedAt }
+            PerfProbe.request(method, path, note: "saved copy")
+            return DataResponse(data: copy.data, status: 200, contentType: "application/json")
+        }
+        if keptKey != nil, knownOffline, !SavedCopies.liveOnly, let copy = savedCopy() { return copy }
+        if let copyScope, let keptKey, SavedCopyStore.shared.exists(scope: copyScope, key: keptKey) {
+            // A weak signal should not hold the screen for a minute when a copy is on the phone.
+            req.timeoutInterval = 15
+        }
         req.httpShouldHandleCookies = handleCookies
         req.setValue(accept, forHTTPHeaderField: "accept")
         // URLSession does not supply the browser Origin required for cookie-backed mutations.
@@ -316,6 +481,7 @@ final class APIClient: ObservableObject {
             req.setValue(roles, forHTTPHeaderField: "x-thorbis-roles")
         }
         #endif
+        PerfProbe.request(method, path)
         let (data, resp): (Data, URLResponse)
         do { (data, resp) = try await session.data(for: req) }
         catch is CancellationError { throw CancellationError() }
@@ -323,8 +489,14 @@ final class APIClient: ObservableObject {
         catch {
             let offline: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost,
                                                .cannotConnectToHost, .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff]
+            if let urlError = error as? URLError, offline.contains(urlError.code), keptKey != nil, let copy = savedCopy() {
+                onSavedCopyServed?()
+                return copy
+            }
+            // A change says plainly that it needs signal; changes that can wait are kept by their
+            // screens (FieldOutbox, PendingMediaStore) before this message is ever shown.
             let detail = (error as? URLError).map { offline.contains($0.code) } == true
-                ? "No connection. Check your signal and try again."
+                ? (isGET ? "No connection. Check your signal and try again." : "This needs a connection. Try again when you have signal.")
                 : error.localizedDescription
             throw Problem(title: "Network error", status: nil, detail: detail)
         }
@@ -343,7 +515,17 @@ final class APIClient: ObservableObject {
             }
             throw Problem(title: "HTTP \(code)", status: code, detail: nil)
         }
-        return DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"))
+        let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"))
+        if let reuseKey, mutationEpoch == epoch {
+            recentReads[reuseKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
+            if recentReads.count > 200 { recentReads = recentReads.filter { Date().timeIntervalSince($0.value.at) < Self.recentReadWindow } }
+        }
+        if savedCopyPaths[path] != nil { savedCopyPaths[path] = nil }
+        if let copyScope, let keptKey, savedCopyScope == copyScope, code == 200,
+           response.contentType?.lowercased().hasPrefix("application/json") != false {
+            SavedCopyStore.shared.write(data, scope: copyScope, key: keptKey)
+        }
+        return response
     }
 }
 
@@ -356,9 +538,7 @@ extension String {
 }
 
 func relativeDay(_ iso: String?) -> String {
-    guard let iso else { return "" }
-    let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    guard let d = f.date(from: iso) else { return "" }
+    guard let iso, let d = JobFiltering.isoFractional.date(from: iso) else { return "" }
     let r = RelativeDateTimeFormatter(); r.unitsStyle = .short
     return r.localizedString(for: d, relativeTo: Date())
 }

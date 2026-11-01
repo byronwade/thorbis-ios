@@ -70,12 +70,26 @@ extension APIClient {
                                                          reason: "Changed in the Thorbis iPhone app"))
     }
 
-    func roleMembers() async throws -> [RoleMember] {
+    func roleMembers(requireComplete: Bool = false, whileCurrent: (() -> Bool)? = nil) async throws -> [RoleMember] {
         var items: [RoleMember] = []
         var cursor: String?
+        var seen: Set<String> = []
+        var pages = 0
+        var memberIDs: Set<String> = []
         repeat {
-            let page: Items<RoleMember> = try await send("GET", "/v1/organization/role-members", cursor: cursor)
-            items += page.items
+            let page: Items<RoleMember> = try await send("GET", "/v1/organization/role-members", cursor: cursor, requireFresh: requireComplete)
+            guard whileCurrent?() ?? true else {
+                throw CancellationError()
+            }
+            pages += 1
+            if requireComplete { items += page.items.filter { memberIDs.insert($0.member.memberId).inserted } }
+            else { items += page.items }
+            if requireComplete && items.count > 1 { return items }
+            if let next = page.nextCursor, requireComplete {
+                guard pages < 500, seen.insert(next).inserted, items.count < 2_000 else {
+                    throw Problem(title: "Incomplete members", status: nil, detail: "Could not check every team member.")
+                }
+            }
             guard page.nextCursor != cursor else { break }
             cursor = page.nextCursor
         } while cursor != nil && items.count < 2_000
@@ -136,19 +150,18 @@ struct TeamView: View {
                 if let error { ErrorBanner(message: error) { await load() } }
                 if loading && members.isEmpty { SkeletonRows(count: 6) }
                 if visible.isEmpty && !members.isEmpty {
-                    PaperEmptyState(symbol: "magnifyingglass", title: "No one matches",
-                                    message: "Nobody on the team matches that search or role.",
-                                    actionTitle: "Clear filters") { search = ""; filter = "All" }
+                    PaperEmptyState(symbol: "magnifyingglass", title: "No one on the team matches",
+                                    actionTitle: "Clear search") { search = ""; filter = "All" }
                 }
                 VStack(alignment: .leading, spacing: 0) {
-                    if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count) }
-                    ForEach(visible) { member in
+                    if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
+                    PaperCardList(data: visible) { member in
                         Button { if canManage && !member.member.isLegalOwner { opening = member } } label: {
                         HStack(spacing: 12) {
-                            Avatar(name: member.member.displayName, size: 34)
+                            Avatar(name: member.member.displayName, size: IconTile.size)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(member.member.displayName).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                Text(member.member.email).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                                Text(member.member.displayName).font(Theme.font(15, weight: .medium)).lineLimit(2)
+                                Text(member.member.email).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                             }
                             Spacer(minLength: 8)
                             // Role is a word on a quiet capsule; owner reads by weight, not a brand tint.
@@ -158,14 +171,14 @@ struct TeamView: View {
                                 .padding(.horizontal, 10).frame(height: 24)
                                 .background(Theme.fill, in: Capsule())
                             if canManage && !member.member.isLegalOwner {
-                                Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                                PaperDisclosure()
                             }
                         }
-                        .frame(minHeight: 56)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
+                        .frame(minHeight: 60)
                         .contentShape(Rectangle())
                         }
-                        .buttonStyle(PressStyle())
+                        .buttonStyle(RowPressStyle())
                         .accessibilityElement(children: .combine)
                         .accessibilityHint(canManage && !member.member.isLegalOwner ? "Change role" : "")
                         // MA-12: long-press mirrors what the row already offers.
@@ -183,17 +196,21 @@ struct TeamView: View {
                         }
                     }
                 }
-                .padding(.horizontal, Theme.gutter)
+                .paperCardMargin()
                 if canInvite && !invitations.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
-                        PaperGroupHeader(title: "Invited", count: invitations.count)
-                        ForEach(invitations) { invitation in
+                        PaperGroupHeader(title: "Invited", count: invitations.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                        PaperCardList(data: invitations) { invitation in
                             HStack(spacing: 12) {
-                                Image(systemName: "envelope").foregroundStyle(Theme.markOlive).frame(width: 34)
+                                IconTile(symbol: "envelope", tint: Theme.markOlive)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(invitation.email).font(Theme.font(15, weight: .medium)).lineLimit(1)
-                                    Text("\(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")")
-                                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                    Text(invitation.email).font(Theme.font(15, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                                    // "Invited" is the state: a word with its mark, then the role and expiry.
+                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                        StatusLabel(tone: .scheduled, word: "Invited", emphasis: .quiet)
+                                        Text("\(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")")
+                                            .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
+                                    }
                                 }
                                 Spacer(minLength: 8)
                                 ThorbisMenu(items: [
@@ -202,10 +219,11 @@ struct TeamView: View {
                                     Image(systemName: "ellipsis").frame(width: 44, height: 44)
                                 }
                             }
-                            .frame(minHeight: 56)
+                            .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 4).padding(.vertical, 8)
+                            .frame(minHeight: 60)
                         }
                     }
-                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                    .paperCardMargin().padding(.top, 16)
                 }
                 if canManage {
                     VStack(alignment: .leading, spacing: 0) {
@@ -215,17 +233,22 @@ struct TeamView: View {
                             }
                             .accessibilityLabel("New role")
                         }
-                        ForEach(customRoles) { role in
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                        PaperCardList(data: customRoles) { role in
                             Button { editingRoleID = role.id } label: {
-                                PaperMenuRow(role.revision.name, symbol: "person.badge.key", subtitle: role.revision.description?.isEmpty == false ? role.revision.description : nil, tile: Theme.markOlive)
+                                PaperMenuRow(role.revision.name, symbol: "person.badge.key", subtitle: role.revision.description?.isEmpty == false ? role.revision.description : nil, tile: Theme.markOlive, filled: true)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RowPressStyle())
                         }
                     }
-                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                    .paperCardMargin().padding(.top, 16)
                 }
-                if !loading && visible.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "person.2", title: search.isEmpty ? "No team members" : "No matches", message: "Invite people with the invite button above.")
+                // Only when there is truly no one; a search with no match has its own state above.
+                if !loading && members.isEmpty && error == nil {
+                    PaperEmptyState(symbol: "person.2", title: "No one on the team",
+                                    message: canInvite ? "Bring your techs in. Invite someone." : "Ask an owner to invite your crew.",
+                                    actionTitle: canInvite ? "Invite someone" : nil,
+                                    action: canInvite ? { inviting = true } as () -> Void : nil)
                 }
                 Text(canManage ? "Tap a person to change their role or what they can do." : "Ask an owner to change roles.")
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
@@ -234,48 +257,53 @@ struct TeamView: View {
             .padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if canInvite {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { inviting = true } label: { Image(systemName: "person.badge.plus") }.accessibilityLabel("Invite to team")
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    PaperCircleButton(symbol: "person.badge.plus", label: "Invite to team", fill: Theme.card, bordered: true) { inviting = true }
                 }
             }
         }
-        .sheet(isPresented: $inviting) {
+        .sheet(isPresented: $inviting) { SheetSurface {
             InviteMemberSheet { sent in
                 notice = sent.delivery == "sent" ? "Invite sent to \(sent.email)." : "Invite created for \(sent.email). Email isn't set up yet, so share the link from the web."
                 await load()
             }
-        }
+        } }
         .safeAreaInset(edge: .top) {
             if let notice {
                 Text(notice).font(Theme.font(13)).foregroundStyle(Theme.foreground)
                     .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .panelBackground(cornerRadius: Theme.controlRadius)
                     .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).strokeBorder(Theme.border))
                     .padding(.horizontal, Theme.gutter)
                     .onTapGesture { self.notice = nil }
             }
         }
         .refreshable { await load() }
-        .task { await load() }
-        .sheet(item: $changing) { member in
-            MemberRoleSheet(member: member) { await load() }
+        .task {
+            #if DEBUG
+            if PaperPreview.opensSheet("team-invite") { inviting = true }
+            #endif
+            await load()
         }
+        .sheet(item: $changing) { member in SheetSurface {
+            MemberRoleSheet(member: member) { await load() }
+        } }
         .removeMemberPrompt($removing, onRemoved: { removed in
             notice = "\(removed.member.displayName) was removed from the team."
             await load()
         }, onError: { message in error = message })
-        .navigationDestination(item: $opening) { member in
+        .thorbisDestination(item: $opening) { member in
             MemberAccessView(member: member) { await load() }
         }
-        .navigationDestination(item: $editingRoleID) { id in
+        .thorbisDestination(item: $editingRoleID) { id in
             RoleEditorView(roleID: id) { await load() }
         }
         .alert("New role", isPresented: $naming) {
-            TextField("Role name", text: $newRoleName)
+            TextField("Role name", text: $newRoleName, prompt: .placeholder("Role name"))
             Button("Create") { Task { await createRole() } }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -361,11 +389,11 @@ struct MemberRoleSheet: View {
                 if let error { Section { ListErrorRow(message: error) } }
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.background)
-            .overlay(alignment: .top) { if !loaded { SkeletonRows(count: 4, leading: false).background(Theme.background) } }
+            .background(Theme.canvas)
+            .overlay(alignment: .top) { if !loaded { SkeletonRows(count: 4, leading: false).background(Theme.canvas) } }
             .navigationTitle("Change role")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            .toolbar { ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .task {
                 do { roles = try await api.organizationRoles() } catch { self.error = error.localizedDescription }
                 loaded = true

@@ -201,7 +201,7 @@ struct SetupWizardView: View {
         .sheet(isPresented: $showStripe, onDismiss: { Task { await loadPayments() } }) {
             NavigationStack {
                 PaymentsSetupView()
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showStripe = false } } }
+                    .toolbar { ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Done") { showStripe = false } } }
             }
         }
         .task {

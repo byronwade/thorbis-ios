@@ -1,0 +1,7 @@
+# Customer history from jobs
+
+A customer profile brings together the information from that customer's jobs. Photos, documents, notes, estimates, invoices and activity retain their job identity and are organized so the user can see both the overall collection and where each item came from. Multiple jobs' photos contribute to the customer's visible total: for example, 15 and 20 photos make 35, provided both sources were successfully read. Partial or unauthorized reads must not be presented as a complete count.
+
+Customers can have multiple contacts and locations. A job may eventually have multiple contacts and locations too, but the current job API does not express those relationships; account-wide contacts and locations must not be labeled as confirmed job associations. Do not infer a job site from the customer's first location. Job-specific associations need a canonical, authorized server contract before being stored or claimed by the app.
+
+The photo roll-up must include authorized modern media and historical job photos, while deduplicating reconciled records only on verified tenant, job and shared storage identity. Each image and detail is authorized against its owning job, session transitions retire previously visible images, and a failed or inconsistent source is disclosed with a retry path. Pending or archived items follow their real status rather than being counted as stored photos.

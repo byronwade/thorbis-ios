@@ -1,0 +1,31 @@
+{
+  "build": 80,
+  "runtimeSource": "d6e638594414b749ef8d513a2911a918a9a6f73e",
+  "bundle": "com.thorbis.field",
+  "version": "1.0",
+  "team": "T677262U5B",
+  "deviceFamilies": [
+    1,
+    2
+  ],
+  "minimumOS": "18.0",
+  "widgetBundle": "com.thorbis.field.widgets",
+  "widgetBuild": "80",
+  "tapEnabled": false,
+  "strictCodesign": true,
+  "sdkPurposeStringsVerified": true,
+  "terminalVersion": "5.8.1",
+  "purposeDescriptions": {
+    "NSBluetoothAlwaysUsageDescription": "Thorbis uses Bluetooth to connect to supported card readers for in-person payments.",
+    "NSLocationWhenInUseUsageDescription": "Thorbis uses your location to show your position on the schedule map and verify where in-person card payments occur."
+  },
+  "frozenSwiftFiles": 187,
+  "frozenOtherFiles": 3,
+  "sourceMismatches": 0,
+  "previewFlagsExcluded": 41,
+  "additionalFixtureControlsExcluded": 20,
+  "binarySHA256": "878d17d90f4f4f6112b54b25be3d89de718c70bf8dbcd6a880732d59d0119ddc",
+  "archive": "/private/tmp/thorbis-80.m4kn3aku/Thorbis.xcarchive",
+  "archiveSigning": "development",
+  "distributionExportAudited": false
+}

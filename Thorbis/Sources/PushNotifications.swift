@@ -19,6 +19,7 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         self.api = api
         self.store = store
         UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().setNotificationCategories(NotificationActions.categories)
     }
 
     /// Called whenever the verified identity changes: a signed-in launch, a sign-in or a workspace switch.
@@ -89,6 +90,19 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         let jobID = Self.jobID(from: userInfo)
         let record = (userInfo["thorbis"] as? [String: Any]).flatMap(RecordLink.init(push:))
+        // "On my way" runs in the background through the same path as the Lock Screen card; if it
+        // can't (signed out, no permission, the job already moved on) the phone says so and the
+        // job opens next time Thorbis does.
+        if response.actionIdentifier == NotificationActions.onMyWay, let jobID {
+            do {
+                try await JobStepIntentRunner.run(jobID: jobID, target: "en_route")
+            } catch {
+                await MainActor.run { store?.requestedJobID = jobID }
+                await NotificationActions.reportFailure(error, jobID: jobID)
+            }
+            return
+        }
+        guard response.actionIdentifier != UNNotificationDismissActionIdentifier else { return }
         let digest = Self.isMorningDigest(userInfo)
         await MainActor.run {
             // TG-11: the digest opens Today.
@@ -150,6 +164,38 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
         return id
+    }
+}
+
+/// Actions on job, estimate and payment notifications. A push shows them when it names one of
+/// these categories in `aps.category` and carries the matching id under `thorbis`.
+enum NotificationActions {
+    static let job = "thorbis.job"
+    static let estimate = "thorbis.estimate"
+    static let invoice = "thorbis.invoice"
+    static let open = "thorbis.open"
+    static let onMyWay = "thorbis.on-my-way"
+
+    static var categories: Set<UNNotificationCategory> {
+        let open = UNNotificationAction(identifier: open, title: "Open", options: [.foreground],
+                                        icon: UNNotificationActionIcon(systemImageName: "arrow.up.forward.app"))
+        // Marks the job On my way (the customer may be told), so it asks for Face ID or the passcode.
+        let onMyWay = UNNotificationAction(identifier: onMyWay, title: "On my way", options: [.authenticationRequired],
+                                           icon: UNNotificationActionIcon(systemImageName: "car"))
+        return [UNNotificationCategory(identifier: job, actions: [open, onMyWay], intentIdentifiers: []),
+                UNNotificationCategory(identifier: estimate, actions: [open], intentIdentifiers: []),
+                UNNotificationCategory(identifier: invoice, actions: [open], intentIdentifiers: [])]
+    }
+
+    /// A step from a notification didn't go through: say so with the reason, and offer the job.
+    static func reportFailure(_ error: Error, jobID: String) async {
+        let content = UNMutableNotificationContent()
+        content.title = "Couldn't mark On my way"
+        content.body = error.localizedDescription
+        content.categoryIdentifier = job
+        content.userInfo = ["thorbis": ["jobId": jobID]]
+        let request = UNNotificationRequest(identifier: "on-my-way-failed-\(jobID)", content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
     }
 }
 

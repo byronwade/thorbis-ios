@@ -29,6 +29,7 @@ struct CustomerEstimateFlow: Equatable {
     let estimate: EstimateRecord
     var step: Step
     var selectedOptionID: String?
+    private(set) var issuedRevision: CustomerIssuedEstimateRevision?
 
     init(estimate: EstimateRecord) {
         self.estimate = estimate
@@ -38,21 +39,21 @@ struct CustomerEstimateFlow: Equatable {
 
     static func options(_ estimate: EstimateRecord) -> [FieldEstimateOption] { estimate.options ?? [] }
 
-    var options: [FieldEstimateOption] { Self.options(estimate) }
+    var options: [FieldEstimateOption] { issuedRevision.map { $0.options ?? [] } ?? Self.options(estimate) }
     var hasOptions: Bool { !options.isEmpty }
     var selectedOption: FieldEstimateOption? { options.first { $0.id == selectedOptionID } }
 
     /// The lines and total being approved: the chosen option's, or the estimate's own.
-    var lines: [FieldLine] { hasOptions ? selectedOption?.lines ?? [] : estimate.lines }
-    var currency: String { selectedOption?.currency ?? estimate.lines.first?.unitPrice.currency ?? "USD" }
+    var lines: [FieldLine] { hasOptions ? selectedOption?.lines ?? [] : issuedRevision?.lines ?? estimate.lines }
+    var currency: String { selectedOption?.currency ?? issuedRevision?.currency ?? estimate.lines.first?.unitPrice.currency ?? "USD" }
     var total: Int? {
         if hasOptions { return selectedOption?.totalAmount }
-        return paperLinesTotal(estimate.lines)
+        return issuedRevision?.totalAmount ?? paperLinesTotal(estimate.lines)
     }
     var totalText: String { total.map { money($0, currency: currency) } ?? "" }
 
     /// The name of what is being approved, said the way the tech says it.
-    var choiceName: String { selectedOption?.title ?? estimate.title }
+    var choiceName: String { selectedOption?.title ?? issuedRevision?.title ?? estimate.title }
 
     var canReview: Bool { !hasOptions || selectedOption != nil }
 
@@ -61,11 +62,23 @@ struct CustomerEstimateFlow: Equatable {
         guard let option = selectedOption else { return "Choose an option" }
         return "Review \(option.title) · \(money(option.totalAmount, currency: option.currency))"
     }
-    var approveTitle: String { total == nil ? "Approve and sign" : "Approve and sign · \(totalText)" }
+    var approveTitle: String {
+        let what = selectedOption.map { "Approve \($0.title)" } ?? "Approve and sign"
+        return total == nil ? what : "\(what) · \(totalText)"
+    }
+    /// When the option's name doesn't fit on one line beside the amount, the commit drops the
+    /// name (it is the heading right above) instead of breaking over two lines.
+    var approveShortTitle: String { total == nil ? "Approve and sign" : "Approve · \(totalText)" }
     var signTitle: String { total == nil ? "Approve" : "Approve \(totalText)" }
 
     mutating func choose(_ optionID: String) { selectedOptionID = optionID }
     mutating func review() { if canReview { step = .review } }
+    mutating func useIssuedRevision(_ revision: CustomerIssuedEstimateRevision) throws {
+        try revision.validate(for: estimate)
+        issuedRevision = revision
+        if !options.contains(where: { $0.id == selectedOptionID }) { selectedOptionID = nil }
+        step = canReview ? (hasOptions && step == .choose ? .choose : .review) : .choose
+    }
     mutating func back() {
         switch step {
         case .review: if hasOptions { step = .choose }
@@ -86,43 +99,22 @@ func customerSignatureHint(name: String, hasInk: Bool) -> String? {
     }
 }
 
-// MARK: - In-person approval with options
-
-private struct IssuedPaper: Decodable { let contentHash: String }
-private struct InPersonLink: Decodable { let token: String }
-
-@MainActor
-extension APIClient {
-    /// Options are chosen and signed through the same customer action the emailed link uses, so
-    /// the server records which option and whose name. Issuing is content-addressed (a repeat
-    /// returns the same paper); minting replaces any earlier link for this revision.
-    func openInPersonEstimateApproval(_ id: String, revisionNumber: Int) async throws -> (token: String, action: PublicEstimateAction) {
-        struct Empty: Encodable {}
-        struct Mint: Encodable { let revisionNumber: Int; let contentHash: String }
-        let paper: IssuedPaper = try await send("POST", financialPath("/v1/estimates", id: id, suffix: "/commercial-documents"), body: Empty())
-        let link: InPersonLink = try await send("POST", financialPath("/v1/estimates", id: id, suffix: "/action-tokens"),
-                                                body: Mint(revisionNumber: revisionNumber, contentHash: paper.contentHash))
-        return (link.token, try await publicDocumentAction(token: link.token))
-    }
-}
-
 // MARK: - Estimate
 
 /// "Show to customer" for an estimate: choose an option, review it, sign, done.
 struct CustomerEstimatePresentation: View {
     let jobID: String?
     let customerName: String
-    /// True when the company offers financing; the lender decides per amount (CP-13, CP-14).
-    let financing: Bool
     let onApproved: (EstimateRecord?) -> Void
     let onDone: () -> Void
+    let returnToDocuments: (() -> Void)?
+    /// True when the company offers financing; the lender decides per amount (CP-13, CP-14).
+    let financing: Bool
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var flow: CustomerEstimateFlow
-    @State private var offer = FinancingOffer.off
-    @State private var showTerms = false
-    @State private var detailsFor: FieldEstimateOption?
     @State private var confirmNotToday = false
     @State private var name: String
     @State private var strokes: [[CGPoint]] = []
@@ -131,38 +123,79 @@ struct CustomerEstimatePresentation: View {
     @State private var error: String?
     @State private var signedAt: Date?
     @State private var signedName = ""
+    @State private var offer = FinancingOffer.off
+    @State private var showTerms = false
     @State private var isMember = false
+    @State private var openingReview = false
+    @State private var openingError: String?
+    @State private var reviewGeneration: UUID?
+    @State private var reviewRequestID = UUID()
+    @StateObject private var handoffObservation: CustomerEstimateHandoffObservation
+    private var handoff: CustomerEstimateHandoffContext? { handoffObservation.context }
+    private var actionBusy: Bool { busy || handoff?.running == true }
 
-    init(estimate: EstimateRecord, jobID: String?, customerName: String, preselectedOptionID: String? = nil, financing: Bool = false,
+    init(estimate: EstimateRecord, jobID: String?, customerName: String, preselectedOptionID: String? = nil,
+         financing: Bool = false,
+         handoff: CustomerEstimateHandoffContext? = nil, returnToDocuments: (() -> Void)? = nil,
          onApproved: @escaping (EstimateRecord?) -> Void, onDone: @escaping () -> Void) {
         self.jobID = jobID
-        self.customerName = customerName
         self.financing = financing
+        self.customerName = customerName
         self.onApproved = onApproved
         self.onDone = onDone
+        self.returnToDocuments = returnToDocuments
+        _handoffObservation = StateObject(wrappedValue: CustomerEstimateHandoffObservation(handoff))
         var flow = CustomerEstimateFlow(estimate: estimate)
         if let preselectedOptionID {
             flow.choose(preselectedOptionID)
             flow.review()
         }
         _flow = State(initialValue: flow)
-        _name = State(initialValue: customerName)
+        _name = State(initialValue: handoff?.signature?.signerName ?? handoff?.initialSignerName ?? customerName)
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
     /// The proven drawn-signature approval needs a job and a single scope; options go through
     /// the customer action, which records the chosen option with the typed name.
     private var drawnApproval: Bool { jobID != nil && !flow.hasOptions }
+    private var showsBackCircle: Bool {
+        handoff == nil && returnToDocuments == nil && flow.hasOptions && flow.step == .review && reviewReady && !actionBusy
+    }
+    private var reviewReady: Bool {
+        !openingReview && flow.issuedRevision != nil && reviewGeneration == api.requestGeneration
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    switch flow.step {
-                    case .choose: chooseScreen
-                    case .review: reviewScreen
-                    case .sign: signScreen
-                    case .done: doneScreen
+                    if let handoff, !handoff.current() {
+                        CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
+                                             message: "Return the device to your technician to reopen this job.")
+                    } else if handoff?.outcome == .unknown {
+                        unknownScreen
+                    } else if case .retryable(let reason)? = handoff?.outcome {
+                        header(eyebrow: "Connection interrupted", title: flow.choiceName)
+                        Text(reason).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                    } else if case .needsReview(let reason)? = handoff?.outcome {
+                        header(eyebrow: "This estimate needs review", title: flow.choiceName)
+                        Text(reason).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                    } else if handoff?.outcome?.isApproved == true {
+                        doneScreen
+                    } else if flow.step == .done || reviewReady {
+                        switch flow.step {
+                        case .choose: chooseScreen
+                        case .review: reviewScreen
+                        case .sign: signScreen
+                        case .done: doneScreen
+                        }
+                    } else if let openingError {
+                        // The bottom bar carries the one action (Try again), so the state is words only.
+                        CustomerStateMessage(symbol: "doc.text.magnifyingglass", title: "We couldn’t open your estimate",
+                                             message: openingError)
+                    } else {
+                        CustomerSkeleton(caption: "Opening your estimate…")
+                            .accessibilityIdentifier("customer-estimate-opening")
                     }
                 }
                 .padding(.horizontal, Theme.gutter)
@@ -170,16 +203,33 @@ struct CustomerEstimatePresentation: View {
                 .padding(.bottom, 24)
                 .frame(maxWidth: type.regular ? 1000 : .infinity, alignment: .leading)
                 .frame(maxWidth: .infinity)
+                // At accessibility sizes a pinned bar would fill half the screen and hide the options,
+                // so the actions follow the content instead (as on the job screen).
+                if typeSize.isAccessibilitySize { bottomBar }
             }
             .scrollDismissesKeyboard(.interactively)
-            bottomBar
+            .accessibilityIdentifier("customer-estimate-presentation-\(flow.estimate.id)")
+            if !typeSize.isAccessibilitySize { bottomBar }
         }
         .foregroundStyle(Theme.foreground)
+        .task(id: api.requestGeneration) {
+            await openReview()
+            if handoff != nil, handoff?.signature == nil, handoff?.outcome == nil, reviewReady { await startSigning() }
+        }
         .animation(.easeOut(duration: 0.2), value: flow.step)
-        .sheet(item: $detailsFor) { option in includedSheet(option) }
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadOffer() }
         .task { isMember = await api.customerIsMember(flow.estimate.customerId) }
+        .toolbar {
+            // PresentDetail.dc.html: a round back circle opposite the lock. Only where this screen is
+            // the customer-mode root; pushed hosts (handoff, job documents) already show their back.
+            if showsBackCircle {
+                ThorbisToolbarItem(placement: .topBarLeading, customerFacing: true) {
+                    PaperCircleButton(symbol: "chevron.left", label: "Back to options", size: 44, fill: Theme.fill) { flow.back() }
+                        .accessibilityIdentifier("customer-estimate-back-to-options")
+                }
+            }
+        }
         .thorbisConfirm("Not ready to decide?",
                         message: "You can think about it and decide later, or decline this estimate now.",
                         isPresented: $confirmNotToday,
@@ -192,11 +242,9 @@ struct CustomerEstimatePresentation: View {
     // MARK: Screens
 
     private var chooseScreen: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            header(eyebrow: "Estimate for \(customerName)", title: "Choose an option")
-            Text("Tap the one you want. You'll see everything again before you sign.")
-                .font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 18) {
+            header(eyebrow: "Estimate for \(customerName)", title: "Choose an option",
+                   summary: "Tap one. You’ll see every line before you sign.")
             let options = flow.options
             if type.regular && options.count <= 3 {
                 HStack(alignment: .top, spacing: 16) {
@@ -213,7 +261,7 @@ struct CustomerEstimatePresentation: View {
     @ViewBuilder private var seeTerms: some View {
         if offer.disclosure != nil {
             Button { showTerms = true } label: {
-                Text("See \(offer.lenderName) terms").font(Theme.font(type.body)).underline()
+                Text("See \(offer.lenderName) terms").font(Theme.customerFont(type.body)).underline()
                     .foregroundStyle(Theme.brandText)
                     .frame(minHeight: type.target, alignment: .leading)
             }
@@ -221,67 +269,72 @@ struct CustomerEstimatePresentation: View {
         }
     }
 
+    /// The whole card is the choice (F25): price first, then the option's name and what it is.
+    /// Every line is shown on the next step ("Review <option>"), so the card carries no second link.
     private func optionCard(_ option: FieldEstimateOption) -> some View {
         let selected = flow.selectedOptionID == option.id
-        return VStack(alignment: .leading, spacing: 10) {
-            Text(option.title).font(Theme.font(type.heading, weight: .medium))
-                .accessibilityAddTraits(.isHeader)
-            if !option.description.isEmpty {
-                Text(option.description).font(Theme.font(type.body))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text(money(option.totalAmount, currency: option.currency))
-                .font(Theme.monoFont(type.total, weight: .medium))
-                .minimumScaleFactor(0.6).lineLimit(1)
-                .accessibilityLabel("Total \(money(option.totalAmount, currency: option.currency))")
-            if let saved = customerSavingsText(option.lines, currency: option.currency) {
-                Text("Includes \(savingsLabel(isMember).lowercased()) of \(saved)")
-                    .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
-            }
-            if let example = offer.example(for: option.totalAmount) {
-                CustomerFinancingLine(example: example, type: type)
-            }
-            Button { detailsFor = option } label: {
-                Text("See what's included").font(Theme.font(type.body)).underline()
-                    .foregroundStyle(Theme.brandText)
-                    .frame(minHeight: type.target, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            Spacer(minLength: 0)
+        let total = money(option.totalAmount, currency: option.currency)
+        return VStack(alignment: .leading, spacing: 0) {
             Button { flow.choose(option.id) } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 24))
-                        .foregroundStyle(selected ? Theme.brandText : Theme.muted)
-                        .accessibilityHidden(true)
-                    Text(selected ? "Selected" : "Choose \(option.title)")
-                        .font(Theme.font(type.body, weight: .medium))
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(total)
+                            .font(Theme.customerFont(type.heading + 6, weight: .medium)).monospacedDigit().tracking(-0.3)
+                            .minimumScaleFactor(0.6).lineLimit(1)
+                        Spacer(minLength: 8)
+                        CustomerRadio(selected: selected)
+                    }
+                    Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                    if !option.description.isEmpty {
+                        Text(option.description).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                    }
+                    if let saved = customerSavingsText(option.lines, currency: option.currency) {
+                        Text("Includes \(savingsLabel(isMember).lowercased()) of \(saved)")
+                            .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                            .padding(.top, 6)
+                    }
+                    if let example = offer.example(for: option.totalAmount) {
+                        CustomerFinancingLine(example: example, type: type)
+                            .padding(.top, 6)
+                    }
+                    Text("\(option.lines.count) \(option.lines.count == 1 ? "item" : "items")")
+                        .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                        .padding(.top, 10)
                 }
-                .frame(maxWidth: .infinity, minHeight: type.target)
                 .foregroundStyle(Theme.foreground)
-                // Selection is the blue pointer; the screen's only ink is the commit (CP-07).
-                .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: 14))
+                .frame(maxWidth: .infinity, minHeight: type.target, alignment: .topLeading)
+                .padding(18)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(selected ? .isSelected : [])
+            .buttonStyle(PressStyle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(selected ? "\(option.title), selected" : "Choose \(option.title)")
+            .accessibilityValue("Total \(total)")
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         }
-        .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(selected ? Theme.foreground : Theme.border, lineWidth: selected ? 2 : 1))
-        .contentShape(RoundedRectangle(cornerRadius: 14))
-        .onTapGesture { flow.choose(option.id) }
+        // Selection is the blue ring and the radio; the screen's only ink is the commit (CP-07).
+        .panelBackground(cornerRadius: 14)
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(selected ? Theme.brand : Theme.border, lineWidth: selected ? 2 : 1))
+        .animation(.easeOut(duration: 0.15), value: selected)
     }
 
+    /// "What's included": the chosen option (or the single scope) with every line in full,
+    /// its quantity and amount, and the total that will be signed.
     private var reviewScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
-            header(eyebrow: "You're approving", title: flow.choiceName)
-            if flow.hasOptions, let description = flow.selectedOption?.description, !description.isEmpty {
-                Text(description).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
-            }
-            CustomerLinesCard(lines: customerEstimateLines(flow.lines), currency: flow.currency, type: type,
-                              rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
-                                  + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
+            let index = flow.options.firstIndex { $0.id == flow.selectedOptionID }
+            header(eyebrow: flow.hasOptions ? "Option \((index ?? 0) + 1) of \(flow.options.count)" : "Your estimate",
+                   title: flow.choiceName, summary: flow.hasOptions ? flow.selectedOption?.description : nil)
+            CustomerIncludedLines(lines: customerEstimateLines(flow.lines), type: type,
+                                  rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
+                                      + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
             if let total = flow.total, let example = offer.example(for: total) {
                 CustomerFinancingLine(example: example, type: type)
                 seeTerms
@@ -293,31 +346,31 @@ struct CustomerEstimatePresentation: View {
         VStack(alignment: .leading, spacing: 18) {
             header(eyebrow: "\(flow.choiceName) · \(flow.totalText)", title: "Sign to approve")
             Text(consentText ?? "By signing, I approve \"\(flow.choiceName)\" for \(flow.totalText) as shown.")
-                .font(Theme.font(type.body))
+                .font(Theme.customerFont(type.body))
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
-                Text("Your full name").font(Theme.font(type.small, weight: .medium)).foregroundStyle(Theme.muted)
-                TextField("Your full name", text: $name)
+                Text("Your full name").font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
+                TextField("Your full name", text: $name, prompt: .placeholder("Your full name"))
                     .textContentType(.name)
-                    .font(Theme.font(type.body))
+                    .font(Theme.customerFont(type.body))
                     .padding(.horizontal, 16)
                     .frame(minHeight: type.target)
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Your signature").font(Theme.font(type.small, weight: .medium)).foregroundStyle(Theme.muted)
+                    Text("Your signature").font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
                     Spacer()
                     if SignatureInk.hasInk(strokes) {
                         Button("Clear") { strokes = [] }
-                            .font(Theme.font(type.small, weight: .medium))
+                            .font(Theme.customerFont(type.small, weight: .medium))
                             .frame(minWidth: type.target, minHeight: 44)
                     }
                 }
                 ZStack(alignment: .bottomLeading) {
                     SignaturePad(strokes: $strokes)
                     if !SignatureInk.hasInk(strokes) {
-                        Text("Sign here with your finger").font(Theme.font(type.small)).foregroundStyle(.black.opacity(0.45))
+                        Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(.black.opacity(0.62))
                             .padding(16).allowsHitTesting(false)
                     }
                 }
@@ -325,9 +378,12 @@ struct CustomerEstimatePresentation: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
                 .accessibilityLabel("Signature box. Sign with your finger.")
+                .accessibilityIdentifier("customer-estimate-signature-pad")
+                .accessibilityValue(handoff?.signature != nil ? "Signature saved for this estimate" : SignatureInk.hasInk(strokes) ? "Signature entered" : "Signature required")
+                .allowsHitTesting(handoff?.submissionStarted != true)
             }
             if let error {
-                Text(error).font(Theme.font(type.body)).foregroundStyle(Theme.destructive)
+                Text(error).font(Theme.customerFont(type.body)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -337,14 +393,14 @@ struct CustomerEstimatePresentation: View {
         VStack(alignment: .center, spacing: 18) {
             Image(systemName: "checkmark.circle.fill").font(.system(size: 64)).foregroundStyle(Theme.success)
                 .accessibilityHidden(true).padding(.top, 40)
-            Text("Approved").font(Theme.font(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
-            Text(doneSentence).font(Theme.font(type.body)).multilineTextAlignment(.center)
+            Text("Approved").font(Theme.customerFont(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
+            Text(doneSentence).font(Theme.customerFont(type.body)).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if flow.total != nil {
-                Text(flow.totalText).font(Theme.monoFont(type.total, weight: .medium))
+                Text(flow.totalText).font(Theme.customerMonoFont(type.total, weight: .medium))
             }
-            Text("Thank you. Please hand the device back to your technician.")
-                .font(Theme.font(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            Text(handoff == nil && returnToDocuments == nil ? "Thank you. Please hand the device back to your technician." : "This estimate is approved. Continue when you're ready.")
+                .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
@@ -352,8 +408,12 @@ struct CustomerEstimatePresentation: View {
 
     private var doneSentence: String {
         let what = flow.choiceName
+        if let handoff {
+            if let signer = handoff.approvedSignerName { return "\(what), signed by \(signer)." }
+            return "\(what) is approved."
+        }
         if let signedAt {
-            return "\(what), signed by \(signedName) at \(signedAt.formatted(date: .omitted, time: .shortened))."
+            return "\(what), signed by \(signedName) at \(signedAt.tradeTime)."
         }
         if let signature = flow.estimate.approvalSignature {
             return "\(what), signed by \(signature.signerName)."
@@ -365,83 +425,129 @@ struct CustomerEstimatePresentation: View {
 
     @ViewBuilder private var bottomBar: some View {
         VStack(spacing: 10) {
+            if let handoff, handoff.outcome != nil {
+                if handoff.outcome?.isApproved == true {
+                    CustomerPresentationCommit(title: handoff.continueTitle, enabled: true, busy: false, type: type, action: onDone)
+                } else if case .retryable? = handoff.outcome {
+                    CustomerPresentationCommit(title: "Try again", enabled: handoff.canApprove(), busy: actionBusy, type: type) {
+                        handoff.run {
+                            await handoff.recoverPreparation()
+                            guard handoff.outcome == nil else { return }
+                            await approve()
+                        }
+                    }
+                } else if handoff.outcome == .unknown, handoff.retryVerified {
+                    CustomerPresentationCommit(title: "Retry exact approval", enabled: handoff.canApprove(), busy: actionBusy, type: type) {
+                        handoff.run { await approve() }
+                    }
+                }
+                CustomerSecondaryButton(title: "Back to selected work", type: type, action: handoff.backToReview)
+            } else if flow.step == .done || reviewReady {
             switch flow.step {
             case .choose:
                 CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
-                if let error { hint(error, danger: true) } else if !flow.canReview { hint("Choose an option above to continue.") }
-                CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
-            case .review:
-                CustomerPresentationCommit(title: flow.approveTitle, enabled: true, busy: busy, type: type) { Task { await startSigning() } }
+                // The disabled commit already reads "Choose an option", so no second line repeats it.
                 if let error { hint(error, danger: true) }
-                HStack(spacing: 10) {
-                    if flow.hasOptions { CustomerSecondaryButton(title: "Back", type: type) { flow.back() } }
-                    CustomerSecondaryButton(title: "Not today", type: type) { confirmNotToday = true }
+                CustomerQuietActions {
+                    CustomerTextButton(title: "Not today", type: type) { confirmNotToday = true }
+                    if let returnToDocuments {
+                        CustomerTextButton(title: "Job documents", type: type, action: returnToDocuments)
+                            .disabled(actionBusy || openingReview)
+                            .accessibilityLabel("Back to job documents")
+                    }
+                }
+            case .review:
+                CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
+                    .accessibilityIdentifier("customer-estimate-approve")
+                if let error { hint(error, danger: true) }
+                // PresentDetail.dc.html: "See other options" is the quiet action right under the commit.
+                CustomerQuietActions {
+                    if flow.hasOptions { CustomerTextButton(title: "See other options", type: type) { flow.back() } }
+                    CustomerTextButton(title: "Not today", type: type) { confirmNotToday = true }
+                }
+                if let returnToDocuments {
+                    CustomerTextButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                        .disabled(actionBusy || openingReview)
                 }
             case .sign:
                 let reason = customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(strokes))
-                CustomerPresentationCommit(title: flow.signTitle, enabled: reason == nil, busy: busy, type: type) { Task { await approve() } }
+                CustomerPresentationCommit(title: flow.signTitle, enabled: reason == nil || handoff?.signature != nil, busy: actionBusy, type: type) {
+                    if let handoff { handoff.run { await approve() } } else { Task { await approve() } }
+                }
+                .accessibilityIdentifier(handoff == nil ? "customer-estimate-submit-approval" : "handoff-submit-approval")
                 if let reason { hint(reason) }
-                CustomerSecondaryButton(title: "Back", type: type) { flow.back(); error = nil }
+                CustomerTextButton(title: "Back", type: type) {
+                    if let handoff { handoff.backToReview() } else { flow.back(); error = nil }
+                }
             case .done:
-                CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
+                if let returnToDocuments {
+                    CustomerPresentationCommit(title: "Back to job documents", enabled: true, busy: false, type: type, action: returnToDocuments)
+                        .disabled(actionBusy)
+                    CustomerSecondaryButton(title: "Hand back to the technician", type: type, action: onDone)
+                        .disabled(actionBusy)
+                } else {
+                    CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type, action: onDone)
+                }
+            }
+            } else {
+                if openingError != nil {
+                    CustomerPresentationCommit(title: "Try again", enabled: true, busy: openingReview, type: type) { Task { await openReview() } }
+                }
+                CustomerSecondaryButton(title: "Not today", type: type) { onDone() }
+                if let returnToDocuments {
+                    CustomerSecondaryButton(title: "Back to job documents", type: type, action: returnToDocuments)
+                        .disabled(actionBusy || openingReview)
+                }
             }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
         .frame(maxWidth: type.regular ? 640 : .infinity)
         .frame(maxWidth: .infinity)
-        .background(Theme.background)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
-        .disabled(busy)
+        .background(Theme.canvas)
+        .disabled(actionBusy && handoff == nil)
     }
 
-    private func hint(_ text: String, danger: Bool = false) -> some View {
-        Text(text).font(Theme.font(type.small)).foregroundStyle(danger ? Theme.destructive : Theme.muted)
-            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func header(eyebrow: String, title: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(eyebrow).font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-            Text(title).font(Theme.font(type.heading + 4, weight: .medium)).accessibilityAddTraits(.isHeader)
-                .fixedSize(horizontal: false, vertical: true)
+    private var unknownScreen: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header(eyebrow: "Approval needs confirmation", title: flow.choiceName)
+            Text("Your approval may have been received. Check its current state before trying again.")
+                .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+            CustomerSecondaryButton(title: "Check approval", type: type) {
+                if let handoff { Task { await handoff.checkOutcome() } }
+            }
         }
     }
 
-    private func includedSheet(_ option: FieldEstimateOption) -> some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(option.title).font(Theme.font(type.heading + 4, weight: .medium))
-                    CustomerLinesCard(lines: customerEstimateLines(option.lines), currency: option.currency, type: type,
-                                      rows: customerSavingsRows(option.lines, currency: option.currency, isMember: isMember)
-                                          + [CustomerAmountRow(label: "Total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
-                }
-                .padding(Theme.gutter)
-            }
-            .background(Theme.background)
-            .foregroundStyle(Theme.foreground)
-            .navigationTitle("What's included")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close") { detailsFor = nil }.font(Theme.font(type.small, weight: .medium)).frame(minHeight: 44)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                CustomerPresentationCommit(title: flow.selectedOptionID == option.id ? "Selected" : "Choose \(option.title)",
-                                           enabled: true, busy: false, type: type) {
-                    flow.choose(option.id)
-                    detailsFor = nil
-                }
-                .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
-                .background(Theme.background)
+    private func hint(_ text: String, danger: Bool = false) -> some View {
+        Text(text).font(Theme.customerFont(type.small)).foregroundStyle(danger ? Theme.destructive : Theme.muted)
+            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Present.dc.html: a quiet eyebrow, the 30pt title, then one plain-language sentence in body colour.
+    private func header(eyebrow: String, title: String, summary: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(eyebrow).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(title).font(Theme.customerFont(type.heading + 6, weight: .medium)).tracking(-0.4)
+                .accessibilityAddTraits(.isHeader)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            if let summary, !summary.isEmpty {
+                Text(summary).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
             }
         }
     }
 
     // MARK: Actions
 
-    @State private var link: (token: String, action: PublicEstimateAction)?
+    @State private var standaloneLink: (token: String, action: PublicEstimateAction)?
+    private var link: (token: String, action: PublicEstimateAction)? {
+        get { handoff?.link ?? standaloneLink }
+        nonmutating set { if let handoff { handoff.link = newValue } else { standaloneLink = newValue } }
+    }
 
     /// One request for every total on screen; any failure simply shows no financing.
     private func loadOffer() async {
@@ -450,90 +556,188 @@ struct CustomerEstimatePresentation: View {
         offer = await api.financingOffer(amounts: amounts)
     }
 
+    private func openReview() async {
+        guard flow.estimate.status != "approved" else { return }
+        if let handoff {
+            guard handoff.current() else { return }
+            if handoff.signature != nil || handoff.outcome != nil || handoff.running {
+                try? flow.useIssuedRevision(handoff.reviewed.revision)
+                flow.selectedOptionID = handoff.reviewed.optionID
+                flow.step = handoff.outcome?.isApproved == true ? .done : .sign
+                reviewGeneration = api.requestGeneration
+                return
+            }
+        }
+        let requestID = UUID(), generation = api.requestGeneration
+        reviewRequestID = requestID
+        reviewGeneration = nil
+        openingReview = true
+        openingError = nil
+        error = nil
+        if handoff == nil { link = nil; uploadedSignature = nil }
+        consentText = handoff?.link?.action.consentText
+        strokes = []
+        defer { if reviewRequestID == requestID { openingReview = false } }
+        do {
+            if let handoff { try await handoff.validate() }
+            let revision = try await api.customerIssuedEstimateRevision(for: flow.estimate, currentAuthority: { handoff?.current() != false })
+            try Task.checkCancellation()
+            if let handoff {
+                guard handoff.current(), handoff.canApprove(), revision == handoff.reviewed.revision else {
+                    throw Problem(title: "This estimate changed. Review its current terms again.", status: 409, detail: nil)
+                }
+            }
+            guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
+            try flow.useIssuedRevision(revision)
+            reviewGeneration = generation
+        } catch is CancellationError {
+        } catch {
+            guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
+            openingError = error.customerSentence(.openEstimate)
+        }
+    }
+
     private func startSigning() async {
         error = nil
-        guard !drawnApproval else { flow.step = .sign; return }
-        guard let revision = flow.estimate.currentRevisionNumber else {
-            error = "This estimate can't be signed yet. Ask your technician."
+        guard handoff?.current() != false, handoff?.canApprove() != false, reviewReady, let revision = flow.issuedRevision else {
+            openingError = "Ask your technician to reopen the current estimate."
+            reviewGeneration = nil
             return
         }
+        guard !drawnApproval else { flow.step = .sign; return }
+        let generation = api.requestGeneration
         busy = true
         defer { busy = false }
         do {
-            let opened = try await api.openInPersonEstimateApproval(flow.estimate.id, revisionNumber: revision)
-            guard opened.action.signingOffered else {
-                error = "This estimate can't be signed here. Ask your technician."
-                return
-            }
+            let opened: (token: String, action: PublicEstimateAction)
+            if let retained = handoff?.link { opened = retained }
+            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) }
+            try Task.checkCancellation()
+            guard generation == api.requestGeneration else { return }
+            guard handoff?.current() != false, handoff?.canApprove() != false else { return }
             link = opened
             consentText = opened.action.consentText
             flow.step = .sign
         } catch is CancellationError {
         } catch {
-            self.error = error.isConnectivityFailure ? "Approving needs a connection. Try again when you have signal." : error.localizedDescription
+            self.error = error.customerSentence(.approve)
         }
     }
 
     private func approve() async {
-        let signer = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) else { return }
+        guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
+        let signer = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) || handoff?.signature != nil else { return }
+        guard handoff?.current() != false, handoff?.canApprove() != false else { return }
         busy = true
         defer { busy = false }
         error = nil
         do {
-            if drawnApproval, let jobID, let revision = flow.estimate.currentRevisionNumber {
+            if let handoff, handoff.signature == nil {
+                guard let data = SignatureInk.png(strokes) else { return }
+                _ = try handoff.freezeSignature(signerName: signer, png: data, signedAt: ISO8601DateFormatter().string(from: Date()))
+            }
+            if let handoff { try await handoff.validate() }
+            if drawnApproval, let jobID {
                 let mediaID = try await uploadSignature(jobID: jobID)
-                let input = FieldSignatureInput(signerName: signer, signedAt: ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
-                let approved = try await api.approveFieldEstimate(flow.estimate.id, revisionNumber: revision, signature: input)
-                onApproved(approved)
+                try Task.checkCancellation()
+                guard generation == api.requestGeneration else { return }
+                guard handoff?.current() != false, handoff?.canApprove() != false else { return }
+                let input = FieldSignatureInput(signerName: signer, signedAt: handoff?.signature?.signedAt ?? ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
+                handoff?.submissionStarted = true; handoff?.retryVerified = false
+                let approved = try await api.approveFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber, signature: input)
+                guard generation == api.requestGeneration else { return }
+                if let handoff {
+                    guard handoff.current() else { return }
+                    guard handoff.canApprove() else { handoff.report(.unknown); return }
+                    handoff.report(await handoff.confirmed(approved))
+                } else { onApproved(approved) }
             } else if let link {
                 let action = link.action
-                guard let nonce = action.nonce, let consentVersion = action.consentVersion else {
+                guard let nonce = action.nonce, let consentVersion = action.consentVersion,
+                      action.canApprove(signerName: signer, consent: true, selectedOptionID: flow.selectedOptionID) else {
                     error = "This estimate can't be signed here. Ask your technician."
                     return
                 }
                 // The drawing is kept with the job; the server records the typed name and option.
                 if let jobID { _ = try? await uploadSignature(jobID: jobID) }
-                _ = try await api.decidePublicDocumentAction(token: link.token, decision: .approve(
+                try Task.checkCancellation()
+                guard generation == api.requestGeneration else { return }
+                guard handoff?.current() != false, handoff?.canApprove() != false else { return }
+                let decision = handoff?.publicDecision ?? PublicEstimateActionDecision.approve(
                     revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
-                    signerName: signer, consentVersion: consentVersion, consent: true, optionID: flow.selectedOptionID))
-                onApproved(nil)
+                    signerName: signer, consentVersion: consentVersion, consent: true, optionID: flow.selectedOptionID)
+                handoff?.publicDecision = decision
+                handoff?.submissionStarted = true; handoff?.retryVerified = false
+                let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)
+                guard generation == api.requestGeneration else { return }
+                if let handoff {
+                    guard handoff.current() else { return }
+                    guard handoff.canApprove() else { handoff.report(.unknown); return }
+                    handoff.report(await handoff.publicConfirmed(patch))
+                } else { onApproved(nil) }
             } else {
                 return
             }
             signedName = signer
             signedAt = Date()
-            flow.step = .done
+            if handoff == nil || handoff?.outcome?.isApproved == true { flow.step = .done }
         } catch is CancellationError {
         } catch {
-            self.error = error.isConnectivityFailure ? "Approving needs a connection. Try again when you have signal." : error.localizedDescription
+            if let handoff, handoff.current() {
+                handoff.report(handoff.submissionStarted ? .unknown :
+                    customerEstimatePreparationCanRetry(error)
+                    ? .retryable("Preparing this approval was interrupted. Try again when connected.")
+                    : .needsReview(error.customerSentence(.approve)))
+            }
+            self.error = error.customerSentence(.approve)
         }
     }
 
     @State private var uploadedSignature: (strokes: [[CGPoint]], mediaID: String)?
 
     private func uploadSignature(jobID: String) async throws -> String {
+        if let handoff {
+            guard handoff.current(), handoff.canApprove(), let intent = handoff.signature else { throw CancellationError() }
+            if let id = handoff.uploadedMediaID { return id }
+            let asset = try await handoff.transfer.upload(jobID: jobID, clientAssetID: intent.clientAssetID, kind: "photo", mime: "image/png",
+                originalFilename: "signature.png", data: intent.png, tags: ["signature"],
+                expectedOrganizationID: handoff.reviewed.estimate.organizationId,
+                currentAuthority: { handoff.current() && handoff.canApprove() })
+            guard handoff.current(), handoff.canApprove() else { throw CancellationError() }
+            handoff.uploadedMediaID = asset.id
+            return asset.id
+        }
         if let uploadedSignature, uploadedSignature.strokes == strokes { return uploadedSignature.mediaID }
         guard let data = SignatureInk.png(strokes) else {
             throw Problem(title: "The signature could not be saved. Try again.", status: nil, detail: nil)
         }
-        let asset = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
+        let transfer: MediaTransfer
+        #if DEBUG
+        if PaperPreview.isJobEstimateHandoff {
+            transfer = MediaTransfer(api: api, storageSession: PaperPreview.handoffStorageTransport())
+        } else { transfer = MediaTransfer(api: api) }
+        #else
+        transfer = MediaTransfer(api: api)
+        #endif
+        let asset = try await transfer.upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
                                                              originalFilename: "signature.png", data: data, tags: ["signature"])
         uploadedSignature = (strokes, asset.id)
         return asset.id
     }
 
     private func decline() async {
-        guard let revision = flow.estimate.currentRevisionNumber else { onDone(); return }
+        guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
         busy = true
         defer { busy = false }
         do {
-            let declined = try await api.declineFieldEstimate(flow.estimate.id, revisionNumber: revision)
+            let declined = try await api.declineFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber)
+            guard generation == api.requestGeneration else { return }
             onApproved(declined)
             onDone()
         } catch is CancellationError {
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.customerSentence(.decline)
         }
     }
 }
@@ -556,7 +760,7 @@ struct CustomerInvoicePresentation: View {
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var signing = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var offer = FinancingOffer.off
     @State private var applications: [FinancingApplication] = []
     @State private var payChoice: CustomerPayChoice?
@@ -564,23 +768,25 @@ struct CustomerInvoicePresentation: View {
     @State private var applicationKey = UUID().uuidString
     @State private var sent: FinancingApplication?
     @State private var showTerms = false
+    @State private var isMember = false
     /// The invoice as re-read after the lender funded it while this screen was open.
     @State private var reloadedInvoice: InvoiceRecord?
     private var invoice: InvoiceRecord { reloadedInvoice ?? openedInvoice }
+    @State private var signing = false
     @State private var name: String
     @State private var strokes: [[CGPoint]] = []
     @State private var busy = false
     @State private var error: String?
     @State private var signedBy: String?
-    @State private var isMember = false
 
     /// Opens on "Choose how to pay" once the offer loads (the pay-screen preview).
     private let opensPayChoice: Bool
 
     init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?, financing: Bool = false,
-         opensPayChoice: Bool = false, onSigned: @escaping (InvoiceRecord) -> Void, onDone: @escaping () -> Void) {
-        self.opensPayChoice = opensPayChoice
+         initiallySigning: Bool = false, opensPayChoice: Bool = false,
+         onSigned: @escaping (InvoiceRecord) -> Void, onDone: @escaping () -> Void) {
         openedInvoice = invoice
+        self.opensPayChoice = opensPayChoice
         self.customerName = customerName
         self.canSign = canSign
         self.onPay = onPay
@@ -588,6 +794,7 @@ struct CustomerInvoicePresentation: View {
         self.onSigned = onSigned
         self.onDone = onDone
         _name = State(initialValue: customerName)
+        _signing = State(initialValue: initiallySigning)
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
@@ -607,9 +814,10 @@ struct CustomerInvoicePresentation: View {
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
                 .frame(maxWidth: type.regular ? 760 : .infinity, alignment: .leading)
                 .frame(maxWidth: .infinity)
+                if typeSize.isAccessibilitySize { bottomBar }
             }
             .scrollDismissesKeyboard(.interactively)
-            bottomBar
+            if !typeSize.isAccessibilitySize { bottomBar }
         }
         .foregroundStyle(Theme.foreground)
         .animation(.easeOut(duration: 0.2), value: payChoice)
@@ -624,34 +832,43 @@ struct CustomerInvoicePresentation: View {
         guard due > 0, !applications.contains(where: \.isOpen) else { return nil }
         return offer.example(for: due)
     }
+
     private var latestApplication: FinancingApplication? { applications.first }
     private var financingStatus: String? { latestApplication.flatMap { FinancingWords.status($0, forCustomer: true) } }
 
     private var invoiceScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Invoice for \(customerName)").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-                Text(due == 0 ? "Paid in full" : "Amount due").font(Theme.font(type.heading + 4, weight: .medium))
+                Text("Invoice for \(customerName)").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                Text(due == 0 ? "Paid in full" : "Amount due").font(Theme.customerFont(type.heading + 4, weight: .medium))
                     .accessibilityAddTraits(.isHeader)
                 if due > 0 {
-                    Text(dueText).font(Theme.monoFont(type.total + 8, weight: .medium))
+                    Text(dueText).font(Theme.customerMonoFont(type.total + 8, weight: .medium))
                         .minimumScaleFactor(0.6).lineLimit(1)
                 }
                 // CP-17: where the application stands, in words.
                 if let financingStatus {
-                    Text(financingStatus).font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                    Text(financingStatus).font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             CustomerLinesCard(lines: invoice.lines, currency: invoice.currency, type: type, rows: amountRows)
             if let signedBy {
                 Label("Signed by \(signedBy)", systemImage: "signature")
-                    .font(Theme.font(type.body)).foregroundStyle(Theme.foreground)
+                    .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
             } else if let signature = invoice.customerAuthorization, signature.linesRevision == invoice.linesRevision {
                 Label("Signed by \(signature.signerName)", systemImage: "signature")
-                    .font(Theme.font(type.body)).foregroundStyle(Theme.foreground)
+                    .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
             }
         }
+    }
+
+    /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest; savings sit
+    /// above them as their own labelled row (CP-06).
+    private var amountRows: [CustomerAmountRow] {
+        customerSavingsRows(invoice.lines, currency: invoice.currency, isMember: isMember)
+            + (CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
+                .map { customerAmountRows($0, currency: invoice.currency) } ?? [])
     }
 
     // MARK: Choose how to pay (CP-15, CP-16)
@@ -659,67 +876,67 @@ struct CustomerInvoicePresentation: View {
     private var payScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Invoice for \(customerName)").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-                Text(payChoice?.title ?? "").font(Theme.font(type.heading + 4, weight: .medium))
+                Text("Invoice for \(customerName)").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                Text(payChoice?.title ?? "").font(Theme.customerFont(type.heading + 4, weight: .medium))
                     .accessibilityAddTraits(.isHeader).fixedSize(horizontal: false, vertical: true)
             }
             if payChoice?.canPayInFull == true {
                 payCard(.inFull, title: "Pay in full") {
-                    Text(dueText).font(Theme.monoFont(type.total, weight: .medium)).minimumScaleFactor(0.6).lineLimit(1)
-                    Text("Card or Tap to Pay with your technician").font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                    Text(dueText).font(Theme.customerMonoFont(type.total, weight: .medium)).minimumScaleFactor(0.6).lineLimit(1)
+                    Text("Card or Tap to Pay with your technician").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 }
             }
             if payChoice?.canFinance == true, let example = dueExample {
                 payCard(.overTime, title: "Pay over time") {
                     CustomerFinancingLine(example: example, type: type)
-                    Text("With \(offer.lenderName)").font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                    Text("With \(offer.lenderName)").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 }
                 if payChoice?.selected == .overTime { applyReview }
             }
             if let error {
-                Text(error).font(Theme.font(type.body)).foregroundStyle(Theme.destructive)
+                Text(error).font(Theme.customerFont(type.body)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
+    /// The whole card is the choice: blue ring and radio when chosen, like the estimate options (CP-07).
     private func payCard(_ method: CustomerPayChoice.Method, title: String, @ViewBuilder content: () -> some View) -> some View {
         let selected = payChoice?.selected == method
         return Button { payChoice?.selected = method; error = nil } label: {
             HStack(alignment: .top, spacing: 14) {
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 24))
-                    .foregroundStyle(selected ? Theme.brandText : Theme.muted)
-                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(title).font(Theme.font(type.heading, weight: .medium))
+                    Text(title).font(Theme.customerFont(type.heading, weight: .medium))
                     content()
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                CustomerRadio(selected: selected)
             }
             .padding(18)
             .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
             .foregroundStyle(Theme.foreground)
-            .background(selected ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(selected ? Theme.foreground : Theme.border, lineWidth: selected ? 2 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
+        .panelBackground(cornerRadius: 14)
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(selected ? Theme.brand : Theme.border, lineWidth: selected ? 2 : 1))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// CP-16: the customer applies on their own phone; Thorbis never sees credit details.
     private var applyReview: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(applySentence).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+            Text(applySentence).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
             if let note = offer.creditCheckNote {
-                Text(note).font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
+                Text(note).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
             }
             if otherPhone != nil {
-                TextField("Mobile number", text: Binding(get: { otherPhone ?? "" }, set: { otherPhone = $0 }))
+                TextField("Mobile number", text: Binding(get: { otherPhone ?? "" }, set: { otherPhone = $0 }),
+                          prompt: .placeholder("Mobile number"))
                     .keyboardType(.phonePad)
                     .textContentType(.telephoneNumber)
-                    .font(Theme.font(type.body))
+                    .font(Theme.customerFont(type.body))
                     .padding(.horizontal, 16)
                     .frame(minHeight: type.target)
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
@@ -729,7 +946,7 @@ struct CustomerInvoicePresentation: View {
             }
             if offer.disclosure != nil {
                 Button { showTerms = true } label: {
-                    Text("See \(offer.lenderName) terms").font(Theme.font(type.body)).underline()
+                    Text("See \(offer.lenderName) terms").font(Theme.customerFont(type.body)).underline()
                         .foregroundStyle(Theme.brandText)
                         .frame(minHeight: type.target, alignment: .leading)
                 }
@@ -755,39 +972,28 @@ struct CustomerInvoicePresentation: View {
         VStack(alignment: .center, spacing: 18) {
             Image(systemName: "checkmark.circle.fill").font(.system(size: 64)).foregroundStyle(Theme.success)
                 .accessibilityHidden(true).padding(.top, 40)
-            Text("Application sent").font(Theme.font(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
-            Text("Sent to •••• \(application.sentToLast4)").font(Theme.font(type.body))
+            Text("Application sent").font(Theme.customerFont(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
+            Text("Sent to •••• \(application.sentToLast4)").font(Theme.customerFont(type.body))
             Text(money(application.amount.amount, currency: application.amount.currency))
-                .font(Theme.monoFont(type.total, weight: .medium))
+                .font(Theme.customerMonoFont(type.total, weight: .medium))
             Text("Open the text from \(application.providerName) to apply. The answer shows on this invoice.")
-                .font(Theme.font(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
     }
 
-    /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest.
-    private var amountRows: [CustomerAmountRow] {
-        var rows = customerSavingsRows(invoice.lines, currency: invoice.currency, isMember: isMember)
-        rows.append(CustomerAmountRow(label: "Total", amount: money(total, currency: invoice.currency), emphasis: invoice.amountPaid == 0))
-        if invoice.amountPaid > 0 {
-            rows.append(CustomerAmountRow(label: "Paid", amount: money(invoice.amountPaid, currency: invoice.currency), emphasis: false))
-            rows.append(CustomerAmountRow(label: "Amount due", amount: dueText, emphasis: true))
-        }
-        return rows
-    }
-
     private var signScreen: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Invoice · \(money(total, currency: invoice.currency))").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
-                Text("Sign for the work").font(Theme.font(type.heading + 4, weight: .medium)).accessibilityAddTraits(.isHeader)
+                Text("Invoice · \(money(total, currency: invoice.currency))").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                Text("Sign for the work").font(Theme.customerFont(type.heading + 4, weight: .medium)).accessibilityAddTraits(.isHeader)
             }
             Text("By signing, I confirm the work and charges on this invoice.")
-                .font(Theme.font(type.body)).fixedSize(horizontal: false, vertical: true)
-            TextField("Your full name", text: $name)
+                .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+            TextField("Your full name", text: $name, prompt: .placeholder("Your full name"))
                 .textContentType(.name)
-                .font(Theme.font(type.body))
+                .font(Theme.customerFont(type.body))
                 .padding(.horizontal, 16)
                 .frame(minHeight: type.target)
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
@@ -795,7 +1001,7 @@ struct CustomerInvoicePresentation: View {
             ZStack(alignment: .bottomLeading) {
                 SignaturePad(strokes: $strokes)
                 if !SignatureInk.hasInk(strokes) {
-                    Text("Sign here with your finger").font(Theme.font(type.small)).foregroundStyle(.black.opacity(0.45))
+                    Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(.black.opacity(0.62))
                         .padding(16).allowsHitTesting(false)
                 }
             }
@@ -805,13 +1011,13 @@ struct CustomerInvoicePresentation: View {
             .overlay(alignment: .topTrailing) {
                 if SignatureInk.hasInk(strokes) {
                     Button("Clear") { strokes = [] }
-                        .font(Theme.font(type.small, weight: .medium)).foregroundStyle(.black)
+                        .font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(.black)
                         .frame(minWidth: type.target, minHeight: 44)
                 }
             }
             .accessibilityLabel("Signature box. Sign with your finger.")
             if let error {
-                Text(error).font(Theme.font(type.body)).foregroundStyle(Theme.destructive)
+                Text(error).font(Theme.customerFont(type.body)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -832,9 +1038,9 @@ struct CustomerInvoicePresentation: View {
                     }
                 }
                 if let hint = choice.hint {
-                    Text(hint).font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                    Text(hint).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 } else if choice.selected == .overTime && !phone.valid {
-                    Text("Enter a US mobile number to continue.").font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                    Text("Enter a US mobile number to continue.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 }
                 CustomerSecondaryButton(title: "Back", type: type) { payChoice = nil; otherPhone = nil; error = nil }
             } else if signing {
@@ -842,7 +1048,7 @@ struct CustomerInvoicePresentation: View {
                 CustomerPresentationCommit(title: "Sign for \(money(total, currency: invoice.currency))", enabled: reason == nil, busy: busy, type: type) {
                     Task { await sign() }
                 }
-                if let reason { Text(reason).font(Theme.font(type.small)).foregroundStyle(Theme.muted) }
+                if let reason { Text(reason).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
                 CustomerSecondaryButton(title: "Back", type: type) { signing = false; error = nil }
             } else if canSign && !authorized && invoice.jobId != nil {
                 CustomerPresentationCommit(title: "Sign for the work", enabled: true, busy: false, type: type) { signing = true }
@@ -857,8 +1063,7 @@ struct CustomerInvoicePresentation: View {
         .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
         .frame(maxWidth: type.regular ? 640 : .infinity)
         .frame(maxWidth: .infinity)
-        .background(Theme.background)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+        .background(Theme.canvas)
         .disabled(busy)
     }
 
@@ -927,12 +1132,10 @@ struct CustomerInvoicePresentation: View {
             signing = false
         } catch is CancellationError {
         } catch {
-            self.error = error.isConnectivityFailure ? "Signing needs a connection. Try again when you have signal." : error.localizedDescription
+            self.error = error.customerSentence(.sign)
         }
     }
 }
-
-// MARK: - Shared pieces
 
 /// What the customer saves off list price on these lines: each price book line records the list
 /// price it came from, and the server charges a member the member price (CP: savings show only
@@ -970,57 +1173,115 @@ extension APIClient {
     }
 }
 
+// MARK: - Shared pieces
+
 struct CustomerAmountRow: Hashable {
     let label: String
     let amount: String
     let emphasis: Bool
 }
 
-/// Lines as name, then "Qty × Each" under it, amount on the right; no truncation (CP-06).
+/// Lines, quantity and amount; consent screens keep the full description inline.
 struct CustomerLinesCard: View {
     let lines: [FieldLine]
     let currency: String
     let type: CustomerType
     let rows: [CustomerAmountRow]
+    var readingAccess: DocumentDescriptionAccess? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(lines) { line in
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(line.description).font(Theme.font(type.body))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
-                            .font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            lineDetails(line).frame(maxWidth: .infinity, alignment: .leading)
+                            lineValue(line).minimumScaleFactor(0.6).lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 16) {
+                            lineDetails(line)
+                            Spacer(minLength: 8)
+                            lineValue(line).fixedSize()
+                        }
                     }
-                    Spacer(minLength: 8)
-                    Text(money(line.quantity * line.unitPrice.amount, currency: line.unitPrice.currency))
-                        .font(Theme.monoFont(type.body)).fixedSize()
                 }
                 .padding(.vertical, 14)
-                .accessibilityElement(children: .combine)
-                Rectangle().fill(Theme.border).frame(height: 1)
+                .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
             }
             if lines.isEmpty {
-                Text("Nothing listed yet.").font(Theme.font(type.body)).foregroundStyle(Theme.muted).padding(.vertical, 14)
+                Text("Nothing listed yet.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             ForEach(rows, id: \.self) { row in
-                HStack(alignment: .firstTextBaseline) {
-                    Text(row.label).font(Theme.font(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
-                    Spacer(minLength: 8)
-                    Text(row.amount)
-                        .font(Theme.monoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
-                        .minimumScaleFactor(0.6).lineLimit(1)
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 8) {
+                            amountLabel(row)
+                            amountValue(row).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline) {
+                            amountLabel(row)
+                            Spacer(minLength: 8)
+                            amountValue(row)
+                        }
+                    }
                 }
                 .padding(.vertical, row.emphasis ? 16 : 10)
                 .accessibilityElement(children: .combine)
             }
         }
         .padding(.horizontal, 18)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+        .panelBackground(cornerRadius: 14)
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
     }
+
+    private func lineDetails(_ line: FieldLine) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let readingAccess {
+                ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+            } else {
+                Text(line.description).font(Theme.customerFont(type.body))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
+                .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func lineValue(_ line: FieldLine) -> some View {
+        Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
+            .font(Theme.customerMonoFont(type.body))
+    }
+
+    private func amountLabel(_ row: CustomerAmountRow) -> some View {
+        Text(row.label).font(Theme.customerFont(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func amountValue(_ row: CustomerAmountRow) -> some View {
+        Text(row.amount)
+            .font(Theme.customerMonoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
+            .minimumScaleFactor(0.6).lineLimit(1)
+    }
+}
+
+func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, invoice: Bool = true) -> [CustomerAmountRow] {
+    var rows: [CustomerAmountRow] = []
+    if amounts.credits < 0 {
+        rows.append(.init(label: "Subtotal", amount: money(amounts.subtotal, currency: currency), emphasis: false))
+        rows.append(.init(label: "Discounts and credits", amount: money(amounts.credits, currency: currency), emphasis: false))
+    }
+    rows.append(.init(label: "Total", amount: money(amounts.total, currency: currency), emphasis: !invoice))
+    if invoice {
+        if amounts.paid > 0 { rows.append(.init(label: "Paid", amount: money(amounts.paid, currency: currency), emphasis: false)) }
+        rows.append(.init(label: "Amount due", amount: money(amounts.due, currency: currency), emphasis: true))
+    }
+    return rows
 }
 
 /// The one commit on a customer screen. Same ink, radius and heights as CustomerCommitButton,
@@ -1028,6 +1289,8 @@ struct CustomerLinesCard: View {
 /// Dynamic Type sizes.
 struct CustomerPresentationCommit: View {
     let title: String
+    /// A shorter label used only when `title` would not fit on one line.
+    var compactTitle: String? = nil
     let enabled: Bool
     let busy: Bool
     let type: CustomerType
@@ -1037,8 +1300,17 @@ struct CustomerPresentationCommit: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if busy { ProgressView().tint(Theme.background) }
-                Text(title).font(Theme.font(type.body, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.8)
+                if let compactTitle {
+                    ViewThatFits(in: .horizontal) {
+                        Text(title).lineLimit(1)
+                        Text(compactTitle).lineLimit(2).minimumScaleFactor(0.8)
+                    }
+                    .font(Theme.customerFont(type.body, weight: .medium)).multilineTextAlignment(.center)
+                    .accessibilityLabel(title)
+                } else {
+                    Text(title).font(Theme.customerFont(type.body, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                        .minimumScaleFactor(0.8)
+                }
             }
             .frame(maxWidth: .infinity, minHeight: type.regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
             .padding(.horizontal, 16)
@@ -1050,6 +1322,158 @@ struct CustomerPresentationCommit: View {
     }
 }
 
+/// The choice mark on an option card: an empty ring, or the accent disc with a check.
+struct CustomerRadio: View {
+    let selected: Bool
+    var body: some View {
+        ZStack {
+            if selected {
+                Circle().fill(Theme.brand)
+                Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+            } else {
+                Circle().strokeBorder(Theme.foreground.opacity(0.3), lineWidth: 1.5)
+            }
+        }
+        .frame(width: 26, height: 26)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The quiet actions under the commit: side by side while they fit, stacked at large text so a
+/// word never breaks across lines.
+struct CustomerQuietActions<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 28) { content().fixedSize(horizontal: true, vertical: false).padding(.horizontal, 8) }
+                .frame(maxWidth: .infinity)
+            VStack(spacing: 0) { content() }
+        }
+    }
+}
+
+/// A quiet action under the commit: words only, still a 56pt target.
+struct CustomerTextButton: View {
+    let title: String
+    let type: CustomerType
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(Theme.customerFont(type.small + 1, weight: .medium))
+                .foregroundStyle(Theme.subtle)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: type.target)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+    }
+}
+
+/// Every line of what the customer is approving on one sheet: the line's whole description,
+/// its amount, "2 × $120.00" when there's more than one, then the total. No separators.
+struct CustomerIncludedLines: View {
+    let lines: [FieldLine]
+    let type: CustomerType
+    let rows: [CustomerAmountRow]
+    /// Consent screens read each description through the protected reader.
+    var readingAccess: DocumentDescriptionAccess? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(lines) { line in
+                VStack(alignment: .leading, spacing: 6) {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        description(line)
+                        amount(line).frame(maxWidth: .infinity, alignment: .trailing)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 14) {
+                            description(line)
+                            amount(line).fixedSize()
+                        }
+                    }
+                    if let detail = readingAccess == nil ? LineText(line.description).detail : nil {
+                        Text(detail).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    // The line amount already says it for one; "2 × $120.00" shows how a bigger amount adds up.
+                    // Consent screens keep the explicit quantity on every line.
+                    if line.quantity != 1 || readingAccess != nil {
+                        Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
+                            .font(Theme.customerFont(type.small)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                }
+                .padding(.horizontal, 18).padding(.vertical, 16)
+                .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
+            }
+            if lines.isEmpty {
+                Text("Nothing listed yet.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(18)
+            }
+            ForEach(rows, id: \.self) { row in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(row.label).font(Theme.customerFont(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+                    Spacer(minLength: 8)
+                    Text(row.amount)
+                        .font(Theme.customerFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular)).monospacedDigit()
+                        .minimumScaleFactor(0.6).lineLimit(1)
+                }
+                // On the same sheet as the lines (no band, no rule): the total reads by size alone.
+                .padding(.horizontal, 18).padding(.top, row.emphasis ? 10 : 12).padding(.bottom, row.emphasis ? 18 : 12)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .documentPanel()
+    }
+
+    @ViewBuilder private func description(_ line: FieldLine) -> some View {
+        if let readingAccess {
+            ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(LineText(line.description).name).font(Theme.customerFont(type.body, weight: .medium))
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func amount(_ line: FieldLine) -> some View {
+        Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
+            .font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+    }
+}
+
+/// A document's status as a word at customer size: a small dot carries the hue, the word stays ink.
+struct CustomerStatusWord: View {
+    let status: String
+    let type: CustomerType
+
+    var body: some View {
+        let tint = StatusWord.documentTint(status)
+        HStack(spacing: 8) {
+            if let tint { Circle().fill(tint).frame(width: 9, height: 9).accessibilityHidden(true) }
+            Text(status == "issued" ? "Unpaid" : status.statusLabel).font(Theme.customerFont(type.small, weight: .medium))
+                .foregroundStyle(tint == nil ? Theme.muted : Theme.foreground)
+        }
+        .fixedSize()
+    }
+}
+
+/// "What's included" above a customer document's lines.
+struct CustomerIncludedLabel: View {
+    let type: CustomerType
+    var title = "What’s included"
+    var body: some View {
+        Text(title).font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.bottom, -10)
+    }
+}
+
 /// A plain secondary action: 56pt, filled well, never ink.
 struct CustomerSecondaryButton: View {
     let title: String
@@ -1058,7 +1482,7 @@ struct CustomerSecondaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title).font(Theme.font(type.body, weight: .medium))
+            Text(title).font(Theme.customerFont(type.body, weight: .medium))
                 .frame(maxWidth: .infinity, minHeight: type.target)
                 .foregroundStyle(Theme.foreground)
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
@@ -1067,8 +1491,191 @@ struct CustomerSecondaryButton: View {
     }
 }
 
+// MARK: - Customer states
+
+/// What the customer was doing when something failed, so the sentence can name it.
+enum CustomerTask {
+    case openEstimate, openDocument, openInvoice, openDetails, openPayments, approve, decline, sign
+
+    /// "Opening your estimate", the start of a sentence a homeowner reads.
+    var doing: String {
+        switch self {
+        case .openEstimate: "Opening your estimate"
+        case .openDocument: "Opening this document"
+        case .openInvoice: "Opening your invoice"
+        case .openDetails: "Opening your details"
+        case .openPayments: "Loading your payments"
+        case .approve: "Approving"
+        case .decline: "Declining"
+        case .sign: "Signing"
+        }
+    }
+}
+
+extension Error {
+    /// One sentence for the person holding the device who is not staff: what happened and the way
+    /// out. Never the server's or the system's own words (those are written for staff and
+    /// support), so a homeowner never reads "HTTP 409" or a decoding failure.
+    /// `handBack` is true inside customer mode (a technician is beside them); false on a public
+    /// link, where the way out is the company that sent it.
+    func customerSentence(_ task: CustomerTask, handBack: Bool = true) -> String {
+        let status = (self as? Problem)?.status
+        switch ProblemKind(self) {
+        case .offline:
+            return "\(task.doing) needs an internet connection. Try again when you have signal."
+        case .server:
+            return "We couldn’t reach the office just now. Try again in a minute."
+        case .expired, .forbidden:
+            return handBack ? "Please hand the device back to your technician so they can reopen this."
+                            : "This link can’t be used any more. Ask the company for a new one."
+        case .other:
+            if status == 409 {
+                return handBack ? "This was just updated. Hand the device back to your technician to reopen it."
+                                : "This estimate was just updated. Try again to see the latest version."
+            }
+            if status == 404 {
+                return handBack ? "This isn’t available any more. Hand the device back to your technician."
+                                : "This estimate isn’t available any more. Ask the company for a new link."
+            }
+            return handBack ? "\(task.doing) didn’t work. Try again, or hand the device back to your technician."
+                            : "\(task.doing) didn’t work. Try again in a moment."
+        }
+    }
+}
+
+/// A whole-screen state at customer size: a neutral glyph, what happened in 24pt, one sentence
+/// in 20pt, and at most one action. Used instead of the system's "unavailable" view, whose small
+/// grey type is written for staff.
+struct CustomerStateMessage: View {
+    let symbol: String
+    let title: String
+    var message: String? = nil
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let type = CustomerType(sizeClass)
+        VStack(alignment: .leading, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 24, weight: .regular)).foregroundStyle(Theme.muted)
+                .frame(width: 56, height: 56)
+                .background(Theme.fill, in: Circle())
+                .accessibilityHidden(true)
+            Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            if let message, !message.isEmpty {
+                Text(message).font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let actionTitle, let action {
+                CustomerSecondaryButton(title: actionTitle, type: type, action: action).padding(.top, 6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 24)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A problem inside a customer screen that still shows its document: 17pt words on the field
+/// well, the glyph tinted, and one action. ErrorBanner's 15pt is staff size.
+struct CustomerProblemBanner: View {
+    let message: String
+    var symbol = "exclamationmark.triangle"
+    var actionTitle: String? = nil
+    var action: (() async -> Void)? = nil
+    @State private var running = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let type = CustomerType(sizeClass)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Image(systemName: symbol).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.warning)
+                    .accessibilityHidden(true)
+                Text(message).font(Theme.customerFont(type.small)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let actionTitle, let action {
+                Button {
+                    Task { running = true; await action(); running = false }
+                } label: {
+                    Text(actionTitle).font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 20).frame(minHeight: 48)
+                        .background(Theme.card, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .disabled(running)
+                .padding(.leading, 29)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Loading at customer size: what is opening, in words, over the shape of the document that is
+/// coming (a title, lines with their amounts, the total). Static; VoiceOver hears the words.
+struct CustomerSkeleton: View {
+    let caption: String
+    var lines = 3
+    /// The document's title and status bars above the lines.
+    var heading = true
+    /// An amount beside each line and a total row; off for forms such as the customer's details.
+    var amounts = true
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let type = CustomerType(sizeClass)
+        VStack(alignment: .leading, spacing: 18) {
+            Text(caption).font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 18) {
+                if heading {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Capsule().fill(Theme.fill).frame(width: 230, height: 24)
+                        Capsule().fill(Theme.fill.opacity(0.7)).frame(width: 110, height: 16)
+                    }
+                }
+                VStack(spacing: 0) {
+                    ForEach(0..<lines, id: \.self) { index in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Capsule().fill(Theme.fill).frame(width: [190, 150, 170][index % 3], height: 17)
+                                Capsule().fill(Theme.fill.opacity(0.7)).frame(width: [90, 120, 100][index % 3], height: 13)
+                            }
+                            Spacer(minLength: 12)
+                            if amounts { Capsule().fill(Theme.fill).frame(width: 74, height: 17) }
+                        }
+                        .padding(.horizontal, 18).padding(.vertical, 18)
+                    }
+                    if amounts {
+                    HStack {
+                        Capsule().fill(Theme.fill).frame(width: 80, height: 20)
+                        Spacer(minLength: 12)
+                        Capsule().fill(Theme.fill).frame(width: 120, height: 28)
+                    }
+                    .padding(18)
+                    .background(Theme.background.opacity(0.6))
+                    }
+                }
+                .documentPanel()
+            }
+            .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(caption)
+    }
+}
+
 #if DEBUG
-/// `--paper-preview-screen present-estimate | present-estimate-review | present-invoice |
+/// `--paper-preview-screen present-estimate | present-estimate-review | present-estimate-detail | present-invoice |
 /// present-estimate-financing | present-invoice-pay`.
 struct CustomerPresentationPreview: View {
     let screen: String
@@ -1083,7 +1690,8 @@ struct CustomerPresentationPreview: View {
                                             onPay: {}, financing: true, opensPayChoice: true, onSigned: { _ in }, onDone: handBack)
             default:
                 CustomerEstimatePresentation(estimate: PaperPreview.optionsEstimate, jobID: PaperPreview.jobID, customerName: "Danielle Marlowe",
-                                             preselectedOptionID: screen == "present-estimate-review" ? PaperPreview.optionsEstimate.options?[1].id : nil,
+                                             preselectedOptionID: screen == "present-estimate-review" ? PaperPreview.optionsEstimate.options?[1].id
+                                                : screen == "present-estimate-detail" ? PaperPreview.optionsEstimate.options?[0].id : nil,
                                              financing: screen == "present-estimate-financing",
                                              onApproved: { _ in }, onDone: handBack)
             }

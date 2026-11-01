@@ -163,12 +163,12 @@ struct CustomerFinancingLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let monthly = FinancingWords.monthly(example), let terms = example.terms {
-                Text(monthly).font(Theme.monoFont(type.heading, weight: .medium))
+                Text(monthly).font(Theme.customerMonoFont(type.heading, weight: .medium))
                     .minimumScaleFactor(0.7).lineLimit(1)
-                Text(terms).font(Theme.font(type.small)).foregroundStyle(Theme.muted)
+                Text(terms).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("Pay over time available").font(Theme.font(type.body)).foregroundStyle(Theme.muted)
+                Text("Pay over time available").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             }
         }
         .accessibilityElement(children: .combine)
@@ -185,7 +185,7 @@ struct FinancingTermsSheet: View {
         NavigationStack {
             ScrollView {
                 Text(offer.disclosure ?? "")
-                    .font(Theme.font(type.body))
+                    .font(Theme.customerFont(type.body))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(Theme.gutter)
@@ -195,8 +195,8 @@ struct FinancingTermsSheet: View {
             .navigationTitle("\(offer.lenderName) terms")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close") { dismiss() }.font(Theme.font(type.small, weight: .medium)).frame(minHeight: 44)
+                ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) {
+                    Button("Close") { dismiss() }.font(Theme.customerFont(type.small, weight: .medium)).frame(minHeight: 44)
                 }
             }
         }

@@ -1,288 +1,5 @@
 import SwiftUI
 
-struct NewJobSheet: View {
-    @EnvironmentObject private var api: APIClient
-    @EnvironmentObject private var store: Store
-    @EnvironmentObject private var session: SessionController
-    @Environment(\.dismiss) private var dismiss
-    @State private var draft: FieldJobDraft
-    @State private var busy = false
-    @State private var error: String?
-    @State private var createdJobID: String?
-    @State private var showNewCustomer = false
-    /// Optional time and technician, applied right after the job is created so a new job can be
-    /// booked and dispatched in one step instead of three.
-    @State private var when: Date?
-    @State private var pickingWhen = false
-    @State private var tech: FieldAssignee?
-    @State private var people: [FieldAssignee] = []
-    /// Set once the job exists, so retrying never creates a second job.
-    @State private var savedJobID: String?
-    @State private var timeSaved = false
-    @State private var techSaved = false
-    @State private var pickingCustomer = false
-    @State private var newCustomerName = ""
-    @State private var wantsNewCustomer = false
-    @FocusState private var titleFocused: Bool
-    private var canAssign: Bool { session.can("job.assign", feature: "jobs") }
-
-    init(preselected: Customer? = nil) {
-        _draft = State(initialValue: FieldJobDraft(customerID: preselected?.id ?? ""))
-    }
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 38, height: 38).background(Theme.fill, in: Circle()).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Cancel new job").disabled(busy)
-                    Spacer()
-                    HStack(spacing: 5) {
-                        Image("ThorbisMark").resizable().scaledToFit().frame(width: 16, height: 16).accessibilityHidden(true)
-                        Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(13, weight: .medium)).lineLimit(1)
-                    }.padding(.horizontal, 12).frame(height: 30).background(Theme.fill, in: Capsule())
-                    Spacer()
-                    // Balances the close button so the workspace pill stays centred.
-                    Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
-                }.padding(.horizontal, Theme.gutter).padding(.top, 6).padding(.bottom, 10)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 2) {
-                            TextField("Job title", text: $draft.title, axis: .vertical)
-                                .font(Theme.font(24, weight: .medium))
-                                .tracking(-0.39)
-                                .textFieldStyle(.plain)
-                                .accessibilityLabel("Job title")
-                                .focused($titleFocused)
-                                .disabled(busy || savedJobID != nil)
-                        }
-                        .padding(.top, 8)
-                        if draft.titleIsTooLong {
-                            Text("Job titles can be up to 200 characters.")
-                                .font(Theme.font(12))
-                                .foregroundStyle(Theme.destructive)
-                                .padding(.top, 4)
-                        }
-
-                        TextField(
-                            text: $draft.notes,
-                            prompt: Text("Add description — what's the problem, where, anything the tech should know…")
-                                .foregroundStyle(Theme.muted),
-                            axis: .vertical
-                        ) {
-                            Text("Job description")
-                        }
-                            .font(Theme.font(15))
-                            .foregroundStyle(Theme.foreground)
-                            .lineLimit(2...6)
-                            .textFieldStyle(.plain)
-                            .accessibilityLabel("Job description")
-                            .padding(.top, 8)
-                            .disabled(busy || savedJobID != nil)
-                        if draft.notesAreTooLong {
-                            Text("Descriptions can be up to 10,000 characters.")
-                                .font(Theme.font(12))
-                                .foregroundStyle(Theme.destructive)
-                                .padding(.top, 4)
-                        }
-
-                        // Customer, when and who as pills that wrap on narrow phones (a chip is a pill;
-                        // values stay words).
-                        FlowRow(spacing: 8, lineSpacing: 8) {
-                            customerPicker
-                            if canAssign {
-                                Button { pickingWhen = true } label: {
-                                    pill(when.map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()) } ?? "When",
-                                         symbol: "clock", set: when != nil)
-                                }
-                                .accessibilityLabel(when == nil ? "Choose a time" : "Time: \(when!.formatted())")
-                                .disabled(busy || timeSaved)
-                                techPicker
-                            }
-                        }
-                        .padding(.top, 12)
-
-                        if let error {
-                            Label(error, systemImage: "exclamationmark.triangle")
-                                .font(Theme.font(13))
-                                .foregroundStyle(Theme.destructive)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.top, 14)
-                                .accessibilityIdentifier("new-job-error")
-                            if let savedJobID, session.can("job.view", feature: "jobs") {
-                                Button("Open the job") { createdJobID = savedJobID }
-                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
-                                    .frame(minHeight: 44)
-                            }
-                        }
-                    }.padding(.horizontal, Theme.gutter).padding(.vertical, 8)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                Spacer(minLength: 0)
-            }.foregroundStyle(Theme.foreground).background(Theme.background).buttonStyle(.plain)
-                // MA-12: the form finishes where the thumb is. The commit rides above the keyboard.
-                .safeAreaInset(edge: .bottom) {
-                    Button { Task { await create() } } label: {
-                        Group {
-                            if busy { ProgressView().tint(Theme.onInk) }
-                            else { Text(savedJobID == nil ? "Create job" : "Try again") }
-                        }
-                        .inkCommit(enabled: draft.canCreate)
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel(savedJobID == nil ? "Create job" : "Try saving again")
-                    .disabled(busy || !draft.canCreate || !session.can("job.create", feature: "jobs"))
-                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
-                    .background(Theme.background)
-                }
-                .onAppear { if draft.title.isEmpty { titleFocused = true } }
-                .toolbar(.hidden, for: .navigationBar)
-                // The new-customer sheet opens once the picker has finished closing; presenting
-                // both in one pass would drop the second sheet.
-                .sheet(isPresented: $pickingCustomer, onDismiss: {
-                    if wantsNewCustomer { wantsNewCustomer = false; showNewCustomer = true }
-                }) {
-                    CustomerPickerSheet(selectedID: draft.customerID,
-                                        canCreate: session.can("customer.create", feature: "core_crm"),
-                                        onNew: { typed in newCustomerName = typed; wantsNewCustomer = true; pickingCustomer = false }) { id in
-                        draft.customerID = id; error = nil; pickingCustomer = false
-                    }
-                }
-                .sheet(isPresented: $showNewCustomer) {
-                    NewCustomerSheet(initialName: newCustomerName) { customer in draft.customerID = customer.id; error = nil }
-                }
-                .sheet(isPresented: $pickingWhen) {
-                    NavigationStack {
-                        DatePicker("When", selection: Binding(get: { when ?? Self.nextHour() }, set: { when = $0; timeSaved = false }),
-                                   in: Date()..., displayedComponents: [.date, .hourAndMinute])
-                            .datePickerStyle(.graphical)
-                            .padding(.horizontal, 20)
-                            .navigationTitle("When")
-                            .navigationBarTitleDisplayMode(.inline)
-                            .toolbar {
-                                ToolbarItem(placement: .topBarLeading) { Button("Clear") { when = nil; pickingWhen = false } }
-                                ToolbarItem(placement: .topBarTrailing) { Button("Done") { if when == nil { when = Self.nextHour() }; pickingWhen = false } }
-                            }
-                    }
-                    .presentationDetents([.large])
-                }
-                .navigationDestination(isPresented: createdJobRoute) {
-                    if let createdJobID { JobDetailView(jobId: createdJobID) }
-                }
-                .navigationDestination(for: Customer.self) { CustomerDetailView(customer: $0) }
-                .navigationDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
-                .navigationDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
-        }
-        // A swipe never throws away a typed title (MA-16).
-        .interactiveDismissDisabled(busy || (savedJobID == nil && !draft.title.isEmpty))
-    }
-
-    private var customerPicker: some View {
-        // A menu can't search; with hundreds of customers the picker is a searchable sheet.
-        Button { pickingCustomer = true } label: {
-            pill(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Customer",
-                 symbol: "person", set: !draft.customerID.isEmpty)
-        }
-        .accessibilityLabel("Customer: \(store.customers.first(where: { $0.id == draft.customerID })?.name ?? "Choose a customer")")
-        // Once the job exists its title, description and customer are fixed; edit them on the job.
-        .disabled(busy || savedJobID != nil)
-    }
-
-    private var techPicker: some View {
-        var items: [ThorbisMenuItem] = [
-            ThorbisMenuItem("No technician yet", icon: "person.crop.circle.badge.xmark", isSelected: tech == nil) { tech = nil }
-        ]
-        items.append(contentsOf: people.map { person in
-            ThorbisMenuItem(person.displayName, isSelected: person == tech) { tech = person; techSaved = false }
-        })
-        return ThorbisMenu(items: items, title: "Technician",
-                           accessibilityLabel: "Technician: \(tech?.displayName ?? "none")") {
-            pill(tech?.displayName ?? "Tech", symbol: "person.badge.clock", set: tech != nil)
-        }
-        .disabled(busy || techSaved)
-        .task { if people.isEmpty { people = (try? await api.fieldAssignees()) ?? [] } }
-    }
-
-    private func pill(_ text: String, symbol: String, set: Bool) -> some View {
-        Label { Text(text).lineLimit(1).truncationMode(.tail) } icon: { Image(systemName: symbol) }
-            .font(Theme.font(13, weight: .medium))
-            .foregroundStyle(set ? Theme.foreground : Theme.muted)
-            .padding(.horizontal, 12)
-            .frame(height: Theme.chipHeight + 4)
-            .frame(maxWidth: 240)
-            .background(Theme.fill, in: Capsule())
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-    }
-
-    private static func nextHour() -> Date {
-        let calendar = Calendar.current
-        let next = calendar.date(byAdding: .hour, value: 1, to: .now) ?? .now
-        return calendar.date(bySetting: .minute, value: 0, of: next) ?? next
-    }
-
-    private var createdJobRoute: Binding<Bool> {
-        Binding(
-            get: { createdJobID != nil },
-            set: { isPresented in
-                guard !isPresented, createdJobID != nil else { return }
-                createdJobID = nil
-                dismiss()
-            }
-        )
-    }
-
-    private func create() async {
-        guard !busy, session.can("job.create", feature: "jobs") else { return }
-        let sessionGeneration = session.generation
-        let organizationID = session.activeOrganization?.id
-        error = nil
-        busy = true
-        defer { busy = false }
-        do {
-            // A retry after a failed time or tech reuses the job already created, never a second one.
-            let jobID: String
-            if let savedJobID {
-                jobID = savedJobID
-            } else {
-                guard let request = draft.request else { return }
-                jobID = try await api.createFieldJob(request).id
-                savedJobID = jobID
-            }
-            guard session.generation == sessionGeneration,
-                  session.activeOrganization?.id == organizationID else { return }
-            var failed: [String] = []
-            if canAssign, let when, !timeSaved {
-                let iso = ISO8601DateFormatter()
-                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                do {
-                    _ = try await api.scheduleFieldJob(jobID, request: FieldScheduleRequest(scheduledFor: iso.string(from: when),
-                                                                                         timeZone: TimeZone.current.identifier))
-                    timeSaved = true
-                } catch is CancellationError { return } catch { failed.append("time") }
-            }
-            if canAssign, let tech, !techSaved {
-                do {
-                    _ = try await api.assignFieldJob(jobID, request: FieldAssignRequest(userId: tech.userId))
-                    techSaved = true
-                } catch is CancellationError { return } catch { failed.append("technician") }
-            }
-            _ = await store.refresh(api)
-            guard session.generation == sessionGeneration,
-                  session.activeOrganization?.id == organizationID else { return }
-            if !failed.isEmpty {
-                // Say exactly what didn't save; the arrow retries just that on the same job.
-                error = "The job was created, but the \(failed.joined(separator: " and ")) didn't save. Tap Try again, or open the job to set it there."
-                return
-            }
-            if session.can("job.view", feature: "jobs") {
-                createdJobID = jobID
-            } else {
-                dismiss()
-            }
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
-    }
-}
-
 /// Searchable customer list for the new-job form. Recent customers come first when the
 /// search is empty, so the common case is one tap.
 struct CustomerPickerSheet: View {
@@ -339,7 +56,7 @@ struct CustomerPickerSheet: View {
             .navigationTitle("Customer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
         .presentationDetents([.large])
@@ -366,7 +83,7 @@ struct AddressLink: View {
     var coordinates: FieldCoordinates? = nil
     var body: some View {
         if let url {
-            Link(destination: url) { Label(address, systemImage: "map").frame(minHeight: 44) }
+            Link(destination: url) { Label(address, systemImage: "map").multilineTextAlignment(.leading).frame(minHeight: 44, alignment: .leading) }
         } else { Text(address) }
     }
     private var url: URL? {
@@ -404,6 +121,8 @@ struct CustomerContactSheet: View {
     @State private var busy = false
     @State private var error: String?
     @FocusState private var focusedField: ContactField?
+    /// Said under the name when Save is pressed without one; clears as they type.
+    @State private var nameProblem: String?
 
     private enum ContactField: Hashable { case name, phone, email, customRole }
     private static let roles = ["Homeowner", "Spouse", "Tenant", "Property mgr"]
@@ -442,6 +161,11 @@ struct CustomerContactSheet: View {
         )
     }
 
+    /// The one reason Save is truly off; a missing name is said under the field when it's pressed.
+    private var saveBlockedReason: String? {
+        session.can("customer.edit", feature: "core_crm") ? nil : "Your role can't change contacts. Ask your office."
+    }
+
     private var canSave: Bool {
         guard !busy, session.can("customer.edit", feature: "core_crm") else { return false }
         return contact == nil ? draft.makeRequest() != nil : draft.makeUpdateRequest() != nil
@@ -468,10 +192,12 @@ struct CustomerContactSheet: View {
                 }
             }
             .frame(height: 40)
+            .onChange(of: name) { _, _ in nameProblem = nil }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     contactField("Name", placeholder: "Full name", text: $name, field: .name)
+                    if let nameProblem { FieldProblem(message: nameProblem).padding(.top, -8) }
                     contactField("Phone", placeholder: "(555) 555-5555", text: $phone, field: .phone)
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -488,7 +214,7 @@ struct CustomerContactSheet: View {
                             }
                         }
                         if usesCustomRole {
-                            contactField("Custom role", placeholder: "Enter a role", text: $customRole, field: .customRole)
+                            contactField("Custom role", placeholder: "Service manager", text: $customRole, field: .customRole)
                                 .padding(.top, 2)
                         } else {
                             Button("Enter custom role") {
@@ -545,10 +271,18 @@ struct CustomerContactSheet: View {
                         if busy { ProgressView().tint(Theme.onInk) }
                         else { Text(contact == nil ? "Save contact" : "Save changes") }
                     }
-                    .inkCommit(enabled: canSave)
+                    .inkCommit(enabled: saveBlockedReason == nil)
                 }
                 .buttonStyle(PressStyle())
-                .disabled(!canSave)
+                // Never pre-disabled for a blank name (pressing says so under it); off only while
+                // saving or when this role can't change contacts, which the sentence below says.
+                .disabled(busy || saveBlockedReason != nil)
+                // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+                if !busy, let reason = saveBlockedReason {
+                    Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if contact == nil {
                     Text("The first contact is set as primary automatically.")
@@ -561,12 +295,12 @@ struct CustomerContactSheet: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
         .foregroundStyle(Theme.foreground)
-        .background(Theme.card)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
         .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(Theme.cardRadius)
-        .presentationBackground(Theme.card)
+        .thorbisSheetSurface()
         .interactiveDismissDisabled(busy)
     }
 
@@ -575,7 +309,7 @@ struct CustomerContactSheet: View {
             Text(title)
                 .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(Theme.muted)
-            TextField(placeholder, text: text)
+            TextField(placeholder, text: text, prompt: .placeholder(placeholder))
                 // design.thorbis.com mobile: input type is at least 16.
                 .font(field == .phone ? Theme.monoFont(16) : Theme.font(16))
                 .keyboardType(field == .phone ? .phonePad : field == .email ? .emailAddress : .default)
@@ -590,7 +324,7 @@ struct CustomerContactSheet: View {
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: 48)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                         .stroke(focusedField == field ? Theme.foreground : Theme.border,
@@ -625,7 +359,14 @@ struct CustomerContactSheet: View {
     }
 
     private func save() async {
-        guard !busy, canSave else { return }
+        guard !busy else { return }
+        guard canSave else {
+            if saveBlockedReason == nil {
+                nameProblem = "Add the contact's name, like Danielle Marlowe."
+                focusedField = .name
+            }
+            return
+        }
         busy = true
         defer { busy = false }
         do {
@@ -667,113 +408,184 @@ extension LocalWorkspaceSection {
     }
 }
 
-/// Paper 29 and 65 together: every destination that is not a tab, then account settings.
+/// More (redesign 2026-10-31, after Linear's sidebar): the business on top with its switcher, then
+/// every place that is not in the bar as a row with a coloured place mark and a count where the phone
+/// already knows one, then Settings and the bar editor. It is the bar's More tab, not a hidden menu.
 struct MoreView: View {
-    @AppStorage("thorbis.appearance") private var appearance = "system"
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
+    @EnvironmentObject private var store: Store
     @EnvironmentObject var api: APIClient
-    @EnvironmentObject private var outbox: FieldOutbox
-    @State private var showWorkspaces = false
-    @State private var showNewJob = false
-    @State private var confirmSignOut = false
+    @State private var showSettings = false
+    @State private var editing = false
 
+    private var pinned: [MenuItem] { layout.visibleTabs(session) }
+
+    /// Every place below the bar's, in the person's menu order, grouped.
+    private func places(in group: MenuItem.Group) -> [MenuItem] {
+        AppMenuContent.menu(tabs: pinned, hidden: layout.hidden, order: layout.menuOrder,
+                            permitted: { $0.permitted(session) })
+            .filter { $0.group == group && $0.route != nil }
+    }
+
+    private var localSections: [LocalWorkspaceSection] {
+        guard session.user?.id != nil, session.activeOrganization?.id != nil else { return [] }
+        return LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                workspaceHeader
-                // Items placed in the tab bar or hidden in Customize menu are left out here.
-                ForEach(MenuItem.Group.allCases, id: \.self) { section in
-                    let items = layout.moreItems(in: section, session: session)
-                    let local = section == .phone && session.user?.id != nil && session.activeOrganization?.id != nil
-                        ? LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) } : []
-                    if !items.isEmpty || !local.isEmpty {
-                        group(section.rawValue) {
-                            ForEach(items) { item in
-                                if let route = item.route {
-                                    NavigationLink(value: route) { PaperMenuRow(item.title, symbol: item.symbol, subtitle: item.subtitle, tile: item.tint) }
+                PaperHeader(title: "More", subtitle: "Every place in Thorbis")
+                VStack(alignment: .leading, spacing: 20) {
+                    businessWell
+                    ForEach(MenuItem.Group.allCases, id: \.self) { group in
+                        let items = places(in: group)
+                        let local = group == .phone ? localSections : []
+                        if !items.isEmpty || !local.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                SectionHeader(title: group.rawValue, count: items.count + local.count)
+                                Well {
+                                    ForEach(Array(items.enumerated()), id: \.element) { index, item in
+                                        placeRow(item)
+                                        if index < items.count - 1 || !local.isEmpty { WellDivider(leading: 54) }
+                                    }
+                                    ForEach(Array(local.enumerated()), id: \.element) { index, section in
+                                        NavigationLink(value: PaperRoute.local(section)) {
+                                            MoreRow(title: section.title, symbol: section.moreSymbol, tint: Theme.markGrey,
+                                                    subtitle: section.moreSubtitle)
+                                        }
+                                        if index < local.count - 1 { WellDivider(leading: 54) }
+                                    }
                                 }
                             }
-                            ForEach(local, id: \.self) { section in
-                                NavigationLink(value: PaperRoute.local(section)) { PaperMenuRow(section.title, symbol: section.moreSymbol, subtitle: section.moreSubtitle, tile: Theme.markBurnt) }
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        SectionHeader(title: "Account")
+                        Well {
+                            Button { showSettings = true } label: {
+                                MoreRow(title: "Settings", symbol: "gearshape", tint: Theme.markGrey,
+                                        subtitle: "Account, company, payments, menu and appearance")
                             }
+                            WellDivider(leading: 54)
+                            Button { editing = true } label: {
+                                MoreRow(title: "Edit bar and menu", symbol: "slider.horizontal.3", tint: Theme.markGrey,
+                                        subtitle: "Choose the places in the bar and their order")
+                            }
+                            .accessibilityIdentifier("more-edit-menu")
                         }
                     }
                 }
-                group("Account") {
-                    if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.businessSetup) {
-                            PaperMenuRow("Set up your business", symbol: "checklist", subtitle: "Trade, company, customers, services, team and payments", tile: Theme.markAccent)
-                        }
-                        NavigationLink(value: PaperRoute.companyDetails) {
-                            PaperMenuRow("Company details", symbol: "building.2", subtitle: "Name, address and phone customers see", tile: Theme.markOlive)
-                        }
-                    }
-                    if session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm") {
-                        NavigationLink(value: PaperRoute.importCustomers) {
-                            PaperMenuRow("Import customers", symbol: "square.and.arrow.down", subtitle: "Bring a CSV from your old software", tile: Theme.markOlive)
-                        }
-                    }
-                    if session.can("organization.settings.edit") {
-                        NavigationLink(value: PaperRoute.payments) {
-                            PaperMenuRow("Payments", symbol: "creditcard", subtitle: "Stripe setup, card payments and payouts", tile: Theme.markForest)
-                        }
-                    }
-                    NavigationLink(value: PaperRoute.customizeMenu) {
-                        PaperMenuRow("Customize menu", symbol: "slider.horizontal.3", subtitle: "Choose your tabs and what shows here", tile: Theme.markAccent)
-                    }
-                    // MA-19: the notes stay one tap away on iPad too, where the gear opens More.
-                    NavigationLink(value: PaperRoute.whatsNew) {
-                        PaperMenuRow("What's new", symbol: "sparkles", subtitle: "What changed in recent updates", tile: Theme.markAccent)
-                    }
-                    HStack(spacing: 12) {
-                        Text(initials(session.user?.name ?? session.user?.email ?? ""))
-                            .font(Theme.font(15, weight: .medium)).foregroundStyle(.white)
-                            .frame(width: 40, height: 40).background(Theme.brandText, in: Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.user?.name ?? "Account").font(Theme.font(15, weight: .medium))
-                            if let email = session.user?.email { Text(email).font(Theme.font(13)).foregroundStyle(Theme.muted) }
-                        }
-                        Spacer()
-                    }
-                    .frame(minHeight: 56)
-                    .accessibilityElement(children: .combine)
-                    PaperMenuRow(title: "Appearance", symbol: "circle.lefthalf.filled") {
-                        ThorbisSelect(options: [("system", "System"), ("light", "Light"), ("dark", "Dark")],
-                                      selection: $appearance, menuTitle: "Appearance")
-                    }
-                    Button { confirmSignOut = true } label: {
-                        PaperMenuRow(title: "Sign out", symbol: "rectangle.portrait.and.arrow.right", tint: Theme.destructive) { EmptyView() }
-                    }
-                }
+                .paperCardMargin()
                 Text("Thorbis Field \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))")
                     .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity).padding(.top, 28).padding(.bottom, 32)
             }
             .foregroundStyle(Theme.foreground).buttonStyle(RowPressStyle())
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showWorkspaces) { WorkspaceSelectionView() }
-        .sheet(isPresented: $showNewJob) { NewJobSheet() }
-        .thorbisConfirm("Sign out of Thorbis?",
-                        message: outbox.signOutWarning,
-                        isPresented: $confirmSignOut,
-                        actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
-    }
-
-    /// MA-05: the same header as every tab root (30/500 title). Switching business lives in the
-    /// bottom bar's menu and New job on the bar's round button, so they are not repeated here.
-    private var workspaceHeader: some View {
-        PaperHeader(title: "More", subtitle: session.activeOrganization?.name ?? "Workspace")
-    }
-
-    private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaperGroupHeader(title: title).padding(.top, 14)
-            content()
+        .sheet(isPresented: $showSettings) { SheetSurface { SettingsView() } }
+        .sheet(isPresented: $editing) {
+            AppMenuEditor { editing = false }
+                .padding(.top, 8)
+                .presentationDetents([.large])
+                .thorbisSheetSurface()
         }
-        .padding(.horizontal, Theme.gutter)
+        #if DEBUG
+        .task { if PaperPreview.enabled, PaperPreview.screen == "app-menu-edit" { editing = true } }
+        #endif
+    }
+
+    /// A place: its route under More (iPad; the sidebar opens Schedule, Jobs and Customers itself).
+    @ViewBuilder private func placeRow(_ item: MenuItem) -> some View {
+        if let route = item.route {
+            NavigationLink(value: route) {
+                MoreRow(title: item.title, symbol: item.symbol, tint: item.tint, subtitle: item.subtitle, count: count(item))
+            }
+        }
+    }
+
+    /// Counts the phone already holds; places whose count needs another read show none.
+    private func count(_ item: MenuItem) -> Int? {
+        switch item {
+        case .schedule:
+            let today = store.jobs.filter { $0.status != "canceled" && (JobFiltering.date($0.scheduledFor).map { Calendar.current.isDateInToday($0) } ?? false) }
+            return today.count
+        case .jobs: return store.jobs.filter { !["completed", "canceled"].contains($0.status) }.count
+        case .customers: return store.customers.isEmpty ? nil : store.customers.count
+        default: return nil
+        }
+    }
+
+    private var businessName: String { session.activeOrganization?.name ?? "Business" }
+
+    /// Every business this person belongs to, the current one checked, then Add a business.
+    private var businessItems: [ThorbisMenuItem] {
+        session.organizations.map { organization in
+            let current = organization.id == session.activeOrganization?.id
+            return ThorbisMenuItem(organization.name, isSelected: current) {
+                guard !current else { return }
+                Task { await session.selectOrganization(id: organization.id) }
+            }
+        }
+    }
+
+    /// The business and its switcher, like the workspace row on top of Linear's menu.
+    private var businessWell: some View {
+        Well {
+            ThorbisMenu(items: businessItems, title: "Switch business",
+                        accessibilityLabel: "\(businessName). Switch business") {
+                HStack(spacing: 12) {
+                    InitialsAvatar(name: businessName, size: 30)
+                        .accessibilityHidden(true)
+                    Text(businessName)
+                        .font(Theme.font(16, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                }
+                .foregroundStyle(Theme.foreground)
+                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                .frame(minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("more-business-switcher")
+        }
+    }
+}
+
+/// One place in More: a coloured place mark, the name (and what it holds), a count on the right.
+struct MoreRow: View {
+    let title: String
+    let symbol: String
+    var tint: Color = Theme.markGrey
+    var subtitle: String? = nil
+    var count: Int? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        HStack(spacing: 14) {
+            PlaceMark(symbol: symbol, tint: tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let subtitle {
+                    Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                }
+            }
+            Spacer(minLength: 8)
+            if let count {
+                Text("\(count)").font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }

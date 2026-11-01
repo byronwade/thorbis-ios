@@ -306,10 +306,13 @@ struct CustomerCommitButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if busy { ProgressView().tint(Theme.background) } else if let icon { Image(systemName: icon) }
-                Text(title).font(Theme.font(CustomerModeStyle.body, weight: .semibold))
+                Text(title).font(Theme.customerFont(CustomerModeStyle.body, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.horizontal, 16).padding(.vertical, 12)
             .frame(maxWidth: .infinity)
-            .frame(height: sizeClass == .regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
+            .frame(minHeight: sizeClass == .regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
             .foregroundStyle(Theme.background)
             .background(Theme.foreground, in: RoundedRectangle(cornerRadius: 14))
         }
@@ -322,9 +325,61 @@ struct CustomerCommitButton: View {
 /// device back") needs the technician's Face ID or passcode before `onUnlocked` runs.
 ///
 /// Present it with `.fullScreenCover`. `content` gets a `handBack` action for its own Done button.
+private struct CustomerModeUnlockKey: EnvironmentKey {
+    static let defaultValue: (@MainActor () async -> Void)? = nil
+}
+extension EnvironmentValues {
+    var customerModeUnlock: (@MainActor () async -> Void)? {
+        get { self[CustomerModeUnlockKey.self] }
+        set { self[CustomerModeUnlockKey.self] = newValue }
+    }
+}
+/// A pushed customer destination requests the container's existing authentication boundary.
+struct CustomerModeOwnerUnlockButton: View {
+    @Environment(\.customerModeUnlock) private var unlock
+    @State private var busy = false
+    var body: some View {
+        Button {
+            guard !busy, let unlock else { return }
+            busy = true
+            Task { await unlock(); busy = false }
+        } label: {
+            HStack(spacing: 8) { Image(systemName: "lock"); Text("Hand back") }
+                .font(Theme.customerFont(17, weight: .medium)).frame(minHeight: CustomerModeStyle.target)
+        }
+        .accessibilityLabel("Hand back")
+        .accessibilityHint("Technician authentication is required to leave customer mode.")
+        .accessibilityIdentifier("customer-mode-owner-exit")
+        .disabled(busy || unlock == nil)
+    }
+}
+
+#if DEBUG
+/// DEBUG fixture controls for customer mode, laid out above the protected navigation stack so
+/// they push it down instead of covering its toolbar.
+private struct CustomerModePreviewControlsStack: ViewModifier {
+    func body(content: Content) -> some View {
+        VStack(spacing: 0) {
+            if PaperPreview.isJobEstimateHandoff && !ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-hide-controls") { JobEstimateHandoffPreviewControls() }
+            else if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
+            else if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-documents-status-change") { PaperPreviewConnectionMenu() }
+            content
+        }
+    }
+}
+#endif
+
 struct CustomerModeContainer<Content: View>: View {
     let onUnlocked: () -> Void
     @ViewBuilder let content: (_ handBack: @escaping () -> Void) -> Content
+    private let ownerControlTitle: String?
+    private let authenticateOwner: @MainActor () async -> Bool
+    init(onUnlocked: @escaping () -> Void, ownerControlTitle: String? = nil,
+         authenticateOwner: @escaping @MainActor () async -> Bool = { await StaffUnlock.unlock() },
+         @ViewBuilder content: @escaping (_ handBack: @escaping () -> Void) -> Content) {
+        self.onUnlocked = onUnlocked; self.ownerControlTitle = ownerControlTitle
+        self.authenticateOwner = authenticateOwner; self.content = content
+    }
     @State private var handingBack = false
     @State private var unlocking = false
 
@@ -333,37 +388,72 @@ struct CustomerModeContainer<Content: View>: View {
             Group {
                 if handingBack { handBackScreen } else { content({ handingBack = true }) }
             }
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { Task { await unlock() } } label: {
-                        Image(systemName: "lock").font(.system(size: 20))
-                            .frame(width: CustomerModeStyle.target, height: CustomerModeStyle.target).contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("Technician: unlock to leave customer mode")
-                    .disabled(unlocking)
-                }
+            .toolbar { ownerToolbar }
+        }
+        .environment(\.customerModeUnlock, { await unlock() })
+        // Customers never get the staff drawer, even on screens pushed inside customer mode.
+        .environment(\.paperDrawerReach, nil)
+        .environment(\.paperDrawer, nil)
+
+        #if DEBUG
+        .overlay {
+            if PaperPreview.isJobEstimateHandoff {
+                JobEstimateHandoffReceiptMetadata().frame(width: 0, height: 0).allowsHitTesting(false)
             }
         }
+        // Stacked above the navigation stack, not a `safeAreaInset`: once the session changed under
+        // the cover, the inset stopped moving the navigation bar down, so the DEBUG disclosure sat on
+        // top of the Hand back pill and VoiceOver / XCTest could not reach the pill's hit point.
+        .modifier(CustomerModePreviewControlsStack())
+        #endif
         .interactiveDismissDisabled()
         .persistentSystemOverlays(.hidden)
+    }
+
+    @ToolbarContentBuilder private var ownerToolbar: some ToolbarContent {
+        ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) {
+            if ownerControlTitle == nil {
+                // Present.dc.html: the lock is a quiet 44pt circle, not a pill; same action and label.
+                Button { Task { await unlock() } } label: {
+                    PaperCircleLabel(symbol: "lock", size: 44, fill: Theme.fill)
+                        .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Technician: unlock to leave customer mode")
+                .accessibilityHint("Technician authentication is required to leave customer mode.")
+                .accessibilityIdentifier("lock")
+                .disabled(unlocking)
+            } else {
+            Button { Task { await unlock() } } label: {
+                Group {
+                    if let ownerControlTitle { HStack(spacing: 8) { Image(systemName: "lock"); Text(ownerControlTitle) }.font(Theme.customerFont(17, weight: .medium)) }
+                    else { Image(systemName: "lock").font(.system(size: 20)) }
+                }.frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
+            }
+            .accessibilityLabel(ownerControlTitle == nil ? "Technician: unlock to leave customer mode" : "Hand back")
+            .accessibilityHint("Technician authentication is required to leave customer mode.")
+            .accessibilityIdentifier(ownerControlTitle == nil ? "lock" : "customer-mode-owner-exit")
+            .disabled(unlocking)
+            }
+        }
     }
 
     private var handBackScreen: some View {
         VStack(spacing: 20) {
             Spacer()
             Image(systemName: "hand.wave").font(.system(size: 44)).foregroundStyle(Theme.brandText).accessibilityHidden(true)
-            Text("Thank you").font(Theme.font(28, weight: .semibold)).tracking(-0.42)
+            Text("Thank you").font(Theme.customerFont(28, weight: .semibold)).tracking(-0.42)
                 .accessibilityAddTraits(.isHeader)
             Text("Please hand the device back to your technician.")
-                .font(Theme.font(CustomerModeStyle.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                .font(Theme.customerFont(CustomerModeStyle.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
             Spacer()
             VStack(spacing: 8) {
                 CustomerCommitButton(title: "Technician: unlock", icon: "faceid", busy: unlocking) { Task { await unlock() } }
                 Button("Go back") { handingBack = false }
-                    .font(Theme.font(CustomerModeStyle.body, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .font(Theme.customerFont(CustomerModeStyle.body, weight: .medium)).foregroundStyle(Theme.brandText)
                     .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target)
             }
             .frame(maxWidth: CustomerModeStyle.readableWidth)
@@ -373,272 +463,53 @@ struct CustomerModeContainer<Content: View>: View {
     }
 
     private func unlock() async {
+        guard !unlocking else { return }
         unlocking = true
         defer { unlocking = false }
-        if await StaffUnlock.unlock() { onUnlocked() }
+        if await authenticateOwner() { onUnlocked() }
     }
 }
 
 // MARK: - Screen
 
-/// "Show to customer": the customer's own details, presented in customer mode for them to check
-/// and correct on the technician's phone or iPad. Notes, balances, gate codes, other customers and
-/// the rest of the app stay hidden, and nothing is saved until the technician has unlocked the
-/// device and seen the changes. Each save is the normal audited customer write, under the
-/// technician's name.
-struct CustomerSelfEditView: View {
+/// The customer's own details in customer mode: the draft they edit, then the technician's audited
+/// save. One model so Customer view can hold the draft across its other sections and run the staff
+/// review only after the technician has unlocked.
+@MainActor
+final class CustomerSelfEditModel: ObservableObject {
     let customerID: String
-    let onFinished: () -> Void
+    @Published var draft: CustomerSelfEditDraft?
+    @Published private(set) var loadError: String?
+    @Published private(set) var saving = false
+    @Published private(set) var saveError: String?
+    @Published private(set) var savedAll = false
+    private let consentKey = UUID().uuidString
 
-    @EnvironmentObject private var api: APIClient
-    @EnvironmentObject private var session: SessionController
-    @State private var draft: CustomerSelfEditDraft?
-    @State private var loadError: String?
-    @State private var staffReview = false
-    @State private var savedAll = false
-    @State private var showErrors = false
-    @State private var saving = false
-    @State private var saveError: String?
-    @State private var consentKey = UUID().uuidString
-    @FocusState private var focused: Bool
+    init(customerID: String) { self.customerID = customerID }
 
-    private var businessName: String { session.activeOrganization?.name ?? "us" }
+    var hasChanges: Bool { draft?.hasChanges == true }
 
-    var body: some View {
-        if staffReview {
-            NavigationStack {
-                Group { if savedAll { saved } else { review } }
-                    .background(Theme.background.ignoresSafeArea())
-                    .foregroundStyle(Theme.foreground)
-                    .navigationTitle("Customer view")
-                    .navigationBarTitleDisplayMode(.inline)
-            }
-            .interactiveDismissDisabled(saving)
-        } else {
-            CustomerModeContainer(onUnlocked: {
-                focused = false
-                if draft?.hasChanges == true { staffReview = true } else { onFinished() }
-            }) { handBack in
-                editing(handBack: handBack)
-            }
-            .task { await load() }
-        }
-    }
-
-    // MARK: Editing (customer)
-
-    @ViewBuilder private func editing(handBack: @escaping () -> Void) -> some View {
-        if let draft = Binding($draft) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Your details").font(Theme.font(34, weight: .bold)).tracking(-0.68)
-                            .accessibilityAddTraits(.isHeader)
-                        Text("Check what \(businessName) has on file and fix anything that's wrong.")
-                            .font(Theme.font(CustomerModeStyle.body)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.top, 8).padding(.bottom, 24)
-
-                    group("You") {
-                        field("Name", text: draft.name, content: .name, error: showErrors ? draft.wrappedValue.nameError : nil)
-                        field("Mobile phone", text: draft.phone, content: .telephoneNumber, keyboard: .phonePad)
-                        field("Email", text: draft.email, content: .emailAddress, keyboard: .emailAddress,
-                              error: showErrors ? draft.wrappedValue.emailError : nil)
-                        field("Billing address", text: draft.address, content: .fullStreetAddress, axis: .vertical)
-                    }
-
-                    group("Best way to reach you") {
-                        HStack(spacing: 8) {
-                            ForEach(CustomerSelfEditDraft.preferredOptions) { option in
-                                choice(option.label, selected: draft.wrappedValue.preferredContact == option.value) {
-                                    draft.wrappedValue.preferredContact = draft.wrappedValue.preferredContact == option.value ? nil : option.value
-                                }
-                            }
-                        }
-                        Toggle(isOn: Binding(get: { draft.wrappedValue.allowsTexts == true },
-                                             set: { draft.wrappedValue.allowsTexts = $0 })) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Text me about my appointments").font(Theme.font(CustomerModeStyle.body, weight: .medium))
-                                Text("On my way, arrival and job updates. Reply STOP any time.")
-                                    .font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
-                            }
-                        }
-                        .tint(Theme.brand)
-                        .frame(minHeight: 56)
-                        .padding(.top, 6)
-                    }
-
-                    if !draft.wrappedValue.locations.isEmpty {
-                        group(draft.wrappedValue.locations.count == 1 ? "Service address" : "Service addresses") {
-                            ForEach(draft.locations) { location in
-                                field(location.wrappedValue.label, text: location.address, content: .fullStreetAddress, axis: .vertical,
-                                      error: showErrors ? draft.wrappedValue.locationErrors[location.wrappedValue.id] : nil)
-                            }
-                        }
-                    }
-
-                    group("Other people we can contact") {
-                        ForEach(draft.contacts) { contact in
-                            VStack(alignment: .leading, spacing: 8) {
-                                field("Name", text: contact.name, content: .name,
-                                      error: showErrors ? draft.wrappedValue.contactErrors[contact.wrappedValue.id] : nil)
-                                field("Phone", text: contact.phone, content: .telephoneNumber, keyboard: .phonePad)
-                                field("Email", text: contact.email, content: .emailAddress, keyboard: .emailAddress)
-                            }
-                            .padding(.bottom, 12)
-                        }
-                        Text("Add someone").font(Theme.font(CustomerModeStyle.smallest, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 2)
-                        field("Name", text: draft.newContactName, content: .name,
-                              error: showErrors ? draft.wrappedValue.newContactError : nil)
-                        field("Phone", text: draft.newContactPhone, content: .telephoneNumber, keyboard: .phonePad)
-                        field("Email", text: draft.newContactEmail, content: .emailAddress, keyboard: .emailAddress)
-                    }
-                }
-                .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
-                .padding(.horizontal, Theme.gutter)
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .bottom) {
-                CustomerCommitButton(title: "Done") {
-                    focused = false
-                    if draft.wrappedValue.isValid { handBack() } else { showErrors = true }
-                }
-                .frame(maxWidth: CustomerModeStyle.readableWidth)
-                .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                .frame(maxWidth: .infinity)
-                .background(Theme.background)
-            }
-        } else if let loadError {
-            ContentUnavailableView("Couldn't open your details", systemImage: "person.crop.circle.badge.exclamationmark",
-                                   description: Text(loadError + " Hand the device back to your technician."))
-        } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    // MARK: Review (technician)
-
-    private var review: some View {
-        let changes = draft?.changeSummary ?? []
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Review changes").font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                    .accessibilityAddTraits(.isHeader)
-                Text("These save to the customer's record and activity under your name.")
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(changes.enumerated()), id: \.offset) { index, line in
-                        Text(line).font(Theme.font(15)).padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        if index < changes.count - 1 { Divider().overlay(Theme.border) }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                if let saveError {
-                    Text(saveError).font(Theme.font(13)).foregroundStyle(Theme.destructive)
-                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 10))
-                }
-            }
-            .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
-            .padding(.horizontal, Theme.gutter).padding(.top, 8)
-            .frame(maxWidth: .infinity)
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 8) {
-                PrimaryButton(title: "Save changes", busy: saving) { Task { await save() } }
-                Button("Discard changes", role: .destructive) { onFinished() }
-                    .font(Theme.font(15, weight: .medium)).frame(minHeight: 44).disabled(saving)
-            }
-            .frame(maxWidth: CustomerModeStyle.readableWidth)
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(Theme.background)
-        }
-    }
-
-    private var saved: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "checkmark.circle").font(.system(size: 44)).foregroundStyle(Theme.success).accessibilityHidden(true)
-            Text("Customer details saved").font(Theme.font(22, weight: .semibold))
-            Spacer()
-            PrimaryButton(title: "Done") { onFinished() }.frame(maxWidth: CustomerModeStyle.readableWidth)
-        }
-        .padding(.horizontal, Theme.gutter).padding(.bottom, 16)
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: Pieces
-
-    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Theme.font(CustomerModeStyle.smallest, weight: .semibold)).foregroundStyle(Theme.muted)
-                .accessibilityAddTraits(.isHeader)
-            content()
-        }
-        .padding(.bottom, 24)
-    }
-
-    private func field(_ label: String, text: Binding<String>, content: UITextContentType? = nil,
-                       keyboard: UIKeyboardType = .default, axis: Axis = .horizontal, error: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
-                TextField("", text: text, axis: axis)
-                    .font(Theme.font(CustomerModeStyle.body))
-                    .textContentType(content)
-                    .keyboardType(keyboard)
-                    .textInputAutocapitalization(keyboard == .emailAddress ? .never : .words)
-                    .autocorrectionDisabled(keyboard != .default)
-                    .lineLimit(axis == .vertical ? 1...3 : 1...1)
-                    .focused($focused)
-                    .accessibilityLabel(label)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .frame(minHeight: 68, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(error == nil ? Theme.border : Theme.destructive))
-            if let error { Text(error).font(Theme.font(CustomerModeStyle.smallest)).foregroundStyle(Theme.destructive) }
-        }
-    }
-
-    private func choice(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title).font(Theme.font(CustomerModeStyle.body, weight: .medium))
-                .frame(maxWidth: .infinity).frame(height: CustomerModeStyle.commitHeight)
-                .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
-                .background(selected ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Theme.brandText : Theme.border))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
-    // MARK: Actions
-
-    private func load() async {
+    func load(api: APIClient) async {
         guard draft == nil else { return }
+        // A retry starts clean, so "Try again" shows the skeleton instead of the old failure.
+        loadError = nil
         do {
             let record = try await api.fieldCustomer(customerID)
             let contacts = try await api.fieldContacts(customerID)
             let locations = try await api.fieldLocations(customerID)
             let consent: CustomerSmsConsent?
             do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
+            guard draft == nil else { return }
             draft = CustomerSelfEditDraft(record: record, contacts: contacts, locations: locations, smsConsent: consent)
         } catch is CancellationError {
         } catch {
-            loadError = error.isConnectivityFailure ? "This needs a connection." : "Something went wrong."
+            loadError = error.customerSentence(.openDetails)
         }
     }
 
     /// Customer record first, then contacts, addresses and the text decision. Each step is its own
     /// audited write; the draft is rebased after each one so a retry doesn't repeat finished work.
-    private func save() async {
+    func save(api: APIClient) async {
         guard var current = draft else { return }
         saving = true
         defer { saving = false }
@@ -685,8 +556,268 @@ struct CustomerSelfEditView: View {
         } catch {
             saveError = error.isConnectivityFailure ? "Saving needs a connection. Try again when you have signal." : error.localizedDescription
         }
+    }}
+
+/// The customer's side: check and fix their details. `done` leaves this form (hand back, or back to
+/// Customer view); nothing is saved here.
+struct CustomerSelfEditForm: View {
+    @ObservedObject var model: CustomerSelfEditModel
+    var doneTitle = "Done"
+    let done: () -> Void
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @State private var showErrors = false
+    @FocusState private var focused: Bool
+
+    private var businessName: String { session.activeOrganization?.name ?? "us" }
+
+    var body: some View {
+        Group {
+        if let draft = Binding($model.draft) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your details").font(Theme.customerFont(34, weight: .bold)).tracking(-0.68)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Check what \(businessName) has on file and fix anything that's wrong.")
+                            .font(Theme.customerFont(CustomerModeStyle.body)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 8).padding(.bottom, 24)
+
+                    group("You") {
+                        field("Name", text: draft.name, content: .name, error: showErrors ? draft.wrappedValue.nameError : nil)
+                        field("Mobile phone", text: draft.phone, content: .telephoneNumber, keyboard: .phonePad)
+                        field("Email", text: draft.email, content: .emailAddress, keyboard: .emailAddress,
+                              error: showErrors ? draft.wrappedValue.emailError : nil)
+                        field("Billing address", text: draft.address, content: .fullStreetAddress, axis: .vertical)
+                    }
+
+                    group("Best way to reach you") {
+                        HStack(spacing: 8) {
+                            ForEach(CustomerSelfEditDraft.preferredOptions) { option in
+                                choice(option.label, selected: draft.wrappedValue.preferredContact == option.value) {
+                                    draft.wrappedValue.preferredContact = draft.wrappedValue.preferredContact == option.value ? nil : option.value
+                                }
+                            }
+                        }
+                        Toggle(isOn: Binding(get: { draft.wrappedValue.allowsTexts == true },
+                                             set: { draft.wrappedValue.allowsTexts = $0 })) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Text me about my appointments").font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
+                                Text("On my way, arrival and job updates. Reply STOP any time.")
+                                    .font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .tint(Theme.brand)
+                        .frame(minHeight: 56)
+                        .padding(.top, 6)
+                    }
+
+                    if !draft.wrappedValue.locations.isEmpty {
+                        group(draft.wrappedValue.locations.count == 1 ? "Service address" : "Service addresses") {
+                            ForEach(draft.locations) { location in
+                                field(location.wrappedValue.label, text: location.address, content: .fullStreetAddress, axis: .vertical,
+                                      error: showErrors ? draft.wrappedValue.locationErrors[location.wrappedValue.id] : nil)
+                            }
+                        }
+                    }
+
+                    group("Other people we can contact") {
+                        ForEach(draft.contacts) { contact in
+                            VStack(alignment: .leading, spacing: 8) {
+                                field("Name", text: contact.name, content: .name,
+                                      error: showErrors ? draft.wrappedValue.contactErrors[contact.wrappedValue.id] : nil)
+                                field("Phone", text: contact.phone, content: .telephoneNumber, keyboard: .phonePad)
+                                field("Email", text: contact.email, content: .emailAddress, keyboard: .emailAddress)
+                            }
+                            .padding(.bottom, 12)
+                        }
+                        Text("Add someone").font(Theme.customerFont(CustomerModeStyle.smallest, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 2)
+                        field("Name", text: draft.newContactName, content: .name,
+                              error: showErrors ? draft.wrappedValue.newContactError : nil)
+                        field("Phone", text: draft.newContactPhone, content: .telephoneNumber, keyboard: .phonePad)
+                        field("Email", text: draft.newContactEmail, content: .emailAddress, keyboard: .emailAddress)
+                    }
+                }
+                .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
+                .padding(.horizontal, Theme.gutter)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom) {
+                CustomerCommitButton(title: doneTitle) {
+                    focused = false
+                    if draft.wrappedValue.isValid { done() } else { showErrors = true }
+                }
+                .frame(maxWidth: CustomerModeStyle.readableWidth)
+                .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(Theme.canvas)
+            }
+        } else if let loadError = model.loadError {
+            ScrollView {
+                CustomerStateMessage(symbol: "person.crop.circle.badge.exclamationmark", title: "We couldn’t open your details",
+                                     message: loadError, actionTitle: "Try again") { Task { await model.load(api: api) } }
+                    .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter)
+                    .frame(maxWidth: .infinity)
+            }
+        } else {
+            ScrollView {
+                CustomerSkeleton(caption: "Opening your details…", lines: 4, heading: false, amounts: false)
+                    .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter).padding(.top, 16)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        }
+        .task { await model.load(api: api) }
+    }
+
+    // MARK: Pieces
+
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(Theme.customerFont(CustomerModeStyle.smallest, weight: .semibold)).foregroundStyle(Theme.muted)
+                .accessibilityAddTraits(.isHeader)
+            content()
+        }
+        .padding(.bottom, 24)
+    }
+
+    private func field(_ label: String, text: Binding<String>, content: UITextContentType? = nil,
+                       keyboard: UIKeyboardType = .default, axis: Axis = .horizontal, error: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
+                TextField("", text: text, axis: axis)
+                    .font(Theme.customerFont(CustomerModeStyle.body))
+                    .textContentType(content)
+                    .keyboardType(keyboard)
+                    .textInputAutocapitalization(keyboard == .emailAddress ? .never : .words)
+                    .autocorrectionDisabled(keyboard != .default)
+                    .lineLimit(axis == .vertical ? 1...3 : 1...1)
+                    .focused($focused)
+                    .accessibilityLabel(label)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .frame(minHeight: 68, alignment: .leading)
+            .panelBackground(cornerRadius: 12)
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(error == nil ? Theme.border : Theme.destructive))
+            if let error { Text(error).font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.destructive) }
+        }
+    }
+
+    private func choice(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
+                .frame(maxWidth: .infinity).frame(height: CustomerModeStyle.commitHeight)
+                .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
+                .background(selected ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Theme.brandText : Theme.border))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
+
+/// The technician's side, after unlocking: review the customer's changes, then save under staff's name.
+struct CustomerSelfEditReview: View {
+    @ObservedObject var model: CustomerSelfEditModel
+    let onFinished: () -> Void
+    @EnvironmentObject private var api: APIClient
+
+    var body: some View {
+        NavigationStack {
+            Group { if model.savedAll { saved } else { review } }
+                .background(Theme.canvas)
+                .foregroundStyle(Theme.foreground)
+                .navigationTitle("Customer view")
+                .navigationBarTitleDisplayMode(.inline)
+        }
+        .interactiveDismissDisabled(model.saving)
+    }
+
+    private var review: some View {
+        let changes = model.draft?.changeSummary ?? []
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Review changes").font(Theme.customerFont(24, weight: .medium)).tracking(-0.36)
+                    .accessibilityAddTraits(.isHeader)
+                Text("These save to the customer's record and activity under your name.")
+                    .font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(changes.enumerated()), id: \.offset) { index, line in
+                        Text(line).font(Theme.customerFont(15)).padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .panelBackground(cornerRadius: 12)
+                if let saveError = model.saveError {
+                    Text(saveError).font(Theme.customerFont(13)).foregroundStyle(Theme.destructive)
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
+            .padding(.horizontal, Theme.gutter).padding(.top, 8)
+            .frame(maxWidth: .infinity)
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 8) {
+                PrimaryButton(title: "Save changes", busy: model.saving) { Task { await model.save(api: api) } }
+                Button("Discard changes", role: .destructive) { onFinished() }
+                    .font(Theme.customerFont(15, weight: .medium)).frame(minHeight: 44).disabled(model.saving)
+            }
+            .frame(maxWidth: CustomerModeStyle.readableWidth)
+            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(Theme.canvas)
+        }
+    }
+
+    private var saved: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "checkmark.circle").font(.system(size: 44)).foregroundStyle(Theme.success).accessibilityHidden(true)
+            Text("Customer details saved").font(Theme.customerFont(22, weight: .semibold))
+            Spacer()
+            PrimaryButton(title: "Done") { onFinished() }.frame(maxWidth: CustomerModeStyle.readableWidth)
+        }
+        .padding(.horizontal, Theme.gutter).padding(.bottom, 16)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// Customer view without a job: just "Your details", in customer mode, then the staff review.
+struct CustomerSelfEditView: View {
+    let customerID: String
+    let onFinished: () -> Void
+    @StateObject private var model: CustomerSelfEditModel
+    @State private var staffReview = false
+
+    init(customerID: String, onFinished: @escaping () -> Void) {
+        self.customerID = customerID
+        self.onFinished = onFinished
+        _model = StateObject(wrappedValue: CustomerSelfEditModel(customerID: customerID))
+    }
+
+    var body: some View {
+        if staffReview {
+            CustomerSelfEditReview(model: model, onFinished: onFinished)
+        } else {
+            CustomerModeContainer(onUnlocked: {
+                if model.hasChanges { staffReview = true } else { onFinished() }
+            }) { handBack in
+                CustomerSelfEditForm(model: model, done: handBack)
+            }
+        }
+    }
+}
+
 
 extension CustomerSelfEditDraft {
     /// After a step saves, later steps compare against what the server now holds.

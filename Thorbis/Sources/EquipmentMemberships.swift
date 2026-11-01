@@ -30,21 +30,18 @@ struct EquipmentRecord: Codable, Identifiable, Hashable {
 
     var warrantyEnd: Date? { warrantyExpiresOn.flatMap(EquipmentRecord.day) }
 
-    static func day(_ raw: String) -> Date? {
-        let format = DateFormatter()
-        format.calendar = Calendar(identifier: .gregorian)
-        format.locale = Locale(identifier: "en_US_POSIX")
-        format.dateFormat = "yyyy-MM-dd"
-        return format.date(from: raw)
-    }
+    static func day(_ raw: String) -> Date? { dayFormat.date(from: raw) }
 
-    static func dayString(_ date: Date) -> String {
+    static func dayString(_ date: Date) -> String { dayFormat.string(from: date) }
+
+    /// Made once: `warrantyEnd` is read per row on every render.
+    private static let dayFormat: DateFormatter = {
         let format = DateFormatter()
         format.calendar = Calendar(identifier: .gregorian)
         format.locale = Locale(identifier: "en_US_POSIX")
         format.dateFormat = "yyyy-MM-dd"
-        return format.string(from: date)
-    }
+        return format
+    }()
 }
 
 /// The fields a person edits. Nil means "leave out"; on update the server leaves absent fields alone.

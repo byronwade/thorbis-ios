@@ -46,7 +46,7 @@ private struct ReportExportMenu: ViewModifier {
         content
             .toolbar {
                 if !exports.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ThorbisToolbarItem(placement: .topBarTrailing) {
                         ThorbisMenu(items: exports.map { export in
                             ThorbisMenuItem(export.label, icon: "tablecells") { open(export) }
                         }, title: "Download as Excel", accessibilityLabel: "Download as Excel") {

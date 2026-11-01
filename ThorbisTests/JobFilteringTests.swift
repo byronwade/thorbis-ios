@@ -2,6 +2,126 @@ import XCTest
 @testable import Thorbis
 
 final class JobFilteringTests: XCTestCase {
+    func testGroupedCustomerJobsPreserveCountsAndSummarySelection() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
+        let jobs = [
+            Job(id: "one", customerId: "a", title: "one", status: "scheduled", createdAt: nil, updatedAt: nil, allowedTransitions: nil, scheduledFor: "2026-10-30T12:00:00Z"),
+            Job(id: "done", customerId: "a", title: "done", status: "completed", createdAt: nil, updatedAt: nil, allowedTransitions: nil),
+            Job(id: "two", customerId: "b", title: "two", status: "in_progress", createdAt: nil, updatedAt: nil, allowedTransitions: nil),
+            Job(id: "none", customerId: nil, title: "none", status: "in_progress", createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+        ]
+        let grouped = CustomerJobGroups(jobs: jobs)
+        for customer in ["a", "b", "missing"] {
+            let original = jobs.filter { $0.customerId == customer }
+            let subset = grouped.jobs(for: customer)
+            XCTAssertEqual(subset, original)
+            XCTAssertEqual(JobFiltering.customerJobSummary(subset, customerID: customer, now: now)?.job.id,
+                           JobFiltering.customerJobSummary(jobs, customerID: customer, now: now)?.job.id)
+        }
+        XCTAssertEqual(grouped.jobs(for: "a").count, 2)
+    }
+
+    func testLargeCustomerJobGroupsKeepEveryJobWithItsCustomer() {
+        let jobs = (0..<1_200).map { index in
+            Job(id: "job-\(index)", customerId: "customer-\(index % 600)", title: "Service",
+                status: "completed", createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+        }
+        let grouped = CustomerJobGroups(jobs: jobs)
+        XCTAssertEqual((0..<600).reduce(0) { $0 + grouped.jobs(for: "customer-\($1)").count }, jobs.count)
+        XCTAssertEqual(grouped.jobs(for: "customer-599").map(\.id), ["job-599", "job-1199"])
+        XCTAssertTrue(grouped.jobs(for: "missing").isEmpty)
+    }
+    func testCustomerSummaryUsesSamePriorityAndHonestHeading() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
+        func job(_ id: String, _ status: String, _ time: String?, customer: String = "c") -> Job {
+            Job(id: id, customerId: customer, title: id, status: status,
+                createdAt: nil, updatedAt: nil, allowedTransitions: nil, scheduledFor: time)
+        }
+        let active = job("active", "in_progress", nil)
+        let next = job("next", "scheduled", "2026-10-30T12:00:00Z")
+        let past = job("past", "dispatched", "2026-10-28T12:00:00Z")
+        let unscheduled = job("unscheduled", "scheduled", nil)
+        let completed = job("completed", "completed", "2026-10-27T12:00:00Z")
+        let other = job("other", "in_progress", nil, customer: "other")
+        let all = [unscheduled, past, next, active, completed, other]
+        let summary = JobFiltering.customerJobSummary(all, customerID: "c", now: now)
+        XCTAssertEqual(summary?.job.id, "active")
+        XCTAssertEqual(summary?.heading, "Open job")
+        XCTAssertEqual(summary?.openCount, 4)
+        let upcoming = JobFiltering.customerJobSummary([past, unscheduled, next], customerID: "c", now: now)
+        XCTAssertEqual(upcoming?.job.id, "next")
+        XCTAssertEqual(upcoming?.heading, "Next visit")
+        let earlier = JobFiltering.customerJobSummary([past, unscheduled], customerID: "c", now: now)
+        XCTAssertEqual(earlier?.job.id, "past")
+        XCTAssertEqual(earlier?.heading, "Past scheduled time")
+        let noTime = JobFiltering.customerJobSummary([unscheduled], customerID: "c", now: now)
+        XCTAssertEqual(noTime?.job.id, "unscheduled")
+        XCTAssertEqual(noTime?.heading, "Open job")
+        XCTAssertNil(JobFiltering.customerJobSummary([completed, other], customerID: "c", now: now))
+    }
+
+    func testNextCustomerVisitUsesEarliestUpcomingScheduledJobForThatCustomer() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
+        func customerJob(_ id: String, customer: String, time: String?, status: String = "scheduled") -> Job {
+            var job = Job(id: id, customerId: customer, title: id, status: status,
+                          createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+            job.scheduledFor = time
+            return job
+        }
+        let jobs = [
+            customerJob("later", customer: "c1", time: "2026-10-31T12:00:00Z"),
+            customerJob("other", customer: "c2", time: "2026-10-29T12:30:00Z"),
+            customerJob("past", customer: "c1", time: "2026-10-29T11:00:00Z"),
+            customerJob("canceled", customer: "c1", time: "2026-10-29T13:00:00Z", status: "canceled"),
+            customerJob("completed", customer: "c1", time: "2026-10-29T13:00:00Z", status: "completed"),
+            customerJob("unscheduled", customer: "c1", time: nil),
+            customerJob("unknown", customer: "c1", time: "invalid"),
+            customerJob("soonest", customer: "c1", time: "2026-10-30T12:00:00Z")
+        ]
+        XCTAssertEqual(JobFiltering.nextScheduledVisit(jobs, customerID: "c1", now: now)?.id, "soonest")
+        XCTAssertNil(JobFiltering.nextScheduledVisit(jobs, customerID: "missing", now: now))
+    }
+
+    func testNextCustomerVisitUsesStableIDToBreakTimeTies() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
+        var first = makeJob("b", time: "2026-10-30T12:00:00Z")
+        first = Job(id: first.id, customerId: "c", title: first.title, status: first.status,
+                    createdAt: nil, updatedAt: nil, allowedTransitions: nil, scheduledFor: first.scheduledFor)
+        var second = first
+        second = Job(id: "a", customerId: "c", title: "a", status: "dispatched",
+                     createdAt: nil, updatedAt: nil, allowedTransitions: nil, scheduledFor: first.scheduledFor)
+        XCTAssertEqual(JobFiltering.nextScheduledVisit([first, second], customerID: "c", now: now)?.id, "a")
+    }
+
+    func testActiveCustomerJobRemainsVisibleAlongsideFutureVisit() {
+        let active = Job(id: "active", customerId: "c", title: "Repair", status: "in_progress",
+                         createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+        let other = Job(id: "other", customerId: "another", title: "Other", status: "in_progress",
+                        createdAt: nil, updatedAt: nil, allowedTransitions: nil)
+        let scheduled = Job(id: "future", customerId: "c", title: "Future", status: "scheduled",
+                            createdAt: nil, updatedAt: nil, allowedTransitions: nil,
+                            scheduledFor: "2026-10-30T12:00:00Z")
+        XCTAssertEqual(JobFiltering.activeCustomerJob([other, scheduled, active], customerID: "c")?.id, "active")
+        XCTAssertNil(JobFiltering.activeCustomerJob([other, scheduled], customerID: "c"))
+    }
+
+    func testPastScheduledCustomerVisitIsScopedAndOrderedDeterministically() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-29T12:00:00Z")!
+        func job(_ id: String, _ customer: String, _ time: String?, _ status: String) -> Job {
+            Job(id: id, customerId: customer, title: id, status: status,
+                createdAt: nil, updatedAt: nil, allowedTransitions: nil, scheduledFor: time)
+        }
+        let jobs = [job("b", "c", "2026-10-28T12:00:00Z", "scheduled"),
+                    job("a", "c", "2026-10-28T12:00:00Z", "dispatched"),
+                    job("recent", "c", "2026-10-29T10:00:00Z", "scheduled"),
+                    job("other", "other", "2026-10-27T10:00:00Z", "scheduled"),
+                    job("canceled", "c", "2026-10-27T10:00:00Z", "canceled"),
+                    job("unknown", "c", nil, "scheduled")]
+        XCTAssertEqual(JobFiltering.overdueScheduledVisit(jobs, customerID: "c", now: now)?.id, "a")
+        XCTAssertNil(JobFiltering.overdueScheduledVisit(jobs, customerID: "missing", now: now))
+        XCTAssertNil(JobFiltering.overdueScheduledVisit([jobs[5]], customerID: "c", now: now))
+    }
+
     func testUnscheduledLaneShowsHowLongTheJobHasWaited() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         XCTAssertEqual(ScheduleCompactRow.age(since: now, now: now), "Today")
@@ -11,11 +131,30 @@ final class JobFilteringTests: XCTestCase {
     }
 
     func testVisitLabelSaysTodayTomorrowOrTheDate() {
+        // Calendar days, not 24-hour steps: on a 25-hour day (DST ends) now + 24h is still today.
+        let calendar = Calendar.current
         let now = Date()
-        XCTAssertTrue(now.visitLabel(now: now).hasPrefix("Today "))
-        XCTAssertTrue(now.addingTimeInterval(86400).visitLabel(now: now).hasPrefix("Tomorrow "))
-        let later = now.addingTimeInterval(5 * 86400).visitLabel(now: now)
+        XCTAssertTrue(now.visitLabel(now: now, calendar: calendar).hasPrefix("Today "))
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)!
+        XCTAssertTrue(tomorrow.visitLabel(now: now, calendar: calendar).hasPrefix("Tomorrow "))
+        let later = calendar.date(byAdding: .day, value: 5, to: now)!.visitLabel(now: now, calendar: calendar)
         XCTAssertFalse(later.hasPrefix("Today") || later.hasPrefix("Tomorrow"))
+    }
+
+    func testVisitLabelCountsCalendarDaysAcrossDaylightSavingChanges() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        // 1 Nov 2026 has 25 hours there (clocks fall back at 2 a.m.); 8 Mar 2026 has 23.
+        for (day, hours) in [((2026, 11, 1), 25.0), ((2026, 3, 8), 23.0)] {
+            let start = calendar.date(from: DateComponents(year: day.0, month: day.1, day: day.2))!
+            XCTAssertEqual(calendar.date(byAdding: .day, value: 1, to: start)!.timeIntervalSince(start), hours * 3600)
+            let earlyMorning = start.addingTimeInterval(30 * 60)
+            // 12:30 a.m. + 24h: 11:30 p.m. the same day on the long day, 1:30 a.m. the next on the short one.
+            let label = earlyMorning.addingTimeInterval(86_400).visitLabel(now: earlyMorning, calendar: calendar)
+            XCTAssertTrue(label.hasPrefix(hours > 24 ? "Today " : "Tomorrow "), label)
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: earlyMorning)!
+            XCTAssertTrue(tomorrow.visitLabel(now: earlyMorning, calendar: calendar).hasPrefix("Tomorrow "))
+        }
     }
 
     func testTodayUsesScheduledTimeAndKeepsUnscheduledSeparate() {

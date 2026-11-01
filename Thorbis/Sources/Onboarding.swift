@@ -32,18 +32,14 @@ enum CompanySlug {
     }
 }
 
-/// The shared look for the account screens: a 46-tall well with a hairline, 16pt type.
+/// The shared look for the account screens: the form field well (one column, label above).
 private struct AuthField: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(Theme.font(16))
             .foregroundStyle(Theme.foreground)
             .textFieldStyle(.plain)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(minHeight: 46)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border, lineWidth: 1))
+            .fieldWell()
     }
 }
 
@@ -55,17 +51,11 @@ private func fieldLabel(_ title: String) -> some View {
     Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
 }
 
-/// MA-15: plain words in body colour; only the mark is tinted.
+/// MA-15: plain words in body colour; only the mark is tinted. Sits where the field's help
+/// text would, never as a toast.
 struct InlineProblem: View {
     let message: String
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.destructive)
-            Text(message).foregroundStyle(Theme.foreground)
-        }
-        .font(Theme.font(15))
-        .accessibilityElement(children: .combine)
-    }
+    var body: some View { FieldProblem(message: message) }
 }
 
 // MARK: - Create account
@@ -80,6 +70,8 @@ struct SignUpView: View {
     @State private var showPassword = false
     @State private var busy = false
     @State private var error: String?
+    /// Which field the error belongs under; nil for the server's answer.
+    @State private var errorField: Field?
     @FocusState private var focused: Field?
 
     private enum Field { case name, email, password }
@@ -94,6 +86,7 @@ struct SignUpView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    StepLabel(step: 1, of: 3).padding(.bottom, 6)
                     Text("Create your account")
                         .font(Theme.font(24, weight: .medium))
                         .accessibilityAddTraits(.isHeader)
@@ -102,16 +95,17 @@ struct SignUpView: View {
                         .padding(.top, 6)
 
                     fieldLabel("Your name").padding(.top, 28)
-                    TextField("First and last name", text: $name)
+                    TextField("First and last name", text: $name, prompt: .placeholder("First and last name"))
                         .textContentType(.name)
                         .textInputAutocapitalization(.words)
                         .submitLabel(.next)
                         .focused($focused, equals: .name)
                         .onSubmit { focused = .email }
                         .authField().padding(.top, 8)
+                    if let error, errorField == .name { InlineProblem(message: error).padding(.top, 6) }
 
                     fieldLabel("Work email").padding(.top, 16)
-                    TextField("you@company.com", text: $email)
+                    TextField("Email", text: $email, prompt: .placeholder("you@company.com"))
                         .textContentType(.username)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
@@ -120,15 +114,16 @@ struct SignUpView: View {
                         .focused($focused, equals: .email)
                         .onSubmit { focused = .password }
                         .authField().padding(.top, 8)
+                    if let error, errorField == .email { InlineProblem(message: error).padding(.top, 6) }
 
                     fieldLabel("Password").padding(.top, 16)
                     HStack(spacing: 0) {
                         Group {
                             if showPassword {
-                                TextField("At least 8 characters", text: $password)
+                                TextField("At least 8 characters", text: $password, prompt: .placeholder("At least 8 characters"))
                                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                             } else {
-                                SecureField("At least 8 characters", text: $password)
+                                SecureField("At least 8 characters", text: $password, prompt: .placeholder("At least 8 characters"))
                             }
                         }
                         .textContentType(.newPassword)
@@ -145,9 +140,11 @@ struct SignUpView: View {
                     }
                     .authField().padding(.top, 8)
 
-                    if let error {
-                        InlineProblem(message: error).padding(.top, 12)
+                    if let error, errorField == .password || errorField == nil {
+                        InlineProblem(message: error).padding(.top, 6)
                             .accessibilityIdentifier("signup-error")
+                    } else {
+                        Text("At least 8 characters.").font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 6)
                     }
                 }
                 .padding(20)
@@ -155,7 +152,7 @@ struct SignUpView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.background.ignoresSafeArea())
+            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             // MA-16: the commit sits in a bottom bar, under the thumb, above the keyboard.
             .safeAreaInset(edge: .bottom) {
@@ -171,13 +168,13 @@ struct SignUpView: View {
                 .padding(.horizontal, 20).padding(.vertical, 10)
                 .frame(maxWidth: 470)
                 .frame(maxWidth: .infinity)
-                .background(Theme.background)
+                .background(Theme.canvas)
                 .accessibilityIdentifier("signup-submit")
             }
             .navigationTitle("New account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
             .interactiveDismissDisabled(dirty || busy)
             .onAppear { focused = .name }
@@ -186,12 +183,13 @@ struct SignUpView: View {
 
     private func create() async {
         guard !busy else { return }
-        guard !trimmedName.isEmpty else { error = "Enter your name."; focused = .name; return }
+        guard !trimmedName.isEmpty else { error = "Enter your name."; errorField = .name; focused = .name; return }
         guard trimmedEmail.contains("@"), trimmedEmail.contains(".") else {
-            error = "Enter the email you’ll sign in with."; focused = .email; return
+            error = "Enter the email you’ll sign in with."; errorField = .email; focused = .email; return
         }
-        guard password.count >= 8 else { error = "Use at least 8 characters for your password."; focused = .password; return }
-        guard password.count <= 128 else { error = "Use 128 characters or fewer for your password."; focused = .password; return }
+        guard password.count >= 8 else { error = "Use at least 8 characters for your password."; errorField = .password; focused = .password; return }
+        guard password.count <= 128 else { error = "Use 128 characters or fewer for your password."; errorField = .password; focused = .password; return }
+        errorField = nil
         busy = true
         defer { busy = false }
         error = nil
@@ -218,55 +216,91 @@ struct SignUpView: View {
 // MARK: - Choose or create a company
 
 /// Shown when the account has no company or more than one, and as the switcher sheet from More.
+/// The companies sit on one white panel; the open one carries the accent check. Creating a
+/// company and signing out stay one tap away.
 struct WorkspaceGateView: View {
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
-    @State private var creating = false
+    @State private var opening: String?
+    @State private var confirmSignOut = false
 
     var body: some View {
         NavigationStack {
             if session.organizations.isEmpty && session.phase != .ready {
                 CreateCompanyForm(firstCompany: true)
             } else {
-                List {
-                    Section {
-                        ForEach(session.organizations) { organization in
-                            Button {
-                                Task { await session.selectOrganization(id: organization.id); dismiss() }
-                            } label: {
-                                HStack {
-                                    Text(organization.name).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    Spacer()
-                                    if organization.id == session.activeOrganization?.id {
-                                        Image(systemName: "checkmark").foregroundStyle(Theme.brandText)
-                                            .accessibilityLabel("Current")
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if session.phase != .ready {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Image("ThorbisMark").resizable().scaledToFit().frame(width: 36, height: 36)
+                                    .accessibilityHidden(true)
+                                Text(session.user?.email.map { "You’re logged in as \($0). Pick the company to open." } ?? "Pick the company to open.")
+                                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                    .padding(.top, 10)
+                            }
+                            .padding(.horizontal, 4)
+                        }
+                        if let error = session.error, !error.isEmpty {
+                            ErrorBanner(message: error).padding(.horizontal, -Theme.gutter).padding(.top, -8)
+                        }
+                        PaperSection("Your companies", count: session.organizations.count) {
+                            ForEach(session.organizations) { organization in
+                                let current = organization.id == session.activeOrganization?.id
+                                Button {
+                                    opening = organization.id
+                                    Task { await session.selectOrganization(id: organization.id); opening = nil; dismiss() }
+                                } label: {
+                                    PaperListRow(leading: .icon("building.2"), title: organization.name) {
+                                        if opening == organization.id {
+                                            ProgressView().controlSize(.small)
+                                        } else if current {
+                                            Image(systemName: "checkmark").font(.system(size: 15, weight: .medium))
+                                                .foregroundStyle(Theme.brandText)
+                                                .accessibilityLabel("Current")
+                                        }
                                     }
                                 }
-                                .frame(minHeight: 44)
+                                .buttonStyle(RowPressStyle())
+                                .disabled(opening != nil)
+                                .accessibilityAddTraits(current ? .isSelected : [])
                             }
                         }
-                    } header: { Text("Your companies") }
-                    Section {
-                        NavigationLink { CreateCompanyForm(firstCompany: false) } label: {
-                            Label("Create a company", systemImage: "plus").foregroundStyle(Theme.foreground)
+                        VStack(alignment: .leading, spacing: 6) {
+                            PaperCard {
+                                NavigationLink { CreateCompanyForm(firstCompany: false).thorbisBackButton() } label: {
+                                    PaperListRow(leading: .icon("plus"), title: "Create a company")
+                                }
+                                .buttonStyle(RowPressStyle())
+                            }
+                            Text("You’ll own the new company. Your other companies stay as they are.")
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 4)
                         }
-                    } footer: {
-                        Text("You’ll own the new company. Your other companies stay as they are.")
-                    }
-                    if session.phase != .ready {
-                        Section {
-                            Button("Sign out", role: .destructive) { Task { await session.signOut() } }
+                        if session.phase != .ready {
+                            Button { confirmSignOut = true } label: {
+                                Text("Sign out").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+                                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressStyle())
+                            .accessibilityIdentifier("workspace-sign-out")
                         }
                     }
+                    .padding(.horizontal, PaperCardMetrics.margin)
+                    .padding(.top, 8).padding(.bottom, 24)
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
                 }
-                .scrollContentBackground(.hidden)
-                .background(Theme.background)
+                .background(Theme.canvas)
                 .navigationTitle("Choose company")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     if session.phase == .ready {
-                        ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                        ThorbisToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                     }
                 }
+                .thorbisConfirm("Sign out of Thorbis?", isPresented: $confirmSignOut,
+                                actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { await session.signOut() } }])
             }
         }
     }
@@ -288,10 +322,10 @@ struct CreateCompanyForm: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if firstCompany {
-                    ThorbisLogoLockup(markSize: 30, wordmarkSize: 19)
+                    StepLabel(step: 2, of: 3)
                     Text(greeting)
                         .font(Theme.font(30, weight: .medium)).tracking(-0.6)
-                        .padding(.top, 20)
+                        .padding(.top, 6)
                         .accessibilityAddTraits(.isHeader)
                 } else {
                     Text("New company")
@@ -303,12 +337,13 @@ struct CreateCompanyForm: View {
                     .padding(.top, 6)
 
                 fieldLabel("Company name").padding(.top, 28)
-                TextField("Wade Plumbing & Heating", text: $name)
+                TextField("Wade Plumbing & Heating", text: $name, prompt: .placeholder("Wade Plumbing & Heating"))
                     .textContentType(.organizationName)
                     .textInputAutocapitalization(.words)
                     .submitLabel(.done)
                     .focused($focused)
                     .onSubmit { Task { await create() } }
+                    .onChange(of: name) { _, _ in error = nil }
                     .authField().padding(.top, 8)
 
                 if let error { InlineProblem(message: error).padding(.top, 12) }
@@ -336,7 +371,7 @@ struct CreateCompanyForm: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(Theme.background.ignoresSafeArea())
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .safeAreaInset(edge: .bottom) {
             Button { Task { await create() } } label: {
@@ -347,11 +382,12 @@ struct CreateCompanyForm: View {
                 .inkCommit()
             }
             .buttonStyle(PressStyle())
-            .disabled(busy || trimmed.isEmpty)
+            // Not pre-disabled: pressed without a name, it says so under the field.
+            .disabled(busy)
             .padding(.horizontal, 20).padding(.vertical, 10)
             .frame(maxWidth: 470)
             .frame(maxWidth: .infinity)
-            .background(Theme.background)
+            .background(Theme.canvas)
             .accessibilityIdentifier("create-company-submit")
         }
         .toolbar(firstCompany ? .hidden : .automatic, for: .navigationBar)
@@ -367,7 +403,8 @@ struct CreateCompanyForm: View {
     }
 
     private func create() async {
-        guard !busy, !trimmed.isEmpty else { return }
+        guard !busy else { return }
+        guard !trimmed.isEmpty else { error = "Add your company’s name, like Wade Plumbing & Heating."; focused = true; return }
         guard trimmed.count <= 120 else { error = "Use 120 characters or fewer."; return }
         busy = true
         defer { busy = false }
@@ -420,8 +457,8 @@ struct OrganizationProfile: Decodable, Equatable {
 }
 
 extension APIClient {
-    func organizationProfile() async throws -> OrganizationProfile {
-        try await send("GET", "/v1/organization/profile")
+    func organizationProfile(requireFresh: Bool = false) async throws -> OrganizationProfile {
+        try await send("GET", "/v1/organization/profile", requireFresh: requireFresh)
     }
 
     func confirmOrganizationFact(_ key: String, value: String, actorID: String, organizationID: String) async throws {
@@ -537,7 +574,7 @@ final class CompanyDetailsModel: ObservableObject {
         } catch let problem as Problem where problem.status == 403 {
             loadError = "Company details need the company settings permission. Ask an owner for access."
         } catch {
-            loadError = error.localizedDescription
+            loadError = error.plainMessage(subject: "company details")
         }
     }
 
@@ -583,7 +620,7 @@ final class CompanyDetailsModel: ObservableObject {
                 }
             } catch {
                 allSaved = false
-                fieldErrors[entry.factKey] = error.localizedDescription
+                fieldErrors[entry.factKey] = error.plainMessage(subject: "company details")
             }
         }
         // Offline: keep what is on screen rather than reloading into an error.
@@ -597,9 +634,13 @@ final class CompanyDetailsModel: ObservableObject {
 }
 
 /// Settings › Company: the facts customers and payment providers read, typed once.
+/// One column on the cream ground: each label above its field, the field's problem in place of
+/// its help, and one ink Save pinned above the keyboard (it used to sit in the bar).
 struct CompanyDetailsView: View {
     /// Inside setup the screen pops itself after a save.
     var onSaved: (() -> Void)? = nil
+    /// "Step 3 of 3" when opened from the first-run setup.
+    var step: (Int, Int)? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
@@ -616,32 +657,53 @@ struct CompanyDetailsView: View {
             if let profile = model.profile {
                 form(profile)
             } else if let error = model.loadError {
-                VStack(alignment: .leading, spacing: 12) {
-                    InlineProblem(message: error)
-                    Button("Try again") { Task { await model.load(api: api) } }
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
-                        .frame(minHeight: 44)
+                VStack(alignment: .leading, spacing: 0) {
+                    ErrorBanner(message: error, symbol: error.hasPrefix("Company details need") ? "lock" : "exclamationmark.triangle",
+                                tint: error.hasPrefix("Company details need") ? Theme.muted : Theme.warning,
+                                action: error.hasPrefix("Company details need") ? nil
+                                    : .init(title: String(localized: "Try again")) { await model.load(api: api) })
                 }
-                .padding(Theme.gutter)
+                .padding(.top, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                SkeletonRows(count: 5, leading: false)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .accessibilityLabel("Loading company details")
+                VStack(spacing: 20) {
+                    SkeletonSection(rows: 3)
+                    SkeletonSection(rows: 2)
+                }
+                .paperCardMargin().padding(.top, 12)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading company details")
             }
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Company details")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if canEdit, model.profile != nil {
-                ToolbarItem(placement: .confirmationAction) {
-                    if model.saving {
-                        ProgressView()
-                    } else {
-                        Button("Save") { Task { await save() } }.disabled(!model.dirty)
+                VStack(spacing: 6) {
+                    Button { Task { await save() } } label: {
+                        HStack(spacing: 8) {
+                            if model.saving { ProgressView().tint(Theme.onInk) }
+                            Text("Save details")
+                        }
+                        .inkCommit(enabled: model.dirty && !model.saving)
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(!model.dirty || model.saving)
+                    .accessibilityIdentifier("company-details-save")
+                    .accessibilityHint(model.dirty ? "" : "No changes to save yet.")
+                    // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+                    if !model.dirty && !model.saving {
+                        Text("No changes to save yet.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityHidden(true)
                     }
                 }
+                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
+                .frame(maxWidth: 600)
+                .frame(maxWidth: .infinity)
+                .background(Theme.canvas)
             }
         }
         .sensoryFeedback(.success, trigger: saved)
@@ -654,48 +716,81 @@ struct CompanyDetailsView: View {
         let needed = entries.filter { CompanyFact.group($0) == 0 }
         let shown = entries.filter { CompanyFact.group($0) == 1 }
         let legal = entries.filter { CompanyFact.group($0) == 2 }
-        return Form {
-            if !profile.coreReady {
-                Section {
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let step { StepLabel(step: step.0, of: step.1).padding(.bottom, 6) }
+                if !profile.coreReady {
                     Text(profile.missingCore.count == 1
                          ? "1 detail is still needed to finish setup."
                          : "\(profile.missingCore.count) details are still needed to finish setup.")
-                        .font(Theme.font(15))
+                        .font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                        .padding(.bottom, 8)
                 }
-            }
-            Section {
-                ForEach(needed, id: \.factKey) { row($0) }
-            } header: { Text("Needed for setup") }
-            if profile.catalog.contains(where: { $0.factKey == "logo" }) {
-                Section { CompanyLogoPicker().padding(.vertical, 4) }
-            }
-            Section {
-                ForEach(shown, id: \.factKey) { row($0) }
-            } header: { Text("What customers see") } footer: {
+                if !canEdit {
+                    ErrorBanner(message: "Ask an owner for access to edit company details.", symbol: "lock", tint: Theme.muted)
+                        .padding(.horizontal, -Theme.gutter).padding(.bottom, 8)
+                }
+                group("Needed for setup", needed)
+                if profile.catalog.contains(where: { $0.factKey == "logo" }) {
+                    CompanyLogoPicker().padding(.top, 16)
+                }
+                group("What customers see", shown)
                 Text("Name on emails and Reply-to email are used when estimates and invoices are emailed.")
-            }
-            if !legal.isEmpty {
-                Section {
-                    DisclosureGroup("Legal details", isExpanded: $showMore) {
-                        ForEach(legal, id: \.factKey) { row($0) }
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .padding(.top, 8)
+                if !legal.isEmpty {
+                    Button { withMotion { showMore.toggle() } } label: {
+                        HStack {
+                            Text("Legal details").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            Text("Optional").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            Spacer()
+                            Image(systemName: showMore ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+                        }
+                        .frame(minHeight: 44).contentShape(Rectangle())
                     }
-                    .font(Theme.font(15, weight: .medium))
-                } footer: { Text("Optional. Payment providers may ask for these.") }
-            }
-            Section {
-                if OperatingFacts.offered(profile) {
-                    NavigationLink { OperatingDetailsView() } label: {
-                        Label("Hours, tax and terms", systemImage: "clock").foregroundStyle(Theme.foreground)
+                    .buttonStyle(PressStyle())
+                    .padding(.top, 20)
+                    .accessibilityValue(showMore ? "Shown" : "Hidden")
+                    if showMore {
+                        VStack(alignment: .leading, spacing: 16) { ForEach(legal, id: \.factKey) { row($0) } }
+                            .padding(.top, 4)
+                        Text("Payment providers may ask for these.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                     }
                 }
-                NavigationLink { CompanyFeaturesView() } label: {
-                    Label("Plan and features", systemImage: "square.grid.2x2").foregroundStyle(Theme.foreground)
+                PaperCard {
+                    VStack(spacing: 0) {
+                        if OperatingFacts.offered(profile) {
+                            NavigationLink { OperatingDetailsView().thorbisBackButton() } label: {
+                                PaperListRow(leading: .icon("clock"), title: "Hours, tax and terms")
+                            }
+                            .buttonStyle(RowPressStyle())
+                            WellDivider()
+                        }
+                        NavigationLink { CompanyFeaturesView().thorbisBackButton() } label: {
+                            PaperListRow(leading: .icon("square.grid.2x2"), title: "Plan and features")
+                        }
+                        .buttonStyle(RowPressStyle())
+                    }
                 }
+                .padding(.top, 24)
             }
+            .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 24)
+            .frame(maxWidth: 600, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
-        .disabled(!canEdit)
+    }
+
+    @ViewBuilder
+    private func group(_ title: String, _ entries: [OrganizationProfile.Entry]) -> some View {
+        if !entries.isEmpty {
+            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.top, 16).padding(.bottom, 10)
+            VStack(alignment: .leading, spacing: 16) { ForEach(entries, id: \.factKey) { row($0) } }
+        }
     }
 
     @ViewBuilder
@@ -706,28 +801,29 @@ struct CompanyDetailsView: View {
                 Text(CompanyFact.label(key, fallback: entry.label))
                     .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                 if entry.required && !entry.confirmed {
-                    Text("Needed").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 8).frame(height: 20)
-                        .background(Theme.fill, in: Capsule())
+                    Text("· Needed").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
                 }
             }
+            .accessibilityHidden(true)
             TextField(CompanyFact.placeholder(key), text: Binding(
                 get: { model.drafts[key] ?? "" },
                 set: { model.drafts[key] = $0; model.fieldErrors[key] = nil }
-            ), axis: CompanyFact.multiline(key) ? .vertical : .horizontal)
+            ), prompt: .placeholder(CompanyFact.placeholder(key)), axis: CompanyFact.multiline(key) ? .vertical : .horizontal)
             .lineLimit(CompanyFact.multiline(key) ? 1...4 : 1...1)
-            .font(Theme.font(15))
+            .textFieldStyle(.plain)
+            .font(Theme.font(16))
             .keyboardType(CompanyFact.keyboard(key))
             .textContentType(CompanyFact.content(key))
             .textInputAutocapitalization(CompanyFact.keyboard(key) == .default ? .sentences : .never)
             .autocorrectionDisabled(CompanyFact.keyboard(key) != .default)
             .focused($focused, equals: key)
-            .accessibilityLabel(CompanyFact.label(key, fallback: entry.label))
+            .disabled(!canEdit)
+            .fieldWell()
+            .accessibilityLabel(CompanyFact.label(key, fallback: entry.label) + (entry.required && !entry.confirmed ? ", needed" : ""))
             if let error = model.fieldErrors[key] {
-                InlineProblem(message: error).font(Theme.font(13))
+                InlineProblem(message: error)
             }
         }
-        .padding(.vertical, 4)
     }
 
     private func save() async {
@@ -778,7 +874,7 @@ struct CompanyFeaturesView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationTitle("Plan and features")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -822,6 +918,36 @@ final class BusinessSetupModel: ObservableObject {
 
     @Published var done: Set<Step> = []
     @Published var loaded = false
+    @Published private(set) var unavailable: Set<Step> = []
+    private var refreshID = UUID()
+    private struct Scope: Equatable {
+        let actor: String
+        let organization: String
+        let sessionGeneration: UUID
+        let authorityRevision: UUID
+        let apiGeneration: UUID
+        let apiOrigin: String
+        let policyVersion: Int?
+        let capabilities: Set<String>
+        let priceBookEnabled: Bool
+        let visible: Set<Step>
+    }
+    private var resultScope: Scope?
+
+    private func scope(api: APIClient, session: SessionController) -> Scope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id else { return nil }
+        return Scope(actor: actor, organization: organization, sessionGeneration: session.generation,
+                     authorityRevision: session.authorityRevision, apiGeneration: api.requestGeneration,
+                     apiOrigin: api.baseURL, policyVersion: session.policyVersion,
+                     capabilities: session.capabilities, priceBookEnabled: session.isFeatureOn("price_book"),
+                     visible: Set(steps(session)))
+    }
+
+    func isCurrent(api: APIClient, session: SessionController) -> Bool {
+        guard let resultScope else { return false }
+        return resultScope == scope(api: api, session: session)
+    }
 
     func steps(_ session: SessionController) -> [Step] {
         Step.allCases.filter { step in
@@ -833,24 +959,65 @@ final class BusinessSetupModel: ObservableObject {
         }
     }
 
-    /// Each step's state comes from the server; one that cannot be read stays open.
+    /// An unsuccessful read is unknown, never evidence that setup is incomplete.
     func refresh(api: APIClient, session: SessionController) async {
-        let visible = Set(steps(session))
-        var next: Set<Step> = []
-        if visible.contains(.details), (try? await api.organizationProfile())?.coreReady == true { next.insert(.details) }
-        if visible.contains(.payments), (try? await api.merchantReadiness())?.chargesReady == true { next.insert(.payments) }
-        if visible.contains(.services), let page = try? await api.priceBookItems(limit: 1), !page.items.isEmpty { next.insert(.services) }
-        if visible.contains(.team) {
-            let invited = (try? await api.pendingInvitations()).map { !$0.isEmpty } ?? false
-            let teammates = invited ? false : ((try? await api.roleMembers()).map { $0.count > 1 } ?? false)
-            if invited || teammates { next.insert(.team) }
+        let id = UUID()
+        refreshID = id
+        guard let binding = scope(api: api, session: session) else {
+            done = []; unavailable = []; resultScope = nil; loaded = false
+            return
         }
+        let visible = binding.visible
+        loaded = false
+        resultScope = nil
+        var next: Set<Step> = []
+        var unknown: Set<Step> = []
+        func stillCurrent() -> Bool {
+            refreshID == id && binding == scope(api: api, session: session) && !Task.isCancelled
+        }
+        if visible.contains(.details) {
+            do {
+                let profile = try await api.organizationProfile(requireFresh: true)
+                guard stillCurrent() else { return }
+                if profile.organizationId != binding.organization { unknown.insert(.details) }
+                else if profile.coreReady { next.insert(.details) }
+            } catch { unknown.insert(.details) }
+            guard stillCurrent() else { return }
+        }
+        if visible.contains(.payments) {
+            do { if try await api.merchantReadiness(requireFresh: true).chargesReady { next.insert(.payments) } }
+            catch { unknown.insert(.payments) }
+            guard stillCurrent() else { return }
+        }
+        if visible.contains(.services) {
+            do { let page = try await api.priceBookItems(limit: 1, requireFresh: true); if !page.items.isEmpty { next.insert(.services) } }
+            catch { unknown.insert(.services) }
+            guard stillCurrent() else { return }
+        }
+        if visible.contains(.team) {
+            let invited = try? await api.pendingInvitations(requireComplete: true, whileCurrent: stillCurrent)
+            guard stillCurrent() else { return }
+            if invited?.isEmpty == false {
+                next.insert(.team)
+            } else {
+                let members = try? await api.roleMembers(requireComplete: true, whileCurrent: stillCurrent)
+                guard stillCurrent() else { return }
+                if let members, members.count > 1 { next.insert(.team) }
+                else if invited == nil || members == nil { unknown.insert(.team) }
+            }
+        }
+        guard stillCurrent() else { return }
+        resultScope = binding
         done = next
+        unavailable = unknown
         loaded = true
     }
+
 }
 
-/// The owner's first-run checklist: four steps, each one tap away, each finished on the server.
+/// The owner's first-run checklist: up to four steps (the ones this role can do), each one tap
+/// away, each finished on the server. The steps sit on one white panel with their state as a
+/// word; the one ink commit is the next step, or "Start using Thorbis" once all are done.
 struct BusinessSetupView: View {
     /// Presented as a sheet after a company is created; pushed from More otherwise.
     var presented = false
@@ -859,26 +1026,41 @@ struct BusinessSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = BusinessSetupModel()
     @State private var inviting = false
+    @State private var opened: BusinessSetupModel.Step?
     @State private var guided = false
 
     var body: some View {
         let steps = model.steps(session)
-        let doneCount = steps.filter { model.done.contains($0) }.count
+        let current = model.loaded && model.isCurrent(api: api, session: session)
+        let doneCount = current ? steps.filter { model.done.contains($0) }.count : 0
+        let next = current ? steps.first { !model.done.contains($0) } : nil
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                if presented { StepLabel(step: 3, of: 3).padding(.bottom, 6) }
                 Text(presented ? "Set up \(session.activeOrganization?.name ?? "your business")" : "Set up your business")
                     .font(Theme.font(24, weight: .medium))
                     .accessibilityAddTraits(.isHeader)
-                Text(model.loaded ? "\(doneCount) of \(steps.count) done. Each step takes a minute or two, and you can come back any time from More."
+                Text(current && model.unavailable.isEmpty ? "\(doneCount) of \(steps.count) done. Each takes a minute or two; you can come back any time from More."
                                   : "Each step takes a minute or two, and you can come back any time from More.")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .padding(.top, 6)
-                ProgressView(value: Double(doneCount), total: Double(max(steps.count, 1)))
-                    .tint(Theme.success)
-                    .padding(.top, 16)
-                    .opacity(model.loaded ? 1 : 0)
+                if current && model.unavailable.isEmpty && !steps.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(steps) { step in
+                            Capsule().fill(model.done.contains(step) ? Theme.success : Theme.fill).frame(height: 4)
+                        }
+                    }
+                    .padding(.top, 14)
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(doneCount) of \(steps.count) steps done")
-
+                }
+                if current && !model.unavailable.isEmpty {
+                    ErrorBanner(message: "Some steps couldn’t be checked.") {
+                        await model.refresh(api: api, session: session)
+                    }
+                    .padding(.horizontal, -Theme.gutter)
+                    .padding(.top, 8)
+                }
                 if session.can("organization.settings.edit") {
                     Button { guided = true } label: {
                         Label(doneCount == 0 ? "Start guided setup" : "Continue guided setup", systemImage: "arrow.right.circle")
@@ -891,81 +1073,82 @@ struct BusinessSetupView: View {
                     .padding(.top, 20)
                     .accessibilityIdentifier("setup-guided")
                 }
-
-                VStack(spacing: 0) {
-                    ForEach(steps) { step in
-                        stepRow(step)
-                        if step != steps.last { Divider().padding(.leading, 40) }
-                    }
+                PaperSection("Steps", count: nil) {
+                    ForEach(steps) { stepRow($0) }
                 }
+                .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
                 .padding(.top, 20)
             }
             .padding(Theme.gutter)
             .frame(maxWidth: 560, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .background(Theme.background)
+        .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
-        .safeAreaInset(edge: .bottom) {
-            if presented, model.loaded, doneCount == steps.count {
-                Button { dismiss() } label: { Text("Start using Thorbis").inkCommit() }
-                    .buttonStyle(PressStyle())
-                    .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                    .background(Theme.background)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Group {
+                if current, let next {
+                    Button { open(next) } label: { Text(next.title).inkCommit() }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("setup-next-step")
+                } else if presented, current, doneCount == steps.count {
+                    Button { dismiss() } label: { Text("Start using Thorbis").inkCommit() }
+                        .buttonStyle(PressStyle())
+                }
             }
+            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
+            .frame(maxWidth: 600)
+            .frame(maxWidth: .infinity)
+            .background(Theme.canvas)
         }
         .navigationTitle(presented ? "" : "Setup")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if presented {
-                ToolbarItem(placement: .cancellationAction) { Button("Later") { dismiss() } }
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Later") { dismiss() } }
             }
         }
-        .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
+        .navigationDestination(item: $opened) { step in
+            switch step {
+            case .details: CompanyDetailsView(step: presented ? (3, 3) : nil).thorbisBackButton()
+            case .payments: PaymentsSetupView().thorbisBackButton()
+            case .services:
+                WorkspacePriceBookView(api: api, canList: true,
+                                       canViewDetail: session.can("organization.settings.edit", feature: "price_book")).thorbisBackButton()
+            case .team: EmptyView()
+            }
+        }
+        .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) { SheetSurface {
             InviteMemberSheet { _ in }
+        } }
+        .onChange(of: opened) { old, new in
+            // Back from a step: read it again, so its word changes to Done.
+            if old != nil, new == nil { Task { await model.refresh(api: api, session: session) } }
         }
         .fullScreenCover(isPresented: $guided, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
             NavigationStack { SetupWizardView() }
         }
-        .task { await model.refresh(api: api, session: session) }
-        .onAppear { Task { await model.refresh(api: api, session: session) } }
+        .task(id: [session.authorityRevision, api.requestGeneration]) { await model.refresh(api: api, session: session) }
     }
 
-    @ViewBuilder
-    private func stepRow(_ step: BusinessSetupModel.Step) -> some View {
-        let isDone = model.done.contains(step)
-        let label = HStack(alignment: .top, spacing: 14) {
-            Image(systemName: isDone ? "checkmark.circle.fill" : step.symbol)
-                .font(.system(size: 19))
-                .foregroundStyle(isDone ? Theme.success : Theme.muted)
-                .frame(width: 26)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(step.title).font(Theme.font(15, weight: .medium))
-                Text(isDone ? "Done" : step.subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
-            }
-            Spacer(minLength: 8)
-            Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-        }
-        .padding(.vertical, 12)
-        .frame(minHeight: 56)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(isDone ? "Done" : "Not done")
+    private func open(_ step: BusinessSetupModel.Step) {
+        if step == .team { inviting = true } else { opened = step }
+    }
 
-        switch step {
-        case .details:
-            NavigationLink { CompanyDetailsView() } label: { label }.buttonStyle(RowPressStyle())
-        case .payments:
-            NavigationLink { PaymentsSetupView() } label: { label }.buttonStyle(RowPressStyle())
-        case .services:
-            NavigationLink {
-                WorkspacePriceBookView(api: api, canList: true,
-                                       canViewDetail: session.can("organization.settings.edit", feature: "price_book"))
-            } label: { label }.buttonStyle(RowPressStyle())
-        case .team:
-            Button { inviting = true } label: { label }.buttonStyle(RowPressStyle())
+    private func stepRow(_ step: BusinessSetupModel.Step) -> some View {
+        let current = model.loaded && model.isCurrent(api: api, session: session)
+        let isDone = current && model.done.contains(step)
+        let isUnknown = current && model.unavailable.contains(step)
+        let word: StatusWord = !current ? StatusWord(text: String(localized: "Checking…"))
+            : isDone ? StatusWord(text: String(localized: "Done"), tint: Theme.success)
+            : isUnknown ? StatusWord(text: String(localized: "Couldn’t check"), tint: Theme.warning)
+            : StatusWord(text: String(localized: "To do"))
+        return Button { open(step) } label: {
+            PaperListRow(leading: .icon(step.symbol), title: step.title, subtitle: step.subtitle, subtitleLines: 2,
+                         dimmed: isDone, status: word)
         }
+        .buttonStyle(RowPressStyle())
+        .accessibilityValue(!current ? "Checking" : (isDone ? "Done" : (isUnknown ? "Status unavailable" : "Not done")))
     }
 }
 

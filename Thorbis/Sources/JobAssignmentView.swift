@@ -62,57 +62,83 @@ struct JobAssignmentView: View {
             && job?.organizationId == session.activeOrganization?.id
     }
 
-    /// Paper's quiet list: one tap picks a technician, one commit saves it.
+    /// What is missing when they press Save (v2: the commit is never pre-disabled).
+    @State private var missing: String?
+
+    /// A modal (design.thorbis.com Places: "Assign a tech" is one task): who has it now, then the
+    /// roster on the panel; one tap picks a tech, the ink commit saves it.
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Assign technician").font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                    .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
-                if !session.can("job.assign", feature: "jobs") {
-                    PaperEmptyState(symbol: "person.crop.circle.badge.xmark", title: "Assignment unavailable", message: "Your role can't assign jobs in this workspace.")
-                } else {
-                    if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
-                    if loading { SkeletonRows(count: 4, inset: 0) }
-                    if isCurrent, let job {
-                        PaperDetailRow("Assigned now", value: job.assignedToUserId.map { current in
+        ThorbisModalSheet(title: "Assign tech", closeLabel: "Close", onClose: { dismiss() },
+                          detents: [.medium, .large],
+                          commitTitle: isCurrent && job != nil ? "Save assignment" : nil,
+                          busy: saving, commitIdentifier: "assign-save",
+                          commit: { attemptSave() }) {
+            if !session.can("job.assign", feature: "jobs") {
+                PaperEmptyState(symbol: "person.crop.circle.badge.xmark", title: "Assignment unavailable", message: "Your role can't assign jobs in this workspace.")
+            } else {
+                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if loading { SkeletonRows(count: 4, inset: 0) }
+                if isCurrent, let job {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Assigned now").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                        Text(job.assignedToUserId.map { current in
                             assignees.first(where: { $0.userId == current })?.displayName ?? "Someone outside your roster"
-                        } ?? "Unassigned")
-                        PaperGroupHeader(title: "Assign to", count: assignees.count).padding(.top, 12)
+                        } ?? "Unassigned").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                    }
+                    .accessibilityElement(children: .combine)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SectionHeader(title: "Assign to", count: assignees.count, horizontalPadding: 0)
                         if assignees.isEmpty {
-                            Text("No one can be assigned right now.").font(Theme.font(14)).foregroundStyle(Theme.muted).frame(minHeight: 44)
-                        }
-                        ForEach(assignees.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }) { person in
-                            Button { selectedUserID = person.userId } label: {
-                                HStack(spacing: 12) {
-                                    Avatar(name: person.displayName, size: 32)
-                                    Text(person.displayName).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    Spacer()
-                                    Image(systemName: selectedUserID == person.userId ? "checkmark.circle.fill" : "circle")
-                                        .font(.system(size: 20))
-                                        .foregroundStyle(selectedUserID == person.userId ? Theme.brandText : Theme.muted)
-                                        .accessibilityHidden(true)
+                            Text("No one can be assigned right now. Ask your office to add a tech.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            let sorted = assignees.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+                            VStack(spacing: 0) {
+                                ForEach(sorted) { person in
+                                    let chosen = selectedUserID == person.userId
+                                    Button { selectedUserID = person.userId; missing = nil } label: {
+                                        HStack(spacing: 12) {
+                                            InitialsAvatar(name: person.displayName, size: 28)
+                                                .accessibilityHidden(true)
+                                            Text(person.displayName).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                                            Spacer(minLength: 8)
+                                            if chosen {
+                                                Image(systemName: "checkmark").font(.system(size: 14, weight: .medium))
+                                                    .foregroundStyle(Theme.brandText).accessibilityHidden(true)
+                                            }
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .frame(minHeight: 48).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(RowPressStyle())
+                                    .accessibilityAddTraits(chosen ? .isSelected : [])
                                 }
-                                .frame(minHeight: 52).contentShape(Rectangle())
                             }
-                            .buttonStyle(RowPressStyle())
-                            .accessibilityAddTraits(selectedUserID == person.userId ? .isSelected : [])
+                            .padding(.horizontal, -10)
                         }
+                        if let missing { FieldProblem(message: missing) }
                     }
                 }
-            }
-            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
-        }
-        .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
-        .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            if isCurrent, let job {
-                PaperActionBar(title: "Save assignment", symbol: "person.crop.circle.badge.checkmark", busy: saving,
-                               disabled: selectedUserID == nil || selectedUserID == job.assignedToUserId) { Task { await save() } }
             }
         }
         .task(id: session.generation) { await load() }
         .refreshable { await load() }
+    }
+
+    /// Press first, then say what is missing under the list.
+    private func attemptSave() {
+        guard let job else { return }
+        guard let selectedUserID else {
+            missing = "Pick a tech to assign this job."
+            return
+        }
+        if selectedUserID == job.assignedToUserId {
+            let name = assignees.first(where: { $0.userId == selectedUserID })?.displayName ?? "This tech"
+            missing = "\(name) already has this job. Pick someone else."
+            return
+        }
+        missing = nil
+        Task { await save() }
     }
 
     private func load(keepError: Bool = false) async {

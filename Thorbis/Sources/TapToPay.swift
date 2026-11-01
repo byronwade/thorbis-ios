@@ -2,8 +2,8 @@ import Foundation
 import ProximityReader
 @preconcurrency import StripeTerminal
 
-/// Server contract (BYR-1550). Both routes stay dark (403 feature_unavailable, then 409) until
-/// Tap to Pay is exposed and Apple's entitlement is in place; the UI hides itself on either.
+/// Server contract (BYR-1550). The server owns workspace/merchant eligibility;
+/// the app's signing qualification is a separate, fail-closed build gate.
 struct TerminalConnectionToken: Decodable, Sendable {
     let secret: String
     let locationId: String
@@ -34,6 +34,7 @@ extension APIClient {
 final class TapToPayController: ObservableObject {
     enum Phase: Equatable {
         case idle
+        case unavailable
         case preparing
         case waitingForCard
         case processing
@@ -46,9 +47,17 @@ final class TapToPayController: ObservableObject {
 
     static let feature = "tap_to_pay"
 
-    /// The device can do Tap to Pay (iPhone XS or later, current iOS). The server feature,
-    /// Apple's entitlement and the merchant setup are checked when a charge starts.
-    static var deviceSupported: Bool { PaymentCardReader.isSupported }
+    static var buildEnabled: Bool { TapToPayReadiness.buildEnabled }
+
+    /// Apple checks the model; Stripe also checks real-device OS/discovery support.
+    /// Neither check establishes entitlement approval, which is audited separately.
+    static var deviceSupported: Bool {
+        #if targetEnvironment(simulator)
+        false
+        #else
+        PaymentCardReader.isSupported && TerminalSetup.shared.supportsTapToPay
+        #endif
+    }
 
     private let invoiceID: String
     private var intent: CardPresentIntent?
@@ -60,9 +69,13 @@ final class TapToPayController: ObservableObject {
     var busy: Bool { [.preparing, .waitingForCard, .processing, .recording].contains(phase) }
 
     /// Runs one charge for the invoice balance. `refresh` reloads the invoice's payments and
-    /// returns true once the webhook-settled payment shows up.
-    func charge(api: APIClient, refresh: @escaping @MainActor () async -> Bool) async {
+    /// returns true only once this intent's webhook-settled payment shows up.
+    func charge(api: APIClient, refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
         guard !busy else { return }
+        guard Self.buildEnabled, Self.deviceSupported else {
+            phase = .unavailable
+            return
+        }
         phase = .preparing
         do {
             let intent: CardPresentIntent
@@ -77,7 +90,7 @@ final class TapToPayController: ObservableObject {
             _ = try await Terminal.shared.confirmPaymentIntent(collected)
             phase = .recording
             for attempt in 0..<20 {
-                if await refresh() { phase = .paid; return }
+                if await refresh(intent) { phase = .paid; return }
                 try await Task.sleep(nanoseconds: UInt64(min(1 + attempt, 4)) * 1_000_000_000)
             }
             // Money moved; Thorbis records it as soon as Stripe's confirmation arrives.
@@ -107,6 +120,8 @@ final class TapToPayController: ObservableObject {
             case .declinedByStripeAPI, .declinedByReader: return "The card was declined. Try another card."
             case .tapToPayReaderTOSAcceptanceRequiresiCloudSignIn, .tapToPayReaderTOSNotYetAccepted:
                 return "Accept Apple's Tap to Pay terms to start taking cards on this iPhone."
+            case .commandNotAllowed:
+                return "Tap to Pay isn't available on this iPhone with the current setup. Use a payment link or another method."
             default: break
             }
         }
@@ -125,6 +140,18 @@ final class TerminalSetup: NSObject {
     func prepare(api: APIClient, invoiceID: String) {
         tokens.api = api
         tokens.invoiceID = invoiceID
+        installIfNeeded()
+    }
+
+    var supportsTapToPay: Bool {
+        installIfNeeded()
+        if case .success = Terminal.shared.supportsReaders(of: .tapToPay, discoveryMethod: .tapToPay, simulated: false) {
+            return true
+        }
+        return false
+    }
+
+    private func installIfNeeded() {
         if !installed {
             Terminal.initWithTokenProvider(tokens)
             installed = true

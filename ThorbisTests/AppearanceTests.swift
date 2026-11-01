@@ -25,7 +25,7 @@ final class AppearanceTests: XCTestCase {
         }
     }
 
-    // design.thorbis.com MA-09: weights 400 and 500 only, nothing under 12.
+    // v2 (design.thorbis.com): weights 400 and 500 only; anything heavier is 500; nothing under 12.
     func testTypeRampKeepsTwoWeightsAndAFloor() {
         for heavy: Font.Weight in [.semibold, .bold, .heavy, .black] {
             XCTAssertEqual(Theme.allowed(heavy), .medium)
@@ -35,14 +35,20 @@ final class AppearanceTests: XCTestCase {
         XCTAssertEqual(Theme.minimumSize, 12)
     }
 
+    // v2 (owner: "the font size is too big"): staff screens use the compact ramp; customer-facing
+    // presentation keeps the older ramp so its 17pt floor holds.
     func testEverySizeLandsOnTheRamp() {
-        let ramp: Set<CGFloat> = [12, 13, 15, 16, 17, 20, 24, 30]
+        let ramp: Set<CGFloat> = [12, 13, 14, 15, 16, 17, 20, 24, 26]
         for size in stride(from: CGFloat(8), through: 40, by: 1) {
             XCTAssertTrue(ramp.contains(Theme.onRamp(size)), "\(size) snapped to \(Theme.onRamp(size))")
         }
-        XCTAssertEqual(Theme.onRamp(14), 15)
-        XCTAssertEqual(Theme.onRamp(26), 24)
-        XCTAssertEqual(Theme.onRamp(34), 30)
+        XCTAssertEqual(Theme.onRamp(15), 14)
+        XCTAssertEqual(Theme.onRamp(16), 15)
+        XCTAssertEqual(Theme.onRamp(17), 15)
+        XCTAssertEqual(Theme.onRamp(30), 24)
+        XCTAssertEqual(Theme.onRamp(34), 26)
+        XCTAssertEqual(Theme.customerRamp(17), 17)
+        XCTAssertEqual(Theme.customerRamp(34), 34)
     }
 
     // Catches unreadable labels on cards/fields, including Increase Contrast.
@@ -50,11 +56,32 @@ final class AppearanceTests: XCTestCase {
         for style: UIUserInterfaceStyle in [.light, .dark] {
             for contrast: UIAccessibilityContrast in [.normal, .high] {
                 for foreground in [Theme.foreground, Theme.muted, Theme.subtle] {
-                    for background in [Theme.background, Theme.surface, Theme.chrome, Theme.card, Theme.fill] {
+                    for background in [Theme.background, Theme.surface, Theme.chrome, Theme.card, Theme.fill, Theme.field] {
                         let text = luminance(resolve(foreground, style: style, contrast: contrast))
                         let surface = luminance(resolve(background, style: style, contrast: contrast))
                         XCTAssertGreaterThanOrEqual((max(text, surface) + 0.05) / (min(text, surface) + 0.05), 4.5,
                             "Unreadable text in style \(style.rawValue), contrast \(contrast.rawValue)")
+                    }
+                }
+            }
+        }
+    }
+
+    // Redesign 2026-10-31: status words stay readable on the ground, the well and their own chip tint.
+    func testStatusTextIsReadableOnItsGrounds() {
+        let pairs: [(Color, Color)] = [
+            (Theme.statusScheduledText, Theme.statusScheduledSurface), (Theme.statusDispatchedText, Theme.statusDispatchedSurface),
+            (Theme.statusInProgressText, Theme.statusInProgressSurface), (Theme.statusDoneText, Theme.statusDoneSurface),
+            (Theme.statusAttentionText, Theme.statusAttentionSurface), (Theme.statusInvoicedText, Theme.statusInvoicedSurface)
+        ]
+        for style: UIUserInterfaceStyle in [.light, .dark] {
+            for contrast: UIAccessibilityContrast in [.normal, .high] {
+                for (text, tint) in pairs {
+                    for ground in [Theme.background, Theme.card, tint] {
+                        let a = luminance(resolve(text, style: style, contrast: contrast))
+                        let b = luminance(resolve(ground, style: style, contrast: contrast))
+                        XCTAssertGreaterThanOrEqual((max(a, b) + 0.05) / (min(a, b) + 0.05), 4.5,
+                            "Unreadable status text in style \(style.rawValue), contrast \(contrast.rawValue)")
                     }
                 }
             }

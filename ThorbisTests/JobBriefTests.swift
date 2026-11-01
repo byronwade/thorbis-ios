@@ -25,7 +25,7 @@ final class JobBriefTests: XCTestCase {
             [.transition("dispatched"), .transition("paused"), .schedule, .assign],
             [.billWithoutEstimate, .deposit],
             [.wrapUp, .followUps],
-            [.showToCustomer, .copyID],
+            [.customerView, .copyID],
         ])
     }
 
@@ -38,6 +38,14 @@ final class JobBriefTests: XCTestCase {
         let groups = JobMenu.groups(.init(barIsWrapUp: true))
         XCTAssertEqual(groups, [[.followUps], [.copyID]])
         XCTAssertFalse(groups.flatMap { $0 }.contains(.wrapUp))
+    }
+
+    func testCustomerViewIsOneEntryOpenToEitherDocumentsOrDetailsPermission() {
+        let both = JobMenu.groups(.init(canShowToCustomer: true, canEditCustomer: true)).flatMap { $0 }
+        XCTAssertEqual(both.filter { $0 == .customerView }.count, 1)
+        XCTAssertTrue(JobMenu.groups(.init(canEditCustomer: true)).flatMap { $0 }.contains(.customerView))
+        XCTAssertTrue(JobMenu.groups(.init(canShowToCustomer: true)).flatMap { $0 }.contains(.customerView))
+        XCTAssertFalse(JobMenu.groups(.init()).flatMap { $0 }.contains(.customerView))
     }
 
     // MARK: JS-06 contacts

@@ -42,6 +42,23 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertTrue(relaunched.entries.isEmpty, "Another actor never sees these changes")
     }
 
+    func testMatchingContextIsReadOnlyAndRedundantVerifiedBindingStaysStable() throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Retain")), policyVersion: 1))
+        let before = box.entries
+        let context = try XCTUnwrap(box.captureContext(matchingActorID: actor, organizationID: org))
+        XCTAssertNil(box.captureContext(matchingActorID: "other", organizationID: org))
+        XCTAssertNil(box.captureContext(matchingActorID: actor, organizationID: "other"))
+        XCTAssertEqual(box.entries, before)
+        box.bind(actorID: actor, organizationID: org)
+        XCTAssertEqual(box.captureContext(matchingActorID: actor, organizationID: org), context)
+        XCTAssertEqual(box.entries, before)
+        box.bind(actorID: nil, organizationID: nil)
+        XCTAssertNil(box.captureContext(matchingActorID: actor, organizationID: org))
+        box.bind(actorID: actor, organizationID: org)
+        XCTAssertNotEqual(box.captureContext(matchingActorID: actor, organizationID: org), context)
+        XCTAssertEqual(box.entries.map(\.id), [note.id])
+    }
     func testSignOutWarningCountsChangesQueuedInOtherWorkspaces() {
         let box = outbox()
         box.enqueue(.note(.init(jobId: jobA, body: "Gate code 4417")), policyVersion: 4)
@@ -175,6 +192,110 @@ final class FieldOutboxTests: XCTestCase {
         XCTAssertTrue(box.entries.isEmpty)
         XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, ["/v1/commands", "/v1/jobs/\(jobA)/notes"])
     }
+    private func waitForRequests(_ count: Int) async throws {
+        for _ in 0..<200 {
+            if URLProtocolFixture.recorded.count >= count { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Expected intercepted request count \(count)")
+    }
+
+    func testRevocationDuringCommandBatchStopsLaterDelivery() async throws {
+        let box = outbox()
+        for index in 0..<51 { box.enqueue(.note(.init(jobId: jobA, body: "Note \(index)")), policyVersion: 1) }
+        let original = box.entries
+        let reply = #"{"outcomes":["# + original.prefix(50).map { #"{"commandId":"\#($0.id)","status":"applied"}"# }.joined(separator: ",") + "]}"
+        let gate = URLProtocolFixture.Gate(); var allowed = true
+        let client = api([.init(200, reply, gate: gate), URLProtocolFixture.offline])
+        let task = Task { await box.drain(api: client, useCommandEndpoint: true, canSend: { allowed }) }
+        try await waitForRequests(1); allowed = false; gate.release(); await task.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(box.entries, original); XCTAssertEqual(box.lastSyncSent, 0)
+        XCTAssertEqual(outbox().entries, original)
+    }
+
+    func testRevocationDuringRESTStopsNextCommand() async throws {
+        let box = outbox()
+        box.enqueue(.note(.init(jobId: jobA, body: "First")), policyVersion: 1)
+        box.enqueue(.note(.init(jobId: jobB, body: "Second")), policyVersion: 1)
+        let original = box.entries
+        let saved = #"{"id":"019f0000-0000-7000-8000-0000000000c1","organizationId":"\#(org)","jobId":"\#(jobA)","authorUserId":"\#(actor)","body":"First","createdAt":"2026-10-27T13:00:00Z"}"#
+        let gate = URLProtocolFixture.Gate(); var allowed = true
+        let client = api([.init(201, saved, gate: gate), URLProtocolFixture.offline])
+        let task = Task { await box.drain(api: client, useCommandEndpoint: false, canSend: { allowed }) }
+        try await waitForRequests(1); allowed = false; gate.release(); await task.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(box.entries, original); XCTAssertEqual(outbox().entries, original)
+    }
+
+    func testBindingFlipAndReturnCannotCommitOldResponse() async throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Keep original")), policyVersion: 1))
+        let original = box.entries; let gate = URLProtocolFixture.Gate()
+        let client = api([.init(200, #"{"outcomes":[{"commandId":"\#(note.id)","status":"applied"}]}"#, gate: gate)])
+        let task = Task { await box.drain(api: client, useCommandEndpoint: true) }
+        try await waitForRequests(1)
+        box.bind(actorID: actor, organizationID: "other")
+        box.bind(actorID: actor, organizationID: org)
+        gate.release(); await task.value
+        XCTAssertEqual(box.entries, original); XCTAssertEqual(outbox().entries, original)
+        XCTAssertEqual(box.lastSyncSent, 0)
+    }
+
+    func testOldDrainCannotClearNewDrainSendingStateAfterBindingRoundTrip() async throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Keep original")), policyVersion: 1))
+        let oldGate = URLProtocolFixture.Gate(), newGate = URLProtocolFixture.Gate()
+        defer { oldGate.release(); newGate.release() }
+        let response = #"{"outcomes":[{"commandId":"\#(note.id)","status":"applied"}]}"#
+        let client = api([.init(200, response, gate: oldGate), .init(200, response, gate: newGate)])
+        let old = Task { await box.drain(api: client, useCommandEndpoint: true) }
+        try await waitForRequests(1)
+        box.bind(actorID: actor, organizationID: "other")
+        box.bind(actorID: actor, organizationID: org)
+        let fresh = Task { await box.drain(api: client, useCommandEndpoint: true) }
+        try await waitForRequests(2)
+        oldGate.release(); await old.value
+        XCTAssertTrue(box.syncing, "Old drain's defer must not retire the current sender")
+        XCTAssertEqual(box.entries.map(\.id), [note.id])
+        newGate.release(); await fresh.value
+        XCTAssertFalse(box.syncing); XCTAssertTrue(box.entries.isEmpty)
+    }
+    func testRevocationBeforeRESTFallbackPreventsRequest() async throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Queued offline")), policyVersion: 1))
+        let original = box.entries; let gate = URLProtocolFixture.Gate(); var allowed = true
+        let response = #"{"outcomes":[{"commandId":"\#(note.id)","status":"rejected","category":"policy_superseded"}]}"#
+        let client = api([.init(200, response, gate: gate), URLProtocolFixture.offline])
+        let task = Task { await box.drain(api: client, useCommandEndpoint: true, canSend: { allowed }) }
+        try await waitForRequests(1); allowed = false; gate.release(); await task.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(box.entries, original); XCTAssertEqual(outbox().entries, original)
+    }
+
+    func testRevocationDuringConflictGETPreventsReconciliation() async throws {
+        let box = outbox()
+        box.enqueue(.progress(.init(jobId: jobA, to: "arrived", arrival: .init(method: "manual"))), policyVersion: 1)
+        let original = box.entries; let gate = URLProtocolFixture.Gate(); var allowed = true
+        let arrived = #"{"id":"\#(jobA)","organizationId":"\#(org)","customerId":"\#(jobB)","title":"T","status":"arrived","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}"#
+        let client = api([.init(409, #"{"title":"Conflict","status":409,"detail":"Conflict"}"#), .init(200, arrived, gate: gate)])
+        let task = Task { await box.drain(api: client, useCommandEndpoint: false, canSend: { allowed }) }
+        try await waitForRequests(2); allowed = false; gate.release(); await task.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(box.entries, original); XCTAssertEqual(outbox().entries, original)
+        XCTAssertEqual(box.lastSyncSent, 0)
+    }
+
+    func testCanceledReviewDoesNotRejectOrRemovePendingCommands() async throws {
+        let box = outbox()
+        let note = try XCTUnwrap(box.enqueue(.note(.init(jobId: jobA, body: "Keep")), policyVersion: 1))
+        let original = box.entries; let gate = URLProtocolFixture.Gate()
+        let client = api([.init(200, #"{"outcomes":[{"commandId":"\#(note.id)","status":"applied"}]}"#, gate: gate)])
+        let task = Task { await box.drain(api: client, useCommandEndpoint: true) }
+        try await waitForRequests(1); task.cancel(); gate.release(); await task.value
+        XCTAssertEqual(box.entries, original); XCTAssertEqual(outbox().entries, original)
+    }
+
     // MARK: - Closeout, signatures and cash offline (design.thorbis.com/offline)
 
     private let invoice = "019f0000-0000-7000-8000-0000000000e1"

@@ -54,6 +54,49 @@ final class CustomerPresentationTests: XCTestCase {
         XCTAssertEqual(CustomerEstimateFlow(estimate: estimate(status: "approved")).step, .done)
     }
 
+    func testCanonicalRevisionReplacesCallerTermsBeforeReview() throws {
+        var flow = CustomerEstimateFlow(estimate: estimate())
+        try flow.useIssuedRevision(issued())
+        XCTAssertEqual(flow.choiceName, "Drain repair")
+        XCTAssertEqual(flow.lines.first?.description, "New cleanout plug")
+        XCTAssertEqual(flow.lines.first?.quantity, 3)
+        XCTAssertEqual(flow.total, 7_500)
+        XCTAssertEqual(flow.step, .review)
+    }
+
+    func testExistingChoiceKeepsItsIdentityWithCanonicalDetails() throws {
+        var flow = CustomerEstimateFlow(estimate: estimate(options: options))
+        flow.choose("better")
+        flow.review()
+        let canonical = FieldEstimateOption(id: "better", title: "Repair with protection", description: "Reviewed work",
+                                            lines: [line("current", 1, 99_900)], totalAmount: 99_900, currency: "USD")
+        try flow.useIssuedRevision(issued(options: [canonical]))
+        XCTAssertEqual(flow.selectedOptionID, "better")
+        XCTAssertEqual(flow.choiceName, "Repair with protection")
+        XCTAssertEqual(flow.lines.first?.id, "current")
+        XCTAssertEqual(flow.total, 99_900)
+        XCTAssertEqual(flow.step, .review)
+    }
+
+    func testRemovedChoiceRequiresCustomerToChooseAgain() throws {
+        var flow = CustomerEstimateFlow(estimate: estimate(options: options))
+        flow.choose("better")
+        flow.review()
+        try flow.useIssuedRevision(issued(options: [options[0]]))
+        XCTAssertNil(flow.selectedOptionID)
+        XCTAssertEqual(flow.step, .choose)
+        XCTAssertFalse(flow.canReview)
+        XCTAssertNil(flow.total)
+    }
+
+    private func issued(options: [FieldEstimateOption] = []) -> CustomerIssuedEstimateRevision {
+        CustomerIssuedEstimateRevision(id: "00000000-0000-4000-8000-000000000105", estimateId: "00000000-0000-4000-8000-000000000001",
+                                      organizationId: "o", customerId: "c", locationId: nil, revisionNumber: 2, status: "issued",
+                                      title: "Drain repair", lines: [FieldLine(id: "plug", description: "New cleanout plug", quantity: 3,
+                                      unitPrice: FieldMoney(amount: 2500, currency: "USD"), source: nil)], options: options,
+                                      totalAmount: 7_500, currency: "USD")
+    }
+
     func testTheSignatureHintSaysWhatIsMissing() {
         XCTAssertEqual(customerSignatureHint(name: " ", hasInk: false), "Type your name and sign to finish.")
         XCTAssertEqual(customerSignatureHint(name: "", hasInk: true), "Type your name to finish.")

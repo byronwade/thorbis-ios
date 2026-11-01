@@ -269,7 +269,7 @@ struct CallDetailView: View {
             .background(Theme.background)
             .navigationTitle("Link to job")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Cancel") { choosingJob = false } } }
+            .toolbar { ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { choosingJob = false } } }
         }
         .presentationDetents([.medium, .large])
     }

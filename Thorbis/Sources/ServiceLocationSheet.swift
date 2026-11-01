@@ -45,7 +45,7 @@ struct ServiceLocationSheet: View {
 
             ZStack {
                 Text(isEditing ? "Edit location" : "New location")
-                    .font(Theme.font(17, weight: .semibold))
+                    .font(Theme.font(17, weight: .medium))
                 // MA-16: Cancel leading; the one commit is the ink button at the bottom.
                 HStack {
                     Button("Cancel") { dismiss() }
@@ -112,17 +112,22 @@ struct ServiceLocationSheet: View {
                 }
                 .buttonStyle(PressStyle())
                 .disabled(!canAttemptSave)
+                // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+                if !busy && !canAttemptSave {
+                    Text("Your role can't change addresses. Ask your office.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
         .foregroundStyle(Theme.foreground)
-        .background(Theme.card)
+        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
         .presentationDetents([.height(600), .large])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(Theme.cardRadius)
-        .presentationBackground(Theme.card)
+        .thorbisSheetSurface()
         .interactiveDismissDisabled(busy)
     }
 
@@ -137,7 +142,7 @@ struct ServiceLocationSheet: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-            TextField(placeholder, text: text, axis: multiline ? .vertical : .horizontal)
+            TextField(placeholder, text: text, prompt: .placeholder(placeholder), axis: multiline ? .vertical : .horizontal)
                 // design.thorbis.com mobile: input type is at least 16.
                 .font(field == .latitude || field == .longitude || field == .gateCode || field == .alarmCode ? Theme.monoFont(16) : Theme.font(16))
                 .keyboardType(keyboard)
@@ -150,7 +155,7 @@ struct ServiceLocationSheet: View {
                 .onSubmit { focusedField = next(after: field) }
                 .padding(.horizontal, 14)
                 .frame(minHeight: multiline ? 70 : 48, maxHeight: multiline ? 84 : 48, alignment: .topLeading)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                         .stroke(focusedField == field ? Theme.foreground : Theme.border,

@@ -29,6 +29,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Thorbis
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Thorbis uses the microphone only while you dictate a job note or photo caption, or record a video clip for a job."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Thorbis turns what you say into job note text, on this iPhone when it can."
         INFOPLIST_FILE: Thorbis/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Thorbis/Resources/Thorbis.entitlements
         DEVELOPMENT_TEAM: T677262U5B
@@ -43,6 +45,9 @@ targets:
     sources:
       - ThorbisWidgets
       - Shared
+      # Inter for the widgets and Live Activity, the same face as the app.
+      - path: Thorbis/Resources/Fonts/Inter.ttf
+      - path: Thorbis/Resources/Fonts/Inter-OFL.txt
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.thorbis.field.widgets
@@ -52,6 +57,8 @@ targets:
         CODE_SIGN_STYLE: Automatic
         SKIP_INSTALL: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        # Shared intents compile here only to draw buttons; they perform in the app process.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) THORBIS_WIDGET_EXTENSION
   ThorbisTests:
     type: bundle.unit-test
     platform: iOS
@@ -68,3 +75,24 @@ targets:
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) WIDGET_TESTS
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
+  ThorbisUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [ThorbisUITests]
+    dependencies:
+      - target: Thorbis
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thorbis.field.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Thorbis
+        CODE_SIGNING_ALLOWED: NO
+schemes:
+  Thorbis:
+    build:
+      targets:
+        Thorbis: all
+    test:
+      targets:
+        - ThorbisTests
+        - ThorbisUITests

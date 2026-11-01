@@ -312,7 +312,7 @@ struct ReviewRequestsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if canEdit {
-                ToolbarItem(placement: .confirmationAction) {
+                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                     if model.saving {
                         ProgressView()
                     } else {
