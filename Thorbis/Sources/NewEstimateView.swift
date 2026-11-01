@@ -138,7 +138,7 @@ struct NewEstimateView: View {
                 // The label stays above the field; the placeholder is only an example.
                 Text("Title").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                     .padding(.top, 6).accessibilityHidden(true)
-                TextField("", text: $title, prompt: Text("Furnace replacement").foregroundStyle(Theme.subtle), axis: .vertical)
+                TextField("", text: $title, prompt: .placeholder("Furnace replacement"), axis: .vertical)
                     .font(Theme.font(24, weight: .medium)).tracking(-0.3)
                     .accessibilityLabel("Estimate title")
                     .onChange(of: title) { _, _ in titleProblem = nil }

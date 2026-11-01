@@ -181,6 +181,8 @@ struct JobCloseoutView: View {
     @State private var unpaidReasonCode = "customer_will_pay_later"
     @State private var unpaidReason = ""
     @State private var unpaidNextAction = ""
+    /// Said above Complete job when it is pressed with the closeout not yet satisfied.
+    @State private var completeProblem: String?
     private var mayRecordUnpaidDisposition: Bool {
         guard let closeout, !closeout.unmet.isEmpty, session.can("job.edit", feature: "jobs") else { return false }
         return closeout.unmet.allSatisfy { $0.kind == "payment_or_unpaid_disposition" } && closeout.policy.requiredChecks.contains { $0.kind == "payment_or_unpaid_disposition" && $0.allowUnpaidDisposition == true }
@@ -299,7 +301,25 @@ struct JobCloseoutView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if job?.status != "completed", session.can("job.complete", feature: "jobs"), job?.allowedTransitions?.contains("completed") == true {
-                PaperActionBar(title: "Complete job", symbol: "checkmark", busy: busy, disabled: !canComplete) { confirmComplete = true }
+                // Not pre-disabled while the closeout is unfinished: pressing says what's left. It is
+                // off only until the closeout has loaded.
+                VStack(alignment: .leading, spacing: 0) {
+                    if let completeProblem, !canComplete {
+                        FieldProblem(message: completeProblem)
+                            .padding(.horizontal, Theme.gutter).padding(.top, 8)
+                    }
+                    PaperActionBar(title: "Complete job", symbol: "checkmark", busy: busy, disabled: closeout == nil) {
+                        if canComplete {
+                            completeProblem = nil
+                            confirmComplete = true
+                        } else {
+                            completeProblem = mayRecordUnpaidDisposition
+                                ? "Explain the unpaid balance and the office follow-up to complete this job."
+                                : "Finish the open items above to complete this job."
+                        }
+                    }
+                }
+                .background(Theme.background)
             }
         }
         .task { await load() }
@@ -334,7 +354,7 @@ struct JobCloseoutView: View {
     }
 
     private func wellField(_ prompt: String, text: Binding<String>) -> some View {
-        TextField(prompt, text: text, axis: .vertical)
+        TextField(prompt, text: text, prompt: .placeholder(prompt), axis: .vertical)
             .font(Theme.font(16)).lineLimit(2...5)
             .padding(12)
             .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
@@ -729,6 +749,10 @@ struct JobFollowUpsView: View {
     @State private var nextAction = ""
     @State private var kind: FieldFollowUpRequest.Kind = .notifyOffice
     @State private var booking: FieldFollowUpRecord?
+    /// Said under each question when Send follow-up is pressed with it unanswered; clears on typing.
+    @State private var reasonProblem: String?
+    @State private var nextProblem: String?
+    @FocusState private var followUpFocus: Int?
     /// Open follow-ups first, then one short form to ask the office for the next step.
     var body: some View {
         ScrollView {
@@ -781,8 +805,10 @@ struct JobFollowUpsView: View {
                         (FieldFollowUpRequest.Kind.officeScheduling, "Schedule a return visit"),
                     ], selection: $kind)
                     .padding(.bottom, 10)
-                    followUpField("What happened?", example: "Part on order, customer away until Friday…", text: $reason)
-                    followUpField("What needs to happen next?", example: "Book a return visit to fit the part…", text: $nextAction).padding(.top, 12)
+                    followUpField("What happened?", example: "Part on order, customer away until Friday…", text: $reason,
+                                  error: reasonProblem, focusID: 0)
+                    followUpField("What needs to happen next?", example: "Book a return visit to fit the part…", text: $nextAction,
+                                  error: nextProblem, focusID: 1).padding(.top, 12)
                     Text("A return-visit request goes to the office to book; it doesn't reserve a time.")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                 }
@@ -801,9 +827,10 @@ struct JobFollowUpsView: View {
         } }
         .safeAreaInset(edge: .bottom) {
             if session.can("job.edit", feature: "jobs") {
-                PaperActionBar(title: "Send follow-up", symbol: "paperplane", busy: busy,
-                               disabled: reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextAction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                   || reason.utf16.count > 2000 || nextAction.utf16.count > 2000) { Task { await create() } }
+                // Never pre-disabled: pressed with a question unanswered, it says which under it.
+                PaperActionBar(title: "Send follow-up", symbol: "paperplane", busy: busy) {
+                    if showFollowUpProblems() { Task { await create() } }
+                }
             }
         }
         .task { await load() }
@@ -811,13 +838,28 @@ struct JobFollowUpsView: View {
     }
 
     /// The question stays above the field once typing starts (GR-26); the placeholder is only an example.
-    private func followUpField(_ label: String, example: String, text: Binding<String>) -> some View {
-        PaperFormField(label) {
-            TextField(example, text: text, axis: .vertical)
+    private func followUpField(_ label: String, example: String, text: Binding<String>, error: String?, focusID: Int) -> some View {
+        PaperFormField(label, error: error) {
+            TextField(example, text: text, prompt: .placeholder(example), axis: .vertical)
                 .font(Theme.font(16)).lineLimit(2...5)
                 .fieldWell()
+                .focused($followUpFocus, equals: focusID)
+                .onChange(of: text.wrappedValue) { _, _ in if focusID == 0 { reasonProblem = nil } else { nextProblem = nil } }
                 .accessibilityLabel(label)
         }
+    }
+
+    /// Says what's missing or too long under each question and moves to the first; true when ready.
+    private func showFollowUpProblems() -> Bool {
+        func problem(_ text: String, missing: String) -> String? {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return missing }
+            return text.utf16.count > 2000 ? "Keep this to 2,000 characters." : nil
+        }
+        reasonProblem = problem(reason, missing: "Say what happened, like \u{201C}Part on order.\u{201D}")
+        nextProblem = problem(nextAction, missing: "Say what needs to happen next, like \u{201C}Book a return visit.\u{201D}")
+        if reasonProblem != nil { followUpFocus = 0 } else if nextProblem != nil { followUpFocus = 1 }
+        return reasonProblem == nil && nextProblem == nil
     }
 
     private func followUpRow(_ record: FieldFollowUpRecord) -> some View {
@@ -904,6 +946,9 @@ struct FollowUpBookingSheet: View {
     @State private var busy = false
     @State private var error: String?
     @State private var result: String?
+    /// Said under the visit's purpose when Book visit is pressed without one; clears on typing.
+    @State private var needProblem: String?
+    @FocusState private var needFocused: Bool
     /// One intent per sheet, so a retry after a dropped connection can't book twice.
     @State private var intentID = UUID().uuidString.lowercased()
 
@@ -926,9 +971,11 @@ struct FollowUpBookingSheet: View {
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                         .tint(Theme.brand)
                     }
-                    PaperFormField("What the visit is for") {
-                        TextField("Service needed", text: $need, axis: .vertical).lineLimit(2...4)
+                    PaperFormField("What the visit is for", error: needProblem) {
+                        TextField("Service needed", text: $need, prompt: .placeholder("Service needed"), axis: .vertical).lineLimit(2...4)
                             .font(Theme.font(16)).fieldWell()
+                            .focused($needFocused)
+                            .onChange(of: need) { _, _ in needProblem = nil }
                     }
                     if let result { Label(result, systemImage: "checkmark.circle").font(Theme.font(15)).foregroundStyle(Theme.success) }
                     if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
@@ -944,8 +991,15 @@ struct FollowUpBookingSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 if result == nil {
-                    PaperActionBar(title: "Book visit", busy: busy,
-                                   disabled: need.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await book() } }
+                    // Never pre-disabled: pressed without a purpose, it says so under the field.
+                    PaperActionBar(title: "Book visit", busy: busy) {
+                        if need.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            needProblem = "Say what the visit is for, like \u{201C}Fit the new capacitor.\u{201D}"
+                            needFocused = true
+                        } else {
+                            Task { await book() }
+                        }
+                    }
                 }
             }
             .onAppear { if need.isEmpty { need = followUp.nextAction } }

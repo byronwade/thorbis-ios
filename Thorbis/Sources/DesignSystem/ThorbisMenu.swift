@@ -107,9 +107,6 @@ struct ThorbisMenu<Label: View>: View {
     @ViewBuilder var label: () -> Label
 
     @State private var model = ThorbisMenuModel()
-    @State private var inLowerHalf = false
-
-    private var resolvedEdge: Edge { arrowEdge ?? (inLowerHalf ? .bottom : .top) }
 
     var body: some View {
         Group {
@@ -119,11 +116,7 @@ struct ThorbisMenu<Label: View>: View {
                 button
             }
         }
-        .onGeometryChange(for: Bool.self) { proxy in
-            let height = ThorbisMenuWindow.height
-            return height > 0 && proxy.frame(in: .global).midY > height / 2
-        } action: { inLowerHalf = $0 }
-        .popover(isPresented: $model.isPresented, arrowEdge: resolvedEdge) {
+        .anchoredPopover(isPresented: $model.isPresented, arrowEdge: arrowEdge) {
             ThorbisMenuPanel(items: items, title: title, customerFacing: customerFacing,
                              onSelect: { model.choose($0) }, onClose: { model.isPresented = false })
                 .onDisappear { model.finish() }
@@ -138,9 +131,73 @@ struct ThorbisMenu<Label: View>: View {
     }
 
     private var button: some View {
-        Button { model.isPresented = true } label: { label() }
+        Button { ThorbisKeyboard.dismiss { model.isPresented = true } } label: { label() }
             .buttonStyle(PressStyle())
             .sensoryFeedback(.selection, trigger: model.isPresented) { _, open in open }
+    }
+}
+
+/// Every anchored popover's direction (ThorbisMenu, JobStatusMenu, a list room's filter): it grows
+/// down from a control in the top half of the window and up from one in the bottom half, so a
+/// control low on the screen opens where there is room instead of squeezing into the strip below
+/// it. An explicit `arrowEdge` wins (`.top` grows down, `.bottom` grows up).
+struct AnchoredPopover<PopoverContent: View>: ViewModifier {
+    @Binding var isPresented: Bool
+    var arrowEdge: Edge?
+    var popoverContent: () -> PopoverContent
+    @State private var inLowerHalf = false
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: Bool.self) { proxy in
+                let height = ThorbisMenuWindow.height
+                return height > 0 && proxy.frame(in: .global).midY > height / 2
+            } action: { inLowerHalf = $0 }
+            .onAppear { ThorbisKeyboard.watch() }
+            .popover(isPresented: $isPresented, arrowEdge: arrowEdge ?? (inLowerHalf ? .bottom : .top)) { popoverContent() }
+    }
+}
+
+/// Opening a popover is a move away from typing. With the keyboard up, a menu growing down from a
+/// select under a focused field (the invite's Role) ended behind the keyboard, and putting the
+/// keyboard away at the same moment let the sheet drop and cut the menu off at the screen's foot.
+/// So the keyboard goes first, and the popover opens once the layout has settled, from where its
+/// control now sits.
+@MainActor enum ThorbisKeyboard {
+    private static var visible = false
+    private static var observers: [NSObjectProtocol] = []
+
+    /// Starts listening (idempotent); called at launch (`ThorbisApp.init`) and by every popover.
+    static func watch() {
+        guard observers.isEmpty else { return }
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { visible = true }
+            },
+            center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { visible = false }
+            },
+        ]
+    }
+
+    /// Runs `open` now, or after putting the keyboard away and letting the screen settle.
+    static func dismiss(then open: @escaping @MainActor () -> Void) {
+        watch()
+        guard visible else { open(); return }
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(400))
+            open()
+        }
+    }
+}
+
+extension View {
+    /// A `.popover` that opens toward the room it has (see `AnchoredPopover`).
+    func anchoredPopover<PopoverContent: View>(isPresented: Binding<Bool>, arrowEdge: Edge? = nil,
+                                               @ViewBuilder content: @escaping () -> PopoverContent) -> some View {
+        modifier(AnchoredPopover(isPresented: isPresented, arrowEdge: arrowEdge, popoverContent: content))
     }
 }
 

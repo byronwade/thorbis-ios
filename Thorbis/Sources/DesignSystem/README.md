@@ -108,6 +108,8 @@ in light and dark, and scales with Dynamic Type.
 | Job status popover (moves grouped by space: forward, then pause / back) | `JobStatusMenu` | `../JobStatusMenu.swift` |
 | **Anchored popover menu** (replaces `Menu {}`) | **`ThorbisMenu`** | `ThorbisMenu.swift` |
 | **A menu shown as a sheet** (Create) | `ThorbisMenuCard` | `ThorbisMenu.swift` |
+| Any other anchored popover (opens down from the top half, up from the bottom half; puts the keyboard away first) | `.anchoredPopover(isPresented:)`, `ThorbisKeyboard.dismiss` | `ThorbisMenu.swift` |
+| A text field's placeholder (verbatim example in `Theme.muted`; the lint rejects `prompt: Text(`) | `prompt: .placeholder("…")` | `ThorbisControls.swift` |
 | **Modal sheet** (one task, one ink commit) | **`ThorbisModalSheet`**, `ThorbisSheetField`, `ThorbisSheetHeader` | `ThorbisSheet.swift` |
 | **Filter / display bottom sheet** | **`ThorbisSheet*`** | `ThorbisSheet.swift` |
 | Sunk field well | `.fieldWell()` | `../PaperComponents.swift` |

@@ -308,7 +308,7 @@ struct JobDepositSheet: View {
                     // The affix lives inside the well (design.thorbis.com "Affixes in the well").
                     HStack(spacing: 8) {
                         Text("$").font(Theme.monoFont(28)).foregroundStyle(Theme.muted)
-                        TextField("150.00", text: $amount).keyboardType(.decimalPad).font(Theme.monoFont(28))
+                        TextField("150.00", text: $amount, prompt: .placeholder("150.00")).keyboardType(.decimalPad).font(Theme.monoFont(28))
                             .onChange(of: amount) { _, _ in key = UUID().uuidString; amountError = nil }
                             .accessibilityLabel("Deposit amount")
                     }

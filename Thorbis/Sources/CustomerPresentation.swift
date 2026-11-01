@@ -313,7 +313,7 @@ struct CustomerEstimatePresentation: View {
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your full name").font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
-                TextField("Your full name", text: $name)
+                TextField("Your full name", text: $name, prompt: .placeholder("Your full name"))
                     .textContentType(.name)
                     .font(Theme.customerFont(type.body))
                     .padding(.horizontal, 16)
@@ -794,7 +794,7 @@ struct CustomerInvoicePresentation: View {
             }
             Text("By signing, I confirm the work and charges on this invoice.")
                 .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
-            TextField("Your full name", text: $name)
+            TextField("Your full name", text: $name, prompt: .placeholder("Your full name"))
                 .textContentType(.name)
                 .font(Theme.customerFont(type.body))
                 .padding(.horizontal, 16)

@@ -237,7 +237,7 @@ struct PublicEstimateActionView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Full name").font(Theme.customerFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                    TextField("Type your name", text: $model.signerName)
+                    TextField("Type your name", text: $model.signerName, prompt: .placeholder("Type your name"))
                         .textContentType(.name)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
@@ -313,7 +313,7 @@ struct PublicEstimateActionView: View {
             VStack(alignment: .leading, spacing: 12) {
                 if action.canRequestChanges {
                     sectionTitle("Request changes")
-                    TextField("Tell the company what needs clarification", text: $model.changeMessage, axis: .vertical)
+                    TextField("Tell the company what needs clarification", text: $model.changeMessage, prompt: .placeholder("Tell the company what needs clarification"), axis: .vertical)
                         .lineLimit(3...5)
                         .focused($focusedField, equals: .message)
                         .padding(12)

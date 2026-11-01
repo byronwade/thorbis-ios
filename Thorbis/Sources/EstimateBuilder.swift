@@ -637,7 +637,7 @@ struct BuilderLineRow: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 0) {
                 // The customer reads this line in full, so it's edited in full: it grows with the text.
-                TextField("", text: $description, prompt: Text("Run capacitor, 45/5 µF").foregroundStyle(Theme.subtle), axis: .vertical)
+                TextField("", text: $description, prompt: .placeholder("Run capacitor, 45/5 µF"), axis: .vertical)
                     .font(Theme.font(16, weight: .medium)).lineLimit(1...8)
                     .focused(focus, equals: .description(lineID))
                     .padding(.horizontal, 12).padding(.vertical, 12)
@@ -652,7 +652,7 @@ struct BuilderLineRow: View {
             layout {
                 HStack(spacing: 6) {
                     stepButton("minus", label: "One fewer", enabled: quantityValue > 1) { quantity = String(max(1, quantityValue - 1)) }
-                    TextField("1", text: $quantity)
+                    TextField("1", text: $quantity, prompt: .placeholder("1"))
                         .keyboardType(.numberPad)
                         .font(Theme.monoFont(17, weight: .medium))
                         .multilineTextAlignment(.center)
@@ -665,7 +665,7 @@ struct BuilderLineRow: View {
                 }
                 HStack(spacing: 4) {
                     Text("$").font(Theme.monoFont(17)).foregroundStyle(Theme.muted)
-                    TextField("0.00", text: $unitPrice)
+                    TextField("0.00", text: $unitPrice, prompt: .placeholder("0.00"))
                         .keyboardType(.decimalPad)
                         .font(Theme.monoFont(17, weight: .medium))
                         .multilineTextAlignment(.trailing)
@@ -1101,7 +1101,7 @@ struct EstimateDiscountSheet: View {
             // v2: the affix sits inside the sunk well; the problem shows under it after Add is pressed.
             HStack(spacing: 6) {
                 if !percent { Text("$").font(Theme.monoFont(22)).foregroundStyle(Theme.muted) }
-                TextField(percent ? "10" : "0.00", text: $text)
+                TextField(percent ? "10" : "0.00", text: $text, prompt: .placeholder(percent ? "10" : "0.00"))
                     .keyboardType(.decimalPad)
                     .font(Theme.monoFont(22, weight: .medium))
                     .focused($focused)

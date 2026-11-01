@@ -226,7 +226,7 @@ struct EstimateRevisionEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             PaperEyebrow(reference: "EST-\(editor.estimate.id.suffix(4).uppercased())",
                          text: "Revision \(editor.estimate.currentRevisionNumber ?? 0) · \(editingDraft ? "Edit draft" : "New replacement draft")")
-            TextField("Estimate title", text: $editor.title, axis: .vertical)
+            TextField("Estimate title", text: $editor.title, prompt: .placeholder("Estimate title"), axis: .vertical)
                 .font(Theme.font(24, weight: .medium)).tracking(-0.36)
                 .accessibilityLabel("Estimate title")
                 .disabled(busy || !canEdit)
@@ -313,11 +313,11 @@ struct EstimateRevisionEditorView: View {
             removed: { line, lineIndex in withAnimation { removed = RemovedLine(line: line, index: lineIndex, optionID: option.id) } }
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                TextField("Option name, like Repair", text: binding.title)
+                TextField("Option name, like Repair", text: binding.title, prompt: .placeholder("Option name, like Repair"))
                     .font(Theme.font(17, weight: .medium))
                     .accessibilityLabel("Option package title")
                     .frame(minHeight: 40)
-                TextField("What this option includes", text: binding.description, axis: .vertical)
+                TextField("What this option includes", text: binding.description, prompt: .placeholder("What this option includes"), axis: .vertical)
                     .font(Theme.font(15)).lineLimit(1...)
                     .foregroundStyle(Theme.muted)
                     .accessibilityLabel("Option package description")

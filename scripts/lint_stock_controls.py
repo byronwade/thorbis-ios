@@ -7,8 +7,10 @@ import re
 import sys
 
 # Stock bar items too: use ThorbisToolbarItem so bar buttons are Thorbis controls (rule 11).
+# A hand-made `prompt: Text(...)` too: use `.placeholder("…")`, which is verbatim (a Text literal is a
+# Markdown key, so an email example became a tinted link) and in the secondary text token.
 PATTERN = re.compile(r"(?<![.a-zA-Z])Menu \{| Picker\(|\.confirmationDialog\(|\.buttonStyle\(\.bordered|\.borderedProminent"
-                     r"|(?<![.a-zA-Z])ToolbarItem(?:Group)?\(")
+                     r"|(?<![.a-zA-Z])ToolbarItem(?:Group)?\(|prompt: Text\(")
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "Thorbis/Sources"
 BASELINE = ROOT / "scripts/.stock-controls-allowlist"

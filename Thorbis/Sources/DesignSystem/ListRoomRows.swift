@@ -307,10 +307,10 @@ struct ListViewBar<Popover: View>: View {
             PaperTabs(options: options, selection: $selection, textTabs: true)
             if let filterLabel {
                 PaperCircleButton(symbol: "line.3.horizontal.decrease", label: filterLabel, size: 36,
-                                  fill: filterActive ? Theme.brandSurface : Theme.fill) { showFilter = true }
+                                  fill: filterActive ? Theme.brandSurface : Theme.fill) { ThorbisKeyboard.dismiss { showFilter = true } }
                     .accessibilityValue(filterActive ? "Filtered" : "")
                     .accessibilityIdentifier("header-filter")
-                    .popover(isPresented: $showFilter, arrowEdge: .top) {
+                    .anchoredPopover(isPresented: $showFilter) {
                         popover
                             .frame(idealWidth: 320, maxWidth: 360)
                             .presentationCompactAdaptation(.popover)

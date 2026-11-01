@@ -4,6 +4,18 @@ import SwiftUI
 // menu/wheel kind and the segmented kind) and `confirmationDialog`. Same Theme tokens, same
 // Linear-mobile feel as ThorbisMenu/ThorbisSheet.
 
+// MARK: - Placeholders
+
+extension Text {
+    /// A text field's placeholder (`prompt:`): an example in the secondary text token (`Theme.muted`,
+    /// 4.5:1 on the field well in both themes). Always verbatim: a `Text("…")` literal is a localized
+    /// Markdown key, so an example like "mike@reyesplumbing.com" became a link and took the app's
+    /// tint (blue) once the field was focused. Use this for every `TextField` prompt.
+    static func placeholder<S: StringProtocol>(_ example: S) -> Text {
+        Text(verbatim: String(example)).foregroundStyle(Theme.muted)
+    }
+}
+
 // MARK: - ThorbisSelect (replaces a menu/default `Picker`)
 
 /// A select control that shows the chosen option's label and a `chevron.up.chevron.down`, and

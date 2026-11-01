@@ -157,7 +157,7 @@ struct MediaCaptureFlow: View {
 
     private var captionRow: some View {
         HStack(spacing: 8) {
-            TextField("Caption (optional)", text: $caption)
+            TextField("Caption (optional)", text: $caption, prompt: .placeholder("Caption (optional)"))
                 .font(Theme.font(16))
                 .submitLabel(.done)
                 .padding(.horizontal, 14)

@@ -28,9 +28,33 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertFalse(app.drawerRow("new").exists, "The closed drawer's New job must not be in the tree")
         XCTAssertFalse(app.drawerRow("settings").exists, "The closed drawer's gear must not be in the tree")
         XCTAssertFalse(app.drawerRow("search").exists)
+        XCTAssertFalse(app.scrollViews["drawer-rows"].exists, "The closed drawer's (empty) scroll view must not be in the tree")
         app.openDrawer()
         XCTAssertTrue(app.drawerRow("new").waitForExistence(timeout: 5))
         XCTAssertTrue(app.drawerRow("settings").exists)
+        XCTAssertTrue(app.scrollViews["drawer-rows"].exists)
+        // Closing takes everything out again once the drawer has slid shut.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        // The UIKit-hosted controls leave as the close starts (VoiceOver returns to the place then);
+        // only the rows stay through the slide.
+        XCTAssertFalse(app.drawerRow("new").exists, "New job must leave the tree as the drawer starts closing")
+        XCTAssertFalse(app.drawerRow("settings").exists, "The gear must leave the tree as the drawer starts closing")
+        XCTAssertTrue(app.scrollViews["drawer-rows"].waitForNonExistence(timeout: 5))
+    }
+
+    /// The edge swipe still opens the drawer although its contents are not built while closed.
+    func testEdgeSwipeOpensTheDrawer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
+        app.launch()
+        XCTAssertTrue(app.drawerMenu.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.scrollViews["drawer-rows"].exists)
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)))
+        XCTAssertTrue(app.buttons["drawer-search"].waitForExistence(timeout: 5), "The edge swipe opens the drawer")
+        XCTAssertTrue(app.scrollViews["drawer-rows"].exists)
     }
 
     func testGearMenuStaysOnScreenInPortrait() { assertGearMenuOnScreen(landscape: false) }

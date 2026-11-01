@@ -95,7 +95,7 @@ struct SignUpView: View {
                         .padding(.top, 6)
 
                     fieldLabel("Your name").padding(.top, 28)
-                    TextField("First and last name", text: $name)
+                    TextField("First and last name", text: $name, prompt: .placeholder("First and last name"))
                         .textContentType(.name)
                         .textInputAutocapitalization(.words)
                         .submitLabel(.next)
@@ -105,7 +105,7 @@ struct SignUpView: View {
                     if let error, errorField == .name { InlineProblem(message: error).padding(.top, 6) }
 
                     fieldLabel("Work email").padding(.top, 16)
-                    TextField("Email", text: $email, prompt: Text(verbatim: "you@company.com").foregroundStyle(Theme.muted))
+                    TextField("Email", text: $email, prompt: .placeholder("you@company.com"))
                         .textContentType(.username)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
@@ -120,10 +120,10 @@ struct SignUpView: View {
                     HStack(spacing: 0) {
                         Group {
                             if showPassword {
-                                TextField("At least 8 characters", text: $password)
+                                TextField("At least 8 characters", text: $password, prompt: .placeholder("At least 8 characters"))
                                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                             } else {
-                                SecureField("At least 8 characters", text: $password)
+                                SecureField("At least 8 characters", text: $password, prompt: .placeholder("At least 8 characters"))
                             }
                         }
                         .textContentType(.newPassword)
@@ -337,12 +337,13 @@ struct CreateCompanyForm: View {
                     .padding(.top, 6)
 
                 fieldLabel("Company name").padding(.top, 28)
-                TextField("Wade Plumbing & Heating", text: $name)
+                TextField("Wade Plumbing & Heating", text: $name, prompt: .placeholder("Wade Plumbing & Heating"))
                     .textContentType(.organizationName)
                     .textInputAutocapitalization(.words)
                     .submitLabel(.done)
                     .focused($focused)
                     .onSubmit { Task { await create() } }
+                    .onChange(of: name) { _, _ in error = nil }
                     .authField().padding(.top, 8)
 
                 if let error { InlineProblem(message: error).padding(.top, 12) }
@@ -381,7 +382,8 @@ struct CreateCompanyForm: View {
                 .inkCommit()
             }
             .buttonStyle(PressStyle())
-            .disabled(busy || trimmed.isEmpty)
+            // Not pre-disabled: pressed without a name, it says so under the field.
+            .disabled(busy)
             .padding(.horizontal, 20).padding(.vertical, 10)
             .frame(maxWidth: 470)
             .frame(maxWidth: .infinity)
@@ -401,7 +403,8 @@ struct CreateCompanyForm: View {
     }
 
     private func create() async {
-        guard !busy, !trimmed.isEmpty else { return }
+        guard !busy else { return }
+        guard !trimmed.isEmpty else { error = "Add your company’s name, like Wade Plumbing & Heating."; focused = true; return }
         guard trimmed.count <= 120 else { error = "Use 120 characters or fewer."; return }
         busy = true
         defer { busy = false }
@@ -763,7 +766,7 @@ struct CompanyDetailsView: View {
             TextField(CompanyFact.placeholder(key), text: Binding(
                 get: { model.drafts[key] ?? "" },
                 set: { model.drafts[key] = $0; model.fieldErrors[key] = nil }
-            ), axis: CompanyFact.multiline(key) ? .vertical : .horizontal)
+            ), prompt: .placeholder(CompanyFact.placeholder(key)), axis: CompanyFact.multiline(key) ? .vertical : .horizontal)
             .lineLimit(CompanyFact.multiline(key) ? 1...4 : 1...1)
             .textFieldStyle(.plain)
             .font(Theme.font(16))

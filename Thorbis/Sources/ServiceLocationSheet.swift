@@ -142,7 +142,7 @@ struct ServiceLocationSheet: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-            TextField(placeholder, text: text, axis: multiline ? .vertical : .horizontal)
+            TextField(placeholder, text: text, prompt: .placeholder(placeholder), axis: multiline ? .vertical : .horizontal)
                 // design.thorbis.com mobile: input type is at least 16.
                 .font(field == .latitude || field == .longitude || field == .gateCode || field == .alarmCode ? Theme.monoFont(16) : Theme.font(16))
                 .keyboardType(keyboard)

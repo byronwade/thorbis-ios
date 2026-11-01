@@ -89,6 +89,8 @@ struct JobChecklistSheet: View {
     @State private var photoFor: ChecklistItem?
     @State private var confirmRestart = false
     @State private var problem: String?
+    /// Said above Finish when it is pressed with nothing checked; clears once an item is.
+    @State private var finishProblem: String?
     @FocusState private var focused: String?
 
     private var template: ChecklistTemplate? { run.flatMap { ChecklistTemplates.template($0.templateID) } }
@@ -130,10 +132,24 @@ struct JobChecklistSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 if let run, let template {
-                    PaperActionBar(title: "Finish · add to notes", symbol: "checklist", busy: busy,
-                                   disabled: run.doneCount(template) == 0 || !JobNotePoster.canPost(session)) {
-                        Task { await finish(run, template) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let finishProblem, run.doneCount(template) == 0 {
+                            FieldProblem(message: finishProblem)
+                                .padding(.horizontal, Theme.gutter).padding(.top, 8)
+                        }
+                        // Not pre-disabled for an empty run: pressing says what's missing. Without
+                        // the note permission it stays off, and the sentence under it says why.
+                        PaperActionBar(title: "Finish · add to notes", symbol: "checklist", busy: busy,
+                                       disabled: !JobNotePoster.canPost(session),
+                                       disabledReason: "Your role can't add job notes. Ask your office.") {
+                            if run.doneCount(template) == 0 {
+                                finishProblem = "Check off at least one item to finish."
+                            } else {
+                                Task { await finish(run, template) }
+                            }
+                        }
                     }
+                    .background(Theme.background)
                 } else if finished {
                     PaperActionBar(title: "Done") { onDone() }
                 }
@@ -219,7 +235,7 @@ struct JobChecklistSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let reading = item.reading {
                     HStack(spacing: 6) {
-                        TextField(reading.prompt, text: readingBinding(item))
+                        TextField(reading.prompt, text: readingBinding(item), prompt: .placeholder(reading.prompt))
                             .font(Theme.font(15, weight: .medium)).monospacedDigit()
                             .keyboardType(.numbersAndPunctuation)
                             .focused($focused, equals: item.id)

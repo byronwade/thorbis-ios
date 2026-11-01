@@ -217,11 +217,11 @@ private struct InboxLocalComposerView: View {
                                       selection: $composer.channel, label: "Channel").fieldWell()
                     }
                     PaperFormField(composer.channel == .sms ? "Phone number" : "Email address") {
-                        TextField(composer.channel == .sms ? "Phone number" : "Email address", text: $composer.recipient)
+                        TextField(composer.channel == .sms ? "Phone number" : "Email address", text: $composer.recipient, prompt: .placeholder(composer.channel == .sms ? "Phone number" : "Email address"))
                             .textInputAutocapitalization(.never).font(Theme.font(16)).fieldWell()
                     }
                     if composer.channel == .email {
-                        PaperFormField("Subject") { TextField("Subject", text: $composer.subject).font(Theme.font(16)).fieldWell() }
+                        PaperFormField("Subject") { TextField("Subject", text: $composer.subject, prompt: .placeholder("Subject")).font(Theme.font(16)).fieldWell() }
                     }
                     PaperFormField("Message") {
                         TextEditor(text: $composer.body).font(Theme.font(16)).scrollContentBackground(.hidden)

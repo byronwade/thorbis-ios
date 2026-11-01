@@ -975,7 +975,7 @@ struct InvoicePaymentCollectionSheet: View {
         FormField(label: "Amount", help: "Up to the balance due. Take part now and the rest later.", error: amountError) {
             HStack(spacing: 8) {
                 MoneyFieldWell {
-                    TextField(paymentAmountText(model.outstandingCents ?? 0), text: $amountText)
+                    TextField(paymentAmountText(model.outstandingCents ?? 0), text: $amountText, prompt: .placeholder(paymentAmountText(model.outstandingCents ?? 0)))
                         .keyboardType(.decimalPad)
                         .focused($amountFocused)
                         .font(Theme.monoFont(16))

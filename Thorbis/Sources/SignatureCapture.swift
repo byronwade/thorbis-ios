@@ -20,6 +20,9 @@ struct SignatureCaptureSheet: View {
     /// Kept across retries so a second tap reuses the same uploaded image.
     @State private var uploaded: (key: String, mediaID: String)?
     @State private var clientAssetID = UUID().uuidString
+    /// Set when the commit is pressed with the name or signature missing, so it says which.
+    @State private var attempted = false
+    @FocusState private var nameFocused: Bool
 
     private var hasInk: Bool { SignatureInk.hasInk(strokes) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -41,7 +44,8 @@ struct SignatureCaptureSheet: View {
                     .font(Theme.font(15))
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                TextField("Customer's full name", text: $name)
+                TextField("Customer's full name", text: $name, prompt: .placeholder("Customer's full name"))
+                    .focused($nameFocused)
                     .textContentType(.name)
                     .submitLabel(.done)
                     .font(Theme.font(17))
@@ -75,12 +79,26 @@ struct SignatureCaptureSheet: View {
                 .accessibilityLabel("Signature pad")
                 if let error { ListErrorRow(message: error) }
                 Spacer(minLength: 0)
-                PrimaryButton(title: title, busy: busy) { Task { await sign() } }
-                    .disabled(!canSubmit)
-                // MA-08: a disabled commit says why, in words under it.
-                if !canSubmit && !busy, let reason = blockedReason {
-                    Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity)
+                // Not pre-disabled for a missing name or signature: pressing says which, under it.
+                // Offline it stays off (a signature is never kept to send later), and says why.
+                PrimaryButton(title: title, busy: busy) {
+                    guard canSubmit else {
+                        attempted = true
+                        if trimmedName.isEmpty || trimmedName.count > 120 { nameFocused = true }
+                        return
+                    }
+                    Task { await sign() }
+                }
+                .disabled(busy || session.isOffline)
+                if !busy, session.isOffline || attempted, let reason = blockedReason {
+                    Group {
+                        if session.isOffline {
+                            Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        } else {
+                            FieldProblem(message: reason)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
             }
             .padding(20)
