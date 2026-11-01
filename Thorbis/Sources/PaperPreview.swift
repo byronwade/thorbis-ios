@@ -1141,7 +1141,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
             if PaperPreview.role != nil { enabledFeatures.append("job_booking_notices") }
             if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
-            let features = Dictionary(uniqueKeysWithValues: enabledFeatures.map { ($0, decision) })
+            let features = Dictionary(enabledFeatures.map { ($0, decision) }, uniquingKeysWith: { first, _ in first })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
         case "/v1/jobs":

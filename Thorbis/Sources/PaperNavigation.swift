@@ -76,6 +76,7 @@ struct RootView: View {
         }
         #if DEBUG
         .modifier(PreviewLandscape())
+        .modifier(PreviewWindowWidth())
         #endif
         // Widgets, the Control Center control and Spotlight read today's jobs from here.
         .modifier(GlanceSnapshotWriter())
@@ -140,6 +141,7 @@ struct RootView: View {
     private func usesTabletLayout(width: CGFloat) -> Bool {
         #if DEBUG
         if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-compact") { return false }
+        if PreviewWindowWidth.width != nil { return false }
         #endif
         return UIDevice.current.userInterfaceIdiom == .pad && sizeClass == .regular && width >= 700
     }
@@ -191,6 +193,26 @@ struct RootView: View {
                 .presentationDetents([.large])
                 .thorbisSheetSurface()
         }
+        .background { keyboardShortcuts }
+    }
+
+    /// A hardware keyboard (iPad in Slide Over or a narrow Split View, or an iPhone with one) gets
+    /// the iPad sidebar's shortcuts: ⌘F / ⌘K search, ⌘N new job, ⇧⌘N the create menu.
+    private var keyboardShortcuts: some View {
+        ZStack {
+            Button("Search") { closeDrawer(thenRun: { openBarSearch() }) }.keyboardShortcut("f", modifiers: .command)
+            Button("Search everything") { closeDrawer(thenRun: { openBarSearch() }) }.keyboardShortcut("k", modifiers: .command)
+            if session.can("job.create", feature: "jobs") {
+                Button("New job") { createJob = true }.keyboardShortcut("n", modifiers: .command)
+            }
+            if !createChoices.isEmpty {
+                Button("Create") { createMenuOpen = true }.keyboardShortcut("n", modifiers: [.command, .shift])
+            }
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private var drawerAnimation: Animation {
@@ -998,7 +1020,7 @@ private struct DrawerCircleInBar: ViewModifier {
 
 #if DEBUG
 /// Screenshot-only sheets, kept off the shell's long modifier chain.
-private struct PreviewSheets: ViewModifier {
+struct PreviewSheets: ViewModifier {
     @Binding var invoiceEditor: Bool
     @Binding var invoiceDetail: Bool
     @Binding var estimateRevision: Bool
@@ -1174,6 +1196,31 @@ private struct PreviewFormSheet: ViewModifier {
 /// Screenshot-only (`--paper-preview-landscape`): iPadOS's windowed mode refuses programmatic
 /// rotation, so the app is laid out at the landscape size and turned a quarter. The capture is
 /// turned back afterwards. Layout is real; safe areas are approximate.
+/// `--paper-preview-window-width 375`: the app drawn in a narrow window at the leading edge, the
+/// way Slide Over or a narrow Split View gives it compact width on iPad. Screenshot-only.
+private struct PreviewWindowWidth: ViewModifier {
+    static var width: CGFloat? {
+        let args = ProcessInfo.processInfo.arguments
+        guard PaperPreview.enabled, let index = args.firstIndex(of: "--paper-preview-window-width"), args.indices.contains(index + 1),
+              let value = Double(args[index + 1]) else { return nil }
+        return CGFloat(value)
+    }
+
+    func body(content: Content) -> some View {
+        if let width = Self.width {
+            HStack(spacing: 0) {
+                content
+                    .environment(\.horizontalSizeClass, .compact)
+                    .frame(width: width)
+                    .clipped()
+                Color.black.opacity(0.5).ignoresSafeArea()
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct PreviewLandscape: ViewModifier {
     func body(content: Content) -> some View {
         if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-landscape") {

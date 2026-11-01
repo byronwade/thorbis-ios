@@ -123,6 +123,7 @@ struct TabletRoot: View {
     /// Landscape: the person folded the sidebar away. Portrait: the sidebar is drawn over the columns.
     @State private var sidebarFolded = false
     @State private var sidebarOpen = false
+    @State private var settledLaunchPlace = false
 
     @State private var search = false
     @State private var searchSeed = ""
@@ -135,6 +136,16 @@ struct TabletRoot: View {
     @State private var newCustomer = false
     @State private var createMenuOpen = false
     @State private var pendingCreate: (() -> Void)?
+    #if DEBUG
+    /// Screenshot-only sheets, the same ones the phone shell opens for these preview screens.
+    @State private var previewInvoiceEditor = false
+    @State private var previewInvoiceDetail = false
+    @State private var previewEstimateRevision = false
+    @State private var previewNewCustomer = false
+    @State private var previewFormSheet: String?
+    @State private var previewSignature = false
+    @State private var previewNewEstimate = false
+    #endif
 
     static let sidebarWidth: CGFloat = 280
     static let readableWidth: CGFloat = 720
@@ -145,13 +156,13 @@ struct TabletRoot: View {
         GeometryReader { geometry in
             let inline = geometry.size.width >= Self.inlineSidebarWidth && !sidebarFolded
             HStack(spacing: 0) {
+                // The sidebar is the drawer's panel tone beside the cream columns: tone, not a rule.
                 if inline {
                     sidebar(fold: { withAnimation(motion) { sidebarFolded = true } })
-                    columnRule
                 }
                 VStack(spacing: 0) {
                     if !inline { topBar(wide: geometry.size.width >= Self.inlineSidebarWidth) }
-                    columns(width: geometry.size.width - (inline ? Self.sidebarWidth + 1 : 0))
+                    columns(width: geometry.size.width - (inline ? Self.sidebarWidth : 0))
                 }
             }
             .overlay(alignment: .leading) {
@@ -162,7 +173,6 @@ struct TabletRoot: View {
                             .accessibilityLabel("Close sidebar")
                             .accessibilityAddTraits(.isButton)
                         sidebar(fold: { withAnimation(motion) { sidebarOpen = false } })
-                            .background(Theme.canvas)
                             .shadow(color: .black.opacity(0.18), radius: 24, x: 4)
                             .transition(.move(edge: .leading))
                     }
@@ -197,6 +207,11 @@ struct TabletRoot: View {
                 createMenuOpen = false
             }
         } }
+        #if DEBUG
+        .modifier(PreviewSheets(invoiceEditor: $previewInvoiceEditor, invoiceDetail: $previewInvoiceDetail,
+                                estimateRevision: $previewEstimateRevision, newCustomer: $previewNewCustomer,
+                                formSheet: $previewFormSheet, signature: $previewSignature, newEstimate: $previewNewEstimate))
+        #endif
         .onChange(of: scheduleSelection) { path = NavigationPath() }
         .onChange(of: scheduleRange) { path = NavigationPath() }
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob() }
@@ -218,7 +233,11 @@ struct TabletRoot: View {
             if session.can("job.view", feature: "jobs") { tab = .schedule }
             else if session.can("customer.view", feature: "core_crm") { tab = .customers }
             else if let first = menuPlaces.first { tab = section(for: first) }
+            openHomeAtLaunch()
         }
+        // Owners whose places lead with Home open there, as on the phone (the role's places can
+        // arrive just after launch).
+        .onChange(of: layout.visibleTabs(session).first) { openHomeAtLaunch() }
         .task {
             await store.refresh(api)
             #if DEBUG
@@ -228,8 +247,6 @@ struct TabletRoot: View {
     }
 
     private var motion: Animation { reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.32, dampingFraction: 0.88) }
-
-    private var columnRule: some View { Rectangle().fill(Theme.border).frame(width: 1).ignoresSafeArea() }
 
     // MARK: Columns
 
@@ -246,11 +263,19 @@ struct TabletRoot: View {
                 }
                 .id(tab)
                 .frame(width: listWidth)
-                columnRule
                 detailStack
             }
-        } else {
+        } else if tab == .schedule {
+            // Week and Map use the whole width.
             detailStack
+        } else {
+            // A place with no list (Inbox, Money, Reports…): the whole column, bar included, keeps
+            // the readable width, so its bar buttons sit at the edge of what they act on rather
+            // than a long reach away on a 13-inch screen.
+            detailStack
+                .frame(maxWidth: Self.readableWidth)
+                .frame(maxWidth: .infinity)
+                .background(Theme.canvas)
         }
     }
 
@@ -397,6 +422,18 @@ struct TabletRoot: View {
         .frame(width: Self.sidebarWidth)
     }
 
+    /// Once, from the untouched first place, and never over a record a link asked for.
+    private func openHomeAtLaunch() {
+        guard !settledLaunchPlace, layout.visibleTabs(session).first == .home else { return }
+        settledLaunchPlace = true
+        guard tab == .schedule, path.isEmpty, !store.openedForRecord, store.requestedJobID == nil,
+              store.requestedRecord == nil else { return }
+        #if DEBUG
+        if PaperPreview.enabled, PaperPreview.screen != "schedule" { return }
+        #endif
+        show(.place(.home))
+    }
+
     private func show(_ target: TabletSection) {
         path = NavigationPath()
         tab = target
@@ -536,6 +573,8 @@ struct TabletRoot: View {
         let job = store.jobs.first { $0.id == PaperPreview.jobID }
         let customer = store.customers.first { $0.id == PaperPreview.customerID }
         switch PaperPreview.screen {
+        // The owner's layout leads with Home, where owners open (as on the phone).
+        case "schedule" where PaperPreview.role == "owner": show(.place(.home))
         case "schedule", "my-day": show(.schedule)
         case "schedule-week": show(.schedule); scheduleRange = "Week"
         case "schedule-map": show(.schedule); scheduleRange = "Map"
@@ -558,10 +597,19 @@ struct TabletRoot: View {
         case "attention": show(.place(.attention))
         case "reports": show(.place(.reports))
         case "revenue": show(.place(.money))
+        case "owner-home": show(.place(.home))
         case "settings", "menu", "more": settings = true
         case "new-job": createJob = true
         case "create-menu": createMenuOpen = true
         case "search", "search-typed": search = true
+        case "invoice-editor", "invoice-editor-line": show(.schedule); previewInvoiceEditor = true
+        case "invoice-detail", "invoice-payment": show(.schedule); previewInvoiceDetail = true
+        case "estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line":
+            show(.schedule); previewEstimateRevision = true
+        case "new-customer": show(.customers); previewNewCustomer = true
+        case "new-estimate": previewNewEstimate = true
+        case "signature": previewSignature = true
+        case "job-schedule", "equipment-editor", "equipment-sections": show(.jobs); previewFormSheet = PaperPreview.screen
         default: break
         }
     }
@@ -647,7 +695,8 @@ struct TabletSidebar: View {
         }
         .padding(.vertical, 12).padding(.horizontal, 12)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.canvas)
+        // The phone drawer's panel, edge to edge.
+        .background(Theme.card.ignoresSafeArea())
         .foregroundStyle(Theme.foreground)
     }
 
@@ -681,10 +730,11 @@ struct TabletSidebar: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// Selected place: the segmented control's white pill on the cream ground.
+    /// Selected place: the drawer's grammar (ink word, filled glyph) on a quiet well, no rim.
     private func rowLabel(_ title: String, icon: String, selected: Bool, count: Int?) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon).font(.system(size: 16)).frame(width: 22)
+                .symbolVariant(selected ? .fill : .none)
                 .foregroundStyle(selected ? Theme.foreground : Theme.muted)
             Text(title).font(Theme.font(15, weight: selected ? .medium : .regular)).lineLimit(1)
             Spacer(minLength: 0)
@@ -695,8 +745,7 @@ struct TabletSidebar: View {
         .padding(.horizontal, 10).frame(minHeight: 44)
         .background {
             if selected {
-                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.selectedSegment)
-                    .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
+                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.fill)
             }
         }
         .contentShape(Rectangle())
@@ -717,8 +766,7 @@ struct TabletSidebar: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .panelBackground(cornerRadius: Theme.cardRadius)
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
         .buttonStyle(PressStyle())
@@ -852,7 +900,6 @@ struct TabletWeekBoard: View {
                 }
                 .padding(4)
                 .panelBackground(cornerRadius: Theme.cardRadius)
-                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
                 .padding(.bottom, 16)
             }
             .scrollIndicators(.hidden)

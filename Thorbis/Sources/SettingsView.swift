@@ -82,7 +82,7 @@ struct SettingsView: View {
                         .padding(.vertical, PaperCardMetrics.edge)
                     }
 
-                    PaperSection("This phone") {
+                    PaperSection(UIDevice.current.userInterfaceIdiom == .pad ? "This iPad" : "This phone") {
                         VStack(spacing: 0) {
                             ThorbisMenu(items: [
                                 ThorbisMenuItem("System", isSelected: appearance == "system") { appearance = "system" },
@@ -103,7 +103,7 @@ struct SettingsView: View {
                         .padding(.vertical, PaperCardMetrics.edge)
                     }
                     // Immediate settings say they are immediate (design.thorbis.com Customize).
-                    Text("Appearance changes right away, on this phone only.")
+                    Text(UIDevice.current.userInterfaceIdiom == .pad ? "Appearance changes right away, on this iPad only." : "Appearance changes right away, on this phone only.")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4).padding(.top, -14)
