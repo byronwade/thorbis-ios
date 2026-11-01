@@ -167,6 +167,7 @@ struct ScheduleView: View {
                     }
                 }
                 .padding(.bottom, 8)
+                if tab == "Today", session.can("job.view", feature: "jobs") { ScorecardTodayRow() }
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if let problem = swipes.problem { ErrorBanner(message: problem) }

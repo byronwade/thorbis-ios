@@ -22,6 +22,28 @@ enum ReleaseNotes {
             fixes: 1
         ),
         ReleaseNote(
+            id: "2026-11-01-team-goals",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "flag", title: "Set weekly goals for your team",
+                      detail: "Settings › Team goals sets a weekly sold goal per role or person. Works offline."),
+                .init(symbol: "chart.bar", title: "See how close you are to your goal",
+                      detail: "My scorecard shows your goal and a bar under Sold, plus the leaderboard when it's on."),
+                .init(symbol: "list.bullet", title: "Every number opens its list",
+                      detail: "Tap Sold, Jobs done or Close rate to see just the invoices, jobs or estimates behind it."),
+                .init(symbol: "sun.max", title: "Your week at the top of Today",
+                      detail: "Today shows this week's sold and your goal in one row that opens My scorecard."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-01-my-scorecard",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "target", title: "See what you sold this week",
+                      detail: "My scorecard in More shows your sold, collected, jobs done, average ticket and close rate."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-01-ipad-reach",
             date: "2026-11-01",
             highlights: [
@@ -53,6 +75,22 @@ enum ReleaseNotes {
                       detail: "Save buttons stay on. Press one early and the form names what's missing under the field."),
             ],
             fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-10-31-ownership-transfer",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "key", title: "Hand the company to a new owner",
+                      detail: "Owners can make a teammate the owner from their Team page. You stay on as an admin."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-31-member-savings",
+            date: "2026-10-31",
+            highlights: [
+                .init(symbol: "tag", title: "Members see what they save",
+                      detail: "Estimates and invoices show a Member savings line above the total when member prices apply."),
+            ]
         ),
         ReleaseNote(
             id: "2026-10-31-row-swipes",
@@ -228,6 +266,88 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "sparkles", title: "A tidier visit, start to finish",
                       detail: "Wrap up, Money, payment and the customer profile line up better, and large text no longer crowds them.")
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-review-requests",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "star.bubble", title: "Ask paid customers for a review",
+                      detail: "Add your review link in Settings. Customers get one text after paying, never twice in 90 days."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-morning-digest",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "sun.max", title: "Start the day with one summary",
+                      detail: "Owners get one 6:30 note: yesterday's collections, today's jobs and overdue invoices. Turn it off in Notices."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-hours-tax-terms",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "clock", title: "Hours, tax and terms in setup",
+                      detail: "Set your open hours, time zone, sales tax rate and payment terms. Saved offline too."),
+                .init(symbol: "photo", title: "Add your logo",
+                      detail: "Pick your company logo from Photos in setup or in Company details."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-call-log",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "phone.badge.waveform", title: "Calls in your Inbox",
+                      detail: "Hear each call to your business, read its summary and link it to the job it booked."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-job-equipment-for-techs",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "shippingbox", title: "Equipment and membership on your jobs",
+                      detail: "Techs on a job now see the units installed there and the customer's member discount."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-10-30-owner-setup",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "person.crop.circle.badge.plus", title: "Start your company from your phone",
+                      detail: "Create an account, name your company and walk through setup one step at a time."),
+                .init(symbol: "square.and.arrow.down", title: "Import customers from a spreadsheet",
+                      detail: "Choose a CSV from your old software, check the columns and bring everyone in."),
+                .init(symbol: "person.badge.minus", title: "Remove someone from your team",
+                      detail: "Long-press a person on Team to remove them. They keep their account and can be invited again."),
+                .init(symbol: "house", title: "See every property in one list",
+                      detail: "Properties shows each service address across your customers, with search."),
+                .init(symbol: "tablecells", title: "Download reports as spreadsheets",
+                      detail: "Revenue, jobs, schedule and payment reports open as Excel files you can share."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-10-30-work-offline",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "wifi.slash", title: "Wrap up a job with no signal",
+                      detail: "Confirm the checklist and complete the job offline. It all sends once you're back online."),
+                .init(symbol: "banknote", title: "Take cash or a check offline",
+                      detail: "The payment waits on the invoice and records itself the moment you have signal again."),
+                .init(symbol: "signature", title: "Customers can sign without signal",
+                      detail: "The signature is kept on your phone and added to the invoice when you reconnect."),
+                .init(symbol: "arrow.triangle.2.circlepath", title: "One line shows what's waiting",
+                      detail: "The top of the app counts changes and photos still on your phone, then says when they've synced."),
+            ],
+            fixes: 0
+        ),
+        ReleaseNote(
+            id: "2026-10-30-sizes-any-order",
+            date: "2026-10-30",
+            highlights: [
+                .init(symbol: "ruler", title: "Sizes found however you type them",
+                      detail: "Pipe 10 mm finds an item written Pipe 10mm, and the words can go in any order."),
             ]
         ),
         ReleaseNote(

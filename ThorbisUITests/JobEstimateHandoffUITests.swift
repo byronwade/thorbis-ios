@@ -475,7 +475,8 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Add estimate"].exists)
         present.tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
+        // The rows replace the opening skeleton once the job's estimates load, like the tests above.
+        XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"].exists)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertLessThanOrEqual(second.frame.maxY, app.buttons["Review selected (0)"].frame.minY, "Both ordinary cards and prices fit above the primary action")

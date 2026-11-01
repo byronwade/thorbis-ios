@@ -1,9 +1,13 @@
 import SwiftUI
 
 struct EstimatesView: View {
+    /// Opened from the scorecard: only the estimates behind Close rate (TG-19), until cleared.
+    var filter: RecordFilter? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @State private var showAll = false
+    @State private var missing = 0
     @State private var records: [EstimateRecord] = []
     @State private var loading = true
     @State private var error: String?
@@ -29,6 +33,7 @@ struct EstimatesView: View {
                 PaperHeader(title: "Estimates", subtitle: records.isEmpty && loading ? "Loading…" : estimatesSummary(records))
                     .environment(\.paperMenuButton, false)
                 if let error { ErrorBanner(message: error) { await load() } }
+                if let active = activeFilter { RecordFilterBar(filter: active, missing: missing) { showAll = true } }
                 if loading && records.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
                 let groups = paperDocumentGroups(visible, status: \.status, order: ["draft", "sent", "approved", "declined"])
                 ForEach(Array(groups.enumerated()), id: \.element.0) { index, pair in
@@ -62,7 +67,7 @@ struct EstimatesView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Title, customer or EST number")
-        .task { await load() }
+        .task(id: showAll) { await load() }
         .refreshable { await load() }
         .toolbar {
             // Neutral like the back button beside it; blue stays for links and selection.
@@ -70,9 +75,24 @@ struct EstimatesView: View {
         }
         .sheet(isPresented: $showCreate, onDismiss: { Task { await load() } }) { SheetSurface { NewEstimateView() } }
     }
+    private var activeFilter: RecordFilter? { showAll ? nil : filter }
+
     private func load() async {
         loading = true
         defer { loading = false }
+        if let active = activeFilter {
+            let result = await FilteredRecords.load(active.ids, fetch: { id in
+                let estimate = try await api.fieldEstimate(id)
+                JobDetailCache.save(estimate: estimate)
+                return estimate
+            }, cached: { JobDetailCache.estimate($0) })
+            // "Show all" while this was loading: the unfiltered list owns the screen now.
+            guard !Task.isCancelled, activeFilter == active else { return }
+            records = result.records
+            missing = result.missing
+            error = nil
+            return
+        }
         do { records = try await api.fieldEstimates(); error = nil }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
@@ -264,6 +284,7 @@ struct EstimateDetailView: View {
     private func customerMode(_ record: EstimateRecord) -> some View {
         CustomerModeContainer(onUnlocked: { customerModeClosed() }) { handBack in
             CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
+                                         financing: session.can("organization.view", feature: FinancingWords.feature),
                                          onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
         }
         .environmentObject(api)
@@ -357,7 +378,9 @@ struct EstimateDetailView: View {
     }
     private func load() async {
         do {
-            record = try await api.fieldEstimate(id)
+            let loaded = try await api.fieldEstimate(id)
+            record = loaded
+            JobDetailCache.save(estimate: loaded)
             error = nil
             if let customer = record?.customerId { memberPricing = try? await api.memberPricing(customer) }
         }
@@ -366,8 +389,12 @@ struct EstimateDetailView: View {
 }
 
 struct InvoicesView: View {
+    /// Opened from the scorecard: only the invoices behind Sold (TG-19), until cleared.
+    var filter: RecordFilter? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
+    @State private var showAll = false
+    @State private var missing = 0
     @State private var records: [InvoiceRecord] = []
     @State private var error: String?
     @State private var loading = true
@@ -391,6 +418,7 @@ struct InvoicesView: View {
                 PaperHeader(title: "Invoices", subtitle: records.isEmpty && loading ? "Loading…" : invoicesSummary(records))
                     .environment(\.paperMenuButton, false)
                 if let error { ErrorBanner(message: error) { await load() } }
+                if let active = activeFilter { RecordFilterBar(filter: active, missing: missing) { showAll = true } }
                 if loading && records.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
                 let groups = paperDocumentGroups(visible, status: \.status, order: ["draft", "issued", "paid", "void"])
                 ForEach(Array(groups.enumerated()), id: \.element.0) { index, pair in
@@ -424,12 +452,24 @@ struct InvoicesView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Customer or INV number")
-        .task { await load() }
+        .task(id: showAll) { await load() }
         .refreshable { await load() }
     }
+    private var activeFilter: RecordFilter? { showAll ? nil : filter }
+
     private func load() async {
         loading = true
         defer { loading = false }
+        if let active = activeFilter {
+            let result = await FilteredRecords.load(active.ids, fetch: { try await api.fieldInvoice($0) },
+                                                    cached: { JobDetailCache.invoice($0) })
+            // "Show all" while this was loading: the unfiltered list owns the screen now.
+            guard !Task.isCancelled, activeFilter == active else { return }
+            records = result.records
+            missing = result.missing
+            error = nil
+            return
+        }
         do { records = try await api.fieldInvoices(); error = nil }
         catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
@@ -443,6 +483,7 @@ struct InvoiceDetailView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
+    @EnvironmentObject private var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @State private var record: InvoiceRecord?
     @State private var error: String?
@@ -471,12 +512,18 @@ struct InvoiceDetailView: View {
             items.append(ThorbisMenuItem("Edit line items", icon: "pencil") { showEditDraft = true })
         }
         items.append(ThorbisMenuItem("View PDF", icon: "doc.text") { showPDF = true })
+        if let application = financingApplications.first, application.isOpen,
+           session.can("invoice.payment.create", feature: FinancingWords.feature) {
+            items.append(ThorbisMenuItem("Cancel financing application", icon: "xmark.circle", role: .destructive) { confirmCancelFinancing = true })
+        }
         if session.can("customer.view", feature: "core_crm"), let customer = store.customers.first(where: { $0.id == record.customerId }) {
             items.append(ThorbisMenuItem(customer.name, icon: "person", subtitle: "Customer") { openCustomer = customer })
         }
         return items
     }
 
+    @State private var financingApplications: [FinancingApplication] = []
+    @State private var confirmCancelFinancing = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -493,8 +540,22 @@ struct InvoiceDetailView: View {
                                    cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency,
                                    statusIdentifier: "invoice-chip-status", titleIdentifier: "invoice-detail-title")
                     invoiceProperties(record)
+                        .thorbisConfirm("Cancel this application?", message: "The customer's link stops working.",
+                                        isPresented: $confirmCancelFinancing,
+                                        actions: [
+                                            ThorbisConfirmAction("Cancel application", role: .destructive) {
+                                                if let application = financingApplications.first { Task { await cancelFinancing(application) } }
+                                            },
+                                        ])
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)
+                    } else if let waiting = outbox.waitingSignature(invoiceID: record.id), waiting.expectedLinesRevision == record.linesRevision {
+                        // OF-02: signed on this phone, not yet on the server.
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Signed by \(waiting.signerName)").font(Theme.font(15, weight: .medium))
+                            WaitingToSyncLabel()
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
                         Button { showSignature = true } label: {
                             Label("Get customer signature", systemImage: "signature")
@@ -548,11 +609,21 @@ struct InvoiceDetailView: View {
                 let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                 SignatureCaptureSheet(title: "Sign for \(money(total, currency: record.currency))",
                                       summary: "By signing, \(store.customerName(record.customerId)) authorizes the work and charges on this invoice.",
-                                      jobID: jobID, suggestedName: store.customerName(record.customerId)) { signature in
+                                      jobID: jobID, suggestedName: store.customerName(record.customerId),
+                                      queueOffline: { png, assetID, signer, signedAt in
+                                          // OF-01: the ink stays on the phone and authorizes this exact revision once online.
+                                          outbox.enqueueSignature(png, payload: .init(jobId: jobID, invoiceId: record.id,
+                                                                                      expectedLinesRevision: record.linesRevision,
+                                                                                      signerName: signer, signedAt: signedAt,
+                                                                                      clientAssetId: assetID),
+                                                                  policyVersion: session.policyVersion ?? 0) != nil
+                                      }) { signature in
                     do {
                         let updated = try await api.authorizeFieldInvoice(id, expectedLinesRevision: record.linesRevision, signature: signature)
                         return accept(updated) ? nil : paymentModel?.loadError
-                    } catch { return error.localizedDescription }
+                    } catch {
+                        return error.isConnectivityFailure ? SignatureCaptureSheet.noSignal : error.localizedDescription
+                    }
                 }
             }
         } }
@@ -593,6 +664,7 @@ struct InvoiceDetailView: View {
         } }
         .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
             if collectAfterCustomer { collectAfterCustomer = false; showCollectPayment = true }
+            Task { await loadFinancing() }
         }) {
             if let record {
                 CustomerModeContainer(onUnlocked: { showToCustomer = false }) { handBack in
@@ -608,8 +680,19 @@ struct InvoiceDetailView: View {
                                 }
                             }
                         } : nil,
+                        financing: session.can("invoice.payment.create", feature: FinancingWords.feature),
                         onSigned: { updated in
+                            let paidChanged = updated.amountPaid != self.record?.amountPaid
                             _ = accept(updated)
+                            // A funded loan is a payment the model has not seen: reload its history
+                            // so the remaining balance can still be taken.
+                            if paidChanged, let paymentModel {
+                                Task {
+                                    await paymentModel.load()
+                                    // The model is not observed here; re-reading the record redraws onPay.
+                                    if let loaded = paymentModel.invoice { self.record = loaded }
+                                }
+                            }
                         },
                         onDone: handBack)
                 }
@@ -650,6 +733,11 @@ struct InvoiceDetailView: View {
                              action: customer.map { found in { openCustomer = found } })
             if let job { EvidenceProperty(label: "Job", value: job.title) }
             if let date { EvidenceProperty(label: date.0, value: date.1) }
+            // CP-17: the financing application in words, never a credit reason.
+            if let application = financingApplications.first, let words = FinancingWords.status(application, forCustomer: false) {
+                EvidenceProperty(label: "Financing",
+                                 value: "\(words) · \(money(application.amount.amount, currency: application.amount.currency))")
+            }
             EvidenceProperty(label: "Reference", value: "INV-\(record.id.suffix(4).uppercased())")
         }
     }
@@ -720,6 +808,8 @@ struct InvoiceDetailView: View {
         }
         if paymentModel == nil {
             paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: expectedJobScope)
+            paymentModel?.outbox = outbox
+            paymentModel?.policyVersion = session.policyVersion ?? 0
         }
         guard let paymentModel else { return }
         await paymentModel.load()
@@ -729,6 +819,29 @@ struct InvoiceDetailView: View {
             error = nil
         } else if let loadError = paymentModel.loadError {
             error = loadError
+        }
+        await loadFinancing()
+    }
+
+    private func cancelFinancing(_ application: FinancingApplication) async {
+        do {
+            let canceled = try await api.cancelFinancingApplication(invoiceID: id, applicationID: application.id)
+            financingApplications = financingApplications.map { $0.id == canceled.id ? canceled : $0 }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Reads applications back from the lender; a newly funded loan reloads the payments.
+    private func loadFinancing() async {
+        guard let record, record.status != "draft", record.status != "void",
+              session.can("invoice.view", feature: FinancingWords.feature),
+              let latest = try? await api.refreshFinancingApplications(invoiceID: id) else { return }
+        let newlyFunded = latest.contains { $0.status == "funded" } && !financingApplications.contains { $0.status == "funded" }
+        financingApplications = latest
+        if newlyFunded, let paymentModel {
+            await paymentModel.load()
+            if let invoice = paymentModel.invoice { self.record = invoice }
         }
     }
 }
@@ -943,6 +1056,17 @@ struct LineText: Equatable {
 }
 
 /// Sum of line amounts in cents, or nil on overflow or a negative line.
+/// The estimate lines a customer sees (EB-13): materials marked hidden fold into one "Materials"
+/// line after the others with their sum, so no price is hidden and the lines still add up to the
+/// total. The server's PDF and approval link fold the same way.
+func customerEstimateLines(_ lines: [FieldLine]) -> [FieldLine] {
+    let hidden = lines.filter { $0.showToCustomer == false }
+    guard let first = hidden.first, let sum = paperLinesTotal(hidden) else { return lines }
+    return lines.filter { $0.showToCustomer != false }
+        + [FieldLine(id: first.id, description: "Materials", quantity: 1,
+                     unitPrice: FieldMoney(amount: sum, currency: first.unitPrice.currency), source: nil)]
+}
+
 func paperLinesTotal(_ lines: [FieldLine]) -> Int? {
     var total = 0
     for line in lines {

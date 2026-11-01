@@ -43,7 +43,23 @@ struct PaymentActivityReport: Decodable {
     let truncated: Bool
 }
 
+/// `GET /v1/reports/activity` (CustomerActivityReport): all-time counts and invoice revenue per customer.
+struct CustomerActivityReport: Decodable {
+    struct Row: Decodable, Identifiable {
+        let customerId: String
+        let estimates, jobs, invoices, revenue: Int
+        var id: String { customerId }
+    }
+    let generatedAt: String
+    let customers: [Row]
+    let truncated: Bool
+
+    /// Who buys: the five customers with the most invoiced revenue.
+    var topCustomers: [Row] { Array(customers.filter { $0.revenue > 0 }.sorted { $0.revenue > $1.revenue }.prefix(5)) }
+}
+
 extension APIClient {
+    func customerActivityReport() async throws -> CustomerActivityReport { try await send("GET", "/v1/reports/activity") }
     func paymentActivityReport() async throws -> PaymentActivityReport { try await send("GET", "/v1/reports/payment-activity") }
     func operationsReport() async throws -> OperationsReport { try await send("GET", "/v1/reports/operations") }
     func scheduleReport() async throws -> ScheduleReport { try await send("GET", "/v1/reports/schedule") }
@@ -62,6 +78,8 @@ struct ReportsView: View {
     @State private var operations: OperationsReport?
     @State private var schedule: ScheduleReport?
     @State private var payments: PaymentActivityReport?
+    @State private var activity: CustomerActivityReport?
+    @EnvironmentObject private var store: Store
     @State private var error: String?
 
     init(includesRevenue: Bool = false, initialTab: String? = nil) {
@@ -118,6 +136,7 @@ struct ReportsView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
+        .reportExports()
         .refreshable { refreshes += 1; await load() }
         .task { await load() }
     }
@@ -155,6 +174,21 @@ struct ReportsView: View {
                         rows(report.months.suffix(6).reversed().map { month in
                             (month.id, monthName(month.month), "\(month.completed) of \(month.booked) done")
                         })
+                    }
+                }
+                if let activity, !activity.truncated, !activity.topCustomers.isEmpty {
+                    PaperSection("Who buys", count: activity.topCustomers.count) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(activity.topCustomers) { row in
+                                PaperListRow(title: store.customerName(row.customerId),
+                                             subtitle: row.jobs == 1 ? "1 job" : "\(row.jobs) jobs") {
+                                    Text(money(row.revenue, currency: "USD")).font(Theme.font(15)).monospacedDigit()
+                                        .foregroundStyle(Theme.muted)
+                                }
+                                .accessibilityElement(children: .combine)
+                            }
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
                     }
                 }
                 footer(report.reportVersion, report.generatedAt)
@@ -318,6 +352,12 @@ struct ReportsView: View {
                 let loaded = try await api.operationsReport()
                 guard session.generation == generation else { return }
                 operations = loaded
+            }
+            if session.can("invoice.view", feature: "invoicing"), session.isFeatureOn("estimates"), session.isFeatureOn("jobs") {
+                // Optional extra: the funnel still shows if this one fails.
+                let loaded = try? await api.customerActivityReport()
+                guard session.generation == generation else { return }
+                activity = loaded
             }
             if session.can("job.view", feature: "jobs") {
                 let loaded = try await api.scheduleReport()

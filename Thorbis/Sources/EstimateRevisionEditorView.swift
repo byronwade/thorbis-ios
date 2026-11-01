@@ -52,6 +52,8 @@ struct EstimateRevisionEditorView: View {
     }
 
     private var sectionsDisabled: Bool { busy || !canEdit || editor.hasUnsupportedLineSources }
+    /// EB-13: the workspace stores line groups and the materials switch.
+    private var storesLineGroups: Bool { session.isFeatureOn("estimate_line_groups") }
 
     private func optionName(_ id: String?) -> String {
         guard let id, let index = editor.options.firstIndex(where: { $0.id == id }) else {
@@ -136,6 +138,7 @@ struct EstimateRevisionEditorView: View {
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .task(id: estimate.customerId) { memberPricing = try? await api.memberPricing(estimate.customerId) }
+            .task(id: storesLineGroups) { editor.storesLineGroups = storesLineGroups }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
@@ -256,7 +259,7 @@ struct EstimateRevisionEditorView: View {
             label: hasOptions ? "Main estimate" : (editor.lines.isEmpty ? "Items" : "Items · \(editor.lines.count)"),
             caption: hasOptions ? "Saved with every revision. With options, the customer chooses one option." : nil,
             lines: editableLines, disabled: sectionsDisabled, focus: $focus, expandedLine: $expandedLine,
-            totalLabel: "Subtotal", showTotal: hasOptions, memberPricing: memberPricing, menuItems: menu,
+            totalLabel: "Subtotal", showTotal: hasOptions, memberPricing: memberPricing, materialsSwitch: storesLineGroups, menuItems: menu,
             addItem: { picker = EstimateBuilderTarget() },
             addDiscount: canDiscount && !hasOptions ? { discountTarget = EstimateBuilderTarget() } : nil,
             removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
@@ -307,7 +310,7 @@ struct EstimateRevisionEditorView: View {
         let disabled = sectionsDisabled || !optionsFeatureEnabled
         return EstimateBuilderSection(
             label: label, lines: binding.lines, disabled: disabled, focus: $focus, expandedLine: $expandedLine,
-            totalLabel: "Option total", memberPricing: memberPricing, menuItems: menu,
+            totalLabel: "Option total", memberPricing: memberPricing, materialsSwitch: storesLineGroups, menuItems: menu,
             addItem: { picker = EstimateBuilderTarget(optionID: option.id) },
             addDiscount: canDiscount ? { discountTarget = EstimateBuilderTarget(optionID: option.id) } : nil,
             removed: { line, lineIndex in withAnimation { removed = RemovedLine(line: line, index: lineIndex, optionID: option.id) } }
@@ -476,6 +479,7 @@ struct EstimateRevisionEditorView: View {
         do {
             let latest = try await api.liveFieldEstimate(estimate.id)
             editor = EstimateRevisionEditorState(estimate: latest)
+            editor.storesLineGroups = storesLineGroups
             classifyLines()
             staleRevision = false
             error = nil
