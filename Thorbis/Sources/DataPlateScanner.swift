@@ -234,13 +234,13 @@ struct DataPlateScannerSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if liveAvailable { liveScanner } else { photoFallback }
                     fields
+                    if let problem {
+                        FieldProblem(message: problem)
+                    }
                     if let result {
                         Label(result.message, systemImage: result.succeeded ? (result == .saved ? "checkmark.circle" : "clock.arrow.circlepath") : "exclamationmark.triangle")
                             .font(Theme.font(14)).foregroundStyle(result.succeeded ? Theme.muted : Theme.destructive)
                             .accessibilityIdentifier("data-plate-result")
-                    }
-                    if let problem {
-                        Label(problem, systemImage: "exclamationmark.triangle").font(Theme.font(14)).foregroundStyle(Theme.destructive)
                     }
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
@@ -273,6 +273,10 @@ struct DataPlateScannerSheet: View {
                     await read(image)
                 }
             }
+            .onChange(of: brand) { _, _ in problem = nil }
+            .onChange(of: model) { _, _ in problem = nil }
+            .onChange(of: serial) { _, _ in problem = nil }
+            .onChange(of: made) { _, _ in problem = nil }
             .sheet(item: $equipment) { item in SheetSurface {
                 EquipmentEditor(customerID: customerID, locations: locations, existing: nil, prefill: equipmentPrefill) {}
             } }

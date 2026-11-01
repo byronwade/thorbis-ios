@@ -166,6 +166,9 @@ struct AnchoredPopover<PopoverContent: View>: ViewModifier {
 @MainActor enum ThorbisKeyboard {
     private static var visible = false
     private static var observers: [NSObjectProtocol] = []
+    /// The latest `open` waiting for the keyboard and sheet to settle. A second tap replaces it
+    /// instead of presenting now; hide can finish (and `visible` go false) before the wait is over.
+    private static var pendingOpen: (@MainActor () -> Void)?
 
     /// Starts listening (idempotent); called at launch (`ThorbisApp.init`) and by every popover.
     static func watch() {
@@ -175,7 +178,8 @@ struct AnchoredPopover<PopoverContent: View>: ViewModifier {
             center.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { visible = true }
             },
-            center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { _ in
+            // Still up until hide *finishes*. `willHide` fires as the sheet starts dropping.
+            center.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { visible = false }
             },
         ]
@@ -184,11 +188,18 @@ struct AnchoredPopover<PopoverContent: View>: ViewModifier {
     /// Runs `open` now, or after putting the keyboard away and letting the screen settle.
     static func dismiss(then open: @escaping @MainActor () -> Void) {
         watch()
+        if pendingOpen != nil {
+            pendingOpen = open
+            return
+        }
         guard visible else { open(); return }
+        pendingOpen = open
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(400))
-            open()
+            let work = pendingOpen
+            pendingOpen = nil
+            work?()
         }
     }
 }
