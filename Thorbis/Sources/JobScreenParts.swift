@@ -80,11 +80,11 @@ struct JobPanelLabel: View {
                         .foregroundStyle(markTint)
                         .accessibilityHidden(true)
                 }
-                // v2: section labels are 13 Medium in the marker grey, the count in the same voice.
-                (Text(title).font(Theme.font(13, weight: .medium))
-                 + Text(count.map { "  \($0)" } ?? "").font(Theme.font(13)))
+                // Cream sheet (C-Job): a cluster's heading is 16 Medium in the type colour, the count
+                // beside it in the marker grey.
+                (Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                 + Text(count.map { "  \($0)" } ?? "").font(Theme.font(14)).foregroundStyle(Theme.muted))
                     .monospacedDigit()
-                    .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel(count.map { "\(title), \($0)" } ?? title)
                     .accessibilityAddTraits(.isHeader)

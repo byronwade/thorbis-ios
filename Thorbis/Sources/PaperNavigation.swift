@@ -180,7 +180,7 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .background(Theme.card.ignoresSafeArea())
+            .background(Theme.background.ignoresSafeArea())
         }
         .sheet(isPresented: $createMenuOpen, onDismiss: {
             let run = pendingCreate
@@ -215,9 +215,10 @@ struct RootView: View {
                                     top: insets.top, bottom: insets.bottom)
         return phonePlaces()
             .accessibilityHidden(drawerOpen)
-            // The pushed card dims a little as it slides, so the drawer reads as the thing in front.
+            // C-Nav: the pushed place reads as the panel beside the drawer's canvas, a step lighter
+            // in both themes, so the drawer is the thing being used.
             .overlay {
-                Color.black.opacity((colorScheme == .dark ? 0.28 : 0.10) * progress)
+                Color.white.opacity((colorScheme == .dark ? 0.05 : 0.45) * progress)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             }
@@ -261,10 +262,9 @@ struct RootView: View {
             title: session.activeOrganization?.name ?? "Thorbis",
             role: WorkRole(session),
             current: selectedTab,
-            places: drawerPlaces,
-            local: localSections,
+            sections: drawerSections,
+            count: drawerCount,
             recents: drawerRecents,
-            inboxUnread: showsInboxDot,
             savedWork: barSync,
             create: drawerCreate,
             settingsItems: settingsItems,
@@ -279,7 +279,8 @@ struct RootView: View {
             openRecent: { item in
                 closeDrawer(thenRun: nil)
                 openRecent(item)
-            }
+            },
+            openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }
         )
         // VoiceOver: the drawer is a modal group while open; the escape gesture closes it. Closed, it
         // stays built under the card but is out of the accessibility tree: no modal trait to trap
@@ -337,6 +338,7 @@ struct RootView: View {
             drawerDrag = 0
         }
         Task { await refreshInboxDot() }
+        Task { await refreshDayMoney() }
         // VoiceOver lands on the drawer's title once it has slid in.
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(400))
@@ -377,13 +379,41 @@ struct RootView: View {
                               permitted: { $0.permitted(session) })
     }
 
-    /// The drawer's places for this role: at most five primary rows, extra pins, then All places.
-    private var drawerPlaces: DrawerPlaces {
-        DrawerPlaces.make(role: WorkRole(session), tabs: pinnedPlaces,
-                          explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
-                          roleDefaults: layout.roleDefaultTabs,
-                          hidden: layout.hidden, order: layout.menuOrder, access: primaryAccess,
-                          permitted: { $0.permitted(session) })
+    /// Every place this role can reach, grouped (Work, Money, Shop, On this phone); pins from Edit
+    /// menu lead in their own section.
+    private var drawerSections: DrawerSections {
+        DrawerSections.make(pins: pinnedPlaces,
+                            explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
+                            roleDefaults: layout.roleDefaultTabs, hidden: layout.hidden, order: layout.menuOrder,
+                            local: localSections) { item in
+            switch item {
+            case .schedule: primaryAccess.canOpen(.schedule)
+            case .jobs: primaryAccess.canOpen(.jobs)
+            case .customers: primaryAccess.canOpen(.customers)
+            default: item.permitted(session)
+            }
+        }
+    }
+
+    @ObservedObject private var dayMoney = DayMoney.shared
+
+    /// The counts at a row's trailing edge, from what the phone already holds: stops left today,
+    /// open jobs, unread Inbox (the accent dot) and what is owed once Today has read the invoices.
+    private func drawerCount(_ item: MenuItem) -> PlaceCount? {
+        switch item {
+        case .schedule:
+            let mine = ScheduleScope.initial(schedulesOwnDay: WorkRole(session).schedulesOwnDay, actorID: session.user?.id)
+            let left = TodayNumbers.left(TodayNumbers.visits(store.jobs, assignee: mine.assignee(session.user?.id, range: .today)))
+            return left > 0 ? PlaceCount(text: "\(left) left", spoken: "\(left) stop\(left == 1 ? "" : "s") left today") : nil
+        case .jobs:
+            let open = TodayNumbers.open(store.jobs)
+            return PlaceCount.number(open, spoken: "\(open) open")
+        case .inbox: return showsInboxDot ? .unread : nil
+        case .money:
+            guard let due = dayMoney.totalDue, due > 0 else { return nil }
+            return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
+        default: return nil
+        }
     }
 
     /// Records kept only on this phone (Fleet, Equipment, Agreements, Team), as More listed them.
@@ -409,6 +439,14 @@ struct RootView: View {
                 return DrawerRecent(item: item, status: store.jobs.first { $0.id == item.id }?.status)
             }
         }
+    }
+
+    /// What is owed on issued invoices, for Money's count: read once per session, only for people
+    /// who may see invoices.
+    private func refreshDayMoney() async {
+        guard MenuItem.money.permitted(session) else { return }
+        await DayMoney.shared.loadIfNeeded(api: api, organizationID: session.activeOrganization?.id,
+                                           identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
     }
 
     /// Asks the server whether Inbox holds unread notices (one row is enough to know).
@@ -577,6 +615,7 @@ struct RootView: View {
         .environment(\.paperDrawer, atTabRoot && !barSearching ? drawerControl : nil)
         .environment(\.paperDrawerReach, barSearching ? nil : drawerControl)
         .environment(\.searchRouteHost, searchRouteHost)
+        .environment(\.paperSearch, PaperSearchAction(run: { openBarSearch() }))
     }
 
     /// The selected place, with the sheets and request handlers every place shares.

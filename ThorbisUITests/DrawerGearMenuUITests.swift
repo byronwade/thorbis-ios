@@ -103,8 +103,9 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 5))
         gear.tap()
         // "Saved on this phone" carries its count after a comma; the gear itself reads "Settings and
-        // businesses", so the other rows are matched exactly.
-        let rows = [app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Saved on this phone")).firstMatch]
+        // businesses", so the other rows are matched exactly. The drawer's own "Saved on this phone"
+        // row (under On this phone) sits behind the open menu, so it is left out.
+        let rows = [app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Saved on this phone", "drawer-saved-work")).firstMatch]
             + ["Add a business", "Settings", "Edit menu"].map { app.buttons.matching(NSPredicate(format: "label == %@", $0)).firstMatch }
         XCTAssertTrue(rows[0].waitForExistence(timeout: 5), "Saved work shows in the gear menu")
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "menu fades in")], timeout: 1)
@@ -124,7 +125,7 @@ final class DrawerGearMenuUITests: XCTestCase {
     }
 
     /// iPad: the gear's rows live in the sidebar — saved work, the business switcher (Add a business)
-    /// and Settings (Customize menu) — and every one stays on screen in both orientations.
+    /// and Settings (Customize menu) — and every one can be brought fully on screen in both orientations.
     private func assertSidebarFootOnScreen(_ app: XCUIApplication, landscape: Bool) {
         if landscape { XCTAssertGreaterThan(app.frame.width, app.frame.height, "Landscape must be exercised") }
         app.showSidebar()
@@ -134,8 +135,15 @@ final class DrawerGearMenuUITests: XCTestCase {
         let rows = [saved, app.buttons["sidebar-settings"],
                     app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Business,")).firstMatch]
         let screen = app.windows.firstMatch.frame
+        // Cream sheet: the sidebar lists every place under Work, Money, Shop and On this iPad, so in
+        // landscape saved work and Settings can start below the fold; the list scrolls them up.
+        let column = app.buttons["sidebar-search"].frame.midX / screen.width
         for row in rows {
             XCTAssertTrue(row.exists, row.description)
+            for _ in 0..<6 where !row.isHittable || !screen.contains(row.frame) {
+                app.coordinate(withNormalizedOffset: CGVector(dx: column, dy: 0.7))
+                    .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: column, dy: 0.4)))
+            }
             XCTAssertTrue(row.isHittable, "\(row.label) must be reachable")
             XCTAssertTrue(screen.contains(row.frame), "\(row.label) must be fully on screen: \(row.frame) in \(screen)")
         }

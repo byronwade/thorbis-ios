@@ -60,15 +60,19 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   circle top left with `ThorbisCompactBackButton` beside it; inside a sheet or cover
   (`PresentationProbe`) and in customer mode (`CustomerModeContainer` clears both keys) it keeps
   `ThorbisBackButton` alone. Edge swipe opens the drawer on roots; on pushed screens it is Back.
-  Which places it lists comes from `DrawerPlaces.make` (role rows, at most five, extra pins, the
-  rest behind "All places"); the drawer: 22pt business name + search circle, the primary rows
-  (22pt outline icon + 17pt label, ~48pt, selected on a soft well), `drawer-all-places` folding the
-  rest in place as 16pt words, an optional Pinned section and Recents (plain words, `StatusGlyph`
-  only for a job under way). `DrawerDot` (brand) marks unread Inbox only, plus saved work needing
-  the person on the gear. Bottom: 48pt ink New job capsule left, gear circle right. New also stays
-  in the root header's + (`PaperHeader(showsCreate: true)`). UI tests: `drawer-menu`, then
-  `drawer-<id>` rows (`openDrawer()` / `openFromDrawer(_:)`, which unfolds All places, and
-  `openSavedWorkFromDrawer()` in `ThorbisUITests`). iPad keeps its
+  Which places it lists comes from `DrawerSections.make` (`../CreamSheet.swift`): every place the
+  role can open, grouped under Work, Money, Shop and On this phone (Fleet, Equipment, Agreements,
+  saved work), with explicit Edit-menu pins leading in a Pinned section; nothing is folded away.
+  Cream sheet (C-Nav.dc.html): the drawer sits on the canvas; 18pt business name + search circle;
+  `PlacesList` rows (18pt mark in the place's quiet hue, filled when here, 15pt word, a tabular
+  count at the trailing edge, the selected place on `Theme.fill`), 12pt section headings, Recent
+  records as plain words; the list fades at its bottom edge. `DrawerDot` (brand) marks unread Inbox
+  only, plus saved work needing the person on the gear. Bottom: the ink New job commit (radius 10)
+  and the Settings circle (its menu: businesses, saved work, Add a business, Settings, Edit menu).
+  The iPad sidebar uses the same `PlacesList` (On this iPad). New also stays in the root header's
+  ink + (`CreamPlaceHeader` on Today, `PaperHeader(showsCreate: true)` elsewhere). UI tests:
+  `drawer-menu`, then `drawer-<id>` rows (`openDrawer()` / `openFromDrawer(_:)`, which scrolls to
+  low rows, and `openSavedWorkFromDrawer()` in `ThorbisUITests`). iPad keeps its
   sidebar. **No stock SwiftUI controls** in app screens:
 no `Menu {}`, `Picker`, `confirmationDialog`, `.buttonStyle(.bordered*)`, or `.borderedProminent`.
 Everything is built from `Theme` tokens (see `../Theme.swift`) so it looks the same everywhere,

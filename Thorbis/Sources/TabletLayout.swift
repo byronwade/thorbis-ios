@@ -503,8 +503,10 @@ struct TabletRoot: View {
 
     private func sidebar(fold: @escaping () -> Void) -> some View {
         TabletSidebar(
-            places: menuPlaces,
-            local: localSections,
+            sections: DrawerSections.make(pins: layout.visibleTabs(session),
+                                          explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
+                                          roleDefaults: layout.roleDefaultTabs, hidden: layout.hidden, order: layout.menuOrder,
+                                          local: localSections, opens: { $0.permitted(session) }),
             current: tab,
             section: section(for:),
             count: sidebarCount,
@@ -583,11 +585,19 @@ struct TabletRoot: View {
         }
     }
 
-    private func sidebarCount(_ item: MenuItem) -> Int? {
+    /// The sidebar's counts, as the phone drawer says them: stops left today, open jobs.
+    private func sidebarCount(_ item: MenuItem) -> PlaceCount? {
         switch item {
-        case .schedule: JobFiltering.schedule(store.jobs, range: .today).count
-        case .jobs: store.jobs.count
-        default: nil
+        case .schedule:
+            let left = TodayNumbers.left(TodayNumbers.visits(store.jobs, assignee: nil))
+            return left > 0 ? PlaceCount(text: "\(left) left", spoken: "\(left) stop\(left == 1 ? "" : "s") left today") : nil
+        case .jobs:
+            let open = TodayNumbers.open(store.jobs)
+            return PlaceCount.number(open, spoken: "\(open) open")
+        case .money:
+            guard let due = DayMoney.shared.totalDue, due > 0 else { return nil }
+            return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
+        default: return nil
         }
     }
 
@@ -738,11 +748,11 @@ struct TabletRoot: View {
 /// (same order and grouping), Settings, then the job you're on and your account at the foot.
 struct TabletSidebar: View {
     @EnvironmentObject private var session: SessionController
-    let places: [MenuItem]
-    let local: [LocalWorkspaceSection]
+    /// Every place this role can reach, grouped as the phone drawer lists them.
+    let sections: DrawerSections
     let current: TabletSection
     let section: (MenuItem) -> TabletSection
-    let count: (MenuItem) -> Int?
+    let count: (MenuItem) -> PlaceCount?
     let currentJob: Job?
     let currentJobTitle: String?
     let currentJobCustomer: String?
@@ -771,7 +781,7 @@ struct TabletSidebar: View {
                 TabletSearchField(compact: false, action: search)
                 if canCreate {
                     Button(action: create) {
-                        PaperCircleLabel(symbol: "plus", size: 44, fill: Theme.card, bordered: true)
+                        CreamCircleLabel(symbol: "plus", size: 44, ink: true)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Create")
@@ -779,38 +789,30 @@ struct TabletSidebar: View {
                     .accessibilityIdentifier("sidebar-create")
                 }
             }
-            .padding(.bottom, 14)
+            .padding(.bottom, 4)
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(MenuItem.Group.allCases, id: \.self) { group in
-                        let items = places.filter { $0.group == group }
-                        let locals = group == .phone ? local : []
-                        if !items.isEmpty || !locals.isEmpty {
-                            if group != .work {
-                                Text(group == .phone ? "On this iPad" : group.rawValue)
-                                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                                    .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
-                                    .accessibilityAddTraits(.isHeader)
-                            }
-                            ForEach(items) { item in
-                                row(item.title, icon: item.symbol, target: section(item), count: count(item), id: item.rawValue)
-                            }
-                            ForEach(locals, id: \.self) { section in
-                                row(section.title, icon: section.moreSymbol, target: .local(section), id: "local-\(section.rawValue)")
-                            }
-                        }
-                    }
-                    if let savedWork { savedWorkRow(savedWork).padding(.top, 14) }
+                VStack(alignment: .leading, spacing: 0) {
+                    // Cream sheet: the phone drawer's grouping (Work, Money, Shop, On this iPad).
+                    PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: WorkRole(session)) }, isCurrent: { current == section($0) },
+                               isCurrentLocal: { current == .local($0) }, count: count, idPrefix: "sidebar",
+                               phoneHeading: "On this iPad", savedWork: savedWork, savedWorkTitle: "Saved on this iPad",
+                               openPlace: { select(section($0)) }, openLocal: { select(.local($0)) },
+                               openSavedWork: reviewSavedWork)
                     Button(action: settings) {
                         rowLabel("Settings", icon: "gearshape", selected: false, count: nil)
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityIdentifier("sidebar-settings")
-                    .padding(.top, savedWork == nil ? 14 : 0)
+                    .padding(.top, 14)
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, 24)
             }
             .scrollIndicators(.hidden)
+            // Where the list continues, fade the edge.
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.92),
+                                       .init(color: .black.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom)
+            }
             if let currentJob { currentJobCard(currentJob) }
             SidebarAccountButton(name: session.user?.name ?? "", action: settings)
                 .padding(.top, 8)
@@ -841,43 +843,6 @@ struct TabletSidebar: View {
         .buttonStyle(RowPressStyle())
         .accessibilityLabel("Business, \(session.activeOrganization?.name ?? "Workspace")")
         .accessibilityHint("Switch or manage businesses")
-    }
-
-    /// Each row is `sidebar-<place>` (`sidebar-jobs`, `sidebar-inbox`), as the phone drawer's are `drawer-<place>`.
-    private func row(_ title: String, icon: String, target: TabletSection, count: Int? = nil, id: String) -> some View {
-        let selected = current == target
-        return Button { select(target) } label: {
-            rowLabel(title, icon: icon, selected: selected, count: count)
-        }
-        .buttonStyle(RowPressStyle())
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("sidebar-\(id)")
-    }
-
-    /// The phone gear's "Saved on this phone", with its words under it and a dot when it needs the person.
-    private func savedWorkRow(_ sync: AppBottomBar.Sync) -> some View {
-        Button(action: reviewSavedWork) {
-            HStack(spacing: 12) {
-                Image(systemName: sync.needsPerson ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath")
-                    .font(.system(size: 16)).frame(width: 22)
-                    .foregroundStyle(sync.needsPerson ? Theme.warning : Theme.muted)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Saved on this iPad").font(Theme.font(15)).lineLimit(1)
-                    Text(sync.words).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
-                }
-                Spacer(minLength: 0)
-                if sync.needsPerson { DrawerDot() }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 6).frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Saved on this iPad")
-        .accessibilityValue(sync.words)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Review what is waiting to sync")
-        .accessibilityIdentifier("sidebar-saved-work")
     }
 
     /// Selected place: the drawer's grammar (ink word, filled glyph) on a quiet well, no rim.

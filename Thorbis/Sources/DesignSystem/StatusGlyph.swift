@@ -152,16 +152,19 @@ struct StatusLabel: View {
     /// `.quiet` sets the word in the marker grey for a row's trailing edge; `.strong` in the type colour.
     var emphasis: Emphasis = .strong
     var size: CGFloat = 13
+    /// Cream sheet: a small dot in the status hue (C-Today, C-Job); false keeps the ring glyph.
+    var dot = true
     @Environment(\.dynamicTypeSize) private var typeSize
 
     enum Emphasis { case strong, quiet }
 
-    init(tone: StatusTone, word: String, pending: Bool = false, emphasis: Emphasis = .strong, size: CGFloat = 13) {
+    init(tone: StatusTone, word: String, pending: Bool = false, emphasis: Emphasis = .strong, size: CGFloat = 13, dot: Bool = true) {
         self.tone = tone
         self.word = word
         self.pending = pending
         self.emphasis = emphasis
         self.size = size
+        self.dot = dot
     }
 
     /// A job's status string, with whether it has a time (booked without one reads as Unscheduled).
@@ -172,8 +175,14 @@ struct StatusLabel: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            StatusMark(tone: tone, pending: pending)
-                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + size * 0.32 }
+            Group {
+                if dot {
+                    StatusDot(tone: tone, pending: pending)
+                } else {
+                    StatusMark(tone: tone, pending: pending)
+                }
+            }
+            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + size * 0.32 }
             Text(word)
                 .font(Theme.font(size, weight: .medium))
                 .foregroundStyle(emphasis == .strong ? Theme.foreground : Theme.muted)
@@ -193,6 +202,24 @@ struct StatusMark: View {
     var body: some View {
         StatusGlyph(tone: tone, label: "", pending: pending, size: 12)
             .accessibilityHidden(true)
+    }
+}
+
+/// The Cream sheet's status mark: a 7pt dot in the status hue (a ring while it waits to sync).
+struct StatusDot: View {
+    let tone: StatusTone
+    var pending = false
+    @ScaledMetric(relativeTo: .footnote) private var size: CGFloat = 7
+    var body: some View {
+        Group {
+            if pending {
+                Circle().strokeBorder(tone.hue, lineWidth: 1.5)
+            } else {
+                Circle().fill(tone.hue)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 

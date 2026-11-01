@@ -91,6 +91,14 @@ extension XCUIApplication {
         let start = coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: y))
         start.press(forDuration: 0.05, thenDragTo: coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: y)))
     }
+
+    /// Scrolls until `element` sits clear of the commit pinned at the screen's foot (the job page's
+    /// Collect payment / Wrap up). A row under it still reports hittable, but a tap at its centre
+    /// lands on the commit.
+    func scrollClearOfFoot(_ element: XCUIElement, footHeight: CGFloat = 150) {
+        let limit = windows.firstMatch.frame.height - footHeight
+        for _ in 0..<6 where !element.isHittable || element.frame.maxY > limit { swipeUp(velocity: .slow) }
+    }
 }
 
 extension XCTestCase {

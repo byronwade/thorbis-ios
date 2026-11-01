@@ -74,7 +74,10 @@ final class CustomerViewUITests: XCTestCase {
     func testInvoiceDetailOpensCustomerViewOnThatInvoice() {
         let app = launch(screen: "job-invoice")
         let paper = app.buttons["job-invoice-\(invoiceA)"]
-        XCTAssertTrue(paper.waitForExistence(timeout: 20)); paper.tap()
+        XCTAssertTrue(paper.waitForExistence(timeout: 20))
+        // Cream sheet: the invoice row can start under the pinned Collect payment commit.
+        app.scrollClearOfFoot(paper)
+        paper.tap()
         // #161: an invoice's Customer view moved into its ••• menu.
         let menu = app.buttons["Customer view, edit or open the PDF"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()

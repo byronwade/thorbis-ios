@@ -126,13 +126,57 @@ struct ScheduleView: View {
     /// Board is the dispatcher's view of every tech's day, so only roles that assign see it.
     private var tabOptions: [String] { canSchedule ? ["Today", "Week", "Board", "Map"] : ["Today", "Week", "Map"] }
 
-    /// One selector row: Today | Week | (Board) | Map. Unscheduled lives in the header's filter circle,
-    /// so while it shows no segment is chosen and tapping one goes back.
-    private var segment: Binding<String> {
-        Binding(get: { tab == "Unscheduled" ? "" : tab }, set: { tab = $0 })
+    /// The view circle: the day, the week, the board and the map first, then whose jobs and the
+    /// Unscheduled queue (one choice per row, the current ones checked).
+    private var viewItems: [ThorbisMenuItem] {
+        let symbols = ["Today": "calendar", "Week": "calendar.day.timeline.left", "Board": "rectangle.split.3x1", "Map": "map"]
+        return tabOptions.map { option in
+            ThorbisMenuItem(option, icon: symbols[option], isSelected: tab == option) { tab = option }
+        } + filterItems
     }
 
-    /// Whose jobs and the Unscheduled queue: the secondary filters behind the header circle.
+    /// The circle wears a dot while it narrows the screen past the role's usual view.
+    private var filterNarrows: Bool {
+        tab == "Unscheduled" || (showsScope && scope == .everyone && WorkRole(session).schedulesOwnDay)
+    }
+
+    /// Today's subtitle is the date ("Sunday, Nov 1"); the numbers row carries the counts.
+    private var headerSubtitle: String {
+        range == .today && tab != "Board" ? Date.now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()) : subtitle
+    }
+
+    private var showsNumbers: Bool { range == .today && tab != "Board" && !todayVisits.isEmpty }
+
+    @ObservedObject private var dayMoney = DayMoney.shared
+    private var canSeeMoney: Bool { session.can("invoice.view", feature: "invoicing") }
+
+    private var moneyIdentity: String {
+        "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)"
+    }
+
+    /// C-Today's numbers, no cards: stops left, what today's stops still owe (when this role may see
+    /// invoices and they have been read) and how many booked stops are past their time.
+    private var numbers: some View {
+        let visits = todayVisits
+        let status = { (job: Job) in outbox.pendingStatus(for: job.id) ?? job.status }
+        let left = TodayNumbers.left(visits, status: status)
+        let late = TodayNumbers.late(visits, status: status)
+        var items = [NumbersRow.Item(value: "\(left)", label: left == 1 ? "stop left" : "stops left",
+                                     spoken: "\(left) stop\(left == 1 ? "" : "s") left")]
+        if canSeeMoney, let collect = dayMoney.toCollect(visits) {
+            items.append(NumbersRow.Item(value: compactMoney(collect), label: "to collect",
+                                         spoken: "\(money(collect, currency: "USD")) to collect"))
+        }
+        items.append(NumbersRow.Item(value: "\(late)", label: "running late", tint: late > 0 ? Theme.destructive : Theme.foreground,
+                                     spoken: "\(late) running late"))
+        return NumbersRow(items: items)
+            .padding(.horizontal, Theme.gutter)
+            .padding(.top, 18).padding(.bottom, 14)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("today-numbers")
+    }
+
+    /// Whose jobs and the Unscheduled queue: the secondary filters behind the view circle.
     private var filterItems: [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
         if session.user?.id != nil {
@@ -155,18 +199,21 @@ struct ScheduleView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: title, subtitle: subtitle, filterMenu: filterItems,
-                            filterActive: tab == "Unscheduled" || (showsScope && scope == .everyone && WorkRole(session).schedulesOwnDay),
-                            showsCreate: true, titleIdentifier: "schedule-title")
-                OfflineBanner()
-                HStack(alignment: .center, spacing: 0) {
-                    PaperTabs(options: tabOptions, selection: segment, textTabs: true)
+                // Cream sheet (C-Today.dc.html): menu, Search and the ink + on top; the place's mark,
+                // title and date; Today/Week/Board/Map, whose jobs and Unscheduled behind the view circle.
+                CreamPlaceHeader(title: title, subtitle: headerSubtitle, symbol: "calendar", titleIdentifier: "schedule-title") {
                     if tab == "Today" {
                         TodayLayoutToggle(mode: todayLayout) { storedTodayLayout = todayLayout.toggled.rawValue }
-                            .padding(.trailing, Theme.gutter - 4)
                     }
+                    ThorbisMenu(items: viewItems, title: "Show", accessibilityLabel: "View and filter, \(tab)") {
+                        CreamCircleLabel(symbol: "line.3.horizontal.decrease", size: 40)
+                            .overlay(alignment: .topTrailing) { if filterNarrows { DrawerDot().offset(x: -4, y: 4) } }
+                    }
+                    .accessibilityValue(filterNarrows ? "Filtered" : "")
+                    .accessibilityIdentifier("header-filter")
                 }
-                .padding(.bottom, 8)
+                OfflineBanner()
+                if showsNumbers { numbers }
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if let problem = swipes.problem { ErrorBanner(message: problem) }
@@ -188,7 +235,14 @@ struct ScheduleView: View {
             }
             .padding(.bottom, 24)
         }
-        .refreshable { await store.refresh(api) }
+        .refreshable {
+            await store.refresh(api)
+            if canSeeMoney { await dayMoney.load(api: api, organizationID: session.activeOrganization?.id, identity: moneyIdentity) }
+        }
+        .task(id: "money|\(moneyIdentity)|\(canSeeMoney)") {
+            guard canSeeMoney else { return }
+            await dayMoney.loadIfNeeded(api: api, organizationID: session.activeOrganization?.id, identity: moneyIdentity)
+        }
         // An open row closes as soon as the list moves.
         .onScrollPhaseChange { _, phase in if phase != .idle { swipes.rows.close() } }
         .background(Theme.canvas)
@@ -364,6 +418,7 @@ struct ScheduleView: View {
             pendingStatus: { outbox.pendingStatus(for: $0.id) },
             // Drive time only for the stop the tech drives to next (the Now panel's rule), never a later one.
             etaMinutes: { job in job.id == place?.jobID && job.id == lead?.id && driving ? eta.minutes : nil },
+            etaMiles: { job in job.id == place?.jobID && job.id == lead?.id && driving ? eta.miles : nil },
             onSiteSince: { onSiteSince($0) },
             locationNotice: { job in
                 job.id == place?.jobID && place?.coordinates != nil && driving && !session.isOffline && eta.locationOff && !locationNoticeDismissed
