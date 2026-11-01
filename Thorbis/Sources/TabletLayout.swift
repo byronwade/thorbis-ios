@@ -435,6 +435,8 @@ struct TabletRoot: View {
     }
 
     private func show(_ target: TabletSection) {
+        // Once the person (or a link) has gone somewhere, a later Home-first menu never moves them.
+        settledLaunchPlace = true
         path = NavigationPath()
         tab = target
     }
