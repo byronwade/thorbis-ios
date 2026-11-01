@@ -9,6 +9,9 @@ struct PriceBookCartPicker: View {
     let canUsePriceBook: Bool
     var unavailableReason: String? = nil
     var searchIdentifier = "price-book-search"
+    /// A limit that still applies while adding (e.g. a draft that can't be saved yet). The builder's
+    /// banner sits under this sheet, so the picker repeats it rather than hide it while they add.
+    var notice: String? = nil
     let quantityInDraft: (String) -> Int?
     let secondaryPriceText: (PriceBookListItem) -> String?
     /// Adds one; returns the reason when the draft refused it (shown here), nil when added.
@@ -35,6 +38,7 @@ struct PriceBookCartPicker: View {
             header
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if let notice { ErrorBanner(message: notice).padding(.horizontal, Theme.gutter) }
                     if let error { ErrorBanner(message: error).padding(.horizontal, Theme.gutter) }
                     if !canUsePriceBook, addCustomLine == nil {
                         ContentUnavailableView("Price Book unavailable", systemImage: "book.closed",

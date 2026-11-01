@@ -421,6 +421,7 @@ struct CustomerEstimatePresentation: View {
                 }
             case .review:
                 CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
+                    .accessibilityIdentifier("customer-estimate-approve")
                 if let error { hint(error, danger: true) }
                 // PresentDetail.dc.html: "See other options" is the quiet action right under the commit.
                 CustomerQuietActions {

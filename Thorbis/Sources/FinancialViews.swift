@@ -491,7 +491,7 @@ struct InvoiceDetailView: View {
                     EvidenceHeader(title: "Invoice \(record.id.suffix(4).uppercased())", status: DocumentStatus(invoice: record),
                                    figureLabel: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
                                    cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency,
-                                   statusIdentifier: "invoice-chip-status")
+                                   statusIdentifier: "invoice-chip-status", titleIdentifier: "invoice-detail-title")
                     invoiceProperties(record)
                     if let signed = record.customerAuthorization, signed.linesRevision == record.linesRevision {
                         SignatureBadge(label: "Authorized by", signature: signed)

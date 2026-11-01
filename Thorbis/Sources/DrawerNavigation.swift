@@ -130,6 +130,10 @@ struct AppDrawer: View {
     let settingsItems: [ThorbisMenuItem]
     /// At accessibility sizes the drawer is full width, so it carries its own close circle.
     let showsClose: Bool
+    /// False while the drawer sits closed under the card. The capsule's context menu and the gear's
+    /// popover are UIKit-hosted and stay in the accessibility tree even when the drawer is hidden,
+    /// so they are only built while the drawer can be seen.
+    var showsControls = true
     var titleFocus: AccessibilityFocusState<Bool>.Binding
     let search: () -> Void
     let close: () -> Void
@@ -187,7 +191,7 @@ struct AppDrawer: View {
             #if DEBUG
             .modifier(PaperPreviewScrollAnchor())
             #endif
-            bottomControls
+            if showsControls { bottomControls }
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.card.ignoresSafeArea())
@@ -345,6 +349,15 @@ struct AppDrawer: View {
 
     // MARK: Bottom
 
+    /// Screenshot only: `--paper-preview-gear-open` (with `--paper-preview-drawer-open`) opens the gear's menu.
+    private var gearOpensForPreview: Bool {
+        #if DEBUG
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-gear-open")
+        #else
+        false
+        #endif
+    }
+
     /// The ink New job capsule on the left and the gear on the right, over a fade. The gear wears
     /// saved work's dot when it needs the person, and says what is still on the phone.
     private var bottomControls: some View {
@@ -353,7 +366,8 @@ struct AppDrawer: View {
             Spacer(minLength: 0)
             // The gear sits at the bottom edge: its menu grows up so every row (saved work, Settings,
             // Edit menu) stays on screen and clear of the home indicator.
-            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Settings and businesses", arrowEdge: .bottom) {
+            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Settings and businesses",
+                        opensOnAppear: gearOpensForPreview, arrowEdge: .bottom) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 19, weight: .regular))
                     .foregroundStyle(Theme.foreground)

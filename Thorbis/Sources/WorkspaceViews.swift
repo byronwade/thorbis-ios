@@ -541,6 +541,7 @@ struct WorkspacePriceBookView: View {
                     }
                 }
                 #if DEBUG
+                .task { if PaperPreview.opensSheet("price-book-new"), canEdit { creating = true } }
                 .toolbar {
                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-authority") {
                         ThorbisToolbarItem(placement: .topBarTrailing) {

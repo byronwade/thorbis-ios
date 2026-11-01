@@ -123,7 +123,9 @@ struct CustomerRecordsView: View {
 
     private func photoCardBody<Content: View>(title: String, status: String?, @ViewBuilder image: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            image().frame(maxWidth: .infinity).frame(height: 120).clipped()
+            // `clipped()` only clips drawing: a filled photo still answers taps beyond its 120pt
+            // frame, so a tile's overflow would open the photo under it. Hit-test the frame only.
+            image().frame(maxWidth: .infinity).frame(height: 120).clipped().contentShape(Rectangle())
             Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
                 .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 8)
@@ -135,6 +137,7 @@ struct CustomerRecordsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelBackground(cornerRadius: Theme.cardRadius)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 
     private func mediaSection(_ title: String, total: Int, groups: [CustomerJobGroup<MediaAssetRecord>], symbol: String, incomplete: Bool = false) -> some View {

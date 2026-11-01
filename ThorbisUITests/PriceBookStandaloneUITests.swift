@@ -48,9 +48,11 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         for _ in 0..<8 where !title.isHittable { app.swipeUp() }
         XCTAssertTrue(title.isHittable)
-        XCTAssertGreaterThan(title.frame.height, 110, "The complete item name must wrap at the largest text size.")
         let price = app.staticTexts["$15.13"]
         XCTAssertTrue(price.exists)
+        // The amount is one line of the same 15pt size (#212's compact ramp shrank both, so a fixed
+        // 110pt floor no longer meant "wraps"): the name must take clearly more than one line.
+        XCTAssertGreaterThan(title.frame.height, price.frame.height * 1.5, "The complete item name must wrap at the largest text size.")
         XCTAssertGreaterThanOrEqual(price.frame.minY, title.frame.maxY, "At the largest text size, the amount should have room below the item name.")
         capture("Price book largest text title")
         for _ in 0..<8 where !price.isHittable { app.swipeUp() }
@@ -69,6 +71,18 @@ final class PriceBookStandaloneUITests: XCTestCase {
         if admin { app.launchArguments.append("--paper-preview-pricebook-admin") }
         app.launch()
         return app
+    }
+
+    /// Since the 2026-10-30 design pass the category chips live behind the header's filter circle
+    /// (one selector per screen): open it and choose the category there.
+    private func chooseCategory(_ name: String, in app: XCUIApplication) {
+        let filter = app.buttons["header-filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 5))
+        filter.tap()
+        let choice = app.buttons[name]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+        choice.tap()
+        XCTAssertTrue(choice.waitForNonExistence(timeout: 5))
     }
 
     private func capture(_ name: String) {
@@ -130,8 +144,13 @@ final class PriceBookStandaloneUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-partial"]
         app.launch()
         XCTAssertTrue(app.staticTexts["1 item loaded"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.buttons["All · 1 loaded"].exists)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Material, 1 loaded")).firstMatch.exists)
+        // The category choices sit behind the header's filter circle; All says the count is partial.
+        app.buttons["header-filter"].tap()
+        let all = app.buttons["All · 1 loaded"]
+        XCTAssertTrue(all.waitForExistence(timeout: 5))
+        all.tap()
+        XCTAssertTrue(all.waitForNonExistence(timeout: 5))
         let search = app.textFields["Search price book"]
         search.tap()
         search.typeText("not in loaded items")
@@ -156,7 +175,7 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Material, 1")).firstMatch.tap()
         XCTAssertFalse(title.exists)
-        app.buttons["Material"].tap()
+        chooseCategory("Material", in: app)
         XCTAssertTrue(title.waitForExistence(timeout: 5))
     }
 
@@ -168,8 +187,8 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Material, 4")).firstMatch.tap()
         XCTAssertFalse(title.exists)
-        app.buttons["Service"].tap()
-        app.buttons["All · 6"].tap()
+        chooseCategory("Service", in: app)
+        chooseCategory("All · 6", in: app)
         XCTAssertTrue(title.waitForExistence(timeout: 5))
     }
 

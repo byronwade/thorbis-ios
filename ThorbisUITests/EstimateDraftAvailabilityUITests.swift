@@ -25,12 +25,18 @@ final class EstimateDraftAvailabilityUITests: XCTestCase {
         app.launch()
         let warning = app.staticTexts["Draft changes can't be saved yet."]
         XCTAssertTrue(warning.waitForExistence(timeout: 30))
-        let search = app.textFields["Search price book or type a line"]
+        // Since #183 the catalog is a sheet over the builder (behind "Add item"); it repeats the limit.
+        let add = app.buttons.matching(identifier: "estimate-add-item").firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        for _ in 0..<8 where !add.isHittable { app.swipeUp() }
+        add.tap()
+        let search = app.textFields["price-book-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()
-        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
-        XCTAssertTrue(warning.exists,
-                      "The limitation must remain visible while adding catalog items")
-        XCTAssertTrue(app.frame.contains(CGPoint(x: warning.frame.midX, y: warning.frame.midY)))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let shown = app.staticTexts.matching(NSPredicate(format: "label == %@", "Draft changes can't be saved yet."))
+            .allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(shown, "The limitation must remain visible while adding catalog items")
+        if let shown { XCTAssertTrue(app.frame.contains(CGPoint(x: shown.frame.midX, y: shown.frame.midY))) }
     }
 }

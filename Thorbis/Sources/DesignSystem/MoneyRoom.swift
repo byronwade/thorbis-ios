@@ -25,6 +25,8 @@ struct EvidenceHeader: View {
     let cents: Int
     let currency: String
     var statusIdentifier: String? = nil
+    /// The title's identifier (the room hides the navigation bar title, so tests find it here).
+    var titleIdentifier = "document-title"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -33,6 +35,7 @@ struct EvidenceHeader: View {
                 Text(title).font(Theme.font(20, weight: .medium)).tracking(-0.2)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier(titleIdentifier)
                 StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet)
                     .accessibilityLabel("Status, \(status.word)")
                     .accessibilityIdentifier(statusIdentifier ?? "document-status")

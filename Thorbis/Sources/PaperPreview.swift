@@ -35,6 +35,13 @@ enum PaperPreview {
                "state-sheets", "state-toasts"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
+    /// `--paper-preview-sheet team-invite | price-book-new | saved-work`: opens that sheet over its
+    /// screen (team, price-book, schedule with a saved-work session) for sheet screenshots.
+    static func opensSheet(_ name: String) -> Bool {
+        let args = ProcessInfo.processInfo.arguments
+        guard enabled, let index = args.firstIndex(of: "--paper-preview-sheet"), args.indices.contains(index + 1) else { return false }
+        return args[index + 1] == name
+    }
     /// `--paper-preview-role tech | office | owner`: who the preview session signs in as, for the
     /// drawer's role screenshots. Absent keeps the standard preview session (office capabilities).
     static var role: String? {
