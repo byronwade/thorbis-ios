@@ -13,6 +13,19 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-01-ipad-reach",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Swipe in the iPad sidebar",
+                      detail: "Swipe from the left edge to show the sidebar. It also lists saved work waiting to sync."),
+                .init(symbol: "hand.draw", title: "Swipe today's jobs on iPad",
+                      detail: "On iPad, Schedule rows swipe for Call, Directions and the next step, as on the phone."),
+                .init(symbol: "keyboard", title: "Command-F opens search",
+                      detail: "Command-F and Command-K open search. On iPad, Control-Command-S and Command-1 to 9 move around."),
+            ],
+            fixes: 2
+        ),
+        ReleaseNote(
             id: "2026-11-01-ipad-pass",
             date: "2026-11-01",
             highlights: [

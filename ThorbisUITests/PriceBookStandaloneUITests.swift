@@ -52,7 +52,13 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(price.exists)
         // The amount is one line of the same 15pt size (#212's compact ramp shrank both, so a fixed
         // 110pt floor no longer meant "wraps"): the name must take clearly more than one line.
-        XCTAssertGreaterThan(title.frame.height, price.frame.height * 1.5, "The complete item name must wrap at the largest text size.")
+        // On a phone the name needs more than one line. The iPad's readable column holds it whole on
+        // one; either way it is never shorter than its price's line (truncated or squeezed).
+        if app.usesTabletLayout {
+            XCTAssertGreaterThanOrEqual(title.frame.height, price.frame.height, "The complete item name must show at the largest text size.")
+        } else {
+            XCTAssertGreaterThan(title.frame.height, price.frame.height * 1.5, "The complete item name must wrap at the largest text size.")
+        }
         XCTAssertGreaterThanOrEqual(price.frame.minY, title.frame.maxY, "At the largest text size, the amount should have room below the item name.")
         capture("Price book largest text title")
         for _ in 0..<8 where !price.isHittable { app.swipeUp() }

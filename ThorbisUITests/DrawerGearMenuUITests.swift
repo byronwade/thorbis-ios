@@ -24,6 +24,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
         app.launch()
+        if app.usesTabletLayout { return assertClosedSidebarIsOutOfTheTree(app) }
         XCTAssertTrue(app.drawerMenu.waitForExistence(timeout: 30))
         XCTAssertFalse(app.drawerRow("new").exists, "The closed drawer's New job must not be in the tree")
         XCTAssertFalse(app.drawerRow("settings").exists, "The closed drawer's gear must not be in the tree")
@@ -42,12 +43,34 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["drawer-rows"].waitForNonExistence(timeout: 5))
     }
 
-    /// The edge swipe still opens the drawer although its contents are not built while closed.
+    /// iPad portrait: the sidebar slides over the columns. Hidden, none of its rows are in the tree;
+    /// shown, they are; a tap on the dimmed columns takes them out again.
+    private func assertClosedSidebarIsOutOfTheTree(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["sidebar-show"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["sidebar-settings"].exists, "The hidden sidebar's Settings must not be in the tree")
+        XCTAssertFalse(app.buttons["sidebar-search"].exists)
+        app.showSidebar()
+        XCTAssertTrue(app.buttons["sidebar-settings"].exists)
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["sidebar-settings"].waitForNonExistence(timeout: 5), "Closing takes the sidebar out of the tree")
+        XCTAssertFalse(app.buttons["sidebar-search"].exists)
+    }
+
+    /// The edge swipe still opens the drawer although its contents are not built while closed. On
+    /// iPad the same swipe brings the hidden sidebar in.
     func testEdgeSwipeOpensTheDrawer() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
         app.launch()
+        if app.usesTabletLayout {
+            XCTAssertTrue(app.buttons["sidebar-show"].waitForExistence(timeout: 30))
+            XCTAssertFalse(app.buttons["sidebar-search"].exists)
+            app.swipeInFromLeftEdge()
+            XCTAssertTrue(app.buttons["sidebar-search"].waitForExistence(timeout: 5), "The edge swipe shows the sidebar")
+            XCTAssertTrue(app.buttons["sidebar-jobs"].isHittable)
+            return
+        }
         XCTAssertTrue(app.drawerMenu.waitForExistence(timeout: 30))
         XCTAssertFalse(app.scrollViews["drawer-rows"].exists)
         let window = app.windows.firstMatch
@@ -69,11 +92,12 @@ final class DrawerGearMenuUITests: XCTestCase {
         cleanupArguments = base
         app.launchArguments = base + ["--paper-preview-reset-saved-work", "--paper-preview-seed-saved-work"]
         app.launch()
-        XCTAssertTrue(app.drawerMenu.waitForExistence(timeout: 30))
+        app.waitForShell()
         if landscape {
             XCUIDevice.shared.orientation = .landscapeLeft
             _ = XCTWaiter.wait(for: [XCTestExpectation(description: "rotation settles")], timeout: 2)
         }
+        if app.usesTabletLayout { return assertSidebarFootOnScreen(app, landscape: landscape) }
         app.openDrawer()
         let gear = app.drawerRow("settings")
         XCTAssertTrue(gear.waitForExistence(timeout: 5))
@@ -97,5 +121,30 @@ final class DrawerGearMenuUITests: XCTestCase {
         rows[2].tap()
         XCTAssertTrue(app.navigationBars.matching(NSPredicate(format: "identifier CONTAINS %@", "Settings")).firstMatch.waitForExistence(timeout: 5)
                       || app.staticTexts["Settings"].waitForExistence(timeout: 5), "Settings opens from the menu")
+    }
+
+    /// iPad: the gear's rows live in the sidebar — saved work, the business switcher (Add a business)
+    /// and Settings (Customize menu) — and every one stays on screen in both orientations.
+    private func assertSidebarFootOnScreen(_ app: XCUIApplication, landscape: Bool) {
+        if landscape { XCTAssertGreaterThan(app.frame.width, app.frame.height, "Landscape must be exercised") }
+        app.showSidebar()
+        let saved = app.buttons["sidebar-saved-work"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 15), "Saved work shows in the sidebar")
+        XCTAssertTrue((saved.value as? String)?.contains("saved item") == true, String(describing: saved.value))
+        let rows = [saved, app.buttons["sidebar-settings"],
+                    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Business,")).firstMatch]
+        let screen = app.windows.firstMatch.frame
+        for row in rows {
+            XCTAssertTrue(row.exists, row.description)
+            XCTAssertTrue(row.isHittable, "\(row.label) must be reachable")
+            XCTAssertTrue(screen.contains(row.frame), "\(row.label) must be fully on screen: \(row.frame) in \(screen)")
+        }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = landscape ? "Sidebar foot landscape" : "Sidebar foot portrait"
+        shot.lifetime = .keepAlways
+        add(shot)
+        rows[1].tap()
+        XCTAssertTrue(app.navigationBars.matching(NSPredicate(format: "identifier CONTAINS %@", "Settings")).firstMatch.waitForExistence(timeout: 5)
+                      || app.staticTexts["Settings"].waitForExistence(timeout: 5), "Settings opens from the sidebar")
     }
 }

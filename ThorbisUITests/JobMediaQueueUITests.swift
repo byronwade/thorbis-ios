@@ -215,7 +215,10 @@ final class JobMediaQueueUITests: XCTestCase {
         for _ in 0..<8 where !photo.isHittable { app.swipeUp() }
         XCTAssertTrue(photo.isHittable)
         // Two across at accessibility sizes (#184); each tile stays large enough to read and tap.
-        XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.4)
+        // Measured against the job's own column (the whole screen on a phone; on iPad the detail
+        // column beside the list).
+        let column = app.scrollViews.containing(NSPredicate(format: "label == %@", "Photo, Finished unit")).firstMatch.frame.width
+        XCTAssertGreaterThan(photo.frame.width, (column > 0 ? min(app.frame.width, column) : app.frame.width) * 0.4)
         XCTAssertGreaterThan(photo.frame.height, 100)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Largest text photo remains usable"

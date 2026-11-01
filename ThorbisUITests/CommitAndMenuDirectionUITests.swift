@@ -61,6 +61,10 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         app.launch()
         let select = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Role,")).firstMatch
         XCTAssertTrue(select.waitForExistence(timeout: 30), app.debugDescription)
+        // The email field takes focus as the sheet appears; open the select once its keyboard is up
+        // (the iPad's form sheet takes longer to present, so the keyboard can arrive after a quick tap).
+        let up = Date().addingTimeInterval(5)
+        while !app.keyboardShowing && Date() < up { usleep(200_000) }
         select.tap()
         let row = app.buttons["Office manager"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
@@ -69,7 +73,7 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         XCTAssertTrue(app.windows.firstMatch.frame.contains(row.frame), "\(row.frame)")
         // The email field has focus on appear; opening the select puts the keyboard away so the
         // menu's last rows aren't hidden behind it.
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "The keyboard goes away when a menu opens")
+        XCTAssertTrue(app.waitForKeyboardToHide(timeout: 5), "The keyboard goes away when a menu opens")
         attach(app, "Role menu open")
     }
 

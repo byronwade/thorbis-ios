@@ -118,7 +118,7 @@ final class PriceBookPickerUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label == %@", "51–73 of 73"), evaluatedWith: range)
         waitForExpectations(timeout: 5)
         let last = app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"]
-        for _ in 0..<12 where !last.isHittable { app.swipeUp() }
+        for _ in 0..<12 where !last.isHittable { catalog(in: app).swipeUp() }
         XCTAssertTrue(last.waitForExistence(timeout: 5), app.debugDescription)
         last.tap()
         let added = app.buttons.matching(identifier: last.identifier)
@@ -134,7 +134,7 @@ final class PriceBookPickerUITests: XCTestCase {
         let app = openLargeCatalog(screen: "new-estimate")
         showMore(in: app)
         let last = app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"]
-        for _ in 0..<12 where !last.isHittable { app.swipeUp() }
+        for _ in 0..<12 where !last.isHittable { catalog(in: app).swipeUp() }
         XCTAssertTrue(last.waitForExistence(timeout: 5), app.debugDescription)
         last.tap()
         let added = app.buttons.matching(identifier: last.identifier)
@@ -179,10 +179,18 @@ final class PriceBookPickerUITests: XCTestCase {
         return app
     }
 
+    /// What to swipe to move through the picker: the screen on a phone; on iPad the picker's own
+    /// list, as the picker is a centred sheet over the editor sheet and the screen's middle is not
+    /// reliably its list.
+    private func catalog(in app: XCUIApplication) -> XCUIElement {
+        guard app.usesTabletLayout else { return app }
+        return app.scrollViews.containing(NSPredicate(format: "identifier BEGINSWITH %@", "price-book-item-")).firstMatch
+    }
+
     private func showMore(in app: XCUIApplication) {
         let more = app.buttons["price-book-show-more"]
         XCTAssertTrue(more.waitForExistence(timeout: 10))
-        for _ in 0..<20 where !more.isHittable { app.swipeUp() }
+        for _ in 0..<20 where !more.isHittable { catalog(in: app).swipeUp() }
         XCTAssertTrue(more.isHittable)
         more.tap()
     }

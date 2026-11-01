@@ -10,6 +10,8 @@ struct PaperTabletSchedule: View {
     @Binding var selectedID: String?
     @ObservedObject var addresses: JobAddressBook
     let newJob: (() -> Void)?
+    /// The rows' swipes, as on the phone's Today: Call and Directions to the right, the next move to the left.
+    @StateObject private var swipes = JobRowSwipeBook()
 
     static let ranges = ["Today", "Week", "Map"]
 
@@ -32,6 +34,7 @@ struct PaperTabletSchedule: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Schedule").font(Theme.font(30, weight: .medium)).tracking(-0.6)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("schedule-title")
                 Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 12)
@@ -41,6 +44,7 @@ struct PaperTabletSchedule: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let error = store.error { ErrorBanner(message: error) }
+                    if let problem = swipes.problem { ErrorBanner(message: problem) }
                     if !jobs.isEmpty {
                         VStack(spacing: 0) {
                             ForEach(Array(jobs.enumerated()), id: \.element.id) { index, job in
@@ -60,11 +64,17 @@ struct PaperTabletSchedule: View {
                 .padding(.horizontal, 12).padding(.bottom, 16)
             }
             .refreshable { await store.refresh(api) }
+            .onScrollPhaseChange { _, phase in if phase != .idle { swipes.rows.close() } }
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
+        .sensoryFeedback(.success, trigger: swipes.confirmed)
+        .sensoryFeedback(.impact(weight: .light), trigger: swipes.queued)
+        .task(id: "swipes|\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)") {
+            swipes.reset(identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
+        }
         .onChange(of: jobs.map(\.id), initial: true) { _, ids in
             if selectedID.map({ ids.contains($0) }) != true, let first = ids.first { selectedID = first }
         }
@@ -81,21 +91,25 @@ struct PaperTabletSchedule: View {
         // The column reads 10:30, 12:15, 1:00: the period under the time only where it changes.
         let leading: PaperRowLeading = date.map { .clock($0.columnTime, period: showsPeriod ? $0.periodMark : nil, accessibility: $0.tradeTime) }
             ?? .text(time)
-        return Button { selectedID = job.id } label: {
-            PaperListRow(leading: leading, title: street ?? job.title,
-                         subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
-                         subtitleLines: 2, dimmed: job.status == "completed") {
-                StatusWord(jobStatus: job.status)
+        return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
+            Button { selectedID = job.id } label: {
+                PaperListRow(leading: leading, title: street ?? job.title,
+                             subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
+                             subtitleLines: 2, dimmed: job.status == "completed") {
+                    StatusWord(jobStatus: job.status)
+                }
+                .environment(\.paperRowInset, 12)
+                .background {
+                    if selected { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.brandSurface) }
+                }
+                .contentShape(Rectangle())
             }
-            .environment(\.paperRowInset, 12)
-            .background {
-                if selected { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.brandSurface) }
-            }
-            .contentShape(Rectangle())
+            .buttonStyle(RowPressStyle())
+            .jobContextMenu(job, customer: customer)
+            .accessibilityLabel("\(time), \(street ?? job.title), \(job.status.statusLabel)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityIdentifier("today-row-\(job.id)")
+            .rowSwipeAccessibility(actions)
         }
-        .buttonStyle(RowPressStyle())
-        .jobContextMenu(job, customer: customer)
-        .accessibilityLabel("\(time), \(street ?? job.title), \(job.status.statusLabel)")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
