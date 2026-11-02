@@ -13,6 +13,17 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-02-steady-job-page",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Job sections open without a freeze",
+                      detail: "Opening Money from far down a job, such as Due on site, shows it from the top and keeps the app moving."),
+                .init(symbol: "text.bubble", title: "More room for notes at large text",
+                      detail: "With the largest text sizes, quick notes and the note box take less of the screen in Activity."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
             id: "2026-11-01-document-status",
             date: "2026-11-01",
             highlights: [

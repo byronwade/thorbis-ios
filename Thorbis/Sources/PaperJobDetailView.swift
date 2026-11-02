@@ -203,9 +203,14 @@ struct JobDetailView: View {
                     }
                     }
                     }
+                    // Each section gets a scroll view of its own, starting at the top. Kept at the old
+                    // offset, a section shorter than where the page was scrolled to (Money opened from
+                    // Due on site far down Overview) had the lazy stack measure its content short, then
+                    // long, then short again every frame, never settling (the app hung). A scrollTo
+                    // from there did not help: the offset never moved.
+                    .id(selectedTab)
                     // A section opened while the tabs are pinned (the pinned tabs, or Due on site, Open
-                    // and See all far down the page) starts at its top. Left at the old offset, the
-                    // shorter section had the scroll view re-adjusting its offset every frame (a hang).
+                    // and See all far down the page) starts at its top, with the tabs still pinned.
                     .onChange(of: selectedTab) {
                         guard tabsPinned else { return }
                         proxy.scrollTo("job-sections", anchor: .top)
@@ -2075,17 +2080,24 @@ struct JobDetailView: View {
     /// JobActivity.dc.html: quick notes, then the field with the mic and a camera circle. Send
     /// takes the camera's place once there is something to save.
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // At accessibility sizes the bar stays a strip under the timeline (it took a third of the
+        // phone): the chips stop growing at the first accessibility size and still scroll in one
+        // row, the field at the second, starting at one line and growing to three, with less air.
+        let roomy = !typeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: roomy ? 8 : 4) {
             QuickNotesRow { phrase in note = NoteDraftText.joined(note, phrase) }
                 .disabled(dictation.isListening)
                 .padding(.horizontal, Theme.gutter)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(dictation.isListening ? "Listening…" : "Add a note", text: $note, prompt: .placeholder(dictation.isListening ? "Listening…" : "Add a note"), axis: .vertical)
                     .font(Theme.font(16))
-                    .lineLimit(1...6)
+                    .lineLimit(roomy ? 1...6 : 1...3)
                     .focused($noteFocused)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .padding(.horizontal, 16).padding(.vertical, roomy ? 12 : 6)
+                    .frame(minHeight: 44)
                     .panelBackground(cornerRadius: 23)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .accessibilityIdentifier("job-note-field")
                 DictateNoteButton(isListening: dictation.isListening) {
                     if dictation.isListening { dictation.stop(); return }
@@ -2128,7 +2140,7 @@ struct JobDetailView: View {
                 .padding(.horizontal, Theme.gutter)
             }
         }
-        .padding(.top, 10).padding(.bottom, 8)
+        .padding(.top, roomy ? 10 : 4).padding(.bottom, roomy ? 8 : 4)
     }
 
     private var canSaveNote: Bool {

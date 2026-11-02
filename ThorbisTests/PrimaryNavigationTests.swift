@@ -111,23 +111,47 @@ final class PrimaryNavigationTests: XCTestCase {
     }
 
     func testTodayNumbersCountLeftAndLate() {
-        let now = Date()
+        assertTodayNumbers(now: Date(), calendar: .current)
+    }
+
+    /// The night the clocks go back (America/New_York, 2026-11-01) has 25 hours: 23:30 is 24.5
+    /// hours after midnight, and 01:30 happens twice. Today's numbers still count the right day.
+    func testTodayNumbersOnTheNightTheClocksGoBack() throws {
+        var eastern = Calendar(identifier: .gregorian)
+        eastern.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let iso = ISO8601DateFormatter()
+        let lateEvening = try XCTUnwrap(iso.date(from: "2026-11-02T04:30:00Z"))  // 23:30 EST, Nov 1
+        let firstOneThirty = try XCTUnwrap(iso.date(from: "2026-11-01T05:30:00Z"))  // 01:30 EDT
+        let secondOneThirty = try XCTUnwrap(iso.date(from: "2026-11-01T06:30:00Z"))  // 01:30 EST
+        let start = eastern.startOfDay(for: lateEvening)
+        XCTAssertEqual(eastern.dateInterval(of: .day, for: lateEvening)?.duration, 25 * 3600, "The test needs the 25-hour day")
+        for now in [lateEvening, firstOneThirty, secondOneThirty] {
+            XCTAssertEqual(eastern.startOfDay(for: now), start)
+            assertTodayNumbers(now: now, calendar: eastern)
+        }
+    }
+
+    /// Two visits shortly before `now` (one done, one late), one shortly after, one canceled and one
+    /// for someone else, all inside `now`'s calendar day however long that day is.
+    private func assertTodayNumbers(now: Date, calendar: Calendar, line: UInt = #line) {
         let iso = ISO8601DateFormatter()
         func job(_ id: String, _ status: String, hoursFromNow: Double, who: String? = "me") -> Job {
             Job(id: id, customerId: nil, title: id, status: status, createdAt: nil, updatedAt: nil, allowedTransitions: nil,
                 scheduledFor: iso.string(from: now.addingTimeInterval(hoursFromNow * 3600)), assignedToUserId: who)
         }
-        // Times stay inside today wherever the test runs.
-        let start = Calendar.current.startOfDay(for: now)
-        let base = now.timeIntervalSince(start) / 3600
-        let jobs = [job("a", "completed", hoursFromNow: -min(base, 1) * 0.5), job("b", "scheduled", hoursFromNow: -min(base, 1) * 0.25),
-                    job("c", "dispatched", hoursFromNow: min(24 - base, 1) * 0.5), job("d", "canceled", hoursFromNow: 0),
-                    job("e", "scheduled", hoursFromNow: min(24 - base, 1) * 0.5, who: "other")]
-        let mine = TodayNumbers.visits(jobs, assignee: "me", now: now)
-        XCTAssertEqual(mine.map(\.id), ["a", "b", "c"])
-        XCTAssertEqual(TodayNumbers.left(mine), 2)
-        XCTAssertEqual(TodayNumbers.late(mine, now: now), 1)
-        XCTAssertEqual(TodayNumbers.open(jobs), 3)
-        XCTAssertEqual(TodayNumbers.visits(jobs, assignee: nil, now: now).count, 4)
+        // Times stay inside today wherever the test runs. The day's end is the next calendar day,
+        // not 24 hours on: the day the clocks go back is 25 hours long, the day they go forward 23.
+        guard let day = calendar.dateInterval(of: .day, for: now) else { return XCTFail("No day for \(now)", line: line) }
+        let before = now.timeIntervalSince(day.start) / 3600
+        let after = day.end.timeIntervalSince(now) / 3600
+        let jobs = [job("a", "completed", hoursFromNow: -min(before, 1) * 0.5), job("b", "scheduled", hoursFromNow: -min(before, 1) * 0.25),
+                    job("c", "dispatched", hoursFromNow: min(after, 1) * 0.5), job("d", "canceled", hoursFromNow: 0),
+                    job("e", "scheduled", hoursFromNow: min(after, 1) * 0.5, who: "other")]
+        let mine = TodayNumbers.visits(jobs, assignee: "me", now: now, calendar: calendar)
+        XCTAssertEqual(mine.map(\.id), ["a", "b", "c"], line: line)
+        XCTAssertEqual(TodayNumbers.left(mine), 2, line: line)
+        XCTAssertEqual(TodayNumbers.late(mine, now: now), 1, line: line)
+        XCTAssertEqual(TodayNumbers.open(jobs), 3, line: line)
+        XCTAssertEqual(TodayNumbers.visits(jobs, assignee: nil, now: now, calendar: calendar).count, 4, line: line)
     }
 }

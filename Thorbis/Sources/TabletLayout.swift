@@ -324,7 +324,9 @@ struct TabletRoot: View {
         }
         .task(id: "addr|\(store.jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)") {
             guard session.can("customer.view", feature: "core_crm") else { return }
-            await addresses.load(Array(store.jobs.prefix(60)), api: api, organizationID: session.activeOrganization?.id,
+            // The job you're on first: the sidebar's "On now" card leads with its street on every
+            // place, however long the day's list is.
+            await addresses.load([currentJob].compactMap { $0 } + store.jobs.prefix(60), api: api, organizationID: session.activeOrganization?.id,
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }
         .onAppear {
