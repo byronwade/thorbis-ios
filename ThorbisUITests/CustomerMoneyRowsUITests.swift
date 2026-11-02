@@ -2,6 +2,29 @@ import XCTest
 
 @MainActor
 final class CustomerMoneyRowsUITests: XCTestCase {
+    func testPartPaidInvoiceRemainsClearAndOpensAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-money",
+                               "--paper-preview-customer-money-partial",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 30))
+        for _ in 0..<15 where !invoice.isHittable { app.swipeUp() }
+        XCTAssertTrue(invoice.isHittable)
+        XCTAssertTrue(invoice.label.contains("Last known: Part paid"))
+        XCTAssertTrue(invoice.label.contains("Last known paid $100.00"))
+        XCTAssertTrue(invoice.label.contains("$340.00"))
+        XCTAssertTrue(invoice.label.contains("Last known total"))
+        invoice.tap()
+        let title = app.staticTexts["invoice-detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertTrue(title.label.contains("2209"))
+        app.navigationBars.buttons["Back"].tap()
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+    }
+
     func testMoneyShowsDocumentIdentityStatusAndInvoiceTotal() {
         continueAfterFailure = false
         let app = XCUIApplication()

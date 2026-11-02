@@ -1066,6 +1066,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "months": months.map { ["month": $0.0, "revenue": $0.1, "collected": $0.2] },
                     "receivable": ["openInvoices": 9, "balance": 733_000, "overdueInvoices": 2, "overdueBalance": 620_000]] as [String: Any]
         }
+        if PaperPreview.screen == "customer-money",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-money-partial") {
+            var invoice = (jsonObject(PaperPreview.issuedInvoice) as? [String: Any]) ?? [:]
+            invoice["amountPaid"] = 10_000
+            if path == "/v1/invoices" { return ["items": matchingCustomer([invoice], queryItems: queryItems)] }
+            if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" { return ["items": [invoice]] }
+            if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" { return invoice }
+        }
         if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
             if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
