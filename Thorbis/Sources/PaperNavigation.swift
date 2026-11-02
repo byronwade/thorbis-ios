@@ -1057,6 +1057,8 @@ struct PreviewSheets: ViewModifier {
     @Binding var formSheet: String?
     @Binding var signature: Bool
     @Binding var newEstimate: Bool
+    @State private var createdEstimateID: String?
+    @State private var openedEstimate: OpenedEstimate?
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
@@ -1088,8 +1090,26 @@ struct PreviewSheets: ViewModifier {
                 SignatureCaptureSheet(title: "Approve $970.00", summary: "By signing, Danielle Marlowe approves \"AC repair and compressor replacement\" as shown.",
                                       jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe") { _ in nil }
             } }
-            .sheet(isPresented: $newEstimate) { SheetSurface {
-                NewEstimateView(customerID: PaperPreview.customerID, jobID: PaperPreview.jobID, title: "AC not cooling")
+            .sheet(isPresented: $newEstimate, onDismiss: {
+                guard EstimateRecoveryPreview.enabled, let id = createdEstimateID else { return }
+                createdEstimateID = nil
+                openedEstimate = OpenedEstimate(id: id, present: false)
+            }) { SheetSurface {
+                NewEstimateView(customerID: PaperPreview.customerID, jobID: PaperPreview.jobID, title: "AC not cooling") { estimate in
+                    if EstimateRecoveryPreview.enabled { createdEstimateID = estimate.id }
+                }
+            } }
+            .sheet(item: $openedEstimate) { opened in SheetSurface {
+                NavigationStack {
+                    EstimateDetailView(id: opened.id, jobID: PaperPreview.jobID)
+                        .safeAreaInset(edge: .top) {
+                            TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                                Text("Sample requests")
+                                    .accessibilityIdentifier("estimate-recovery-detail-counts")
+                                    .accessibilityValue(EstimateRecoveryPreview.shared.counts)
+                            }
+                        }
+                }
             } }
     }
 }
