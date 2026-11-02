@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-02-back-alone",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "chevron.backward", title: "One Back button on job pages",
+                      detail: "Job, customer and money pages show one round Back button. The menu opens from where you started."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-01-cream-sheet",
             date: "2026-11-01",
             highlights: [
