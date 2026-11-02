@@ -1005,7 +1005,6 @@ struct CustomerDetailView: View {
                     SkeletonRows(count: 3, inset: 0)
                 } else if let visible {
                     CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: { await loadRecords() }, parts: parts)
-                        .accessibilityIdentifier("customer-records")
                 }
             }
         }
