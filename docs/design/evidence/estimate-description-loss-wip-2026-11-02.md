@@ -51,6 +51,18 @@ Evidence and limitations:
   on base `d212d14`. This is one iPhone 17 Pro simulator at default text size;
   large text, a small device, compact iPad windows and real-server saving
   remain unverified.
+- On iPhone SE (3rd generation) with the largest accessibility text, the
+  first test failed before reaching the editor: the custom-item action grew
+  to roughly 2,236pt for the long search and the picker did not close
+  (`/private/tmp/thorbis-textloss-small-large.log`). The picker now displays
+  a stable action title and a two-line preview while passing the full query
+  to the line. `/private/tmp/thorbis-textloss-small-large-fixed2.log` passed
+  (exit 0): the action was under half the screen height, the full draft text
+  persisted, Save and Done did not intersect, and the warning and Save were
+  hittable. The staged app/test diff hash was
+  `d49faed8fe7485428210126253157f06903b122304f9ac622e614ff515c77dcb`
+  on `ea94efd`. The passing run did not retain a screenshot; it does not prove
+  absence of visual clipping or adequate editor space at that text size.
 - A preceding UI recording showed the number keyboard covering Save
   (`/private/tmp/textloss-fail-frame.png`). The candidate's keyboard-aware
   layout has not been qualified against a completed UI run.
