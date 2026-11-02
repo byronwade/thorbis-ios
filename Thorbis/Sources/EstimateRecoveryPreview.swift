@@ -89,6 +89,7 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
             var estimate: [String: Any] = ["id": Self.estimateID, "organizationId": PaperPreview.organizationID,
                 "customerId": customer, "createdByUserId": PaperPreview.actorID, "status": "draft", "title": title,
                 "lines": lines, "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-changed-terms") { estimate["title"] = "Unexpected work" }
             if let location = input["locationId"] { estimate["locationId"] = location }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-other-location") {
                 estimate["locationId"] = "00000000-0000-4000-8000-000000009999"

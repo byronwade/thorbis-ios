@@ -25,6 +25,7 @@ struct NewEstimateView: View {
     @State private var created: EstimateRecord?
     @State private var createdScope: EstimateCreationScope?
     @State private var requiresLocationVerification = false
+    @State private var requiresManualReview = false
     @State private var createOutcomeUncertain = false
     @State private var memberPricing: MemberPricing?
     /// Shown after Save is pressed (validate on commit): what is missing, under its place.
@@ -61,7 +62,7 @@ struct NewEstimateView: View {
                      requestGeneration: api.requestGeneration, origin: origin)
     }
     private var canCommit: Bool {
-        if createOutcomeUncertain { return false }
+        if createOutcomeUncertain || requiresManualReview { return false }
         if created != nil {
             let canView = session.can("estimate.view", feature: "estimates")
             return jobID == nil ? canView : canView && session.can("job.edit", feature: "jobs")
@@ -181,7 +182,7 @@ struct NewEstimateView: View {
             }
             PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
                            disabled: !canCommit,
-                           disabledReason: canCommit ? nil : (createOutcomeUncertain ? "Check Estimates or ask your office before starting another." : created == nil ? "Your role can't create estimates. Ask your office." : jobID == nil ? "Your role can't view this estimate. Ask your office." : "Your role can't add this estimate to the job. Ask your office.")) {
+                           disabledReason: canCommit ? nil : (requiresManualReview ? "Ask your office to review the saved estimate." : createOutcomeUncertain ? "Check Estimates or ask your office before starting another." : created == nil ? "Your role can't create estimates. Ask your office." : jobID == nil ? "Your role can't view this estimate. Ask your office." : "Your role can't add this estimate to the job. Ask your office.")) {
                 if showProblems() { Task { await save() } }
             }
         }
@@ -341,7 +342,7 @@ struct NewEstimateView: View {
     }
 
     private func save() async {
-        guard recovery.mayProceed(validDraft: valid) else { return }
+        guard !requiresManualReview, recovery.mayProceed(validDraft: valid) else { return }
         guard let scope = creationScope else {
             error = "Your session changed. Check your workspace before continuing."
             return
@@ -393,11 +394,13 @@ struct NewEstimateView: View {
                     error = "Your role can't create estimates. Ask your office."
                     return
                 }
+                let submitted = creationRequest()
                 createStarted = true
-                estimate = try await api.createFieldEstimate(creationRequest())
+                estimate = try await api.createFieldEstimate(submitted)
                 createStarted = false
                 guard UUID(uuidString: estimate.id) != nil, estimate.organizationId == scope.organizationID,
-                      estimate.customerId == customerID else {
+                      estimate.customerId == customerID,
+                      estimate.createdByUserId.lowercased() == scope.actorID.lowercased() else {
                     // The response cannot safely identify the submitted work; do not create again.
                     createOutcomeUncertain = true
                     if creationScope == scope {
@@ -410,7 +413,13 @@ struct NewEstimateView: View {
                 created = estimate
                 createdScope = scope
                 requiresLocationVerification = estimate.locationId != jobLocationID
+                requiresManualReview = !EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: estimate) ||
+                    (jobID == nil && requiresLocationVerification)
                 guard creationScope == scope else { return }
+                if requiresManualReview {
+                    error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but its details differ from your submission. Ask your office to review it."
+                    return
+                }
                 if requiresLocationVerification {
                     error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved with a different location. Retry to verify the job, or ask your office for help."
                     return

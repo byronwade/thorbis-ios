@@ -1095,7 +1095,9 @@ struct PreviewSheets: ViewModifier {
                 createdEstimateID = nil
                 openedEstimate = OpenedEstimate(id: id, present: false)
             }) { SheetSurface {
-                NewEstimateView(customerID: PaperPreview.customerID, jobID: PaperPreview.jobID, title: "AC not cooling") { estimate in
+                NewEstimateView(customerID: PaperPreview.customerID,
+                                jobID: ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-standalone") ? nil : PaperPreview.jobID,
+                                title: "AC not cooling") { estimate in
                     if EstimateRecoveryPreview.enabled { createdEstimateID = estimate.id }
                 }
             } }
