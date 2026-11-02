@@ -1451,10 +1451,10 @@ struct JobDetailView: View {
                             Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                             Spacer(minLength: 8)
                             // Never broken mid-number at accessibility sizes ("$340.0" over "0"):
-                            // the label wraps instead.
+                            // the amount goes first and the label wraps instead.
                             Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
                                 .foregroundStyle(Theme.foreground)
-                                .lineLimit(1).fixedSize()
+                                .lineLimit(1).layoutPriority(1)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 11)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
