@@ -980,6 +980,7 @@ struct InvoicePaymentCollectionSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                ScrollViewReader { proxy in
                 ScrollView {
                     // v2 modal: the amount large, the method as quiet chips with the rest in a popover,
                     // the custom amount in a sunk well with its $ inside, then the one ink commit.
@@ -996,7 +997,7 @@ struct InvoicePaymentCollectionSheet: View {
                             }
                         }
                         paymentOptions
-                        if option.takesCustomAmount && !hasLockedIntent && !model.waitingForProjection { amountField }
+                        if option.takesCustomAmount && !hasLockedIntent && !model.waitingForProjection { amountField.id("payment-amount") }
                         receiptRow
                         if let payLinkError { ErrorBanner(message: payLinkError) }
                         if let paymentError = model.paymentError, !hasLockedIntent, !model.waitingForProjection {
@@ -1008,6 +1009,16 @@ struct InvoicePaymentCollectionSheet: View {
                     .padding(.bottom, 24)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // The Done bar's clearance lands after the keyboard scrolled the field into view,
+                // leaving it half under the footer; bring the field and its help back once it has.
+                .onChange(of: amountFocused) { _, focused in
+                    guard focused else { return }
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        withAnimation { proxy.scrollTo("payment-amount", anchor: .bottom) }
+                    }
+                }
+                }
 
                 footer
             }

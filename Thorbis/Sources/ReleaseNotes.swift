@@ -21,7 +21,7 @@ enum ReleaseNotes {
                 .init(symbol: "creditcard", title: "Done stays off Record payment",
                       detail: "With the number pad up in Collect payment, Done sits above the record button instead of over it."),
             ],
-            fixes: 1
+            fixes: 3
         ),
         ReleaseNote(
             id: "2026-11-02-steady-job-page",
