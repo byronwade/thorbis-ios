@@ -198,7 +198,8 @@ struct JobDetailView: View {
                         .padding(.top, selectedTab == "Overview" ? (isOnSite ? 12 : 14) : 8)
                         .padding(.bottom, 28)
                     } header: {
-                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card) }
+                        // Inset 1pt so the pinned tabs never cut the sheet's rim.
+                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card.padding(.horizontal, 1)) }
                     }
                     }
                     }
@@ -1033,7 +1034,8 @@ struct JobDetailView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
-            .background(Theme.canvas)
+            // Inset 1pt so the bar sits inside the job's sheet and its rim runs on to the bottom.
+            .background { Rectangle().fill(Theme.canvas).padding(.horizontal, 1).ignoresSafeArea(edges: .bottom) }
         }
     }
 

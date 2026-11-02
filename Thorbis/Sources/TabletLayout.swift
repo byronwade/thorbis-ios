@@ -800,12 +800,10 @@ struct TabletSidebar: View {
                                phoneHeading: "On this iPad", savedWork: savedWork, savedWorkTitle: "Saved on this iPad",
                                openPlace: { select(section($0)) }, openLocal: { select(.local($0)) },
                                openSavedWork: reviewSavedWork)
-                    Button(action: settings) {
-                        rowLabel("Settings", icon: "gearshape", selected: false, count: nil)
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityIdentifier("sidebar-settings")
-                    .padding(.top, 14)
+                    // The places' own row, so the gear and its word sit in the places' columns.
+                    PlaceRow(title: "Settings", symbol: "gearshape", tint: Theme.markGrey, here: false,
+                             count: nil, id: "sidebar-settings", action: settings)
+                        .padding(.top, 14)
                 }
                 .padding(.bottom, 24)
             }
@@ -845,27 +843,6 @@ struct TabletSidebar: View {
         .buttonStyle(RowPressStyle())
         .accessibilityLabel("Business, \(session.activeOrganization?.name ?? "Workspace")")
         .accessibilityHint("Switch or manage businesses")
-    }
-
-    /// Selected place: the drawer's grammar (ink word, filled glyph) on a quiet well, no rim.
-    private func rowLabel(_ title: String, icon: String, selected: Bool, count: Int?) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 16)).frame(width: 22)
-                .symbolVariant(selected ? .fill : .none)
-                .foregroundStyle(selected ? Theme.foreground : Theme.muted)
-            Text(title).font(Theme.font(15, weight: selected ? .medium : .regular)).lineLimit(1)
-            Spacer(minLength: 0)
-            if let count, count > 0 {
-                Text("\(count)").font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
-            }
-        }
-        .padding(.horizontal, 10).frame(minHeight: 44)
-        .background {
-            if selected {
-                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.fill)
-            }
-        }
-        .contentShape(Rectangle())
     }
 
     /// The job you're on, always one tap away — in the sidebar's foot, never floating over rows.
