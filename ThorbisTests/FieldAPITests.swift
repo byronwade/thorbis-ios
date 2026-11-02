@@ -191,6 +191,23 @@ final class FieldAPITests: XCTestCase {
         XCTAssertEqual(body, ["body": "Valve is leaking"])
     }
 
+    func testEstimateReauthorizationRequiresFreshServerResponse() async throws {
+        let estimateID = "00000000-0000-4000-8000-000000000008"
+        let reply = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"draft","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply), .init(403, #"{"title":"Access revoked","status":403}"#)]), baseURL: "https://app.thorbis.com")
+        _ = try await client.fieldEstimate(estimateID)
+        do {
+            _ = try await client.fieldEstimate(estimateID, requireFresh: true)
+            XCTFail("A previously read estimate must not bypass revoked access")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.status, 403)
+        }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.last)
+        XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+    }
+
     func testCreatingEstimateUsesMinorUnitsAndCanonicalRoute() async throws {
         let reply = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"draft","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
         let client = APIClient(session: URLProtocolFixture.session([.init(201, reply)]), baseURL: "https://app.thorbis.com")
