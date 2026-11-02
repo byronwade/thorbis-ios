@@ -36,6 +36,43 @@ extension EstimateCreationRecoveryTests {
         XCTAssertFalse(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Server error", status: 500, detail: nil)))
     }
 
+    func testCreatedResponseMustMatchSubmittedLineTermsAndProvenance() throws {
+        var fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.estimate)) as? [String: Any])
+        fixture["status"] = "draft"
+        fixture.removeValue(forKey: "options")
+        fixture.removeValue(forKey: "sentAt")
+        let created = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: fixture))
+        let inputs = created.lines.map { line in
+            FieldEstimateLineInput(description: line.description, quantity: line.quantity, unitPrice: line.unitPrice,
+                source: line.source?.kind == "price_book" ? .priceBookSelection(itemID: line.source!.priceBookItemId!, revision: line.source!.priceBookRevision!) : .manual)
+        }
+        let submitted = FieldEstimateCreate(customerId: created.customerId, title: created.title, lines: inputs)
+        XCTAssertTrue(EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: created))
+        var changedLines = inputs
+        changedLines[0] = .init(description: created.lines[0].description, quantity: 99, unitPrice: created.lines[0].unitPrice, source: .manual)
+        let changed = FieldEstimateCreate(customerId: created.customerId, title: created.title, lines: changedLines)
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(changed, created: created))
+        let wrongTitle = FieldEstimateCreate(customerId: created.customerId, title: "Different", lines: inputs)
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(wrongTitle, created: created))
+        var hiddenMaterial = inputs
+        hiddenMaterial[0] = .init(description: created.lines[0].description, quantity: created.lines[0].quantity,
+                                  unitPrice: created.lines[0].unitPrice, source: .manual, group: "material", showToCustomer: false)
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(.init(customerId: created.customerId, title: created.title, lines: hiddenMaterial), created: created))
+        var explicitlyVisible = inputs
+        explicitlyVisible[0] = .init(description: created.lines[0].description, quantity: created.lines[0].quantity,
+                                     unitPrice: created.lines[0].unitPrice, source: .manual, showToCustomer: true)
+        var hiddenResponse = fixture
+        var hiddenLines = try XCTUnwrap(hiddenResponse["lines"] as? [[String: Any]])
+        hiddenLines[0]["showToCustomer"] = false
+        hiddenResponse["lines"] = hiddenLines
+        let hidden = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: hiddenResponse))
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(.init(customerId: created.customerId, title: created.title, lines: explicitlyVisible), created: hidden))
+        var wrongSource = inputs
+        let line = created.lines[1]
+        wrongSource[1] = .init(description: line.description, quantity: line.quantity, unitPrice: line.unitPrice, source: .manual)
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(.init(customerId: created.customerId, title: created.title, lines: wrongSource), created: created))
+    }
+
     func testReauthorizationIgnoresRecordTimestampsButRejectsChangedCommercialTerms() throws {
         let original = PaperPreview.estimate
         func changing(_ edit: (inout [String: Any]) -> Void) throws -> EstimateRecord {

@@ -22,6 +22,28 @@ struct EstimateCreationRecovery {
 
     var canEdit: Bool { !isSaving && savedEstimateID == nil }
 
+    /// Verify the create response against the submitted scope and money, allowing the server
+    /// to add line IDs, capture timestamps and original price-book snapshot metadata.
+    static func matchesSubmittedTerms(_ request: FieldEstimateCreate, created: EstimateRecord) -> Bool {
+        guard created.customerId == request.customerId, created.title == request.title,
+              created.status == "draft", (created.options ?? []).isEmpty,
+              created.lines.count == request.lines.count else { return false }
+        return zip(request.lines, created.lines).allSatisfy { requested, saved in
+            guard requested.description == saved.description, requested.quantity == saved.quantity,
+                  requested.unitPrice == saved.unitPrice else { return false }
+            if let group = requested.group, saved.group != group { return false }
+            if let visible = requested.showToCustomer, (saved.showToCustomer ?? true) != visible { return false }
+            switch requested.source ?? .manual {
+            case .manual: return saved.source == nil || saved.source?.kind == "manual"
+            case let .priceBookSelection(id, revision):
+                return saved.source?.kind == "price_book" &&
+                    saved.source?.priceBookItemId?.lowercased() == id.lowercased() &&
+                    saved.source?.priceBookRevision == revision
+            case .unsupported: return false
+            }
+        }
+    }
+
     /// A fresh read must preserve the saved terms and identity. Storage can normalize record
     /// timestamps without changing what was saved, so those two metadata fields are excluded.
     static func matchesSavedEstimate(_ saved: EstimateRecord, latest: EstimateRecord) -> Bool {

@@ -101,6 +101,35 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         }
     }
 
+    func testCreatedEstimateWithChangedTermsRequiresReviewWithoutLinking() {
+        checkUnexpectedCreatedResult(extra: "--paper-preview-estimate-recovery-changed-terms", standalone: false)
+    }
+
+    func testStandaloneEstimateWithUnexpectedLocationRequiresReview() {
+        checkUnexpectedCreatedResult(extra: "--paper-preview-estimate-recovery-other-location", standalone: true)
+    }
+
+    private func checkUnexpectedCreatedResult(extra: String, standalone: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+                               "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages", extra]
+        if standalone { app.launchArguments.append("--paper-preview-estimate-recovery-standalone") }
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let title = standalone ? "Open saved estimate" : "Retry adding to job"
+        let action = app.buttons[title]
+        XCTAssertTrue(action.waitForExistence(timeout: 10))
+        XCTAssertFalse(action.isEnabled)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "details differ from your submission")).firstMatch.waitForExistence(timeout: 5))
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 5))
+        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+    }
+
     private func addSampleItem(in app: XCUIApplication) {
         let add = app.buttons.matching(identifier: "estimate-add-item").firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 30))
