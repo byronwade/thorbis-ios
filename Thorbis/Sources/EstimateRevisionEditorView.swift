@@ -11,12 +11,14 @@ struct EstimateRevisionEditorView: View {
     @State private var editor: EstimateRevisionEditorState
     @State private var busy = false
     @State private var error: String?
+    @State private var descriptionProblem: String?
     @State private var staleRevision = false
     @State private var confirmReload = false
     @State private var confirmDiscard = false
     @State private var picker: EstimateBuilderTarget?
     @State private var discountTarget: EstimateBuilderTarget?
     @State private var expandedLine: UUID?
+    @State private var revealProblem = 0
     @State private var keyboardUp = false
     @State private var scrollTarget: String?
     @State private var removed: RemovedLine?
@@ -76,8 +78,9 @@ struct EstimateRevisionEditorView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView { content }
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView { content }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: focus) { _, value in
                         guard let id = value?.lineID else { return }
@@ -88,11 +91,17 @@ struct EstimateRevisionEditorView: View {
                         guard let id else { return }
                         withAnimation { proxy.scrollTo(id, anchor: .center) }
                     }
+                    .onChange(of: revealProblem) { _, _ in
+                        guard let id = expandedLine else { return }
+                        withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    }
                     .onChange(of: scrollTarget) { _, target in
                         guard let target else { return }
                         withAnimation { proxy.scrollTo(target, anchor: .top) }
                         scrollTarget = nil
                     }
+                }
+                revisionFooter
             }
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
@@ -106,17 +115,6 @@ struct EstimateRevisionEditorView: View {
             .keyboardDoneButton()
             .trackKeyboard($keyboardUp)
             .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    if let removed {
-                        LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
-                    }
-                    if !keyboardUp { footerTotal }
-                    PaperActionBar(title: saveTitle, symbol: "doc.badge.plus", busy: busy, disabled: !canSave) {
-                        Task { await save() }
-                    }
-                }
-            }
             .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: optionName(target.optionID),
@@ -140,6 +138,9 @@ struct EstimateRevisionEditorView: View {
             .task(id: estimate.customerId) { memberPricing = try? await api.memberPricing(estimate.customerId) }
             .task(id: storesLineGroups) { editor.storesLineGroups = storesLineGroups }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
+            .onChange(of: (editor.lines + editor.options.flatMap(\.lines)).map(\.description)) { _, _ in
+                if descriptionProblem != nil { refreshDescriptionProblem() }
+            }
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
                             isPresented: $confirmReload,
@@ -154,6 +155,23 @@ struct EstimateRevisionEditorView: View {
                 }
             }
             #endif
+        }
+    }
+
+    private var revisionFooter: some View {
+        VStack(spacing: 0) {
+            if let removed {
+                LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
+            }
+            if !keyboardUp { footerTotal }
+            if let descriptionProblem {
+                FieldProblem(message: descriptionProblem)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter)
+            }
+            PaperActionBar(title: saveTitle, symbol: "doc.badge.plus", busy: busy, disabled: !canSave) {
+                Task { await save() }
+            }
         }
     }
 
@@ -447,6 +465,17 @@ struct EstimateRevisionEditorView: View {
         }
     }
 
+    private func refreshDescriptionProblem() {
+        let lines = editor.lines + editor.options.flatMap(\.lines)
+        if lines.contains(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
+            descriptionProblem = EstimateRevisionEditorError.priceBookOriginalTooLong.localizedDescription
+        } else if lines.contains(where: { $0.estimateDescriptionProblem == .tooLong }) {
+            descriptionProblem = "Item descriptions can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before saving."
+        } else {
+            descriptionProblem = nil
+        }
+    }
+
     private func save() async {
         guard !editingDraft else {
             error = "Draft changes can't be saved yet."
@@ -456,6 +485,15 @@ struct EstimateRevisionEditorView: View {
             error = "You no longer have permission to revise this estimate."
             return
         }
+        let allLines = editor.lines + editor.options.flatMap(\.lines)
+        if let line = allLines.first(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong })
+            ?? allLines.first(where: { $0.estimateDescriptionProblem == .tooLong }) {
+            refreshDescriptionProblem()
+            expandedLine = line.id
+            revealProblem += 1
+            return
+        }
+        descriptionProblem = nil
         busy = true
         defer { busy = false }
         do {

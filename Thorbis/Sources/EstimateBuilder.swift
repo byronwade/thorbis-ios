@@ -104,7 +104,7 @@ extension Array where Element == EstimateRevisionLineDraft {
     @discardableResult
     mutating func addCustomLine(_ description: String = "", to group: EstimateLineGroup) -> UUID? {
         guard count < Self.maximumLines else { return nil }
-        let trimmed = String(description.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         let line = EstimateRevisionLineDraft(description: trimmed, quantity: "1", unitPrice: "", source: .manual, group: group)
         insertFollowingSwitch(line, at: insertionIndex(for: group))
         return line.id
@@ -195,7 +195,23 @@ extension Array where Element == EstimateRevisionLineDraft {
     }
 }
 
+enum EstimateDescriptionProblem {
+    case empty, tooLong, priceBookOriginalTooLong
+}
+
 extension EstimateRevisionLineDraft {
+    /// Price Book sources are snapshotted by the server, so changing the displayed line
+    /// cannot repair an overlong original revision.
+    var estimateDescriptionProblem: EstimateDescriptionProblem? {
+        if case .priceBookSelection = source,
+           let original = priceBookOriginal?.description.trimmingCharacters(in: .whitespacesAndNewlines),
+           original.utf16.count > 200 { return .priceBookOriginalTooLong }
+        let value = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return .empty }
+        if value.utf16.count > 200 { return .tooLong }
+        return nil
+    }
+
     var isEditedPriceBookLine: Bool {
         guard let original = priceBookOriginal, case .priceBookSelection = source else { return false }
         return description.trimmingCharacters(in: .whitespacesAndNewlines) != original.description ||
@@ -218,7 +234,7 @@ extension Array where Element == EstimateRevisionLineDraft {
     @discardableResult
     mutating func addCreditLine(_ description: String, cents: Int) -> UUID? {
         guard count < Self.maximumLines, cents > 0 else { return nil }
-        let line = EstimateRevisionLineDraft(description: String(description.prefix(200)), quantity: "1",
+        let line = EstimateRevisionLineDraft(description: description, quantity: "1",
                                              unitPrice: EstimateRevisionEditorState.priceText(-cents),
                                              source: .manual, group: last?.group ?? .work)
         append(line)

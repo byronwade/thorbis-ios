@@ -16,6 +16,7 @@ struct NewEstimateView: View {
     @State private var error: String?
     @State private var picker: EstimateBuilderTarget?
     @State private var expandedLine: UUID?
+    @State private var revealProblem = 0
     @State private var keyboardUp = false
     @State private var removed: RemovedLine?
     @State private var confirmDiscard = false
@@ -27,6 +28,7 @@ struct NewEstimateView: View {
     @State private var titleProblem: String?
     @State private var customerProblem: String?
     @State private var linesProblem: String?
+    @State private var descriptionProblem: String?
     private let jobID: String?
     private let jobLocationID: String?
     private let onCreated: (EstimateRecord) -> Void
@@ -47,7 +49,7 @@ struct NewEstimateView: View {
     var valid: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
         lines.allSatisfy { line in
-            !line.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            line.estimateDescriptionProblem == nil &&
             (Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)).map { (1...100_000).contains($0) } ?? false) &&
             MoneyInput.cents(line.unitPrice) != nil
         }
@@ -55,8 +57,9 @@ struct NewEstimateView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView { builder }
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView { builder }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: focus) { _, value in
                         guard let id = value?.lineID else { return }
@@ -67,6 +70,12 @@ struct NewEstimateView: View {
                         guard let id else { return }
                         withAnimation { proxy.scrollTo(id, anchor: .center) }
                     }
+                    .onChange(of: revealProblem) { _, _ in
+                        guard let id = expandedLine else { return }
+                        withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    }
+                }
+                builderFooter
             }
             .keyboardDoneButton()
             .trackKeyboard($keyboardUp)
@@ -79,23 +88,6 @@ struct NewEstimateView: View {
                 }
             }
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    if let removed {
-                        LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
-                    }
-                    // While typing, only the commit stays: the total would sit on the field being edited.
-                    if !keyboardUp {
-                        EstimateBuilderTotal(total: total, detail: memberLine)
-                    }
-                    // Not pre-disabled: pressed with something missing, it says what under that place.
-                    PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
-                                   disabled: !session.can("estimate.create", feature: "estimates"),
-                                   disabledReason: session.can("estimate.create", feature: "estimates") ? nil : "Your role can't create estimates. Ask your office.") {
-                        if showProblems() { Task { await save() } }
-                    }
-                }
-            }
             .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "this estimate" : title,
@@ -111,7 +103,13 @@ struct NewEstimateView: View {
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .onChange(of: customerID) { _, _ in customerProblem = nil }
-            .onChange(of: lines.count) { _, _ in linesProblem = nil }
+            .onChange(of: lines.count) { _, _ in
+                linesProblem = nil
+                if descriptionProblem != nil { refreshDescriptionProblem() }
+            }
+            .onChange(of: lines.map(\.description)) { _, _ in
+                if descriptionProblem != nil { refreshDescriptionProblem() }
+            }
             .task(id: customerID) {
                 memberPricing = nil
                 guard !customerID.isEmpty else { return }
@@ -119,6 +117,25 @@ struct NewEstimateView: View {
                 let pricing = try? await api.memberPricing(customerID)
                 guard !Task.isCancelled, customerID == expected else { return }
                 memberPricing = pricing
+            }
+        }
+    }
+
+    private var builderFooter: some View {
+        VStack(spacing: 0) {
+            if let removed {
+                LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
+            }
+            if !keyboardUp { EstimateBuilderTotal(total: total, detail: memberLine) }
+            if let descriptionProblem {
+                FieldProblem(message: descriptionProblem)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter)
+            }
+            PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
+                           disabled: !session.can("estimate.create", feature: "estimates"),
+                           disabledReason: session.can("estimate.create", feature: "estimates") ? nil : "Your role can't create estimates. Ask your office.") {
+                if showProblems() { Task { await save() } }
             }
         }
     }
@@ -221,13 +238,37 @@ struct NewEstimateView: View {
     }
 
     /// Fills each problem slot; true when the estimate can be saved.
+    private func refreshDescriptionProblem() {
+        if lines.contains(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
+            descriptionProblem = "A price book item's original description is too long for an estimate. Ask your office to update it, then add it again."
+        } else if lines.contains(where: { $0.estimateDescriptionProblem == .tooLong }) {
+            descriptionProblem = "Item descriptions can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before saving."
+        } else {
+            descriptionProblem = nil
+        }
+    }
+
     private func showProblems() -> Bool {
         guard created == nil else { return true }
         titleProblem = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Name the work, like \u{201C}Furnace replacement.\u{201D}" : nil
         customerProblem = customerID.isEmpty ? "Choose the customer this estimate is for." : nil
-        linesProblem = lines.isEmpty ? "Add at least one item."
-            : valid || titleProblem != nil || customerProblem != nil ? nil
-            : "Each item needs a description, a quantity from 1 to 100,000 and a price like 145.00."
+        descriptionProblem = nil
+        if lines.isEmpty {
+            linesProblem = "Add at least one item."
+        } else if let longLine = lines.first(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
+            linesProblem = nil
+            refreshDescriptionProblem()
+            expandedLine = longLine.id
+            revealProblem += 1
+        } else if let longLine = lines.first(where: { $0.estimateDescriptionProblem == .tooLong }) {
+            linesProblem = nil
+            refreshDescriptionProblem()
+            expandedLine = longLine.id
+            revealProblem += 1
+        } else {
+            linesProblem = valid || titleProblem != nil || customerProblem != nil ? nil
+                : "Each item needs a description, a quantity from 1 to 100,000 and a price like 145.00."
+        }
         return valid
     }
 
