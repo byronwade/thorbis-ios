@@ -108,6 +108,27 @@ struct NewEstimateView: View {
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                #if DEBUG
+                if EstimateRecoveryPreview.enabled {
+                    ThorbisToolbarItem(placement: .principal) {
+                        HStack {
+                            TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                                Text("Sample requests")
+                                    .accessibilityIdentifier("estimate-recovery-request-counts")
+                                    .accessibilityValue(EstimateRecoveryPreview.shared.counts)
+                            }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
+                                Button("Revalidate sample") {
+                                    Task {
+                                        await session.revalidate()
+                                        EstimateRecoveryPreview.shared.release()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                #endif
                 ThorbisToolbarItem(placement: .cancellationAction) {
                     Button(created == nil ? "Cancel" : "Close") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
                 }
