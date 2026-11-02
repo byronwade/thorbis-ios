@@ -130,6 +130,53 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
     }
 
+    func testLostGroupsRequireExplicitChoiceBeforeLinking() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+                               "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+                               "--paper-preview-estimate-group-feature", "--paper-preview-estimate-drop-groups"]
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let continueButton = app.buttons["Continue without groups"]
+        XCTAssertTrue(continueButton.waitForExistence(timeout: 10))
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 5))
+        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+        continueButton.tap()
+        XCTAssertTrue(app.staticTexts["Continue without item groups?"].waitForExistence(timeout: 5))
+        app.buttons.matching(identifier: "Continue without groups").lastMatch.tap()
+        let retry = app.buttons["Retry adding to job"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        retry.tap()
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=0,jobReads=0")
+    }
+
+    func testDroppedHiddenLineVisibilityBlocksLink() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+                               "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+                               "--paper-preview-estimate-group-feature", "--paper-preview-estimate-drop-visibility"]
+        app.launch()
+        addSampleItem(in: app)
+        let visibility = app.switches["Show on estimate"]
+        XCTAssertTrue(visibility.waitForExistence(timeout: 10))
+        visibility.tap()
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let retry = app.buttons["Retry adding to job"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        XCTAssertFalse(retry.isEnabled)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "details differ from your submission")).firstMatch.waitForExistence(timeout: 5))
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+    }
+
     private func addSampleItem(in app: XCUIApplication) {
         let add = app.buttons.matching(identifier: "estimate-add-item").firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 30))

@@ -31,8 +31,7 @@ struct EstimateCreationRecovery {
         return zip(request.lines, created.lines).allSatisfy { requested, saved in
             guard requested.description == saved.description, requested.quantity == saved.quantity,
                   requested.unitPrice == saved.unitPrice else { return false }
-            if let group = requested.group, saved.group != group { return false }
-            if let visible = requested.showToCustomer, (saved.showToCustomer ?? true) != visible { return false }
+            if (requested.showToCustomer ?? true) != (saved.showToCustomer ?? true) { return false }
             switch requested.source ?? .manual {
             case .manual: return saved.source == nil || saved.source?.kind == "manual"
             case let .priceBookSelection(id, revision):
@@ -42,6 +41,19 @@ struct EstimateCreationRecovery {
             case .unsupported: return false
             }
         }
+    }
+
+    enum GroupResult { case preserved, missing, conflicting }
+
+    static func groupResult(_ request: FieldEstimateCreate, created: EstimateRecord) -> GroupResult {
+        guard request.lines.count == created.lines.count else { return .conflicting }
+        var missing = false
+        for (requested, saved) in zip(request.lines, created.lines) {
+            guard let group = requested.group else { continue }
+            guard let actual = saved.group else { missing = true; continue }
+            if actual != group { return .conflicting }
+        }
+        return missing ? .missing : .preserved
     }
 
     /// A fresh read must preserve the saved terms and identity. Storage can normalize record

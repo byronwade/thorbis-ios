@@ -83,6 +83,8 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
             }
             let lines = inputs.enumerated().map { index, value -> [String: Any] in
                 var line = value
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-drop-groups") { line.removeValue(forKey: "group") }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-drop-visibility") { line.removeValue(forKey: "showToCustomer") }
                 line["id"] = String(format: "00000000-0000-4000-8000-%012d", index + 8902)
                 return line
             }

@@ -1159,6 +1159,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-group-feature") { enabledFeatures.append("estimate_line_groups") }
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
