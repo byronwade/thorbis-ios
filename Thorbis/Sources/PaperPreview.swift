@@ -1705,6 +1705,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                  "createdAt": created, "updatedAt": created, "allowedTransitions": [String]()] as [String: Any]
             }
         }
+        // The visit someone is on always has its site, so the iPad sidebar's "On now" card leads with
+        // the same street on every place, as the job itself does.
+        listed = listed.map { row in
+            row["status"] as? String == "in_progress" && row["locationId"] == nil
+                ? row.merging(["locationId": PaperPreview.homeLocationID]) { _, new in new } : row
+        }
         return listed
     }
     /// Owner Home: the July invoice still owed, one sent this morning and one paid off today.
