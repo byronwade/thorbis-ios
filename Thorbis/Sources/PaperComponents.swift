@@ -1316,9 +1316,23 @@ extension StatusWord {
                   tint: pending ? Theme.warning : StatusWord.jobTint(status))
     }
 
-    /// An estimate's or invoice's status ("Unpaid" for an issued invoice).
+    /// An estimate's or invoice's status ("Unpaid" for an issued invoice). The dot takes the
+    /// `DocumentStatus` hue, so a document reads the same on the job, in search and on its own page.
     init(documentStatus status: String) {
-        self.init(text: status == "issued" ? "Unpaid" : status.statusLabel, tint: StatusWord.documentTint(status))
+        self.init(text: status == "issued" ? "Unpaid" : status.statusLabel, tint: StatusWord.documentTone(status)?.hue)
+    }
+
+    /// The `DocumentStatus` tone for a bare status word, estimate or invoice (staff screens). Nil
+    /// for anything that isn't a document status (a search hit's "active"), which keeps no dot.
+    static func documentTone(_ status: String) -> StatusTone? {
+        switch status {
+        case "viewed", "approved", "declined": DocumentStatus(estimateStatus: status).tone
+        case "draft", "sent", "issued", "open", "partial", "partially_paid", "paid", "overdue", "void", "voided":
+            DocumentStatus(invoiceStatus: status, amountPaid: 0, balance: nil).tone
+        case "completed": .done
+        case "canceled", "cancelled": .cancelled
+        default: nil
+        }
     }
 
     static func jobTint(_ status: String) -> Color? {
@@ -1330,6 +1344,7 @@ extension StatusWord {
         }
     }
 
+    /// Customer mode's document colours (its own presentation; staff screens use `documentTone`).
     static func documentTint(_ status: String) -> Color? {
         switch status {
         case "approved", "paid", "completed": Theme.success

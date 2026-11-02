@@ -1447,11 +1447,24 @@ struct JobDetailView: View {
                 if let balance = invoiceBalanceCents, balance > 0 {
                     // What is owed now, in the type colour; it opens Money.
                     Button { withMotion(.snappy) { selectedTab = "Money" } } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                            Spacer(minLength: 8)
-                            Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
-                                .foregroundStyle(Theme.foreground)
+                        let amount = Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Group {
+                            if typeSize.isAccessibilitySize {
+                                // The amount reads under the label, as in `moneyLine`: side by side it
+                                // broke mid-number ("$340.0" over "0").
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    amount
+                                }
+                            } else {
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    Spacer(minLength: 8)
+                                    amount
+                                }
+                            }
                         }
                         .padding(.horizontal, 16).padding(.vertical, 11)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -1488,21 +1501,18 @@ struct JobDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The estimate's word and mark as its own page and the lists show them (`DocumentStatus`).
     private func estimateWord(_ status: String) -> (String, StatusTone) {
-        switch status {
-        case "approved": ("Approved", .done)
-        case "sent": ("Sent", .dispatched)
-        case "declined": ("Declined", .attention)
-        default: (status.statusLabel, .unscheduled)
-        }
+        let document = DocumentStatus(estimateStatus: status)
+        return (document.word, document.tone)
     }
 
+    /// The invoice's word and mark as its own page and the lists show them; an issued invoice with
+    /// nothing left to collect still reads "Issued".
     private func invoiceWord(_ invoice: InvoiceRecord, due: Int?) -> (String, StatusTone) {
-        switch invoice.status {
-        case "issued": (due ?? 0) > 0 ? ("Unpaid", .inProgress) : ("Issued", .unscheduled)
-        case "paid": ("Paid", .done)
-        default: (invoice.status.statusLabel, .unscheduled)
-        }
+        if invoice.status == "issued", invoice.amountPaid == 0, (due ?? 0) <= 0 { return ("Issued", .unscheduled) }
+        let document = DocumentStatus(invoice: invoice)
+        return (document.word, document.tone)
     }
 
     /// Open follow-ups, waiting on the office; Open goes to the follow-ups screen.

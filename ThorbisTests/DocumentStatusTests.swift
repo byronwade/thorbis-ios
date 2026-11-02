@@ -24,6 +24,14 @@ final class DocumentStatusTests: XCTestCase {
         XCTAssertEqual(StatusTone(invoice: invoice("issued", paid: 10_000)), .inProgress)
     }
 
+    /// A bare status word (job Money, search) takes the same tone as the document's own page.
+    func testStatusWordToneMatchesTheDocumentPage() {
+        XCTAssertEqual(StatusWord.documentTone("sent"), DocumentStatus(estimateStatus: "sent").tone)
+        XCTAssertEqual(StatusWord.documentTone("issued"), DocumentStatus(invoice: invoice("issued")).tone)
+        XCTAssertEqual(StatusWord.documentTone("approved"), .done)
+        XCTAssertNil(StatusWord.documentTone("active"), "Not a document status: no dot")
+    }
+
     func testFullyPaidIssuedInvoiceReadsPaidNotPartPaid() {
         XCTAssertEqual(DocumentStatus(invoice: invoice("issued", paid: 48_000)), DocumentStatus(tone: .invoiced, word: "Paid"))
     }
