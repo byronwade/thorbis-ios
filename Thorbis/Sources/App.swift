@@ -63,7 +63,7 @@ struct ThorbisApp: App {
             JobInvoiceMemory.clear()
             JobChecklistStore.clearAll()
             OfficeContact.clearAll()
-            Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }
+            Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear(); DayMoney.shared.reset() }
         }
         session.onVerifiedIdentity = { [weak inboxBoard, weak store, weak outbox, weak pendingMedia, weak api] actorID, organizationID in
             if let actorID, let organizationID {

@@ -172,6 +172,7 @@ struct TabletRoot: View {
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var pendingMedia: PendingMediaStore
+    @ObservedObject private var dayMoney = DayMoney.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var tab: TabletSection = .schedule
@@ -591,13 +592,16 @@ struct TabletRoot: View {
     private func sidebarCount(_ item: MenuItem) -> PlaceCount? {
         switch item {
         case .schedule:
-            let left = TodayNumbers.left(TodayNumbers.visits(store.jobs, assignee: nil))
+            let mine = ScheduleScope.initial(schedulesOwnDay: WorkRole(session).schedulesOwnDay, actorID: session.user?.id)
+            let left = TodayNumbers.left(
+                TodayNumbers.visits(store.jobs, assignee: mine.assignee(session.user?.id, range: .today))
+            ) { outbox.pendingStatus(for: $0.id) ?? $0.status }
             return left > 0 ? PlaceCount(text: "\(left) left", spoken: "\(left) stop\(left == 1 ? "" : "s") left today") : nil
         case .jobs:
             let open = TodayNumbers.open(store.jobs)
             return PlaceCount.number(open, spoken: "\(open) open")
         case .money:
-            guard let due = DayMoney.shared.totalDue, due > 0 else { return nil }
+            guard let due = dayMoney.totalDue, due > 0 else { return nil }
             return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
         default: return nil
         }

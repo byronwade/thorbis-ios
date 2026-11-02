@@ -112,9 +112,10 @@ enum TodayNumbers {
         }
     }
 
-    /// Stops not finished yet.
+    /// Stops not finished yet. Queued complete or cancel (via `status`) drop the stop so Today
+    /// and the sidebar stay in lockstep.
     static func left(_ visits: [Job], status: (Job) -> String = { $0.status }) -> Int {
-        visits.filter { status($0) != "completed" }.count
+        visits.filter { !["completed", "canceled"].contains(status($0)) }.count
     }
 
     /// Booked stops whose time has passed (the list's "Late" word, counted).

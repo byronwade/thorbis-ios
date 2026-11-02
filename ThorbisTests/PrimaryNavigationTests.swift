@@ -129,5 +129,26 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(TodayNumbers.late(mine, now: now), 1)
         XCTAssertEqual(TodayNumbers.open(jobs), 3)
         XCTAssertEqual(TodayNumbers.visits(jobs, assignee: nil, now: now).count, 4)
+        let queued: [String: String] = ["b": "completed", "c": "canceled"]
+        let status = { (job: Job) in queued[job.id] ?? job.status }
+        XCTAssertEqual(TodayNumbers.left(mine, status: status), 0,
+                       "A queued complete or cancel drops the stop, as Today already does")
+        XCTAssertEqual(TodayNumbers.left(TodayNumbers.visits(jobs, assignee: nil, now: now), status: status), 1,
+                       "Everyone's leftover still counts the other person's open stop")
+    }
+
+    func testDayMoneyResetClearsTotalsSoTheSameIdentityLoadsAgain() async {
+        defer { DayMoney.shared.reset() }
+        let invoice = #"{"items":[{"id":"00000000-0000-4000-8000-00000000000a","organizationId":"org","customerId":"00000000-0000-4000-8000-000000000003","jobId":"job","createdByUserId":"00000000-0000-4000-8000-000000000004","origin":"manual","sourceOperationKey":"manual:test","status":"issued","lines":[{"id":"00000000-0000-4000-8000-000000000009","description":"Repair","quantity":1,"unitPrice":{"amount":124000,"currency":"USD"}}],"linesRevision":1,"amountPaid":0,"currency":"USD","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}]}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, invoice), .init(200, invoice)]),
+                            baseURL: "https://app.thorbis.com")
+        await DayMoney.shared.load(api: api, organizationID: "org", identity: "tech|org|1")
+        XCTAssertEqual(DayMoney.shared.totalDue, 124_000)
+        XCTAssertEqual(DayMoney.shared.dueByJob["job"], 124_000)
+        DayMoney.shared.reset()
+        XCTAssertNil(DayMoney.shared.totalDue)
+        XCTAssertTrue(DayMoney.shared.dueByJob.isEmpty)
+        await DayMoney.shared.loadIfNeeded(api: api, organizationID: "org", identity: "tech|org|1")
+        XCTAssertEqual(DayMoney.shared.totalDue, 124_000, "Sign-out reset must not leave the old identity blocking a reload")
     }
 }
