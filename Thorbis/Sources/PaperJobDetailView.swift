@@ -198,7 +198,8 @@ struct JobDetailView: View {
                         .padding(.top, selectedTab == "Overview" ? (isOnSite ? 12 : 14) : 8)
                         .padding(.bottom, 28)
                     } header: {
-                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card) }
+                        // Inset 1pt so the pinned tabs never cut the sheet's rim.
+                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card.padding(.horizontal, 1)) }
                     }
                     }
                     }
@@ -442,6 +443,7 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
+            Group {
             if job != nil, selectedTab == "Activity", !showsPhotos, session.can("job.note", feature: "jobs") {
                 // JobActivity.dc.html: the composer stays at the bottom, quick notes above it.
                 // Its ground runs past the home indicator to the screen's edge, so no timeline
@@ -451,6 +453,10 @@ struct JobDetailView: View {
                         Theme.card.padding(.bottom, -120).ignoresSafeArea()
                     }
             } else if !typeSize.isAccessibilitySize { primaryAction.environment(\.thorbisSheetCanvas, true) }
+            }
+            // 1pt in from each side, so every bar (Overview, Money, Activity's composer) sits inside
+            // the job's sheet and the sheet's rim runs on to the bottom edge.
+            .padding(.horizontal, 1)
         }
         .sheet(isPresented: $showPause) { SheetSurface {
             // v2 modal: two sunk fields, one ink commit in the sheet's pad. The commit is never

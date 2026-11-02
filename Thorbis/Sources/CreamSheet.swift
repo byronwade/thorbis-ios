@@ -465,7 +465,8 @@ struct MapStrip: View {
             let pin = CGPoint(x: w * 0.57, y: h * 0.27)
             let ring = Path(ellipseIn: CGRect(x: pin.x - 9, y: pin.y - 9, width: 18, height: 18))
             context.fill(ring, with: .color(Theme.brand))
-            context.stroke(ring, with: .color(.white), lineWidth: 3)
+            // The ring is the sheet the strip sits on, so in dark it stays a grey, not a white halo.
+            context.stroke(ring, with: .color(Theme.card), lineWidth: 3)
         }
         .background(Theme.fill)
         .aspectRatio(aspect, contentMode: .fit)
