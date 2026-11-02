@@ -38,7 +38,10 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
             return lock.withLock {
                 if request.cachePolicy == .reloadIgnoringLocalCacheData { estimateReads += 1 }
                 guard var estimate = savedEstimate else { return Reply(status: 404, payload: ["title": "Sample missing", "status": 404]) }
-                if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-changed") { estimate["title"] = "Changed sample estimate" }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-changed") ||
+                    (ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-changed-after-link") && links > 0) {
+                    estimate["title"] = "Changed sample estimate"
+                }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-normalized-dates") {
                     estimate["createdAt"] = "2026-10-29T00:00:00.000Z"
                     estimate["updatedAt"] = "2026-10-29T00:00:00.000Z"
