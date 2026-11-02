@@ -13,6 +13,17 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-02-clear-note-box",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "text.bubble", title: "The note box is easy to spot",
+                      detail: "In a job's Activity, the note box has its own edge in light and dark, so you can see where to type."),
+                .init(symbol: "creditcard", title: "Done stays off Record payment",
+                      detail: "With the number pad up in Collect payment, Done sits above the record button instead of over it."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
             id: "2026-11-02-steady-job-page",
             date: "2026-11-02",
             highlights: [

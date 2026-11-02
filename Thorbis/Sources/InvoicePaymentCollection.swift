@@ -1011,6 +1011,9 @@ struct InvoicePaymentCollectionSheet: View {
 
                 footer
             }
+            // The number pad's Done, with the footer lifted clear of it: the bare Done bar floated
+            // over the commit's trailing end.
+            .keyboardDoneButton()
             .background(Theme.surface.ignoresSafeArea())
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Collect payment")
@@ -1020,7 +1023,6 @@ struct InvoicePaymentCollectionSheet: View {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     PaperCircleButton(symbol: "xmark", label: "Close", size: 30, fill: Theme.fill) { dismiss() }
                 }
-                ThorbisKeyboardDoneBar { amountFocused = false }
             }
             .thorbisDestination(isPresented: $showPayLinkShare) {
                 InvoicePaymentLinkView(
