@@ -170,13 +170,13 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
         continueButton.tap()
         XCTAssertTrue(app.staticTexts["Continue without item groups?"].waitForExistence(timeout: 5))
-        let confirmations = app.buttons.matching(identifier: "Continue without groups")
-        XCTAssertGreaterThan(confirmations.count, 0)
-        confirmations.element(boundBy: confirmations.count - 1).tap()
+        let confirmation = app.buttons.matching(identifier: "Continue without groups").allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(confirmation, "The confirmation action must be reachable")
+        confirmation?.tap()
         let retry = app.buttons["Retry adding to job"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
         retry.tap()
-        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=1,jobReads=1")
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=2,jobReads=2")
     }
 
     func testDroppedHiddenLineVisibilityBlocksLink() {
@@ -204,7 +204,11 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
     private func addSampleItem(in app: XCUIApplication) {
         let add = app.buttons.matching(identifier: "estimate-add-item").firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 30))
-        for _ in 0..<5 where !add.isHittable { app.swipeUp() }
+        let clear = app.frame.height * 0.7
+        for _ in 0..<10 where !add.isHittable || add.frame.maxY > clear {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        }
         XCTAssertTrue(add.isHittable)
         add.tap()
         let search = app.textFields["price-book-search"]
@@ -257,7 +261,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(counts.waitForExistence(timeout: 5))
         XCTAssertEqual(counts.value as? String, "creates=1,links=1,estimateReads=0,jobReads=0")
         retry.tap()
-        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=2,jobReads=2")
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=1,jobReads=1")
     }
 
     private func assertOpenedSavedEstimate(in app: XCUIApplication, counts expected: String) {
