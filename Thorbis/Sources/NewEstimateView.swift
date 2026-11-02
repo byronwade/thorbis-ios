@@ -28,12 +28,14 @@ struct NewEstimateView: View {
     @State private var customerProblem: String?
     @State private var linesProblem: String?
     private let jobID: String?
+    private let jobLocationID: String?
     private let onCreated: (EstimateRecord) -> Void
 
-    init(customerID: String = "", jobID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
+    init(customerID: String = "", jobID: String? = nil, locationID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
         _customerID = State(initialValue: customerID)
         _title = State(initialValue: title)
         self.jobID = jobID
+        self.jobLocationID = jobID == nil ? nil : locationID
         self.onCreated = onCreated
     }
 
@@ -229,6 +231,23 @@ struct NewEstimateView: View {
         return valid
     }
 
+    /// Carry the job location into the estimate so the server can link matching records.
+    /// The link command remains authoritative if the job has changed since this form opened.
+    func creationRequest() -> FieldEstimateCreate {
+        FieldEstimateCreate(
+            customerId: customerID,
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            lines: lines.map { line in
+                let presentation = lines.storedPresentation(of: line, storesGroups: storesLineGroups)
+                return .init(description: line.description.trimmingCharacters(in: .whitespacesAndNewlines),
+                             quantity: Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1,
+                             unitPrice: .init(amount: MoneyInput.cents(line.unitPrice) ?? 0, currency: "USD"),
+                             source: line.source ?? .manual,
+                             group: presentation.group, showToCustomer: presentation.showToCustomer)
+            },
+            locationId: jobLocationID)
+    }
+
     private func save() async {
         guard valid else { return }
         busy = true
@@ -238,17 +257,7 @@ struct NewEstimateView: View {
             if let created {
                 estimate = created
             } else {
-                estimate = try await api.createFieldEstimate(.init(
-                    customerId: customerID,
-                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                    lines: lines.map { line in
-                        let presentation = lines.storedPresentation(of: line, storesGroups: storesLineGroups)
-                        return .init(description: line.description.trimmingCharacters(in: .whitespacesAndNewlines),
-                                     quantity: Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1,
-                                     unitPrice: .init(amount: MoneyInput.cents(line.unitPrice) ?? 0, currency: "USD"),
-                                     source: line.source ?? .manual,
-                                     group: presentation.group, showToCustomer: presentation.showToCustomer)
-                    }))
+                estimate = try await api.createFieldEstimate(creationRequest())
                 created = estimate
                 // On a job, the estimate opens only once it's attached; an unattached one in job
                 // context would never count as the job's estimate.
