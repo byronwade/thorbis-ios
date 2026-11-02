@@ -26,6 +26,9 @@ struct NewEstimateView: View {
     @State private var createdScope: EstimateCreationScope?
     @State private var requiresLocationVerification = false
     @State private var requiresManualReview = false
+    @State private var requiresGroupDisclosure = false
+    @State private var acceptedGroupLoss = false
+    @State private var confirmGroupLoss = false
     @State private var createOutcomeUncertain = false
     @State private var memberPricing: MemberPricing?
     /// Shown after Save is pressed (validate on commit): what is missing, under its place.
@@ -148,6 +151,13 @@ struct NewEstimateView: View {
                 )
                 .environmentObject(session).environmentObject(api)
             } }
+            .thorbisConfirm("Continue without item groups?",
+                            message: "The saved estimate did not keep the Work and Materials groups. Item descriptions, prices and visibility are unchanged. Continue without those groups, or ask your office for help.",
+                            isPresented: $confirmGroupLoss,
+                            actions: [ThorbisConfirmAction("Continue without groups") {
+                                acceptedGroupLoss = true
+                                Task { await save() }
+                            }])
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .onChange(of: customerID) { _, _ in customerProblem = nil }
@@ -183,7 +193,8 @@ struct NewEstimateView: View {
             PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
                            disabled: !canCommit,
                            disabledReason: canCommit ? nil : (requiresManualReview ? "Ask your office to review the saved estimate." : createOutcomeUncertain ? "Check Estimates or ask your office before starting another." : created == nil ? "Your role can't create estimates. Ask your office." : jobID == nil ? "Your role can't view this estimate. Ask your office." : "Your role can't add this estimate to the job. Ask your office.")) {
-                if showProblems() { Task { await save() } }
+                if requiresGroupDisclosure && !acceptedGroupLoss { confirmGroupLoss = true }
+                else if showProblems() { Task { await save() } }
             }
         }
         // The floating keyboard accessory is 44pt high and otherwise sits over Save.
@@ -198,7 +209,10 @@ struct NewEstimateView: View {
     }
 
     private var commitTitle: String {
-        if created != nil { return jobID == nil ? "Open saved estimate" : "Retry adding to job" }
+        if created != nil {
+            if requiresGroupDisclosure && !acceptedGroupLoss { return "Continue without groups" }
+            return jobID == nil ? "Open saved estimate" : "Retry adding to job"
+        }
         guard let total else { return "Save estimate" }
         return "Save estimate · \(money(total, currency: "USD"))"
     }
@@ -342,7 +356,8 @@ struct NewEstimateView: View {
     }
 
     private func save() async {
-        guard !requiresManualReview, recovery.mayProceed(validDraft: valid) else { return }
+        guard !requiresManualReview, (!requiresGroupDisclosure || acceptedGroupLoss),
+              recovery.mayProceed(validDraft: valid) else { return }
         guard let scope = creationScope else {
             error = "Your session changed. Check your workspace before continuing."
             return
@@ -413,11 +428,27 @@ struct NewEstimateView: View {
                 created = estimate
                 createdScope = scope
                 requiresLocationVerification = estimate.locationId != jobLocationID
+                let groupResult = EstimateCreationRecovery.groupResult(submitted, created: estimate)
                 requiresManualReview = !EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: estimate) ||
-                    (jobID == nil && requiresLocationVerification)
+                    groupResult == .conflicting || (jobID == nil && requiresLocationVerification)
+                // Missing groups are irrelevant for an all-Work estimate unless a person moved
+                // a line or a price-book material may be reclassified after reopening.
+                let groupsMatter = lines.contains { line in
+                    if line.group == .material { return true }
+                    if case let .priceBookSelection(id, _) = line.source {
+                        guard let kind = catalog.items.first(where: { $0.id == id })?.kind else { return true }
+                        return kind == "material"
+                    }
+                    return false
+                }
+                requiresGroupDisclosure = groupResult == .missing && groupsMatter
                 guard creationScope == scope else { return }
                 if requiresManualReview {
                     error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but its details differ from your submission. Ask your office to review it."
+                    return
+                }
+                if requiresGroupDisclosure {
+                    error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved without its item groups. Review this before continuing."
                     return
                 }
                 if requiresLocationVerification {

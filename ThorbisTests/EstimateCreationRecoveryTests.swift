@@ -67,6 +67,15 @@ extension EstimateCreationRecoveryTests {
         hiddenResponse["lines"] = hiddenLines
         let hidden = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: hiddenResponse))
         XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(.init(customerId: created.customerId, title: created.title, lines: explicitlyVisible), created: hidden))
+        XCTAssertFalse(EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: hidden), "Omitted visibility means visible")
+        let requestedGroup = FieldEstimateCreate(customerId: created.customerId, title: created.title, lines: hiddenMaterial)
+        XCTAssertEqual(EstimateCreationRecovery.groupResult(requestedGroup, created: created), .missing)
+        var wrongGroupJSON = fixture
+        var wrongGroupLines = try XCTUnwrap(wrongGroupJSON["lines"] as? [[String: Any]])
+        wrongGroupLines[0]["group"] = "work"
+        wrongGroupJSON["lines"] = wrongGroupLines
+        let wrongGroup = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: wrongGroupJSON))
+        XCTAssertEqual(EstimateCreationRecovery.groupResult(requestedGroup, created: wrongGroup), .conflicting)
         var wrongSource = inputs
         let line = created.lines[1]
         wrongSource[1] = .init(description: line.description, quantity: line.quantity, unitPrice: line.unitPrice, source: .manual)
