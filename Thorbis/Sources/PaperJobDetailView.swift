@@ -1719,7 +1719,7 @@ struct JobDetailView: View {
         JobPanel(dividers: false) {
         VStack(alignment: .leading, spacing: 0) {
             // The visit's time and the job number are said once, in the header (chip and eyebrow).
-            DisclosureGroup("More job details") {
+            DisclosureGroup {
                 if let created = JobFiltering.date(job.createdAt) {
                     PaperDetailRow("Booked", value: created.formatted(.dateTime.month(.abbreviated).day().year()))
                 }
@@ -1731,10 +1731,14 @@ struct JobDetailView: View {
                         }
                     }
                 }
+            } label: {
+                // The whole row toggles, 44pt tall; the bare title was a 25pt target.
+                Text("More job details")
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .font(Theme.font(15, weight: .medium))
             .tint(Theme.foreground)
-            .frame(minHeight: 44)
         }
         .padding(.horizontal, 16).padding(.vertical, 4)
         }
@@ -2096,7 +2100,10 @@ struct JobDetailView: View {
                     .focused($noteFocused)
                     .padding(.horizontal, 16).padding(.vertical, roomy ? 12 : 6)
                     .frame(minHeight: 44)
-                    .panelBackground(cornerRadius: 23)
+                    // The sunk field and its 1px rim: the panel ground matched the bar's, so the
+                    // field had no edge in light or dark.
+                    .background(Theme.field, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false))
                     .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .accessibilityIdentifier("job-note-field")
                 DictateNoteButton(isListening: dictation.isListening) {
