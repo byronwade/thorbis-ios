@@ -345,9 +345,16 @@ struct PriceBookResultsList: View {
                     Button { addCustomLine(trimmedQuery) } label: {
                         HStack(spacing: 12) {
                             PaperCircleLabel(symbol: "plus", size: 32)
-                            Text(trimmedQuery.isEmpty ? "Add a custom item" : "Add \u{201C}\(trimmedQuery)\u{201D} as a custom item")
-                                .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .multilineTextAlignment(.leading)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Add a custom item")
+                                    .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                if !trimmedQuery.isEmpty {
+                                    Text(trimmedQuery)
+                                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 10).frame(minHeight: 56).contentShape(Rectangle())

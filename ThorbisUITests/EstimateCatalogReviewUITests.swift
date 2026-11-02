@@ -44,9 +44,20 @@ final class EstimateCatalogReviewUITests: XCTestCase {
     }
 
     func testLongCustomDescriptionRemainsEditableAndExplainsSaveLimit() {
+        checkLongCustomDescriptionAtKeyboard(largeText: false)
+    }
+
+    func testLongCustomDescriptionAndSaveStayReachableAtLargestText() {
+        checkLongCustomDescriptionAtKeyboard(largeText: true)
+    }
+
+    private func checkLongCustomDescriptionAtKeyboard(largeText: Bool) {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         app.launch()
         openPicker(app.buttons.matching(identifier: "estimate-add-item").firstMatch, in: app)
         let search = app.textFields["price-book-search"]
@@ -56,6 +67,7 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         search.typeText(fullDescription)
         let add = app.buttons["price-book-add-custom"]
         XCTAssertTrue(add.waitForExistence(timeout: 10))
+        if largeText { XCTAssertLessThanOrEqual(add.frame.height, app.frame.height / 2, "A long query must not make the custom-item action taller than half the screen") }
         add.tap()
         let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
         XCTAssertTrue(description.waitForExistence(timeout: 10))
@@ -67,6 +79,8 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         save.tap()
         let warning = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Error: Item descriptions can be up to 200 characters")).firstMatch
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        XCTAssertTrue(warning.isHittable, "The warning must remain visible while the keyboard is open")
+        XCTAssertTrue(save.isHittable, "Save must remain reachable while the warning is displayed")
         XCTAssertEqual(description.value as? String, fullDescription)
     }
 
