@@ -69,10 +69,17 @@ final class EstimateCatalogReviewUITests: XCTestCase {
     func testRevisionShowsLengthWarningWhenSavingWithNumberKeyboardOpen() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "builder-line"]
+        // This preview has a sent revision and valid manual/Price Book source identities.
+        // The builder-line showcase intentionally includes incomplete Price Book provenance,
+        // which correctly disables editing and is not a suitable editor fixture.
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision"]
         app.launch()
+        let line = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Compressor diagnostic")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 30))
+        line.tap()
         let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
         XCTAssertTrue(description.waitForExistence(timeout: 30))
+        XCTAssertTrue(description.isEnabled, "The revision fixture must be editable with supported provenance")
         description.tap()
         description.typeText(String(repeating: "x", count: 201))
         let price = app.textFields["Price each in dollars"]

@@ -30,6 +30,13 @@ Evidence and limitations:
   The revision UI test failed before entering text because its `builder-line`
   preview has unsupported provenance and disables editing. Neither test
   establishes that the keyboard layout or warning is usable.
+- Follow-up fixture correction: the revision UI test now opens
+  `estimate-revision`, selects the `Compressor diagnostic` line, and explicitly
+  asserts it is enabled. That preview uses the sent `PaperPreview.estimate`,
+  whose main and option lines have supported manual or Price Book source
+  identities; unlike `builder-line`, it does not use `optionsEstimate`'s
+  incomplete Price Book source. This is a source inspection, not a test pass.
+  The corrected test remains unrun while the simulator is unstable.
 - A preceding UI recording showed the number keyboard covering Save
   (`/private/tmp/textloss-fail-frame.png`). The candidate's keyboard-aware
   layout has not been qualified against a completed UI run.
