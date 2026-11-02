@@ -1447,14 +1447,24 @@ struct JobDetailView: View {
                 if let balance = invoiceBalanceCents, balance > 0 {
                     // What is owed now, in the type colour; it opens Money.
                     Button { withMotion(.snappy) { selectedTab = "Money" } } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                            Spacer(minLength: 8)
-                            // Never broken mid-number at accessibility sizes ("$340.0" over "0"):
-                            // the amount goes first and the label wraps instead.
-                            Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
-                                .foregroundStyle(Theme.foreground)
-                                .lineLimit(1).layoutPriority(1)
+                        let amount = Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Group {
+                            if typeSize.isAccessibilitySize {
+                                // The amount reads under the label, as in `moneyLine`: side by side it
+                                // broke mid-number ("$340.0" over "0").
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    amount
+                                }
+                            } else {
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    Spacer(minLength: 8)
+                                    amount
+                                }
+                            }
                         }
                         .padding(.horizontal, 16).padding(.vertical, 11)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
