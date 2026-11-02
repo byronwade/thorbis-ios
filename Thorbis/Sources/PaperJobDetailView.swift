@@ -443,6 +443,7 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
+            Group {
             if job != nil, selectedTab == "Activity", !showsPhotos, session.can("job.note", feature: "jobs") {
                 // JobActivity.dc.html: the composer stays at the bottom, quick notes above it.
                 // Its ground runs past the home indicator to the screen's edge, so no timeline
@@ -452,6 +453,10 @@ struct JobDetailView: View {
                         Theme.card.padding(.bottom, -120).ignoresSafeArea()
                     }
             } else if !typeSize.isAccessibilitySize { primaryAction.environment(\.thorbisSheetCanvas, true) }
+            }
+            // 1pt in from each side, so every bar (Overview, Money, Activity's composer) sits inside
+            // the job's sheet and the sheet's rim runs on to the bottom edge.
+            .padding(.horizontal, 1)
         }
         .sheet(isPresented: $showPause) { SheetSurface {
             // v2 modal: two sunk fields, one ink commit in the sheet's pad. The commit is never
@@ -1034,8 +1039,7 @@ struct JobDetailView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
-            // Inset 1pt so the bar sits inside the job's sheet and its rim runs on to the bottom.
-            .background { Rectangle().fill(Theme.canvas).padding(.horizontal, 1).ignoresSafeArea(edges: .bottom) }
+            .background(Theme.canvas)
         }
     }
 
