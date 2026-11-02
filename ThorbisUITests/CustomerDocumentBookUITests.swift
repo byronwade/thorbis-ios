@@ -135,10 +135,28 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Hand back to the technician"].exists)
         app.buttons["Back to job documents"].tap()
-        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 15))
+        let position = app.staticTexts["customer-document-position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Approved"].waitForExistence(timeout: 10))
-        app.buttons["Next document"].tap()
-        XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 10))
+        // Approval refreshes membership. Wait until both estimates are back in the book before
+        // paging — tapping Next while the second id is still unavailable lands on the refresh
+        // placeholder instead of "Sample additional work".
+        let bothReady = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "of 2"), object: position)
+        XCTAssertEqual(XCTWaiter.wait(for: [bothReady], timeout: 15), .completed,
+                       "Refresh must keep both estimates in the book")
+        let next = app.buttons["Next document"]
+        let nextReady = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isEnabled == true AND isHittable == true"), object: next)
+        XCTAssertEqual(XCTWaiter.wait(for: [nextReady], timeout: 10), .completed)
+        next.tap()
+        let title = app.staticTexts["Sample additional work"]
+        if !title.waitForExistence(timeout: 5)
+            && app.buttons["Refresh documents"].waitForExistence(timeout: 2) {
+            // Second estimate linked but not yet readable — pull it, then the title appears.
+            app.buttons["Refresh documents"].tap()
+        }
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["customer-book-review-sign"].waitForExistence(timeout: 10))
     }
 
