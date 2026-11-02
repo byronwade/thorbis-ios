@@ -39,14 +39,22 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
                 if request.cachePolicy == .reloadIgnoringLocalCacheData { estimateReads += 1 }
                 guard var estimate = savedEstimate else { return Reply(status: 404, payload: ["title": "Sample missing", "status": 404]) }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-changed") { estimate["title"] = "Changed sample estimate" }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-normalized-dates") {
+                    estimate["createdAt"] = "2026-10-29T00:00:00.000Z"
+                    estimate["updatedAt"] = "2026-10-29T00:00:00.000Z"
+                }
                 return Reply(status: 200, payload: estimate)
             }
         }
         if request.httpMethod == "GET", path == "/v1/jobs/\(PaperPreview.jobID)" {
             if request.cachePolicy == .reloadIgnoringLocalCacheData { lock.withLock { jobReads += 1 } }
-            return Reply(status: 200, payload: ["id": PaperPreview.jobID, "organizationId": PaperPreview.organizationID,
+            var job: [String: Any] = ["id": PaperPreview.jobID, "organizationId": PaperPreview.organizationID,
                 "customerId": PaperPreview.customerID, "title": "Sample job", "status": "in_progress",
-                "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"])
+                "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-matching-location") {
+                job["locationId"] = "00000000-0000-4000-8000-000000009999"
+            }
+            return Reply(status: 200, payload: job)
         }
         guard request.httpMethod == "POST" else { return nil }
         if path == "/v1/estimates" {
@@ -82,6 +90,9 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
                 "customerId": customer, "createdByUserId": PaperPreview.actorID, "status": "draft", "title": title,
                 "lines": lines, "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]
             if let location = input["locationId"] { estimate["locationId"] = location }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-other-location") {
+                estimate["locationId"] = "00000000-0000-4000-8000-000000009999"
+            }
             lock.withLock { savedEstimate = estimate }
             return Reply(status: 201, payload: estimate, hold: ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold"))
         }
