@@ -4,6 +4,8 @@ Customer Money keeps estimates and invoices grouped by job and keeps the existin
 
 The conservative freshness label is deliberate: the API may return saved copies for some pages while the compilation succeeds. The current compilation cannot reliably attribute freshness to every record, including mixed live and cached pagination. A later provenance-aware implementation may distinguish fresh data.
 
+Review follow-up: an issued invoice with a positive recorded payment and a checked positive remaining balance now reads “Last known: Part paid” and shows the last-known paid amount alongside its total. A checked open invoice with no recorded payments reads “Last known: Unpaid”. A paid, void, or overdue status is taken from the server record. An open invoice is never called paid solely because its stored paid amount reaches the computed line total; that requires payment reconciliation. Unknown or invalid amounts do not infer payment state. All status wording is labeled last known because per-record cache provenance is unavailable. The added status tests and updated UI expectation have not yet run.
+
 | Check | Status and evidence |
 | --- | --- |
 | Feature retention and authority | Existing grouped and off-job navigation values retained; document records continue to be filtered by customer and organization by the existing compilation. |
