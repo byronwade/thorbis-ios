@@ -315,13 +315,23 @@ struct CustomerMoneyRow: Identifiable {
 
     static func invoice(_ invoice: InvoiceRecord) -> Self {
         let isVoid = invoice.status == "void" || invoice.status == "voided"
-        let status = DocumentStatus(tone: invoice.status == "paid" ? .done : isVoid ? .cancelled : .scheduled,
-                                    word: invoice.status.statusLabel)
         let amounts = invoice.currency == "USD"
             ? CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) : nil
+        let isOpen = ["issued", "sent", "open"].contains(invoice.status)
+        let baseStatus: DocumentStatus
+        if isOpen && (amounts == nil || amounts?.due == 0) {
+            // Do not infer a settled invoice from line arithmetic without payment reconciliation.
+            baseStatus = DocumentStatus(tone: .scheduled, word: invoice.status.statusLabel)
+        } else {
+            baseStatus = DocumentStatus(invoiceStatus: invoice.status, amountPaid: invoice.amountPaid,
+                                        balance: amounts?.due)
+        }
+        let status = DocumentStatus(tone: baseStatus.tone, word: "Last known: \(baseStatus.word)")
         let total = isVoid ? nil : amounts?.total
+        let paid = !isVoid && invoice.status != "draft" && amounts != nil && invoice.amountPaid > 0
+            ? "Last known paid \(money(invoice.amountPaid, currency: invoice.currency))" : nil
         return Self(id: invoice.id, kind: "invoice", route: .invoice(invoice.id), title: "Invoice",
-                    reference: "INV-\(invoice.id.suffix(4).uppercased())", status: status, meta: nil,
+                    reference: "INV-\(invoice.id.suffix(4).uppercased())", status: status, meta: paid,
                     amount: total.map { money($0, currency: invoice.currency) },
                     amountNote: total != nil ? "Last known total" : nil)
     }

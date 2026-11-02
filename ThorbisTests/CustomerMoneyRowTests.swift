@@ -16,6 +16,8 @@ final class CustomerMoneyRowTests: XCTestCase {
         XCTAssertEqual(row.reference, "INV-2209")
         XCTAssertEqual(row.amount, money(34_000, currency: "USD"))
         XCTAssertEqual(row.amountNote, "Last known total")
+        XCTAssertEqual(row.status.word, "Last known: Part paid")
+        XCTAssertEqual(row.meta, "Last known paid \(money(10_000, currency: "USD"))")
     }
 
     func testInvoiceTotalIsLabeledAsLastKnownWhenSourceFreshnessIsUnknown() {
@@ -36,6 +38,35 @@ final class CustomerMoneyRowTests: XCTestCase {
                               "unitPrice": ["amount": Int.max, "currency": "USD"]]]
         }
         XCTAssertNil(CustomerMoneyRow.invoice(invoice).amount)
+    }
+
+    func testUnpaidAndServerReportedStatusesStayDistinct() throws {
+        XCTAssertEqual(CustomerMoneyRow.invoice(PaperPreview.issuedInvoice).status.word, "Last known: Unpaid")
+        let overdue = try changingInvoice { $0["status"] = "overdue" }
+        let void = try changingInvoice { $0["status"] = "void" }
+        let paid = try changingInvoice { $0["status"] = "paid" }
+        XCTAssertEqual(CustomerMoneyRow.invoice(overdue).status.word, "Last known: Overdue")
+        XCTAssertEqual(CustomerMoneyRow.invoice(void).status.word, "Last known: Void")
+        XCTAssertEqual(CustomerMoneyRow.invoice(paid).status.word, "Last known: Paid")
+    }
+
+    func testAnIssuedInvoiceIsNotInferredPaidFromUnreconciledAmount() throws {
+        let invoice = try changingInvoice { $0["amountPaid"] = 34_000 }
+        let row = CustomerMoneyRow.invoice(invoice)
+        XCTAssertEqual(row.status.word, "Last known: Issued")
+        XCTAssertEqual(row.meta, "Last known paid \(money(34_000, currency: "USD"))")
+    }
+
+    func testInvalidAmountsDoNotInventPaymentStatus() throws {
+        let invoice = try changingInvoice { json in
+            json["amountPaid"] = 1_000
+            json["lines"] = [["id": "overflow", "description": "Work", "quantity": 2,
+                              "unitPrice": ["amount": Int.max, "currency": "USD"]]]
+        }
+        let row = CustomerMoneyRow.invoice(invoice)
+        XCTAssertEqual(row.status.word, "Last known: Issued")
+        XCTAssertNil(row.meta)
+        XCTAssertNil(row.amount)
     }
 
     private func changingInvoice(_ edit: (inout [String: Any]) -> Void) throws -> InvoiceRecord {

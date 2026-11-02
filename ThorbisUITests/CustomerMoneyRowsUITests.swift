@@ -16,7 +16,7 @@ final class CustomerMoneyRowsUITests: XCTestCase {
         for _ in 0..<8 where !invoice.exists { app.swipeUp() }
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
         XCTAssertTrue(invoice.label.contains("INV-2209"))
-        XCTAssertTrue(invoice.label.contains("Issued"))
+        XCTAssertTrue(invoice.label.contains("Last known: Unpaid"))
         XCTAssertTrue(invoice.label.contains("Last known total"))
         XCTAssertTrue(invoice.label.contains("340.00"))
 
