@@ -1,0 +1,44 @@
+# Estimate description loss — held candidate
+
+This branch is work in progress and is not qualified for merge or TestFlight.
+It starts at release record `8eb4e32`. The staged source and test diff before
+this note had SHA-256 `328004503854397c218aa624ef6c1ed8994d72a89f6e42933799eb4f20a96e1a`.
+`project.yml` was `d70032a3cac9ded75c8599814df84d22e00d7e63c24b406875b63354added94c`,
+and the generated Xcode project was `bb6864d643c01d98ae15aa249fa080b86f9cf9b6927eec4c73b10a295c6a04ec`.
+
+The candidate retains custom and credit descriptions instead of silently
+truncating them. It enforces the current 200 UTF-16-unit estimate bound,
+identifies overlong Price Book source snapshots, and attempts to keep the
+correction and Save action visible with the keyboard open. It does not add
+server support for long descriptions or durable draft storage.
+
+Evidence and limitations:
+
+- `/private/tmp/thorbis-textloss-red2.log`: the custom-line preservation test
+  failed on the original implementation because the ending was truncated.
+- `/private/tmp/thorbis-textloss-warning-credit-red.log`: the credit-line
+  preservation test failed on the original implementation for the same reason.
+- `/private/tmp/thorbis-textloss-revision-red.log`: the revision test failed
+  before the guard for both main and option catalog lines. Its credit test
+  passed after removal of the credit truncation. Its UI selector failed because
+  XCTest rejected an identifier longer than 128 characters.
+- `/private/tmp/thorbis-textloss-final.log`: 35 unit tests passed on a source
+  snapshot built before the final exact-error assertions and re-scroll changes.
+  The first new-estimate UI test was interrupted following a simulator renderer
+  crash; the log reports an unexpected exit and restarts. The diagnostic is
+  `~/Library/Logs/DiagnosticReports/SimRenderServer-2026-11-02-180528.ips`.
+  The revision UI test failed before entering text because its `builder-line`
+  preview has unsupported provenance and disables editing. Neither test
+  establishes that the keyboard layout or warning is usable.
+- A preceding UI recording showed the number keyboard covering Save
+  (`/private/tmp/textloss-fail-frame.png`). The candidate's keyboard-aware
+  layout has not been qualified against a completed UI run.
+
+Before integration: run focused tests on this exact source; repair the revision
+test fixture using a supported, editable estimate without weakening permission
+or provenance checks; verify warning visibility, keyboard reachability,
+repeated scrolling to an already expanded line, multiple invalid lines, and
+correction at large Dynamic Type and on a small phone/iPad window. Review the
+full diff independently, and confirm the backend contract and TestFlight build
+qualification separately. Do not infer a durable draft or successful server
+save from preview tests.

@@ -9,6 +9,7 @@ enum EstimateRevisionEditorError: Error, LocalizedError, Equatable {
     case tooManyLines
     case descriptionRequired
     case descriptionTooLong
+    case priceBookOriginalTooLong
     case invalidQuantity
     case invalidPrice
     case archivedPriceBookItem
@@ -35,6 +36,7 @@ enum EstimateRevisionEditorError: Error, LocalizedError, Equatable {
         case .tooManyLines: "An estimate can contain up to 500 line items."
         case .descriptionRequired: "Enter a description for each line item."
         case .descriptionTooLong: "Line item descriptions can contain up to 200 characters."
+        case .priceBookOriginalTooLong: "A price book item's original description is too long for an estimate. Ask your office to update it, then add it again."
         case .invalidQuantity: "Quantity must be a whole number from 1 to 100,000."
         case .invalidPrice: "Enter a USD price with no more than two decimal places and no more than $1,000,000 per unit."
         case .archivedPriceBookItem: "Archived Price Book items cannot be added to an estimate."
@@ -358,6 +360,9 @@ struct EstimateRevisionEditorState: Equatable {
         guard !drafts.isEmpty else { throw EstimateRevisionEditorError.noLines }
         guard drafts.count <= 500 else { throw EstimateRevisionEditorError.tooManyLines }
         return try drafts.map { draft in
+            guard draft.estimateDescriptionProblem != .priceBookOriginalTooLong else {
+                throw EstimateRevisionEditorError.priceBookOriginalTooLong
+            }
             let description = cleaned(draft.description)
             guard !description.isEmpty else { throw EstimateRevisionEditorError.descriptionRequired }
             guard description.utf16.count <= 200,

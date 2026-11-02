@@ -43,6 +43,50 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         XCTAssertTrue(editableLine.waitForExistence(timeout: 5))
     }
 
+    func testLongCustomDescriptionRemainsEditableAndExplainsSaveLimit() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate"]
+        app.launch()
+        openPicker(app.buttons.matching(identifier: "estimate-add-item").firstMatch, in: app)
+        let search = app.textFields["price-book-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        let fullDescription = String(repeating: "scope ", count: 40) + "last words"
+        search.typeText(fullDescription)
+        let add = app.buttons["price-book-add-custom"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        add.tap()
+        let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
+        XCTAssertTrue(description.waitForExistence(timeout: 10))
+        XCTAssertEqual(description.value as? String, fullDescription)
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch.tap()
+        let warning = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Error: Item descriptions can be up to 200 characters")).firstMatch
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        XCTAssertEqual(description.value as? String, fullDescription)
+    }
+
+    func testRevisionShowsLengthWarningWhenSavingWithNumberKeyboardOpen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "builder-line"]
+        app.launch()
+        let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
+        XCTAssertTrue(description.waitForExistence(timeout: 30))
+        description.tap()
+        description.typeText(String(repeating: "x", count: 201))
+        let price = app.textFields["Price each in dollars"]
+        XCTAssertTrue(price.waitForExistence(timeout: 5))
+        price.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save revised draft")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertTrue(save.isHittable)
+        save.tap()
+        let warning = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Error: Item descriptions can be up to 200 characters")).firstMatch
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+    }
+
     func testReviewKeepsCatalogItemInItsChosenOption() {
         continueAfterFailure = false
         let app = XCUIApplication()
