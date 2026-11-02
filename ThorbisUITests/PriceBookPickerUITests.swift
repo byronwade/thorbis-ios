@@ -140,6 +140,10 @@ final class PriceBookPickerUITests: XCTestCase {
         let added = app.buttons.matching(identifier: last.identifier)
             .matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch
         XCTAssertTrue(added.waitForExistence(timeout: 5))
+        // After the first add the row reflows ("1 in draft"); wait until it is hittable again
+        // before the second tap, or the tap misses under suite load.
+        for _ in 0..<12 where !added.isHittable { catalog(in: app).swipeUp() }
+        XCTAssertTrue(added.isHittable, app.debugDescription)
         added.tap()
         let twice = app.buttons.matching(identifier: last.identifier)
             .matching(NSPredicate(format: "value == %@", "2 in draft")).firstMatch

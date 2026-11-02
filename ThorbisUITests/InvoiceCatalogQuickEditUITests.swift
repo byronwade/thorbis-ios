@@ -86,7 +86,15 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         proof.lifetime = .keepAlways
         add(proof)
 
-        app.buttons["Close line"].firstMatch.tap()
+        // Quantity's number pad covers the Done/"Close line" capsule. Put the keyboard away and
+        // reveal the control before tapping, or the tap is absorbed and the line stays open.
+        if app.keyboardShowing {
+            app.keyboards.firstMatch.swipeDown()
+            _ = app.waitForKeyboardToHide(timeout: 3)
+        }
+        let closeLine = app.buttons["Close line"].firstMatch
+        reveal(closeLine, in: app)
+        closeLine.tap()
         XCTAssertTrue(quantity.waitForNonExistence(timeout: 5))
         let summary = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "10", "245.00")).firstMatch
         XCTAssertTrue(summary.waitForExistence(timeout: 5), "The closed line keeps the edited quantity")

@@ -111,23 +111,26 @@ final class PrimaryNavigationTests: XCTestCase {
     }
 
     func testTodayNumbersCountLeftAndLate() {
-        let now = Date()
-        let iso = ISO8601DateFormatter()
+        // A fixed clock and a fixed-offset calendar keep the counts independent of when and where the
+        // test runs. Wall-clock time broke this on DST days: hours-from-midnight stopped implying a
+        // 24-hour day, so a "future" visit could land in the past and be miscounted as late.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 15, hour: 12))!
+        let iso = ISO8601DateFormatter() // formats in UTC, matching the calendar above
         func job(_ id: String, _ status: String, hoursFromNow: Double, who: String? = "me") -> Job {
             Job(id: id, customerId: nil, title: id, status: status, createdAt: nil, updatedAt: nil, allowedTransitions: nil,
                 scheduledFor: iso.string(from: now.addingTimeInterval(hoursFromNow * 3600)), assignedToUserId: who)
         }
-        // Times stay inside today wherever the test runs.
-        let start = Calendar.current.startOfDay(for: now)
-        let base = now.timeIntervalSince(start) / 3600
-        let jobs = [job("a", "completed", hoursFromNow: -min(base, 1) * 0.5), job("b", "scheduled", hoursFromNow: -min(base, 1) * 0.25),
-                    job("c", "dispatched", hoursFromNow: min(24 - base, 1) * 0.5), job("d", "canceled", hoursFromNow: 0),
-                    job("e", "scheduled", hoursFromNow: min(24 - base, 1) * 0.5, who: "other")]
-        let mine = TodayNumbers.visits(jobs, assignee: "me", now: now)
+        // Noon ± an hour stays inside the same day, so these offsets are stable on any date.
+        let jobs = [job("a", "completed", hoursFromNow: -0.5), job("b", "scheduled", hoursFromNow: -0.25),
+                    job("c", "dispatched", hoursFromNow: 0.5), job("d", "canceled", hoursFromNow: 0),
+                    job("e", "scheduled", hoursFromNow: 0.5, who: "other")]
+        let mine = TodayNumbers.visits(jobs, assignee: "me", now: now, calendar: calendar)
         XCTAssertEqual(mine.map(\.id), ["a", "b", "c"])
         XCTAssertEqual(TodayNumbers.left(mine), 2)
         XCTAssertEqual(TodayNumbers.late(mine, now: now), 1)
         XCTAssertEqual(TodayNumbers.open(jobs), 3)
-        XCTAssertEqual(TodayNumbers.visits(jobs, assignee: nil, now: now).count, 4)
+        XCTAssertEqual(TodayNumbers.visits(jobs, assignee: nil, now: now, calendar: calendar).count, 4)
     }
 }
