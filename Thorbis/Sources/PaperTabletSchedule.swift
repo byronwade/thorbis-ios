@@ -51,6 +51,9 @@ struct PaperTabletSchedule: View {
                                 scheduleRow(job, showsPeriod: TimeColumn.showsPeriod(jobs, at: index))
                             }
                         }
+                            // The rows' swipe ground is the canvas; here they sit on the panel, so they
+                            // take the panel's tone and read as one list, not a stack of cards.
+                            .environment(\.thorbisSheetCanvas, true)
                             .padding(4)
                             .panelBackground(cornerRadius: Theme.cardRadius)
                             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))

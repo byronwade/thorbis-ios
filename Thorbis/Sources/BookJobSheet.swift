@@ -414,15 +414,18 @@ struct NewJobSheet: View {
                 }
                 Spacer(minLength: 8)
                 if savedJob == nil {
-                    Button("Change") {
+                    Button {
                         draft.customerID = ""
                         draft.locationID = nil
                         locations = []
                         locationsLoaded = false
                         focus = .caller
+                    } label: {
+                        // The frame sits on the label so the whole 44pt is the target (was the 17pt word).
+                        Text("Change").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                     }
                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
-                    .frame(minHeight: 44).disabled(busy)
+                    .disabled(busy)
                     .accessibilityLabel("Change customer")
                 }
             }

@@ -377,12 +377,11 @@ struct InvoiceLineEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("INV-\(invoice.id.suffix(4).uppercased())")
                 .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-            HStack(spacing: 8) {
-                Text(editor.invoice.status.statusLabel)
-                    .font(Theme.font(12, weight: .medium))
-                    .foregroundStyle(editor.invoice.status == "draft" ? Theme.warning : Theme.muted)
-                    .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
+            HStack(spacing: 10) {
+                // Status is a word and a dot, as on the new estimate and the invoice's rows (was a
+                // warning-tinted badge that made a draft read like a problem).
+                let status = DocumentStatus(invoice: editor.invoice)
+                StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet)
                 Text("Revision \(editor.invoice.linesRevision)")
                     .font(Theme.font(12)).foregroundStyle(Theme.muted)
             }

@@ -205,14 +205,27 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["job-tool-note"].exists)
         XCTAssertTrue(app.buttons["job-tool-photo"].exists)
         let details = app.buttons["More job details"]
-        for _ in 0..<8 where !details.isHittable { app.swipeUp() }
         XCTAssertTrue(details.waitForExistence(timeout: 5))
+        revealAboveJobBar(details, in: app)
+        XCTAssertGreaterThanOrEqual(details.frame.height, 44, "The whole details row toggles")
         details.tap()
         // v2: the job number lives in the header's eyebrow; the details fold out when it was booked.
         let booked = app.staticTexts["Booked"]
-        for _ in 0..<4 where !booked.isHittable { app.swipeUp() }
         XCTAssertTrue(booked.waitForExistence(timeout: 5))
+        revealAboveJobBar(booked, in: app)
         XCTAssertTrue(booked.isHittable)
+    }
+
+    /// Scrolls until `element` is clear of the job's bottom bar. A row that has scrolled under the
+    /// bar still reports `isHittable` (its hit point is on screen), so a tap on it lands on the bar's
+    /// camera or commit instead (iPad: the swipes can leave "More job details" right behind it).
+    private func revealAboveJobBar(_ element: XCUIElement, in app: XCUIApplication) {
+        let camera = app.buttons["job-bar-camera"]
+        func barTop() -> CGFloat { camera.exists ? camera.frame.minY - 12 : app.frame.maxY }
+        for _ in 0..<12 where !(element.isHittable && element.frame.maxY <= barTop()) {
+            app.swipeUp(velocity: .slow)
+        }
+        XCTAssertLessThanOrEqual(element.frame.maxY, barTop(), "\(element.label) should scroll clear of the job's bar")
     }
 
     /// Off Overview the header is one line (title and status word); the customer, balance, Customer

@@ -1705,6 +1705,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                  "createdAt": created, "updatedAt": created, "allowedTransitions": [String]()] as [String: Any]
             }
         }
+        // The visit someone is on (Chen's water heater) has its site on every screen, so the iPad
+        // sidebar's "On now" card leads with the same street on every place. The sample job keeps
+        // its per-screen site: its screens show the title when it has none.
+        listed = listed.map { row in
+            row["status"] as? String == "in_progress" && row["locationId"] == nil && row["id"] as? String != PaperPreview.jobID
+                ? row.merging(["locationId": PaperPreview.homeLocationID]) { _, new in new } : row
+        }
         return listed
     }
     /// Owner Home: the July invoice still owed, one sent this morning and one paid off today.

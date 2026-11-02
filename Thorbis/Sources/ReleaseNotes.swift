@@ -21,6 +21,46 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-11-02-clear-note-box",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "text.bubble", title: "The note box is easy to spot",
+                      detail: "In a job's Activity, the note box has its own edge in light and dark, so you can see where to type."),
+                .init(symbol: "creditcard", title: "Done stays off Record payment",
+                      detail: "With the number pad up in Collect payment, Done sits above the record button instead of over it."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-11-02-steady-job-page",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Job sections open without a freeze",
+                      detail: "Opening Money from far down a job, such as Due on site, shows it from the top and keeps the app moving."),
+                .init(symbol: "text.bubble", title: "More room for notes at large text",
+                      detail: "With the largest text sizes, quick notes and the note box take less of the screen in Activity."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-11-01-document-status",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "doc.text", title: "Estimates and invoices read the same",
+                      detail: "Sent and Unpaid show the same mark on the job, in search and on the estimate or invoice."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-11-01-cream-polish",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "list.bullet", title: "iPad's day reads as one list",
+                      detail: "On iPad, today's stops sit together in one list beside the job, not as separate cards."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
             id: "2026-11-01-cream-sheet",
             date: "2026-11-01",
             highlights: [

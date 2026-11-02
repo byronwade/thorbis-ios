@@ -105,12 +105,14 @@ final class JobAddressBook: ObservableObject {
         return Directions.url(address: place.address, coordinates: place.coordinates)
     }
 
-    /// Reads the places for `jobs`. Never more than `limit` customers per screen.
+    /// Reads the places for `jobs`, in their order (callers put the job that matters most first).
+    /// Never more than `limit` customers per screen.
     func load(_ jobs: [Job], api: APIClient, organizationID: String?, identity: String, limit: Int = 20) async {
         if identity != key { key = identity; streets = [:]; places = [:]; loaded = [] }
         guard let organizationID else { return }
-        let customers = Array(Set(jobs.compactMap { $0.locationId == nil ? nil : $0.customerId }))
-            .filter { !loaded.contains($0) }.sorted().prefix(limit)
+        var seen = Set<String>()
+        let customers = jobs.compactMap { $0.locationId == nil ? nil : $0.customerId }
+            .filter { !loaded.contains($0) && seen.insert($0).inserted }.prefix(limit)
         for customerID in customers {
             guard !Task.isCancelled else { return }
             let places: [ServiceLocationRecord]
