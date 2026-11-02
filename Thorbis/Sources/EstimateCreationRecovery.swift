@@ -22,6 +22,18 @@ struct EstimateCreationRecovery {
 
     var canEdit: Bool { !isSaving && savedEstimateID == nil }
 
+    /// A fresh read must preserve the saved terms and identity. Storage can normalize record
+    /// timestamps without changing what was saved, so those two metadata fields are excluded.
+    static func matchesSavedEstimate(_ saved: EstimateRecord, latest: EstimateRecord) -> Bool {
+        saved.id == latest.id && saved.organizationId == latest.organizationId &&
+        saved.customerId == latest.customerId && saved.createdByUserId == latest.createdByUserId &&
+        saved.locationId == latest.locationId && saved.status == latest.status &&
+        saved.currentRevisionNumber == latest.currentRevisionNumber && saved.title == latest.title &&
+        saved.lines == latest.lines && saved.options == latest.options && saved.sentAt == latest.sentAt &&
+        saved.approvedAt == latest.approvedAt && saved.declinedAt == latest.declinedAt &&
+        saved.approvalSignature == latest.approvalSignature
+    }
+
     static func isExpectedLink(_ link: JobEstimateLink, jobID: String, estimateID: String) -> Bool {
         link.jobId == jobID && link.estimateId == estimateID
     }

@@ -24,6 +24,7 @@ struct NewEstimateView: View {
     /// Set once the server created the estimate, so a retry only links it and never creates a duplicate.
     @State private var created: EstimateRecord?
     @State private var createdScope: EstimateCreationScope?
+    @State private var requiresLocationVerification = false
     @State private var createOutcomeUncertain = false
     @State private var memberPricing: MemberPricing?
     /// Shown after Save is pressed (validate on commit): what is missing, under its place.
@@ -357,8 +358,8 @@ struct NewEstimateView: View {
         do {
             let estimate: EstimateRecord
             if let created {
-                if createdScope != scope {
-                    // A routine policy refresh gets a fresh, scoped read before linking.
+                if createdScope != scope || requiresLocationVerification {
+                    // Recheck policy refreshes and unexpected saved locations before linking.
                     guard session.can("estimate.view", feature: "estimates"),
                           jobID == nil || (session.can("job.view", feature: "jobs") && session.can("job.edit", feature: "jobs")) else {
                         error = "Your access changed. Ask your office to check the saved estimate."
@@ -366,7 +367,8 @@ struct NewEstimateView: View {
                     }
                     let latest = try await api.fieldEstimate(created.id, requireFresh: true)
                     guard creationScope == scope else { return }
-                    guard latest == created, latest.organizationId == scope.organizationID else {
+                    guard EstimateCreationRecovery.matchesSavedEstimate(created, latest: latest),
+                          latest.organizationId == scope.organizationID else {
                         error = "The saved estimate or your access changed. Check it before continuing."
                         return
                     }
@@ -383,6 +385,7 @@ struct NewEstimateView: View {
                     }
                     guard creationScope == scope, session.can("estimate.view", feature: "estimates") else { return }
                     createdScope = scope
+                    requiresLocationVerification = false
                 }
                 estimate = created
             } else {
@@ -394,7 +397,7 @@ struct NewEstimateView: View {
                 estimate = try await api.createFieldEstimate(creationRequest())
                 createStarted = false
                 guard UUID(uuidString: estimate.id) != nil, estimate.organizationId == scope.organizationID,
-                      estimate.customerId == customerID, estimate.locationId == jobLocationID else {
+                      estimate.customerId == customerID else {
                     // The response cannot safely identify the submitted work; do not create again.
                     createOutcomeUncertain = true
                     if creationScope == scope {
@@ -406,7 +409,12 @@ struct NewEstimateView: View {
                 // while the response is in flight; never attach it under another identity.
                 created = estimate
                 createdScope = scope
+                requiresLocationVerification = estimate.locationId != jobLocationID
                 guard creationScope == scope else { return }
+                if requiresLocationVerification {
+                    error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved with a different location. Retry to verify the job, or ask your office for help."
+                    return
+                }
             }
             if let jobID {
                 guard creationScope == scope else { return }

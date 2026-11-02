@@ -36,6 +36,29 @@ extension EstimateCreationRecoveryTests {
         XCTAssertFalse(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Server error", status: 500, detail: nil)))
     }
 
+    func testReauthorizationIgnoresRecordTimestampsButRejectsChangedCommercialTerms() throws {
+        let original = PaperPreview.estimate
+        func changing(_ edit: (inout [String: Any]) -> Void) throws -> EstimateRecord {
+            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+            edit(&json)
+            return try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        }
+        let timestamps = try changing { $0["createdAt"] = "2026-07-18T12:00:00.000Z"; $0["updatedAt"] = "2026-07-20T12:00:00.000Z" }
+        XCTAssertTrue(EstimateCreationRecovery.matchesSavedEstimate(original, latest: timestamps))
+        let changedTitle = try changing { $0["title"] = "Other work" }
+        XCTAssertFalse(EstimateCreationRecovery.matchesSavedEstimate(original, latest: changedTitle))
+        let changedLine = try changing { json in
+            var lines = json["lines"] as! [[String: Any]]
+            lines[0]["quantity"] = 99
+            json["lines"] = lines
+        }
+        XCTAssertFalse(EstimateCreationRecovery.matchesSavedEstimate(original, latest: changedLine))
+        let otherLocation = try changing { $0["locationId"] = "00000000-0000-4000-8000-000000009999" }
+        XCTAssertFalse(EstimateCreationRecovery.matchesSavedEstimate(original, latest: otherLocation))
+        let otherStatus = try changing { $0["status"] = "approved" }
+        XCTAssertFalse(EstimateCreationRecovery.matchesSavedEstimate(original, latest: otherStatus))
+    }
+
     func testOnlyTheRequestedJobAndEstimateConfirmTheLink() {
         let correct = JobEstimateLink(id: "link", jobId: "job", estimateId: "estimate", linkedAt: nil)
         let wrongJob = JobEstimateLink(id: "link", jobId: "other-job", estimateId: "estimate", linkedAt: nil)

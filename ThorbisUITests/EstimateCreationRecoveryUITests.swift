@@ -7,7 +7,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
                                "--paper-preview-estimate-create-recovery", "--paper-preview-estimate-create-hold",
-                               "--paper-preview-catalog-pages"]
+                               "--paper-preview-estimate-recovery-normalized-dates", "--paper-preview-catalog-pages"]
         app.launch()
         addSampleItem(in: app)
         let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
@@ -58,6 +58,47 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         waitForExpectations(timeout: 10)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved estimate or your access changed")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.textFields["Estimate title"].isEnabled)
+    }
+
+    func testDifferentCreatedLocationIsRetainedAndOnlyLinkedAfterFreshJobMatch() {
+        checkDifferentCreatedLocation(jobMatches: true)
+    }
+
+    func testDifferentCreatedLocationIsNotLinkedToMismatchedJob() {
+        checkDifferentCreatedLocation(jobMatches: false)
+    }
+
+    private func checkDifferentCreatedLocation(jobMatches: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+                               "--paper-preview-estimate-create-recovery", "--paper-preview-estimate-recovery-other-location",
+                               "--paper-preview-catalog-pages"]
+        if jobMatches { app.launchArguments.append("--paper-preview-estimate-recovery-matching-location") }
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let retry = app.buttons["Retry adding to job"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 5))
+        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved with a different location")).firstMatch.exists)
+        retry.tap()
+        let expected = jobMatches ? "creates=1,links=1,estimateReads=1,jobReads=1" : "creates=1,links=0,estimateReads=1,jobReads=1"
+        expectation(for: NSPredicate(format: "value == %@", expected), evaluatedWith: counts)
+        waitForExpectations(timeout: 10)
+        if jobMatches {
+            expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: retry)
+            waitForExpectations(timeout: 10)
+            retry.tap()
+            assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=1,jobReads=1")
+        } else {
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "job or your access changed")).firstMatch.waitForExistence(timeout: 5))
+            XCTAssertFalse(app.textFields["Estimate title"].isEnabled)
+        }
     }
 
     private func addSampleItem(in app: XCUIApplication) {
