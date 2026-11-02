@@ -124,6 +124,8 @@ struct EvidenceLineRow: View {
     let line: FieldLine
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .subheadline) private var quantityWidth: CGFloat = 32
+    /// Room for "$9,999.00", so the quantity column stays put whatever each line costs.
+    @ScaledMetric(relativeTo: .subheadline) private var amountWidth: CGFloat = 80
 
     var body: some View {
         let text = LineText(line.description)
@@ -148,6 +150,7 @@ struct EvidenceLineRow: View {
                         .frame(width: quantityWidth, alignment: .trailing)
                     if let amount {
                         Text(amount).font(Theme.rowAmountFont(15)).lineLimit(1).fixedSize()
+                            .frame(minWidth: amountWidth, alignment: .trailing)
                     }
                 }
                 if line.quantity != 1 {
