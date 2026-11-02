@@ -124,8 +124,6 @@ struct EvidenceLineRow: View {
     let line: FieldLine
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .subheadline) private var quantityWidth: CGFloat = 32
-    /// Room for "$9,999.00", so the quantity column stays put whatever each line costs.
-    @ScaledMetric(relativeTo: .subheadline) private var amountWidth: CGFloat = 80
 
     var body: some View {
         let text = LineText(line.description)
@@ -136,11 +134,10 @@ struct EvidenceLineRow: View {
             if stacked {
                 Text(text.name).font(Theme.font(15, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(line.quantity) × \(unit)").font(Theme.monoFont(14)).foregroundStyle(Theme.muted)
-                    Spacer(minLength: 8)
-                    if let amount { Text(amount).font(Theme.rowAmountFont(15)) }
-                }
+                // One figure per line, each whole: side by side they broke mid-number ("$120.0" over "0").
+                Text("\(line.quantity) × \(unit)").font(Theme.monoFont(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let amount { Text(amount).font(Theme.rowAmountFont(15)).lineLimit(1).fixedSize() }
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(text.name).font(Theme.font(15, weight: .medium))
@@ -149,8 +146,13 @@ struct EvidenceLineRow: View {
                     Text("\(line.quantity)").font(Theme.monoFont(15)).foregroundStyle(Theme.muted)
                         .frame(width: quantityWidth, alignment: .trailing)
                     if let amount {
-                        Text(amount).font(Theme.rowAmountFont(15)).lineLimit(1).fixedSize()
-                            .frame(minWidth: amountWidth, alignment: .trailing)
+                        // At least as wide as "$9,999.00", so the quantity column stays put
+                        // whatever each line costs (sized by a hidden template, not a frame).
+                        ZStack(alignment: .trailing) {
+                            Text(verbatim: "$9,999.00").hidden().accessibilityHidden(true)
+                            Text(amount)
+                        }
+                        .font(Theme.rowAmountFont(15)).lineLimit(1).fixedSize()
                     }
                 }
                 if line.quantity != 1 {

@@ -19,7 +19,7 @@ enum ReleaseNotes {
                 .init(symbol: "doc.text", title: "Estimates and invoices read the same",
                       detail: "Sent and Unpaid show the same mark on the job, in search and on the estimate or invoice."),
             ],
-            fixes: 2
+            fixes: 3
         ),
         ReleaseNote(
             id: "2026-11-01-cream-polish",

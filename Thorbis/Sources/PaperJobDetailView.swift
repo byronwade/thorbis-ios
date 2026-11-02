@@ -1446,16 +1446,12 @@ struct JobDetailView: View {
                 }
                 if let balance = invoiceBalanceCents, balance > 0 {
                     // What is owed now, in the type colour; it opens Money.
-                    // At accessibility sizes the amount reads under the label, as in `moneyLine`;
-                    // side by side it broke mid-number ("$340.0" over "0").
-                    let stacked = typeSize.isAccessibilitySize
-                    let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                                         : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
                     Button { withMotion(.snappy) { selectedTab = "Money" } } label: {
-                        layout {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if !stacked { Spacer(minLength: 8) }
+                            Spacer(minLength: 8)
+                            // Never broken mid-number at accessibility sizes ("$340.0" over "0"):
+                            // the label wraps instead.
                             Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
                                 .foregroundStyle(Theme.foreground)
                                 .lineLimit(1).fixedSize()
