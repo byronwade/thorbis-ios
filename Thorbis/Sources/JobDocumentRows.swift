@@ -6,6 +6,8 @@ struct JobDocumentRow: View {
     let title: String
     let status: String
     let amount: String?
+    /// Staff word and mark from the full record, so a part-paid invoice is not just "Unpaid".
+    var document: DocumentStatus? = nil
     var detail: String? = nil
     var fresh = true
     var customerFacing = false
@@ -57,8 +59,10 @@ struct JobDocumentRow: View {
             if !stacked { Spacer(minLength: 8) }
             VStack(alignment: stacked ? .leading : .trailing, spacing: 4) {
                 if let amount { Text(amount).moneyStyle(.row).fixedSize() }
-                if fresh { StatusWord(documentStatus: status) }
-                else { Text("Status needs refresh").font(Theme.font(13)).foregroundStyle(Theme.muted) }
+                if fresh {
+                    if let document { StatusWord(document: document) }
+                    else { StatusWord(documentStatus: status) }
+                } else { Text("Status needs refresh").font(Theme.font(13)).foregroundStyle(Theme.muted) }
             }
         }
         .padding(.vertical, 4)
@@ -113,6 +117,7 @@ extension JobDocumentRow {
             amount = paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") }
             detail = nil
         }
+        document = DocumentStatus(estimateStatus: estimate.status)
         self.fresh = fresh
         self.customerFacing = customerFacing
         self.symbol = "doc.text"
@@ -122,6 +127,7 @@ extension JobDocumentRow {
         reference = "INV-\(invoice.id.suffix(4).uppercased())"
         title = invoice.origin == "estimate_deposit" ? "Deposit" : "Invoice"
         status = invoice.status
+        document = DocumentStatus(invoice: invoice)
         amount = paperLinesTotal(invoice.lines).map { money($0, currency: invoice.currency) }
         if invoice.status == "issued", let total = paperLinesTotal(invoice.lines), invoice.amountPaid >= 0, total >= invoice.amountPaid {
             detail = "\(money(total - invoice.amountPaid, currency: invoice.currency))\u{00A0}due"

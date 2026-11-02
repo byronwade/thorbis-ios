@@ -1318,8 +1318,19 @@ extension StatusWord {
 
     /// An estimate's or invoice's status ("Unpaid" for an issued invoice). The dot takes the
     /// `DocumentStatus` hue, so a document reads the same on the job, in search and on its own page.
+    /// Issued invoices with payments need `init(invoice:)` — a bare `"issued"` cannot see `amountPaid`.
     init(documentStatus status: String) {
         self.init(text: status == "issued" ? "Unpaid" : status.statusLabel, tint: StatusWord.documentTone(status)?.hue)
+    }
+
+    /// The same word and mark the document's own page shows (`DocumentStatus`).
+    init(document status: DocumentStatus) {
+        self.init(text: status.word, tint: status.tone.hue)
+    }
+
+    /// An invoice including payments, so issued-plus-collections reads "Part paid" / "Paid".
+    init(invoice: InvoiceRecord) {
+        self.init(document: DocumentStatus(invoice: invoice))
     }
 
     /// The `DocumentStatus` tone for a bare status word, estimate or invoice (staff screens). Nil

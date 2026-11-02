@@ -32,6 +32,24 @@ final class DocumentStatusTests: XCTestCase {
         XCTAssertNil(StatusWord.documentTone("active"), "Not a document status: no dot")
     }
 
+    @MainActor
+    func testStatusWordReadsPartPaidFromTheInvoice() {
+        let unpaid = invoice("issued")
+        XCTAssertEqual(StatusWord(invoice: unpaid).text, "Unpaid")
+        XCTAssertEqual(StatusWord(invoice: unpaid).tint, DocumentStatus(invoice: unpaid).tone.hue)
+        let part = invoice("issued", paid: 10_000)
+        XCTAssertEqual(StatusWord(invoice: part).text, "Part paid")
+        XCTAssertEqual(StatusWord(invoice: part).tint, StatusTone.inProgress.hue)
+        XCTAssertEqual(JobDocumentRow(invoice: part, fresh: true).document, DocumentStatus(invoice: part))
+        let search = SearchResultsBuilder(terms: SearchTerms(""), jobs: [], customers: [], customerRecords: [],
+                                          estimates: [], invoices: [], street: { _ in nil }, server: nil,
+                                          phoneMatch: nil, actions: [], canJobs: true, canCustomers: true,
+                                          canEstimates: true, canInvoices: true)
+        XCTAssertEqual(search.invoiceHit(part).status?.text, "Part paid")
+        XCTAssertEqual(StatusWord(documentStatus: "issued").text, "Unpaid",
+                       "A bare issued string still cannot see payments")
+    }
+
     func testFullyPaidIssuedInvoiceReadsPaidNotPartPaid() {
         XCTAssertEqual(DocumentStatus(invoice: invoice("issued", paid: 48_000)), DocumentStatus(tone: .invoiced, word: "Paid"))
     }

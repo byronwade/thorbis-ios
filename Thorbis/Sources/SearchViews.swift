@@ -310,7 +310,7 @@ struct SearchResultsBuilder {
         // MF-04: an unpaid invoice shows what's owed now.
         let shown = invoice.status == "issued" ? total.map { max(0, $0 - invoice.amountPaid) } : total
         return SearchHit(id: "invoice:\(invoice.id)", title: customerName(invoice.customerId),
-                         subtitle: Self.invoiceRef(invoice.id), status: StatusWord(documentStatus: invoice.status),
+                         subtitle: Self.invoiceRef(invoice.id), status: StatusWord(invoice: invoice),
                          amount: shown.map { money($0, currency: invoice.currency) },
                          glyph: SearchGlyph.document("invoice"), target: .open(.route(.invoice(invoice.id))))
     }
