@@ -374,8 +374,9 @@ struct NewEstimateView: View {
         do {
             let estimate: EstimateRecord
             if let created {
-                if createdScope != scope || requiresLocationVerification {
-                    // Recheck policy refreshes and unexpected saved locations before linking.
+                do {
+                    // A retry or consent may follow another actor changing this saved estimate.
+                    // Recheck the authorized record and job before every link attempt.
                     guard session.can("estimate.view", feature: "estimates"),
                           jobID == nil || (session.can("job.view", feature: "jobs") && session.can("job.edit", feature: "jobs")) else {
                         error = "Your access changed. Ask your office to check the saved estimate."

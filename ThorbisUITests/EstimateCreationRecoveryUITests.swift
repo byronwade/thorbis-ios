@@ -32,7 +32,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: retry)
         waitForExpectations(timeout: 10)
         retry.tap()
-        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=1,jobReads=1")
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=2,jobReads=2")
     }
 
     func testAuthorityRefreshRejectsChangedEstimateBeforeLink() {
@@ -94,11 +94,33 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
             expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: retry)
             waitForExpectations(timeout: 10)
             retry.tap()
-            assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=1,jobReads=1")
+            assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=2,jobReads=2")
         } else {
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "job or your access changed")).firstMatch.waitForExistence(timeout: 5))
             XCTAssertFalse(app.textFields["Estimate title"].isEnabled)
         }
+    }
+
+    func testSameAuthorityRetryRejectsAnEstimateChangedAfterLinkFailure() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+                               "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+                               "--paper-preview-estimate-recovery-changed-after-link"]
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let retry = app.buttons["Retry adding to job"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: retry)
+        waitForExpectations(timeout: 10)
+        retry.tap()
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        expectation(for: NSPredicate(format: "value == %@", "creates=1,links=1,estimateReads=1,jobReads=0"), evaluatedWith: counts)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved estimate or your access changed")).firstMatch.waitForExistence(timeout: 5))
     }
 
     func testCreatedEstimateWithChangedTermsRequiresReviewWithoutLinking() {
@@ -148,11 +170,13 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0")
         continueButton.tap()
         XCTAssertTrue(app.staticTexts["Continue without item groups?"].waitForExistence(timeout: 5))
-        app.buttons.matching(identifier: "Continue without groups").lastMatch.tap()
+        let confirmations = app.buttons.matching(identifier: "Continue without groups")
+        XCTAssertGreaterThan(confirmations.count, 0)
+        confirmations.element(boundBy: confirmations.count - 1).tap()
         let retry = app.buttons["Retry adding to job"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
         retry.tap()
-        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=0,jobReads=0")
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=1,jobReads=1")
     }
 
     func testDroppedHiddenLineVisibilityBlocksLink() {
@@ -233,7 +257,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(counts.waitForExistence(timeout: 5))
         XCTAssertEqual(counts.value as? String, "creates=1,links=1,estimateReads=0,jobReads=0")
         retry.tap()
-        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=0,jobReads=0")
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=2,jobReads=2")
     }
 
     private func assertOpenedSavedEstimate(in app: XCUIApplication, counts expected: String) {
