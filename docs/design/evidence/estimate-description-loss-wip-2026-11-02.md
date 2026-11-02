@@ -37,6 +37,20 @@ Evidence and limitations:
   identities; unlike `builder-line`, it does not use `optionsEstimate`'s
   incomplete Price Book source. This is a source inspection, not a test pass.
   The corrected test remains unrun while the simulator is unstable.
+- Follow-up on `d212d14`: 35 focused unit tests and the corrected revision
+  keyboard test passed. The new-estimate UI test failed: its accessibility
+  hierarchy and recording showed the floating Done control still overlapped
+  Save. A geometry regression reproduced that overlap before the fix
+  (`/private/tmp/thorbis-textloss-overlap-red.log`). After adding 48pt of
+  keyboard-only footer clearance, both new and revision keyboard UI tests
+  passed (`/private/tmp/thorbis-textloss-overlap-green.log`, exit 0). Each
+  checks that Save and Done do not intersect and that tapping Save displays
+  the length warning; the new-estimate test also checks the complete draft
+  text remains in the field. The verified staged code/test diff had SHA-256
+  `4b571584463091a56061b4c4da508d2851a161442f321024bfe1b2154bc0b31b`
+  on base `d212d14`. This is one iPhone 17 Pro simulator at default text size;
+  large text, a small device, compact iPad windows and real-server saving
+  remain unverified.
 - A preceding UI recording showed the number keyboard covering Save
   (`/private/tmp/textloss-fail-frame.png`). The candidate's keyboard-aware
   layout has not been qualified against a completed UI run.

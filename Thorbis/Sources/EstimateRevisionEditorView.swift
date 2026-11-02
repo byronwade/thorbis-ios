@@ -173,6 +173,8 @@ struct EstimateRevisionEditorView: View {
                 Task { await save() }
             }
         }
+        .padding(.bottom, keyboardUp ? 48 : 0)
+        .background(Theme.canvas)
     }
 
     private var content: some View {

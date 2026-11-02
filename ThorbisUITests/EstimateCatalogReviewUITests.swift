@@ -60,7 +60,11 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
         XCTAssertTrue(description.waitForExistence(timeout: 10))
         XCTAssertEqual(description.value as? String, fullDescription)
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch.tap()
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.frame.intersects(keyboardDone.frame), "The keyboard Done control must not cover any part of Save")
+        save.tap()
         let warning = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Error: Item descriptions can be up to 200 characters")).firstMatch
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
         XCTAssertEqual(description.value as? String, fullDescription)
@@ -89,6 +93,9 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save revised draft")).firstMatch
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         XCTAssertTrue(save.isHittable)
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.frame.intersects(keyboardDone.frame), "The keyboard Done control must not cover any part of Save")
         save.tap()
         let warning = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Error: Item descriptions can be up to 200 characters")).firstMatch
         XCTAssertTrue(warning.waitForExistence(timeout: 5))

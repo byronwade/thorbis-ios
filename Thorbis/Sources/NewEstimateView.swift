@@ -138,6 +138,9 @@ struct NewEstimateView: View {
                 if showProblems() { Task { await save() } }
             }
         }
+        // The floating keyboard accessory is 44pt high and otherwise sits over Save.
+        .padding(.bottom, keyboardUp ? 48 : 0)
+        .background(Theme.canvas)
     }
 
     /// MF-05: what a member would pay, under the total. The saved prices stay the price book's.
