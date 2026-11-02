@@ -322,7 +322,7 @@ struct TabletRoot: View {
             searchSeed = query
             search = true
         }
-        .task(id: "addr|\(store.jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)") {
+        .task(id: Self.addressLoadTaskID(jobs: store.jobs, currentJobID: currentJob?.id, generation: session.generation)) {
             guard session.can("customer.view", feature: "core_crm") else { return }
             // The job you're on first: the sidebar's "On now" card leads with its street on every
             // place, however long the day's list is.
@@ -603,6 +603,13 @@ struct TabletRoot: View {
             return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
         default: return nil
         }
+    }
+
+    /// Restarts the place load when the day's jobs, their sites, the job you're on, or the session
+    /// change. Starting work keeps the same id:locationId list; the On now card still needs that
+    /// job's street, so its id is its own segment.
+    static func addressLoadTaskID(jobs: [Job], currentJobID: String?, generation: UUID) -> String {
+        "addr|\(currentJobID ?? "")|\(jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(generation)"
     }
 
     /// The job this person is on now, pinned at the foot of the sidebar on every place.
