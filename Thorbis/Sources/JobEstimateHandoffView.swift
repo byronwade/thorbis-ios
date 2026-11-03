@@ -5,6 +5,8 @@ struct JobEstimateHandoffView: View {
     @ObservedObject var model: JobEstimateHandoffModel
     let handBack: () -> Void
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @State private var reviewing = false
     @State private var checkpointID: String?
     private var type: CustomerType { CustomerType(sizeClass) }
@@ -32,6 +34,12 @@ struct JobEstimateHandoffView: View {
         .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .navigationTitle("Estimates").navigationBarTitleDisplayMode(.inline)
         .task { await model.refresh() }
+        .onChange(of: api.requestGeneration) { _, _ in
+            if !model.isCurrent { checkpointID = nil; reviewing = false; model.retire() }
+        }
+        .onChange(of: session.authorityRevision) { _, _ in
+            if !model.isCurrent { checkpointID = nil; reviewing = false; model.retire() }
+        }
         .onChange(of: model.isCurrent) { _, current in
             if !current { checkpointID = nil; reviewing = false; model.retire() }
         }
@@ -98,18 +106,25 @@ struct JobEstimateHandoffView: View {
                 let selected = model.selectedIDs.contains(record.id)
                 if selected, !model.options(for: record.id).isEmpty {
                     Text("Choose one package for this estimate").font(Theme.customerFont(type.body))
-                    ForEach(model.options(for: record.id)) { option in
-                        Button { model.chooseOption(estimateID: record.id, optionID: option.id) } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: model.selection.optionIDs[record.id] == option.id ? "largecircle.fill.circle" : "circle")
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
-                                    if !option.description.isEmpty { Text(option.description).font(Theme.customerFont(type.small)) }
-                                    Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
-                                }
-                            }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                        .accessibilityIdentifier("handoff-option-\(record.id)-\(option.id)")
+                    ForEach(Array(model.options(for: record.id).enumerated()), id: \.element.id) { index, option in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button { model.chooseOption(estimateID: record.id, optionID: option.id) } label: {
+                                HStack(alignment: .top, spacing: 12) {
+                                    Image(systemName: model.selection.optionIDs[record.id] == option.id ? "largecircle.fill.circle" : "circle")
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
+                                        Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                    }
+                                }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                            .accessibilityIdentifier("handoff-option-\(record.id)-\(option.id)")
+                            if !option.description.isEmpty {
+                                ReadOnlyDocumentDescription(text: option.description, fontSize: type.body,
+                                                            access: selectionDescriptionAccess(for: record), customerFacing: true,
+                                                            accessibilityContext: "Estimate \((model.records.firstIndex(where: { $0.id == record.id }) ?? 0) + 1), EST-\(record.id.suffix(4).uppercased()), package \(index + 1)")
+                                    .padding(.leading, 36)
+                            }
+                        }
                     }
                 }
             } else if record.status == "sent" {
@@ -171,17 +186,28 @@ struct JobEstimateHandoffView: View {
             Text("Review selected work").font(Theme.customerFont(type.heading, weight: .medium)).accessibilityAddTraits(.isHeader)
             Text("\(model.reviewed.count) separate estimates. You'll approve and sign each one.")
                 .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
-            ForEach(model.reviewed) { item in
+            ForEach(Array(model.reviewed.enumerated()), id: \.element.id) { index, item in
+                let reference = "Estimate \(index + 1), EST-\(item.id.suffix(4).uppercased())"
                 let option = item.revision.options?.first(where: { $0.id == item.optionID })
                 Text(item.revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                 Text("EST-\(item.id.suffix(4).uppercased()) · Revision \(item.revision.revisionNumber)").font(Theme.customerMonoFont(type.small)).foregroundStyle(Theme.muted)
                 if model.contexts[item.key]?.outcome == .unknown { Text("Approval needs confirmation").font(Theme.customerFont(type.body)) }
                 else if model.contexts[item.key]?.outcome?.isApproved == true { Text("Approved").font(Theme.customerFont(type.body)) }
-                if let option { Text(option.title).font(Theme.customerFont(type.body, weight: .medium)) }
+                if let option {
+                    Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
+                    if !option.description.isEmpty {
+                        ReadOnlyDocumentDescription(text: option.description, fontSize: type.body,
+                                                    access: descriptionAccess(for: item), customerFacing: true,
+                                                    accessibilityContext: "\(reference), package \((item.revision.options?.firstIndex(where: { $0.id == option.id }) ?? 0) + 1)")
+                    }
+                }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
                 if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
                     CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: lines, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false))
+                    CustomerIncludedLines(lines: lines, type: type,
+                                          rows: customerAmountRows(amounts, currency: currency, invoice: false),
+                                          readingAccess: descriptionAccess(for: item),
+                                          descriptionContext: reference)
                 }
             }
             ForEach(selectedTotals, id: \.currency) { value in
@@ -191,6 +217,23 @@ struct JobEstimateHandoffView: View {
             Text("These estimates stay separate and do not become one bill.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
         }
     }
+    private func selectionDescriptionAccess(for record: EstimateRecord) -> DocumentDescriptionAccess {
+        .init(identity: .estimate(scope: model.scope, record: record, issued: model.revision(for: record.id)),
+              organizationID: model.scope.organizationID, capability: "estimate.view", feature: "estimates",
+              sourceGeneration: model.session.generation, fresh: model.complete && model.isCurrent,
+              active: !reviewing && model.isCurrent && model.selectedIDs.contains(record.id),
+              scopeValid: model.eligibleIDs.contains(record.id) && model.scope.contains(record, requestedID: record.id))
+    }
+
+    private func descriptionAccess(for item: JobEstimateReviewedItem) -> DocumentDescriptionAccess {
+        .init(identity: .estimate(scope: model.scope, record: item.estimate, issued: item.revision),
+              organizationID: model.scope.organizationID, capability: "estimate.view", feature: "estimates",
+              sourceGeneration: model.session.generation, fresh: model.complete && model.isCurrent,
+              active: reviewing && model.isCurrent,
+              scopeValid: model.reviewed.contains(item) && model.scope.contains(item.estimate, requestedID: item.id)
+                  && item.revision.estimateId == item.id && item.revision.revisionNumber == item.estimate.currentRevisionNumber)
+    }
+
     private var selectedTotals: [(currency: String, amount: Int)] {
         var values: [String: Int] = [:]
         for item in model.reviewed {

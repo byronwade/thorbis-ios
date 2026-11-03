@@ -211,8 +211,15 @@ final class JobEstimateHandoffModel: ObservableObject {
         self.customerName = customerName; self.documents = documents; self.api = api; self.session = session
         actorID = session.user?.id ?? ""; sessionGeneration = session.generation; apiGeneration = api.requestGeneration; origin = api.normalizedOrigin
     }
-    func revision(for id: String) -> CustomerIssuedEstimateRevision? { revisions[id] }
-    func options(for id: String) -> [FieldEstimateOption] { revisions[id]?.options ?? records.first(where: { $0.id == id })?.options ?? [] }
+    func revision(for id: String) -> CustomerIssuedEstimateRevision? {
+        guard let current = records.first(where: { $0.id == id }), let revision = revisions[id],
+              (try? revision.validate(for: current)) != nil else { return nil }
+        return revision
+    }
+    func options(for id: String) -> [FieldEstimateOption] {
+        if let currentRevision = revision(for: id) { return currentRevision.options ?? [] }
+        return records.first(where: { $0.id == id })?.options ?? []
+    }
     func context(for id: String) -> CustomerEstimateHandoffContext? {
         guard let revision = records.first(where: { $0.id == id })?.currentRevisionNumber else { return nil }
         return contexts["\(id):\(revision)"]
