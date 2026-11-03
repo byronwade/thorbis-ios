@@ -159,7 +159,7 @@ struct NewEstimateView: View {
                                 Task { await save() }
                             }])
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
-            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
+            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)) { await refreshCatalog() }
             .onChange(of: customerID) { _, _ in customerProblem = nil }
             .onChange(of: lines.count) { _, _ in
                 linesProblem = nil
@@ -269,7 +269,7 @@ struct NewEstimateView: View {
         guard canUsePriceBook else { return }
         let org = session.activeOrganization?.id
         let generation = session.generation
-        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: force)
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, authority: session.priceBookAuthority, force: force)
         guard !Task.isCancelled, session.generation == generation, session.activeOrganization?.id == org else { return }
     }
 

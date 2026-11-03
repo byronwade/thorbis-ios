@@ -365,7 +365,17 @@ struct PriceBookResultsList: View {
                     .accessibilityIdentifier("price-book-add-custom")
                 }
             }
-            if canUsePriceBook, !current || catalog.items.isEmpty {
+            if canUsePriceBook, catalog.context == context, catalog.denialPersistenceFailure, !catalog.accessDenied {
+                ErrorBanner(message: "The saved price book could not be secured. Connect and finish refreshing it.") { retry() }
+            }
+            if canUsePriceBook, catalog.context == context, catalog.accessDenied {
+                ErrorBanner(message: catalog.denialPersistenceFailure
+                    ? "Price book access could not be verified, and its saved copy could not be secured. Connect and try again."
+                    : "Price book access could not be verified. \(catalog.error ?? "Try again when you have access.")") { retry() }
+            } else if canUsePriceBook, context.authority == nil {
+                Text("Connect once to verify your price book access on this device.")
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+            } else if canUsePriceBook, !current || catalog.items.isEmpty {
                 if !current || catalog.loading {
                     PaperCard { ForEach(0..<6, id: \.self) { _ in skeletonRow } }
                 } else if let error = catalog.error, !catalog.isPartial {

@@ -36,7 +36,7 @@ struct PriceBookCartPicker: View {
     @FocusState private var focus: EstimateBuilderFocus?
 
     private var context: PriceBookCatalogContext {
-        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
+        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)
     }
 
     var body: some View {
@@ -137,7 +137,9 @@ struct PriceBookCartPicker: View {
     }
 
     private func add(_ item: PriceBookListItem) {
-        guard canUsePriceBook, catalog.isCurrent(context, api: api) else { return }
+        guard canUsePriceBook, session.can("pricebook.view", feature: "price_book"),
+              session.priceBookAuthority == context.authority,
+              catalog.isCurrent(context, api: api) else { return }
         if let message = addItem(item) {
             error = message
             return

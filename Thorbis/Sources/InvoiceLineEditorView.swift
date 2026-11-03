@@ -23,7 +23,7 @@ struct InvoiceLineEditorView: View {
     @FocusState private var focus: EstimateBuilderFocus?
 
     private var catalogContext: PriceBookCatalogContext {
-        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
+        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)
     }
 
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
@@ -370,7 +370,7 @@ struct InvoiceLineEditorView: View {
         guard canUsePriceBook else { return }
         let expected = catalogContext
         await catalog.refresh(api: api, organizationID: expected.organizationID,
-                              sessionGeneration: expected.sessionGeneration, force: force)
+                              sessionGeneration: expected.sessionGeneration, authority: expected.authority, force: force)
     }
 
     private var invoiceEditorHeading: some View {
