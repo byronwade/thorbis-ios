@@ -1,12 +1,12 @@
 import XCTest
 @testable import Thorbis
 
+#if DEBUG
 @MainActor private final class OwnerTransportStore: CustomerQuarantineStore {
     var records: [CustomerQuarantineScope: CustomerQuarantineState] = [:]
     func read(_ scope: CustomerQuarantineScope) throws -> CustomerQuarantineState? { records[scope] }
     func write(_ state: CustomerQuarantineState, for scope: CustomerQuarantineScope) throws { records[scope] = state }
 }
-
 @MainActor final class CustomerGuardedOwnerTransportTests: XCTestCase {
     func testFirstCustomerReadUsesRealLiveOnlyAndNamespacedTransport() async throws {
         let scope = try CustomerQuarantineScope(actorID: "abcdefab-0000-4000-8000-000000000001", organizationID: "abcdefab-0000-4000-8000-000000000002", origin: "https://app.thorbis.com", customerID: "abcdefab-0000-4000-8000-000000000003")
@@ -38,3 +38,4 @@ import XCTest
         XCTAssertEqual(nested.header("Cache-Control"), "no-cache")
     }
 }
+#endif

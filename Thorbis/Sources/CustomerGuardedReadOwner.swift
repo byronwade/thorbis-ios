@@ -1,7 +1,14 @@
 import Foundation
 import Combine
 
-enum CustomerGuardedReadEvidence { case completeLive, limitedLive, cached }
+enum CustomerGuardedReadEvidence {
+    // Until an authoritative complete-read contract exists, production cannot
+    // claim a compilation is complete and thereby clear a denial marker.
+    #if DEBUG
+    case completeLive
+    #endif
+    case limitedLive, cached
+}
 enum CustomerGuardedReadError: Error { case transportNotScoped, stale, denied }
 struct CustomerGuardedValue<Value> { let value: Value; let evidence: CustomerGuardedReadEvidence }
 
@@ -68,7 +75,9 @@ struct CustomerGuardedSnapshot<Value> {
             guard generation == attempt, isCurrent(), !Task.isCancelled else { throw CustomerGuardedReadError.stale }
             let outcome: CustomerQuarantineOutcome
             switch loaded.evidence {
+            #if DEBUG
             case .completeLive: outcome = .liveCompilation
+            #endif
             case .limitedLive: outcome = .liveActivity
             case .cached: outcome = .cached
             }
