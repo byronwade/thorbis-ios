@@ -3,6 +3,11 @@ import XCTest
 
 @MainActor
 final class TapToPayReadinessTests: XCTestCase {
+    func testTechnicianConnectionDoesNotPresentMerchantTerms() throws {
+        let config = try TerminalSetup.shared.connectionConfiguration(locationID: "tml_test_location")
+        XCTAssertFalse(config.isTOSAcceptancePermitted)
+    }
+
     func testUnqualifiedBuildOverridesAnOtherwiseEligibleWorkspaceAndPhone() {
         XCTAssertFalse(TapToPayReadiness.allows(
             buildEnabled: false, deviceSupported: true, featureEnabled: true, canCollect: true
