@@ -37,6 +37,11 @@ import Foundation
             let existing = try store.load(CommercialNewEstimateDraft.self, scope: draftScope)
             if let existing {
                 guard existing.customerID.lowercased() == customerID.lowercased() else { throw Failure.unavailable }
+                // Codable can decode a structurally invalid saved line (for
+                // example, an unknown group). Preserve it and refuse editing.
+                // Incomplete quantity/price text is valid in an unsaved draft.
+                let lines = try existing.lines()
+                guard lines.count <= 500, Set(lines.map(\.id)).count == lines.count else { throw Failure.unavailable }
                 if existing.uncertain || existing.created != nil || existing.atomicOperation != nil ||
                     existing.requiresManualReview || existing.requiresLocationVerification || existing.requiresGroupDisclosure {
                     state = .attemptPending

@@ -106,4 +106,38 @@ import XCTest
         XCTAssertTrue(try store.acquireCoordinatedDraft(scope: scope, owner: newOwner))
         store.release(scope: scope, owner: newOwner)
     }
+    func testDecodableButInvalidSavedLinesRemainUntouched() throws {
+        for variant in ["unknownGroup", "partialBaseline", "duplicateIdentity"] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as? [String: Any])
+            var lines = try XCTUnwrap(object["draftLines"] as? [[String: Any]])
+            switch variant {
+            case "unknownGroup": lines[0]["group"] = "future-unknown"
+            case "partialBaseline": lines[0]["originalDescription"] = "Original valve"
+            default: lines.append(lines[0])
+            }
+            object["draftLines"] = lines
+            let decoded = try JSONDecoder().decode(CommercialNewEstimateDraft.self, from: JSONSerialization.data(withJSONObject: object))
+            let store = CommercialDraftStore(directory: root); try store.save(decoded, scope: scope)
+            let file = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first { $0.pathExtension == "json" })
+            let before = try Data(contentsOf: file)
+            let editor = lifecycle(store)
+            XCTAssertThrowsError(try editor.open(), "\(variant) must fail closed")
+            XCTAssertEqual(editor.state, .notOpen)
+            XCTAssertEqual(try Data(contentsOf: file), before)
+        }
+    }
+    func testIncompleteEditableLineCanStillBeRestored() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let incomplete = CommercialNewEstimateDraft(customerID: actor, title: "Repair",
+            lines: [.init(description: "", quantity: "", unitPrice: "1.", source: .manual)], uncertain: false,
+            created: nil, requiresLocationVerification: false, requiresManualReview: false,
+            requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        let store = CommercialDraftStore(directory: root); try store.save(incomplete, scope: scope)
+        let editor = lifecycle(store); try editor.open()
+        XCTAssertEqual(editor.state, .needsRestore)
+        try editor.acknowledgeRestored(try XCTUnwrap(editor.recoveredDraft))
+        XCTAssertEqual(editor.state, .editable)
+        try editor.close(preserving: incomplete)
+    }
 }
