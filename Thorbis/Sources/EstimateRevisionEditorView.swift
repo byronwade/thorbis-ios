@@ -529,7 +529,7 @@ struct EstimateRevisionEditorView: View {
                 editor.estimate.id,
                 request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount, extendedTextVerified: verified)
             )
-            guard scopeMatches else { error = "The workspace changed. Your edits are still here. Check the original workspace before retrying."; return }
+            guard scopeMatches, canEdit else { error = "The workspace or access changed. Your edits are still here. Check the original workspace before retrying."; return }
             onSaved(revised)
             dismiss()
         } catch is CancellationError {
