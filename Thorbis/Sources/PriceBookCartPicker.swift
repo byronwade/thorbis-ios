@@ -34,6 +34,9 @@ struct PriceBookCartPicker: View {
     @State private var added = 0
     @State private var error: String?
     @FocusState private var focus: EstimateBuilderFocus?
+    #if DEBUG
+    @State private var previewRevalidated = false
+    #endif
 
     private var context: PriceBookCatalogContext {
         .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)
@@ -129,6 +132,16 @@ struct PriceBookCartPicker: View {
                     .sensoryFeedback(.selection, trigger: kind)
                 }
             }
+            #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-revalidation") {
+                Button("Refresh sample authority") {
+                    Task { await session.revalidate(); previewRevalidated = true }
+                }.accessibilityIdentifier("price-book-preview-revalidate")
+                if previewRevalidated {
+                    Text("Sample authority refreshed").accessibilityIdentifier("price-book-preview-revalidated")
+                }
+            }
+            #endif
             if kind != .all {
                 Text("Showing \(kind.title.lowercased())").font(Theme.font(13)).foregroundStyle(Theme.muted)
             }

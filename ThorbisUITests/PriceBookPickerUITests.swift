@@ -75,6 +75,34 @@ final class PriceBookPickerUITests: XCTestCase {
         add(proof)
     }
 
+    func testInvoicePickerKeepsSearchAndAddedLineDuringAuthorityRevalidation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor",
+                               "--paper-preview-catalog-pages", "--paper-preview-picker-revalidation"]
+        app.launch()
+        let before = lineCount(app)
+        openPicker(in: app, addItem: "invoice-add-item")
+        let search = app.textFields["invoice-catalog-search"]
+        search.tap()
+        search.typeText(sentinel)
+        let item = app.buttons["price-book-item-\(sentinelID)"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        item.tap()
+        XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
+        let revalidate = app.buttons["price-book-preview-revalidate"]
+        XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
+        revalidate.tap()
+        XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        XCTAssertEqual(search.value as? String, sentinel)
+        XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
+        app.buttons["price-book-done"].tap()
+        XCTAssertEqual(lineCount(app), before + 1)
+        let editor = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, sentinel)
+    }
+
     func testInvoicePickerKeepsFirstPageSelectionOpen() {
         let app = openPriceBook()
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009701"]
