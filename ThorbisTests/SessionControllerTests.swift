@@ -158,22 +158,30 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == "/api/auth/organization/create" }.count, 0)
     }
 
-    #if DEBUG
     func testSessionLossDuringUnbindDoesNotRebindOldIdentity() async {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let expiring = activeSession.replacingOccurrences(of: "2099-10-27T12:00:00.000Z", with: formatter.string(from: Date().addingTimeInterval(3)))
         let (session, _) = controller([
-            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)
+            .init(200, expiring), .init(200, oneOrganization), .init(200, catalog), .init(200, features)
         ])
         await session.restore()
+        XCTAssertEqual(session.phase, .ready)
+        let originalGeneration = session.generation
         var rebinds = 0
-        session.onWillUnbindDevice = { session.previewForce(.failed) }
+        session.onWillUnbindDevice = {
+            for _ in 0..<400 where session.generation == originalGeneration {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
         session.onAbortedDeviceUnbind = { rebinds += 1 }
 
         let signedOut = await session.signOut()
         XCTAssertFalse(signedOut)
         XCTAssertEqual(rebinds, 0)
+        XCTAssertNotEqual(session.generation, originalGeneration)
         XCTAssertEqual(session.phase, .failed)
     }
-    #endif
 
     func testExtendedTextNeedsFreshEnabledResponseFromSameWorkspace() async {
         let timestamp = ISO8601DateFormatter().string(from: Date())

@@ -44,3 +44,7 @@ The initial `c633337` simulator run stopped in Swift compilation before any test
 Better Auth's checked-out 1.6.26 create handler defaults to activating the new organization; the follow-up sends `keepCurrentActiveOrganization: true` to avoid a server-side switch before the lifecycle barrier. The unrun create/failed-switch test asserts that exact JSON field and the client workspace. Local dependency/config source supports the field; hosted server version and actual server session behavior have not been verified here.
 
 The frozen `6f70f1c` focused simulator run also stopped at compilation before tests: three catch blocks in the earlier recovery-copy UI assigned to the implicit catch `error` rather than `self.error` (`NewEstimateView.swift` lines 625, 693, 717). The follow-up fixes those three assignments. Log `/tmp/thorbis-lifecycle-6f70f1c-xcode.log`; hashes `/tmp/thorbis-lifecycle-6f70f1c-hashes.txt` matched after the run. No app test passed in either attempt.
+
+The `9a40257` simulator run compiled the app and ran seven session cases: six passed, and the identity-loss case failed because its `previewForce` call does nothing without Paper Preview. The failure did not exercise expiry or generation retirement. Log `/tmp/thorbis-lifecycle-9a40257-xcode.log`; source hashes `/tmp/thorbis-lifecycle-9a40257-hashes.txt`.
+
+The follow-up replaces that fixture with a real near-term session expiry while device unbinding is suspended, and checks that generation actually retires before asserting no rebind. This corrected test has not run yet.
