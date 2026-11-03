@@ -151,29 +151,12 @@ final class APIClient: ObservableObject {
     }
 
     private static func validatedOrigin(_ raw: String) -> URLComponents? {
-        guard let components = URLComponents(string: raw),
-              let host = components.host?.lowercased(),
-              components.user == nil, components.password == nil,
-              components.query == nil, components.fragment == nil,
-              components.path.isEmpty || components.path == "/"
-        else { return nil }
-        if components.scheme == "https", host == "app.thorbis.com", components.port == nil {
-            return components
-        }
-        #if DEBUG
-        if components.scheme == "http", ["127.0.0.1", "localhost", "[::1]"].contains(host) {
-            return components
-        }
-        #endif
-        return nil
+        APIOrigin.validated(raw)
     }
 
     /// Canonical origin identity, using the same trust rules as every API request.
     static func normalizedOrigin(_ raw: String) -> String? {
-        guard var origin = validatedOrigin(raw) else { return nil }
-        origin.host = origin.host?.lowercased()
-        origin.path = ""
-        return origin.string
+        APIOrigin.normalized(raw)
     }
 
     var normalizedOrigin: String? { Self.normalizedOrigin(baseURL) }
