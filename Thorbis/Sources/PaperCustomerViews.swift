@@ -233,6 +233,14 @@ struct CustomerRecordsScope: Equatable, Sendable {
     }
 }
 
+private struct CustomerLocationNoteOpening: Identifiable, Equatable {
+    let locationID: String
+    let scope: CustomerRecordsScope
+    let origin: String
+    let apiGeneration: UUID
+    var id: String { locationID }
+}
+
 struct CustomerDetailView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
@@ -256,6 +264,12 @@ struct CustomerDetailView: View {
     @State private var isMutatingContact = false
     @State private var contactMutationError: String?
     @State private var locationSheet: CustomerLocationSheet?
+    @State private var locationNoteOpening: CustomerLocationNoteOpening?
+    @State private var locationNoteEditRequest: CustomerLocationNoteOpening?
+    @State private var locationNoteDenied: CustomerLocationNoteOpening?
+    #if DEBUG
+    @State private var previewLocationDenied = false
+    #endif
     @State private var locationToRemove: ServiceLocationRecord?
     @State private var isRemovingLocation = false
     @State private var locationError: String?
@@ -351,6 +365,28 @@ struct CustomerDetailView: View {
                 }
             }
         }
+        #if DEBUG
+        .toolbar {
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-location-note-denial") {
+                ThorbisToolbarItem(placement: .topBarLeading) {
+                    Button(previewLocationDenied ? "Restore sample location" : "Deny sample location shortly") {
+                        if previewLocationDenied {
+                            previewLocationDenied = false
+                            PaperPreviewProtocol.setCustomerLocationDenied(false)
+                            Task { await load() }
+                        } else {
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .seconds(8))
+                                previewLocationDenied = true
+                                PaperPreviewProtocol.setCustomerLocationDenied(true)
+                                await SavedCopies.$liveOnly.withValue(true) { await load() }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        #endif
         .safeAreaInset(edge: .bottom) { if !typeSize.isAccessibilitySize { customerPrimaryActions } }
         .deviceHandoffs($handoff)
         .task { await load() }
@@ -395,6 +431,42 @@ struct CustomerDetailView: View {
                 error = nil
             }
         } }
+        .sheet(item: $locationNoteOpening, onDismiss: openRequestedLocationEditor) { opening in SheetSurface {
+            if let location = locationForNote(opening), let note = location.notes, !note.isEmpty {
+                NavigationStack {
+                    ScrollView {
+                        Text(note).font(Theme.font(17)).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Theme.gutter)
+                    }
+                    .background(Theme.canvas)
+                    .navigationTitle("Site notes")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ThorbisToolbarItem(placement: .cancellationAction) { Button("Done") { locationNoteOpening = nil } }
+                        if canEdit {
+                            ThorbisToolbarItem(placement: .confirmationAction) {
+                                Button("Edit location") {
+                                    guard locationForNote(opening) != nil, canEdit else { return }
+                                    locationNoteEditRequest = opening
+                                    locationNoteOpening = nil
+                                }
+                            }
+                        }
+                    }
+                    .presentationDetents([.large])
+                }
+            }
+        } }
+        .onChange(of: recordsScope) { _, _ in closeLocationNote() }
+        .onChange(of: api.normalizedOrigin) { _, _ in closeLocationNote() }
+        .onChange(of: api.requestGeneration) { _, _ in closeLocationNote() }
+        .onChange(of: locations) { _, _ in
+            if let opening = locationNoteOpening {
+                guard let note = locationForNote(opening)?.notes, !note.isEmpty else { closeLocationNote(); return }
+            }
+        }
         .sheet(item: $locationSheet) { item in SheetSurface {
             ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
                 locationState.save(saved)
@@ -822,7 +894,17 @@ struct CustomerDetailView: View {
                                     .accessibilityElement(children: .combine)
                                     AddressLink(address: location.address, coordinates: location.coordinates)
                                         .labelStyle(.titleOnly).font(Theme.font(15)).tint(Theme.foreground)
-                                    if let notes = location.notes { Text(notes).font(Theme.font(15)).foregroundStyle(Theme.muted) }
+                                    if locationNoteAccessDenied {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Site notes unavailable. Refresh to try again.")
+                                                .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                            Button("Retry site notes") { Task { await load() } }
+                                                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                                                .frame(minHeight: 44).contentShape(Rectangle())
+                                        }
+                                    } else if let notes = location.notes, !notes.isEmpty {
+                                        locationNote(notes, location: location)
+                                    }
                                     if let parking = location.parking { detailRow("Parking", value: parking) }
                                     // A hazard on site reads in the warning tint, with its own glyph.
                                     if let dogs = location.dogOnSite { hazardRow("Dogs on site", value: dogs) }
@@ -848,6 +930,53 @@ struct CustomerDetailView: View {
             }
             if let locationError { mutationError(locationError, id: "location-mutation-error") }
         }
+    }
+
+    private func locationNote(_ notes: String, location: ServiceLocationRecord) -> some View {
+        let long = notes.count > 80 || notes.contains("\n")
+        let canOpen = recordsScope.map { location.organizationId == $0.organizationID && location.customerId == $0.customerID } == true
+            && api.normalizedOrigin != nil && !locationNoteAccessDenied
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(notes).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .lineLimit(long && canOpen ? 3 : nil)
+                .fixedSize(horizontal: false, vertical: true)
+            if long && canOpen {
+                Button("Show more") {
+                    guard let scope = recordsScope, let origin = api.normalizedOrigin,
+                          location.organizationId == scope.organizationID, location.customerId == customer.id else { return }
+                    locationNoteOpening = CustomerLocationNoteOpening(locationID: location.id, scope: scope,
+                                                                     origin: origin, apiGeneration: api.requestGeneration)
+                }
+                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                .frame(minHeight: 44).contentShape(Rectangle())
+                .accessibilityLabel("Show more site notes for \(location.label)")
+                .accessibilityIdentifier("location-note-more-\(location.id)")
+            }
+        }
+    }
+
+    private var locationNoteAccessDenied: Bool {
+        guard let denied = locationNoteDenied else { return false }
+        return recordsScope == denied.scope && api.normalizedOrigin == denied.origin && api.requestGeneration == denied.apiGeneration
+    }
+
+    private func locationForNote(_ opening: CustomerLocationNoteOpening) -> ServiceLocationRecord? {
+        guard !locationNoteAccessDenied, recordsScope == opening.scope, api.normalizedOrigin == opening.origin,
+              api.requestGeneration == opening.apiGeneration else { return nil }
+        return locations.first { $0.id == opening.locationID && $0.customerId == customer.id &&
+            $0.organizationId == opening.scope.organizationID }
+    }
+
+    private func closeLocationNote() {
+        locationNoteEditRequest = nil
+        locationNoteOpening = nil
+    }
+
+    private func openRequestedLocationEditor() {
+        defer { locationNoteEditRequest = nil }
+        guard let opening = locationNoteEditRequest, canEdit,
+              let location = locationForNote(opening) else { return }
+        locationSheet = .edit(location)
     }
 
     private func removeLocation(_ location: ServiceLocationRecord) async {
@@ -1207,6 +1336,10 @@ struct CustomerDetailView: View {
         let requestGeneration = loadGeneration
         let locationRequestGeneration = locationState.beginLoad()
         let contactRequestGeneration = contactState.beginLoading()
+        let noteScope = recordsScope
+        let noteOrigin = api.normalizedOrigin
+        let noteAPIGeneration = api.requestGeneration
+        let revalidatingNote = locationNoteAccessDenied
         do {
             let loadedRecord = try await api.fieldCustomer(customer.id)
             guard loadGeneration == requestGeneration else { return }
@@ -1214,14 +1347,25 @@ struct CustomerDetailView: View {
             let loadedContacts = try await api.fieldContacts(customer.id)
             guard loadGeneration == requestGeneration else { return }
             contactState.receive(loadedContacts, generation: contactRequestGeneration)
-            let loadedLocations = try await api.fieldLocations(customer.id)
+            let loadedLocations = try await SavedCopies.$liveOnly.withValue(SavedCopies.liveOnly || revalidatingNote) {
+                try await api.fieldLocations(customer.id)
+            }
             guard loadGeneration == requestGeneration else { return }
             if locationState.receive(loadedLocations, generation: locationRequestGeneration) {
                 locationError = nil
+                if revalidatingNote, recordsScope == noteScope, api.normalizedOrigin == noteOrigin,
+                   api.requestGeneration == noteAPIGeneration { locationNoteDenied = nil }
             }
             error = nil
         } catch is CancellationError {} catch {
             guard loadGeneration == requestGeneration else { return }
+            if let problem = error as? Problem, [401, 403, 404].contains(problem.status ?? 0),
+               let scope = noteScope, let origin = noteOrigin,
+               recordsScope == scope, api.normalizedOrigin == origin, api.requestGeneration == noteAPIGeneration {
+                locationNoteDenied = CustomerLocationNoteOpening(locationID: "", scope: scope,
+                                                                 origin: origin, apiGeneration: noteAPIGeneration)
+                closeLocationNote()
+            }
             self.error = error.localizedDescription
         }
     }

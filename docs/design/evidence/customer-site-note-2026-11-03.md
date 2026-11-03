@@ -1,0 +1,9 @@
+# Customer site note readability — 3 November 2026
+
+Status: in progress, not released. Base: build 155 record `7ed3470`.
+
+The customer overview currently renders a site's entire note inline. Long paragraphs can separate the address from the rest of the customer's locations, equipment and activity. Paper Thorbis Mobile customer detail artboard `VQA-0` places short notes directly in context; this adaptation keeps short site notes visible and proposes a bounded preview and native reading sheet for longer notes. The existing location editor remains the source of edits.
+
+The reader must resolve the location from the existing customer collection rather than storing a second copy. It must follow the current actor, organization, customer, session, origin and API generation, dismiss when access or location changes, preserve existing offline data and permissions, and expose full content with readable Dynamic Type. Long-description and edit journeys require focused simulator evidence, and an independent review is needed before release. This record will be updated with results.
+
+Held after independent review. In `/tmp/thorbis-customer-site-note-green.log`, the long-note largest-text preview/reader/editor test and an existing overview test passed; denial recovery failed because the sample Restore control was not found. The subsequent denial-content fix and fixture correction have not been tested. The view-local denial is lost on recreation, an authority or API generation change can bypass it, and an older denial can be discarded by a newer request. Current location collection data also is not proven scoped across changes. Do not release or describe this reader as safe until durable, correctly ordered denial and collection ownership are addressed. The baseline expected-red control test is `/tmp/thorbis-customer-site-note-red.log`.

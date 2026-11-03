@@ -43,6 +43,46 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Contact actions for \(name)"].isHittable)
         capture("Customer contact and quick actions, largest text")
     }
+    func testLongLocationNoteOpensReaderAndExistingEditor() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-location-long-note", "--paper-preview-scroll", "center", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let more = app.buttons["location-note-more-00000000-0000-4000-8000-000000007001"]
+        for _ in 0..<16 where !more.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.waitForExistence(timeout: 20))
+        XCTAssertTrue(more.isHittable)
+        capture("Customer location note preview, largest text")
+        more.tap()
+        let full = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "final paragraph contains the site-specific cleanup instructions")).firstMatch
+        XCTAssertTrue(full.waitForExistence(timeout: 10))
+        capture("Customer location note reader")
+        let edit = app.buttons["Edit location"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
+        XCTAssertTrue(app.buttons["Cancel location changes"].waitForExistence(timeout: 10))
+    }
+
+    func testLocationNoteDenialClosesReaderAndFreshReadRestoresIt() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-location-long-note", "--paper-preview-location-note-denial", "--paper-preview-scroll", "center"]
+        app.launch()
+        let more = app.buttons["location-note-more-00000000-0000-4000-8000-000000007001"]
+        XCTAssertTrue(more.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !more.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.isHittable)
+        app.buttons["Deny sample location shortly"].tap()
+        more.tap()
+        XCTAssertTrue(app.navigationBars["Site notes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Site notes"].waitForNonExistence(timeout: 20))
+        XCTAssertFalse(more.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "final paragraph contains the site-specific cleanup instructions")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Site notes unavailable. Refresh to try again."].exists)
+        app.buttons["Restore sample location"].tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 15))
+    }
+
     func testNextVisitStaysReadableAndOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()

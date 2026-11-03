@@ -654,6 +654,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
         var priceBookViewRevoked = false
+        var customerLocationDenied = false
         var documentEstimateViewRevoked = false
         var jobMediaViewRevoked = false
         var priceBookReads = 0
@@ -664,7 +665,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.customerLocationDenied = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -676,6 +677,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
     static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
+    static func setCustomerLocationDenied(_ denied: Bool) { scenario.lock.withLock { scenario.customerLocationDenied = denied } }
     static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
     static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
     static func switchSavedWorkWorkspace() {
@@ -786,6 +788,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ Self.scenario.estimateUnavailable }) {
             status = 503
             payload = ["status": 503, "title": "Sample estimate connection unavailable"]
+        } else if PaperPreview.screen == "customer", url.path.hasSuffix("/locations"),
+                  Self.scenario.lock.withLock({ Self.scenario.customerLocationDenied }) {
+            status = 403
+            payload = ["status": 403, "title": "Sample location access denied"]
         } else if PaperPreview.screen == "price-book", url.path == "/v1/query",
                   Self.scenario.lock.withLock({ Self.scenario.priceBookQueryFailed }) {
             status = 503
@@ -1591,7 +1597,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
                                     "label": "Home", "kind": "service", "address": address,
-                                    "notes": "Sample location for design preview",
+                                    "notes": ProcessInfo.processInfo.arguments.contains("--paper-preview-location-long-note")
+                                        ? "Enter through the north courtyard and ring the bell beside the main door. The building manager will meet the technician and provide access to the utility room.\n\nProtect the floor and keep the hallway clear throughout the visit. The final paragraph contains the site-specific cleanup instructions."
+                                        : "Sample location for design preview",
                                     "coordinates": previewCoordinates(customerID: id),
                                     "gateCode": "4821#", "alarmCode": "7350",
                                     "dogOnSite": "Rusty — friendly, stays in the back yard",
