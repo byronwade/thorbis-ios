@@ -1242,7 +1242,7 @@ struct CustomerLinesCard: View {
     private func lineDetails(_ line: FieldLine) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let readingAccess {
-                ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+                ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess, customerFacing: true)
             } else {
                 Text(line.description).font(Theme.customerFont(type.body))
                     .fixedSize(horizontal: false, vertical: true)
@@ -1378,18 +1378,19 @@ struct CustomerIncludedLines: View {
     let rows: [CustomerAmountRow]
     /// Consent screens read each description through the protected reader.
     var readingAccess: DocumentDescriptionAccess? = nil
+    var descriptionContext: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(lines) { line in
+            ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
                 VStack(alignment: .leading, spacing: 6) {
                     if dynamicTypeSize.isAccessibilitySize {
-                        description(line)
+                        description(line, index: index)
                         amount(line).frame(maxWidth: .infinity, alignment: .trailing)
                     } else {
                         HStack(alignment: .firstTextBaseline, spacing: 14) {
-                            description(line)
+                            description(line, index: index)
                             amount(line).fixedSize()
                         }
                     }
@@ -1429,9 +1430,11 @@ struct CustomerIncludedLines: View {
         .documentPanel()
     }
 
-    @ViewBuilder private func description(_ line: FieldLine) -> some View {
+    @ViewBuilder private func description(_ line: FieldLine, index: Int) -> some View {
         if let readingAccess {
-            ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+            ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess,
+                                        customerFacing: true,
+                                        accessibilityContext: descriptionContext.map { "\($0), item \(index + 1)" })
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(LineText(line.description).name).font(Theme.customerFont(type.body, weight: .medium))

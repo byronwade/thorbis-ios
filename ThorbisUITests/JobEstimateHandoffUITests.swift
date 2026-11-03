@@ -124,6 +124,105 @@ final class JobEstimateHandoffUITests: XCTestCase {
         }, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed, "Each real selection must stick before the next tap")
     }
+    func testSelectedEstimateLongDescriptionOpensReadOnlyAndReturnsToReview() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        selectEstimate(app, first)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
+        let more = app.buttons["Show more, EST-8101, item 1"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        visible(app, more)
+        more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textViews.firstMatch.exists, "Customer description is read-only")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "$190.00")).firstMatch.exists)
+    }
+
+    func testSelectedReviewDescriptionClosesWhenSessionIsRetired() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-slow-invalidation"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        selectEstimate(app, first)
+        toggleSampleControls(app)
+        app.buttons["End sample session shortly"].tap()
+        toggleSampleControls(app)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
+        let more = app.buttons["Show more, EST-8101, item 1"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        visible(app, more)
+        more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Description"])
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 30), .completed)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.exists)
+    }
+
+    func testSelectedPackageDescriptionCanBeReadDuringCombinedReview() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-options", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        selectEstimate(app, first)
+        let package = app.buttons["handoff-option-00000000-0000-4000-8000-000000008101-00000000-0000-4000-8000-000000008201"]
+        XCTAssertTrue(package.waitForExistence(timeout: 5))
+        visible(app, package)
+        package.tap()
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
+        let more = app.buttons["Show more, EST-8101, Sample package"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        visible(app, more)
+        more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final package detail: test all equipment and explain the finished work.")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "$250.00")).firstMatch.exists)
+    }
+
+    func testSameTitleEstimatesOpenTheirOwnLongDescriptions() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-duplicate-titles", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(second.waitForExistence(timeout: 10)); selectEstimate(app, second)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
+        let firstMore = app.buttons["Show more, EST-8101, item 1"]
+        XCTAssertTrue(firstMore.waitForExistence(timeout: 5)); visible(app, firstMore); firstMore.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        let secondMore = app.buttons["Show more, EST-8102, item 1"]
+        XCTAssertTrue(secondMore.waitForExistence(timeout: 5)); visible(app, secondMore); secondMore.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final second estimate detail: verify the separate work.")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testLongReviewDescriptionRemainsReadableAtLargestText() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls",
+                        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
+        let more = app.buttons["Show more, EST-8101, item 1"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); visible(app, more); more.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testTwoSameTitleEstimatesApproveIndependentlyInOneProtectedHandoff() throws {
         let app = open(["--paper-preview-handoff-duplicate-titles", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
