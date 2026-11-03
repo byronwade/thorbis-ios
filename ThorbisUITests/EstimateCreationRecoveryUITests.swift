@@ -274,8 +274,9 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(recoveredCounts.waitForExistence(timeout: 15))
         let warning = hasSavedID ? "job link could not be confirmed" : "previous save could not be confirmed"
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", warning)).firstMatch.waitForExistence(timeout: 10))
-        XCTAssertEqual(recoveredCounts.value as? String, "creates=0,links=0,estimateReads=0,jobReads=0")
-        let unexpectedRequest = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "creates=0,links=0,estimateReads=0,jobReads=0"), object: recoveredCounts)
+        let observed = recoveredCounts.value as? String ?? ""
+        XCTAssertTrue(observed.hasPrefix("creates=0,links=0,"), "Recovery may read to verify access but must not create or link")
+        let unexpectedRequest = XCTNSPredicateExpectation(predicate: NSPredicate(format: "NOT (value BEGINSWITH %@)", "creates=0,links=0,"), object: recoveredCounts)
         unexpectedRequest.isInverted = true
         wait(for: [unexpectedRequest], timeout: 2)
         if !hasSavedID {
@@ -286,7 +287,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
             XCTAssertTrue(retry.waitForExistence(timeout: 10))
             XCTAssertTrue(retry.isEnabled)
             retry.tap()
-            assertOpenedSavedEstimate(in: app, counts: "creates=0,links=1,estimateReads=1,jobReads=1")
+            assertOpenedSavedEstimate(in: app, counts: "creates=0,links=1,estimateReads=2,jobReads=2")
         }
     }
 
