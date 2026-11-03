@@ -40,6 +40,43 @@ import Security
         let expired = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now.addingTimeInterval(61) })
         XCTAssertNil(expired.offline(scope: scope, authorized: true))
     }
+    func testDenialCannotBeBypassedByReturningToAnEarlierDeadline() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let markers = Markers(); let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let a = scope(deadline: now.addingTimeInterval(60)), b = scope(deadline: now.addingTimeInterval(120))
+        let store = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now })
+        let first = try store.beginLive(scope: a)
+        _ = try store.completeLive(scope: a, ticket: first, job: record(), stillAuthorized: true)
+        _ = try store.beginLive(scope: b)
+        try store.deny(scope: b)
+        XCTAssertNil(store.offline(scope: a, authorized: true))
+        XCTAssertNil(store.offline(scope: b, authorized: true))
+    }
+    func testFreshLongerAuthorityDoesNotExtendOlderSnapshotExpiry() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let markers = Markers(); let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let a = scope(deadline: now.addingTimeInterval(60)), b = scope(deadline: now.addingTimeInterval(120))
+        let store = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now })
+        let ticket = try store.beginLive(scope: a)
+        _ = try store.completeLive(scope: a, ticket: ticket, job: record(), stillAuthorized: true)
+        let afterA = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now.addingTimeInterval(61) })
+        XCTAssertNil(afterA.offline(scope: b, authorized: true))
+    }
+    func testDenialAcrossPolicyAndAuthorityChangesRetiresOlderGrant() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let markers = Markers(); let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let old = scope(deadline: now.addingTimeInterval(60))
+        let changed = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 4, authorityGeneration: "new-authority", sessionDigest: String(repeating: "a", count: 64), deadline: now.addingTimeInterval(120))
+        let store = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now })
+        let ticket = try store.beginLive(scope: old)
+        _ = try store.completeLive(scope: old, ticket: ticket, job: record(), stillAuthorized: true)
+        _ = try store.beginLive(scope: changed)
+        try store.deny(scope: changed)
+        XCTAssertNil(store.offline(scope: old, authorized: true))
+    }
     func testWriteAheadDenialAndCrashSurviveReopen() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -90,7 +127,7 @@ import Security
         XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
         XCTAssertThrowsError(try store.beginLive(scope: scope))
         XCTAssertNil(store.offline(scope: scope, authorized: true))
-        let other = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: UUID().uuidString, sessionDigest: String(repeating: "a", count: 64), deadline: now.addingTimeInterval(60))
+        let other = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: "018f0000-0000-7000-8000-000000000099", policyVersion: 3, authorityGeneration: UUID().uuidString, sessionDigest: String(repeating: "a", count: 64), deadline: now.addingTimeInterval(60))
         XCTAssertNoThrow(try store.beginLive(scope: other))
     }
     func testActualKeychainAdapterCanReadAndUpdate() throws {
@@ -155,6 +192,19 @@ import Security
         let pending = try store.beginLive(scope: scope)
         try store.deny(scope: scope)
         XCTAssertNil(try store.restoreAfterConnectivityFailure(scope: scope, ticket: pending, stillAuthorized: true))
+        XCTAssertNil(store.offline(scope: scope, authorized: true))
+    }
+    func testAbandonedAttemptCannotRestoreOldGrantOnLaterOfflineRead() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let markers = Markers(); let now = Date(timeIntervalSince1970: 1_800_000_000); let scope = scope(deadline: now.addingTimeInterval(60))
+        let store = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now })
+        let first = try store.beginLive(scope: scope)
+        _ = try store.completeLive(scope: scope, ticket: first, job: record(), stillAuthorized: true)
+        let canceled = try store.beginLive(scope: scope)
+        try store.abandon(scope: scope, ticket: canceled)
+        let next = try store.beginLive(scope: scope)
+        XCTAssertNil(try store.restoreAfterConnectivityFailure(scope: scope, ticket: next, stillAuthorized: true))
         XCTAssertNil(store.offline(scope: scope, authorized: true))
     }
     func testRetirementRevokesGrantsAndPreventsLateCompletion() throws {

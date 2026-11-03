@@ -23,6 +23,10 @@ struct JobOfficeColdScope: Codable, Hashable {
         policyVersion > 0 && !authorityGeneration.isEmpty && sessionDigest.count == 64 &&
         sessionDigest.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } && deadline.timeIntervalSince1970.isFinite
     }
+    func sameAuthority(as other: Self) -> Bool {
+        actor == other.actor && organization == other.organization && origin == other.origin && job == other.job &&
+        policyVersion == other.policyVersion && authorityGeneration == other.authorityGeneration && sessionDigest == other.sessionDigest
+    }
 }
 
 @MainActor protocol JobOfficeColdMarkerStorage {
@@ -73,10 +77,16 @@ struct JobOfficeColdScope: Codable, Hashable {
         let state: State
         let ticket: UUID?
         let digest: String?
+        let processEpoch: UUID?
+        init(state: State, ticket: UUID?, digest: String?, processEpoch: UUID? = nil) {
+            self.state = state; self.ticket = ticket; self.digest = digest; self.processEpoch = processEpoch
+        }
     }
     enum Failure: Error { case invalidScope, unavailable, invalidJob, contended, io }
     private static var unsafe: Set<String> = []
     private static var retirementUnsafe: Set<String> = []
+    private static let processEpoch = UUID()
+    private static var activeAttempts: [String: UUID] = [:]
     private let directory: URL
     private let markers: any JobOfficeColdMarkerStorage
     private let clock: () -> Date
@@ -94,8 +104,9 @@ struct JobOfficeColdScope: Codable, Hashable {
     private func key(_ scope: JobOfficeColdScope) throws -> String {
         guard scope.identityIsValid, APIClient.normalizedOrigin(scope.origin) == scope.origin,
               clock() < scope.deadline else { throw Failure.invalidScope }
-        let fields = [scope.actor, scope.organization, scope.origin, scope.job, String(scope.policyVersion),
-                      scope.authorityGeneration, scope.sessionDigest, String(scope.deadline.timeIntervalSince1970.bitPattern)]
+        // Policy, authority and deadline can change and later recur. Denials
+        // must cover every variant within the same actor/job/session identity.
+        let fields = [scope.actor, scope.organization, scope.origin, scope.job, scope.sessionDigest]
         return SHA256.hash(data: Data(fields.map { "\($0.utf8.count):\($0)" }.joined().utf8)).map { String(format: "%02x", $0) }.joined()
     }
     private func withLifecycleLock<T>(exclusive: Bool, _ action: () throws -> T) throws -> T {
@@ -153,7 +164,8 @@ struct JobOfficeColdScope: Codable, Hashable {
         let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         guard actual == digest else { throw Failure.unavailable }
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
-        guard snapshot.scope == scope, snapshot.job.id.lowercased() == scope.job,
+        guard snapshot.scope.sameAuthority(as: scope), clock() < snapshot.scope.deadline,
+              snapshot.job.id.lowercased() == scope.job,
               snapshot.job.organizationId.lowercased() == scope.organization else { throw Failure.unavailable }
         return snapshot
     }
@@ -161,17 +173,23 @@ struct JobOfficeColdScope: Codable, Hashable {
         try locked(scope) { key in
             let interrupted = try barrierExists(key)
             let prior = try marker(key)
-            let retained = !interrupted && (prior?.state == .available || prior?.state == .pending) ? prior?.digest : nil
+            let activePending = prior.map { previous in
+                previous.state == .pending && previous.processEpoch == Self.processEpoch &&
+                previous.ticket.map { Self.activeAttempts[key] == $0 } == true
+            } ?? false
+            let retained = !interrupted && (prior?.state == .available || activePending) ? prior?.digest : nil
             let ticket = UUID()
             try establishBarrier(key)
-            try saveMarker(.init(state: .pending, ticket: ticket, digest: retained), key: key)
+            try saveMarker(.init(state: .pending, ticket: ticket, digest: retained, processEpoch: Self.processEpoch), key: key)
             try clearBarrier(key)
+            Self.activeAttempts[key] = ticket
             return ticket
         }
     }
     func completeLive(scope: JobOfficeColdScope, ticket: UUID, job: JobRecord, stillAuthorized: Bool) throws -> Snapshot? {
         try locked(scope) { key in
-            guard try !barrierExists(key), let current = try marker(key), current.state == .pending, current.ticket == ticket, stillAuthorized else { return nil }
+            guard try !barrierExists(key), let current = try marker(key), current.state == .pending, current.ticket == ticket,
+                  current.processEpoch == Self.processEpoch, Self.activeAttempts[key] == ticket, stillAuthorized else { return nil }
             guard job.id.lowercased() == scope.job, job.organizationId.lowercased() == scope.organization else { throw Failure.invalidJob }
             let result = Snapshot(scope: scope, job: job, epoch: UUID(), savedAt: clock())
             let data = try JSONEncoder().encode(result)
@@ -186,24 +204,35 @@ struct JobOfficeColdScope: Codable, Hashable {
             } catch { Self.unsafe.insert(key); throw error }
             guard clock() < scope.deadline else { throw Failure.invalidScope }
             try saveMarker(.init(state: .available, ticket: nil, digest: digest), key: key)
+            Self.activeAttempts.removeValue(forKey: key)
             return result
         }
     }
     func restoreAfterConnectivityFailure(scope: JobOfficeColdScope, ticket: UUID, stillAuthorized: Bool) throws -> Snapshot? {
         try locked(scope) { key in
             guard try !barrierExists(key), let current = try marker(key), current.state == .pending, current.ticket == ticket,
+                  current.processEpoch == Self.processEpoch, Self.activeAttempts[key] == ticket,
                   stillAuthorized, let digest = current.digest else { return nil }
             let result = try snapshot(digest, scope: scope, key: key)
             guard clock() < scope.deadline else { throw Failure.invalidScope }
             try saveMarker(.init(state: .available, ticket: nil, digest: digest), key: key)
+            Self.activeAttempts.removeValue(forKey: key)
             return result
         }
     }
     func deny(scope: JobOfficeColdScope) throws {
         try locked(scope) { key in
+            Self.activeAttempts.removeValue(forKey: key)
             try establishBarrier(key)
             try saveMarker(.init(state: .denied, ticket: nil, digest: nil), key: key)
             try clearBarrier(key)
+        }
+    }
+    /// Call when an in-flight task is canceled or retired without a result.
+    /// The pending marker remains, but its previous grant cannot be restored.
+    func abandon(scope: JobOfficeColdScope, ticket: UUID) throws {
+        try locked(scope) { key in
+            if Self.activeAttempts[key] == ticket { Self.activeAttempts.removeValue(forKey: key) }
         }
     }
     func offline(scope: JobOfficeColdScope, authorized: Bool) -> Snapshot? {
@@ -223,6 +252,7 @@ struct JobOfficeColdScope: Codable, Hashable {
             let retired = directory.appendingPathComponent("retire.barrier")
             do {
                 try Data("retiring".utf8).write(to: retired, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                Self.activeAttempts.removeAll()
                 try markers.removeAll()
                 let paths = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
                 for path in paths where path != retired && (path.pathExtension == "json" || path.pathExtension == "barrier") {

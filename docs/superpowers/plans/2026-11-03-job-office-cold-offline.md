@@ -77,3 +77,29 @@ real Keychain case to verify deletion is limited to the dedicated test service;
 a second Keychain service remained intact (`/tmp/thorbis-job-office-cold-delete-xcode.log`).
 This is simulator evidence only and does not qualify device signing, integrated
 logout, power-loss recovery or network/authority races.
+
+## Denial variants and interrupted attempts
+
+The original prototype keyed records by policy, authority generation and exact
+expiry. That allowed a denial under one expiry to leave a prior grant accessible
+when an earlier expiry recurred. The denial, lock, Keychain marker and barrier
+now share one key for actor, organization, origin, job and session digest.
+Snapshots separately bind their exact policy and authority generation and must
+be within both their original expiry and the caller's current expiry. A denial
+under any policy/generation/deadline for that same identity retires its old
+grant. Mixed-version migration is not implemented; this key change cannot be
+rolled out while any old reader can still access its old-key grant.
+
+A second reproduced bug let a pending marker from a dead process retain an old
+snapshot on the next process's connectivity failure. A pending marker now
+contains a random process epoch, and retention/completion additionally require
+an active in-memory ticket for that exact key under the flock. A process restart
+or another process treats the old pending marker as orphaned and cannot restore
+its previous grant. Same-process overlapping reads retain the old snapshot only
+while the previous ticket is genuinely active. The caller must invoke `abandon`
+on cancellation or retirement; a denial invalidates every active attempt for
+that key. Standalone red/green process and deadline checks are recorded in
+`/tmp/thorbis-cold-orphan-{red,green}.log` and
+`/tmp/thorbis-cold-deadline-{red,green}.log`. iOS and network/UI coverage of
+these revisions, cross-process policy races and full caller cancellation wiring
+remain open; no cold reader or sign-out path is enabled.
