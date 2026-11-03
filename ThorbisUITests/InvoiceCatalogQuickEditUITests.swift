@@ -55,7 +55,8 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let search = openCatalog(app, typing: "Camera sewer inspection")
         let item = app.buttons[itemID]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
-        item.tap()
+        // The item's text remains a direct add target at the standard text size.
+        item.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons.matching(identifier: itemID).matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch.waitForExistence(timeout: 5))
 
         // A new search keeps the cart; the same item again adds a second, distinct line.
@@ -86,20 +87,99 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         proof.lifetime = .keepAlways
         add(proof)
 
-        // Quantity's number pad covers the Done/"Close line" capsule. Put the keyboard away and
-        // reveal the control before tapping, or the tap is absorbed and the line stays open.
-        if app.keyboardShowing {
-            app.keyboards.firstMatch.swipeDown()
-            _ = app.waitForKeyboardToHide(timeout: 3)
+        let close = app.buttons["Close line"].firstMatch
+        XCTAssertTrue(close.isHittable, "The line's Done control should be directly reachable while editing")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(close.frame.intersects(app.keyboards.firstMatch.frame), "The keyboard must not cover the line's Done control")
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.exists)
+        XCTAssertFalse(close.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover the line's Done control")
+        let remove = app.buttons["Remove"].firstMatch
+        XCTAssertTrue(remove.isHittable, "Remove remains available while editing")
+        XCTAssertGreaterThanOrEqual(remove.frame.minX - close.frame.maxX, 20, "Separate the destructive action from Done")
+        XCTAssertFalse(remove.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover Remove")
+        XCTAssertFalse(remove.frame.intersects(app.keyboards.firstMatch.frame), "The keyboard must not cover Remove")
+        let saveWhileTyping = app.buttons["Save draft"]
+        if saveWhileTyping.exists && saveWhileTyping.isHittable {
+            XCTAssertFalse(close.frame.intersects(saveWhileTyping.frame), "Invoice actions must not cover the line's Done control")
         }
-        let closeLine = app.buttons["Close line"].firstMatch
-        reveal(closeLine, in: app)
-        closeLine.tap()
+        close.tap()
         XCTAssertTrue(quantity.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "Closing the line must dismiss the keyboard")
         let summary = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "10", "245.00")).firstMatch
         XCTAssertTrue(summary.waitForExistence(timeout: 5), "The closed line keeps the edited quantity")
         XCTAssertTrue(app.buttons["Save draft"].isHittable)
         XCTAssertTrue(app.buttons["Issue invoice"].isHittable)
+    }
+
+    func testClosingFocusedPriceKeepsAndFormatsTheEnteredAmount() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let price = app.textFields["invoice-line-price-" + identity]
+        XCTAssertTrue(price.waitForExistence(timeout: 10))
+        reveal(price, in: app); price.tap(); price.doubleTap(); app.typeText("12.5")
+        XCTAssertEqual(price.value as? String, "12.5")
+        let close = app.buttons["Close line"].firstMatch
+        reveal(close, in: app)
+        close.tap()
+        XCTAssertTrue(price.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Save draft"].isHittable)
+        XCTAssertTrue(app.buttons["Issue invoice"].isHittable)
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Compressor diagnostic", "12.50")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertEqual(app.textFields["invoice-line-price-" + identity].value as? String, "12.50")
+    }
+
+    func testLargestTextCanCloseFocusedInvoiceLineAboveKeyboardDone() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let price = app.textFields["invoice-line-price-" + identity]
+        reveal(price, in: app)
+        price.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let close = app.buttons["Close line"].firstMatch
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        reveal(close, in: app)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(close.frame.intersects(keyboardDone.frame))
+        XCTAssertFalse(close.frame.intersects(app.keyboards.firstMatch.frame))
+        let remove = app.buttons["Remove"].firstMatch
+        reveal(remove, in: app)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(remove.frame.intersects(keyboardDone.frame), "Remove must clear keyboard Done at large text")
+        XCTAssertFalse(remove.frame.intersects(app.keyboards.firstMatch.frame), "Remove must clear the keyboard at large text")
+        XCTAssertGreaterThanOrEqual(remove.frame.minY - close.frame.maxY, 12, "Separate Remove from line Done at large text")
+        reveal(close, in: app)
+        XCTAssertFalse(close.frame.intersects(keyboardDone.frame))
+        close.tap()
+        XCTAssertTrue(price.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Compressor diagnostic")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testKeyboardDoneDismissesKeyboardWithoutClosingTheLine() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let price = app.textFields["invoice-line-price-" + identity]
+        reveal(price, in: app)
+        price.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(price.exists, "Dismissing the keyboard must keep the item open")
     }
 
     func testTypedLineBecomesACustomLineOpenForItsPrice() {
@@ -141,20 +221,61 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         add(proof)
     }
 
+    func testLargeTextCatalogAddControlIsVisibleAndAddsTwiceWithKeyboard() {
+        let app = launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "--paper-preview-long-catalog-title"])
+        let search = openCatalog(app, typing: "Camera sewer inspection")
+        let item = app.buttons[itemID]
+        let done = app.buttons["price-book-done"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(item.frame.height, 44, "The add target must remain easy to touch")
+        XCTAssertLessThanOrEqual(item.frame.height, 64, "The add control must stay compact even when the item description is long")
+        let scroll = app.scrollViews.containing(NSPredicate(format: "identifier == %@", itemID)).firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<8 {
+            if item.isHittable && item.frame.minY >= search.frame.maxY && item.frame.maxY < done.frame.minY { break }
+            let upper = search.frame.maxY + 12
+            let lower = done.frame.minY - 12
+            XCTAssertGreaterThan(lower - upper, 70, "The visible results viewport needs room to scroll above the Done bar")
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: scroll.frame.midX, dy: lower))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: scroll.frame.midX, dy: upper)))
+        }
+        XCTAssertTrue(item.isHittable)
+        XCTAssertGreaterThanOrEqual(item.frame.minY, search.frame.maxY)
+        XCTAssertLessThan(item.frame.maxY, done.frame.minY)
+        XCTAssertTrue(item.label.contains("Camera sewer inspection"), "The accessibility label identifies the item")
+        XCTAssertTrue(item.label.contains("written repair recommendation"), "The accessibility label retains the full long item name")
+        XCTAssertTrue(item.label.contains("245"), "The accessibility label includes the price")
+        let proof = XCTAttachment(screenshot: app.screenshot())
+        proof.name = "Large text price book with separate add target"
+        proof.lifetime = .keepAlways
+        add(proof)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        item.tap()
+        XCTAssertTrue(app.buttons.matching(identifier: itemID).matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch.waitForExistence(timeout: 5))
+        item.tap()
+        XCTAssertTrue(app.buttons.matching(identifier: itemID).matching(NSPredicate(format: "value == %@", "2 in draft")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(search.value as? String, "Camera sewer inspection")
+        XCTAssertEqual(done.label, "Done · 2 items")
+    }
+
     func testLargestTextKeepsCatalogEditingAndInvoiceReviewReachable() {
         let app = launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         let search = openCatalog(app, typing: "Camera sewer inspection")
         let item = app.buttons[itemID]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
-        // At this size the row can sit under the keyboard; the catalog scrolls it up as a person would.
-        for _ in 0..<6 where !item.isHittable {
+        // A partly visible accessibility row can report hittable while its tap point is
+        // covered by the fixed Done bar. Scroll until the center is visibly above it.
+        let done = app.buttons["price-book-done"]
+        for _ in 0..<10 where !item.isHittable || item.frame.midY >= done.frame.minY {
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -80)))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -50)))
         }
         XCTAssertTrue(item.isHittable)
+        XCTAssertLessThan(item.frame.midY, done.frame.minY, "The catalog item's tap point must clear the Done bar")
         item.tap()
         XCTAssertTrue(app.buttons.matching(identifier: itemID).matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch.waitForExistence(timeout: 5))
-        let done = app.buttons["price-book-done"]
         XCTAssertTrue(done.isHittable)
         done.tap()
         XCTAssertTrue(search.waitForNonExistence(timeout: 5))

@@ -20,10 +20,11 @@ struct InvoiceLineEditorView: View {
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var addedLineSelection: InvoiceCatalogLineSelection?
     @State private var expandedLine: UUID?
+    @State private var keyboardUp = false
     @FocusState private var focus: EstimateBuilderFocus?
 
     private var catalogContext: PriceBookCatalogContext {
-        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
+        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)
     }
 
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
@@ -49,6 +50,11 @@ struct InvoiceLineEditorView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView { content }
+                // The keyboard's floating Done control sits above the keyboard safe area.
+                // Reserve room inside the scroll view so line actions can move above it.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if keyboardUp { Color.clear.frame(height: 72).allowsHitTesting(false) }
+                }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: focus) { _, value in
                     guard let id = value?.lineID else { return }
@@ -70,10 +76,16 @@ struct InvoiceLineEditorView: View {
             }
         }
         .keyboardDoneButton()
+        .trackKeyboard($keyboardUp)
         .task(id: catalogContext) { await refreshCatalog() }
-        .onChange(of: catalogContext) { _, _ in addedLineSelection = nil; showPriceBook = false }
+        .onChange(of: catalogContext) { previous, current in
+            if !previous.preservesInvoicePickerState(comparedTo: current) {
+                addedLineSelection = nil
+                showPriceBook = false
+            }
+        }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-        .safeAreaInset(edge: .bottom) { invoiceCommitActions }
+        .safeAreaInset(edge: .bottom) { if !keyboardUp { invoiceCommitActions } }
         .thorbisConfirm("Issue invoice?",
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
@@ -197,11 +209,22 @@ struct InvoiceLineEditorView: View {
             description: binding.description, quantity: binding.quantity, unitPrice: binding.unitPrice,
             lineID: line.id, currency: invoice.currency, lineTotal: total, unitLabel: line.unitLabel,
             note: sourceNote(line), menuItems: items, expanded: expandedLine == line.id,
-            toggle: { withAnimation(EstimateLineGroupsEditor.spring) { expandedLine = expandedLine == line.id ? nil : line.id } },
+            toggle: {
+                if expandedLine == line.id {
+                    // The row disappears when closed, so finish its focused price before
+                    // removing the field that normally formats it on focus loss.
+                    if focus == .price(line.id), let cents = InvoiceLineEditorState.priceCents(line.unitPrice) {
+                        try? editor.setUnitPrice(line.id, cents: cents)
+                    }
+                    focus = nil
+                }
+                withAnimation(EstimateLineGroupsEditor.spring) { expandedLine = expandedLine == line.id ? nil : line.id }
+            },
             remove: { removeLine(line.id) }, focus: $focus,
             descriptionIdentifier: "invoice-line-description-\(line.id)",
             quantityIdentifier: "invoice-line-quantity-\(line.id)",
-            priceIdentifier: "invoice-line-price-\(line.id)"
+            priceIdentifier: "invoice-line-price-\(line.id)",
+            lineActionsLeading: keyboardUp
         )
         .disabled(linesDisabled)
         .accessibilityAction(named: "Move up") { if canMoveUp { moveLine(line.id, offset: -1) } }
@@ -370,7 +393,7 @@ struct InvoiceLineEditorView: View {
         guard canUsePriceBook else { return }
         let expected = catalogContext
         await catalog.refresh(api: api, organizationID: expected.organizationID,
-                              sessionGeneration: expected.sessionGeneration, force: force)
+                              sessionGeneration: expected.sessionGeneration, authority: expected.authority, force: force)
     }
 
     private var invoiceEditorHeading: some View {
@@ -481,8 +504,21 @@ struct InvoiceCatalogLineSelection: Equatable {
     let context: PriceBookCatalogContext
 
     func resolvedLineID(in lines: [InvoiceLineDraft], context current: PriceBookCatalogContext) -> UUID? {
-        guard context == current, current.organizationID?.isEmpty == false,
+        guard context.preservesInvoicePickerState(comparedTo: current), current.organizationID?.isEmpty == false,
               lines.filter({ $0.id == lineID }).count == 1 else { return nil }
         return lineID
+    }
+}
+
+private extension PriceBookCatalogContext {
+    /// Local revalidation revisions retire requests but do not change a verified invoice draft's identity.
+    func preservesInvoicePickerState(comparedTo other: PriceBookCatalogContext) -> Bool {
+        guard organizationID == other.organizationID, sessionGeneration == other.sessionGeneration else { return false }
+        switch (authority, other.authority) {
+        case (nil, nil): return true
+        case let (old?, new?):
+            return old.actorID == new.actorID && old.policyVersion == new.policyVersion && old.generation == new.generation
+        default: return false
+        }
     }
 }

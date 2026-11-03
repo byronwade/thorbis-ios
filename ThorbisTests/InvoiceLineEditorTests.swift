@@ -22,6 +22,26 @@ final class InvoiceLineEditorTests: XCTestCase {
         )
     }
 
+    func testPartialPriceTextRemainsUncommittedUntilItIsComplete() throws {
+        var state = InvoiceLineEditorState(invoice: try makeInvoice())
+        state.lines[0].unitPrice = "12."
+        XCTAssertNil(InvoiceLineEditorState.priceCents(state.lines[0].unitPrice))
+        XCTAssertEqual(state.lines[0].unitPrice, "12.")
+        XCTAssertThrowsError(try state.makeRequest()) {
+            XCTAssertEqual($0 as? InvoiceLineEditorError, .invalidPrice)
+        }
+    }
+
+    func testNegativePriceCanBeCanonicalizedWithoutChangingItsValue() throws {
+        var state = InvoiceLineEditorState(invoice: try makeInvoice())
+        let id = state.lines[0].id
+        let cents = try XCTUnwrap(InvoiceLineEditorState.priceCents("-12.5"))
+        XCTAssertEqual(cents, -1250)
+        try state.setUnitPrice(id, cents: cents)
+        XCTAssertEqual(state.lines[0].unitPrice, "-12.50")
+        XCTAssertEqual(try state.makeRequest().lines[0].unitPrice.amount, -1250)
+    }
+
     func testEditorUsesObservedRevisionAndConvertsDecimalPriceToExactCents() throws {
         let invoice = try makeInvoice()
         var state = InvoiceLineEditorState(invoice: invoice)

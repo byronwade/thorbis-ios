@@ -53,6 +53,13 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func amount(_ id: String) -> Int { id == Self.a || id == Self.c ? 19000 : id == Self.b && flags.contains("--paper-preview-handoff-mixed") ? 0 : 32000 }
     private func lines(_ id: String) -> [[String: Any]] {
+        if flags.contains("--paper-preview-handoff-long-description"), id == Self.a ||
+            (id == Self.b && flags.contains("--paper-preview-handoff-duplicate-titles")) {
+            let description = id == Self.a
+                ? "Inspect and prepare the full work area before beginning.\n\nComplete the repair, check every connection, and explain the work to the customer. Final sample detail: return the area to its original condition."
+                : "Inspect the second work area before beginning.\n\nComplete the additional service and explain the results. Final second estimate detail: verify the separate work."
+            return [["id": id, "description": description, "quantity": 1, "unitPrice": ["amount": amount(id), "currency": "USD"]]]
+        }
         if id == Self.a, flags.contains("--paper-preview-handoff-discount") {
             return [["id": id, "description": "Anonymized service scope", "quantity": 1, "unitPrice": ["amount": 22000, "currency": "USD"]],
                     ["id": "sample-credit", "description": "Courtesy discount", "quantity": 1, "unitPrice": ["amount": -3000, "currency": "USD"]]]
@@ -67,7 +74,10 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private func options(_ id: String) -> [[String: Any]] {
         guard id == Self.a, flags.contains("--paper-preview-handoff-options") else { return [] }
         let scope: [[String: Any]] = [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 25000, "currency": "USD"]]]
-        return [["id": "00000000-0000-4000-8000-000000008201", "title": "Sample package", "description": "One package within this estimate", "lines": scope, "totalAmount": 25000, "currency": "USD"]]
+        let description = flags.contains("--paper-preview-handoff-long-description")
+            ? "This package includes a complete inspection and preparation before installation.\n\nFinal package detail: test all equipment and explain the finished work."
+            : "One package within this estimate"
+        return [["id": "00000000-0000-4000-8000-000000008201", "title": "Sample package", "description": description, "lines": scope, "totalAmount": 25000, "currency": "USD"]]
     }
     private func estimate(_ id: String) -> [String: Any] {
         var value: [String: Any] = ["id": id, "organizationId": org, "customerId": PaperPreview.customerID, "createdByUserId": PaperPreview.actorID, "status": status(id), "currentRevisionNumber": changedRevision && id == Self.b ? 2 : 1, "title": title(id), "lines": lines(id), "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]
@@ -222,11 +232,20 @@ struct JobEstimateHandoffReceiptMetadata: UIViewRepresentable {
 
 struct JobEstimateHandoffPreviewControls: View {
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
     @State private var proof = ""
     var body: some View {
         DisclosureGroup("Sample testing controls") {
             Button("Change sample workspace shortly") { delayed { JobEstimateHandoffPreview.shared.changeWorkspace() } }
             Button("End sample session shortly") { delayed(restore: true) { JobEstimateHandoffPreview.shared.endSession() } }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-retire-api") {
+                Button("Retire sample API shortly") {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(20))
+                        api.invalidateRequests()
+                    }
+                }
+            }
             Button("Choose sample workspace shortly") { delayed(restore: true) { JobEstimateHandoffPreview.shared.chooseWorkspace() } }
             Button("Interrupt next membership read") { JobEstimateHandoffPreview.shared.interruptNextMembership() }
             Button("Interrupt next signature upload") { JobEstimateHandoffPreview.shared.interruptNextUpload() }
@@ -238,7 +257,8 @@ struct JobEstimateHandoffPreviewControls: View {
     }
     private func delayed(restore: Bool = false, _ change: @escaping @MainActor () -> Void) {
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(4)); change()
+            let delay: Int64 = ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-slow-invalidation") ? 20 : 4
+            try? await Task.sleep(for: .seconds(delay)); change()
             if restore { await session.restore() } else { await session.revalidate() }
         }
     }

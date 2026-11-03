@@ -134,7 +134,7 @@ struct EstimateRevisionEditorView: View {
                 }
             } }
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
-            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
+            .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)) { await refreshCatalog() }
             .task(id: estimate.customerId) { memberPricing = try? await api.memberPricing(estimate.customerId) }
             .task(id: storesLineGroups) { editor.storesLineGroups = storesLineGroups }
             .onChange(of: catalog.items.map(\.id)) { classifyLines() }
@@ -395,7 +395,7 @@ struct EstimateRevisionEditorView: View {
         guard canUsePriceBook else { return }
         let org = session.activeOrganization?.id
         let generation = session.generation
-        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: force)
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, authority: session.priceBookAuthority, force: force)
         guard !Task.isCancelled, session.generation == generation, session.activeOrganization?.id == org else { return }
         classifyLines()
     }

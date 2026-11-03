@@ -13,12 +13,53 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-03-customer-records-loading",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "person.crop.rectangle.stack", title: "Faster customer records",
+                      detail: "Customer histories with several jobs can load more quickly."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-03-job-estimate-status",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "doc.text", title: "See estimate progress",
+                      detail: "See which job estimates are drafts or awaiting approval at a glance."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-02-back-alone",
             date: "2026-11-02",
             highlights: [
                 .init(symbol: "chevron.backward", title: "One Back button on job pages",
                       detail: "Job, customer and money pages show one round Back button. The menu opens from where you started."),
             ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-invoice-keyboard-catalog",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Easier invoice editing",
+                      detail: "Close an invoice item and add price book items more easily while the keyboard is open."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-customer-estimate-details",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Read estimate details",
+                      detail: "Open long item and package details while reviewing work with your customer."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-price-book-first-items",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "book", title: "Start with loaded items",
+                      detail: "See the first price book items while the rest load, with a clear note when search is incomplete."),
+            ],
+            fixes: 1
         ),
         ReleaseNote(
             id: "2026-11-02-estimate-text",

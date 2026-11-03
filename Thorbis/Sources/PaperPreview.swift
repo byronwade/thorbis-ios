@@ -121,7 +121,21 @@ enum PaperPreview {
                                     unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)
             draft = changed(draft, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([invalid]))])
         }
-        return [changed(estimate, ["title": "Main drain repair", "options": NSNull()]), draft,
+        var main = changed(estimate, ["title": "Main drain repair", "options": NSNull()])
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-review-states") {
+            main = changed(main, ["status": "declined"])
+            draft = changed(draft, ["status": "approved"])
+        }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-multiple-options"),
+           let original = estimate.options,
+           var options = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [[String: Any]],
+           var second = options.first {
+            second["id"] = "00000000-0000-4000-8000-000000009219"
+            second["title"] = "Second complete package"
+            options.append(second)
+            main = changed(estimate, ["title": "Main drain repair", "options": options])
+        }
+        return [main, draft,
                 changed(estimate, ["id": "00000000-0000-4000-8000-000000002239", "title": "Other job estimate", "options": NSNull()])]
     }
     static var jobDocumentInvoices: [InvoiceRecord] {
@@ -289,6 +303,13 @@ enum PaperPreview {
         return PreviewRefundIntentStore.shared
     }
     @MainActor static func api() -> APIClient {
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"),
+           let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            // Isolate this preview from an earlier preview's complete sample snapshot.
+            let sample = cache.appendingPathComponent("PriceBook", isDirectory: true)
+                .appendingPathComponent("\(organizationID.lowercased()).json")
+            try? FileManager.default.removeItem(at: sample)
+        }
         if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-many") {
             UserDefaults.standard.removeObject(forKey: "priceBookUsage.\(organizationID)")
         }
@@ -707,6 +728,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        // Keep the second catalog page pending to exercise honest partial search states.
+        if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"), url.path == "/v1/query",
+           let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           query.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }),
+           query.contains(where: { $0.name == "cursor" }) {
+            return
+        }
         // Left unanswered on purpose: the screen keeps showing what it draws while it waits.
         if PaperPreview.enabled, let held = PaperPreview.heldPath, url.path == held { return }
         // `--paper-preview-payment-timeout`: recording a payment times out, so Collect payment shows its pending state.
@@ -1271,11 +1300,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                         "items": items, "nextCursor": later ? NSNull() : cursor, "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
             }
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
-               ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages"),
+               (ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages") ||
+                ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial")),
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
                 let cursor = "00000000-0000-4000-8000-000000009988"
                 let later = queryItems.first(where: { $0.name == "cursor" })?.value == cursor
-                let rows = later ? [(9999, "Camera sewer inspection")] : (1...50).map { (9700 + $0, "Plumbing catalog service \($0)") }
+                let longTitle = "Camera sewer inspection with detailed video documentation, full pipe assessment, and a written repair recommendation"
+                let title = ProcessInfo.processInfo.arguments.contains("--paper-preview-long-catalog-title") ? longTitle : "Camera sewer inspection"
+                let rows = later ? [(9999, title)] : (1...50).map { (9700 + $0, "Plumbing catalog service \($0)") }
                 let items: [[String: Any]] = rows.map { number, title in
                     let id = String(format: "00000000-0000-4000-8000-%012d", number)
                     return ["id": id, "resourceId": "price_book_items", "label": title, "subtitle": "Service · flat",

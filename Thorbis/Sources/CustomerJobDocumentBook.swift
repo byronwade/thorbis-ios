@@ -248,16 +248,18 @@ private struct CustomerEstimateBookPage: View {
                     if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() } }
                     if estimate.status != "sent" || issued != nil {
                         if options.isEmpty {
-                            estimateLines(lines, currency: currency)
+                            estimateLines(lines, currency: currency, descriptionContext: "EST-\(estimate.id.suffix(4).uppercased())")
                         } else {
                             if estimate.status == "approved" {
                                 Text("These are the quoted packages. The approved package selection isn't available here.")
                                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                             }
-                            ForEach(options) { option in
+                            ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                                 Text(option.title).font(Theme.customerFont(type.heading, weight: .medium))
-                                if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess) }
-                                estimateLines(option.lines, currency: option.currency)
+                                if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess, customerFacing: true,
+                                                                                              accessibilityContext: "EST-\(estimate.id.suffix(4).uppercased()), package \(index + 1)") }
+                                estimateLines(option.lines, currency: option.currency,
+                                              descriptionContext: "EST-\(estimate.id.suffix(4).uppercased()), package \(index + 1)")
                             }
                         }
                     }
@@ -275,10 +277,10 @@ private struct CustomerEstimateBookPage: View {
         .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh)) { await load() }
     }
 
-    @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String) -> some View {
+    @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String, descriptionContext: String) -> some View {
         if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
             CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: lines, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess)
+                    CustomerIncludedLines(lines: lines, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess, descriptionContext: descriptionContext)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                 .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
@@ -351,7 +353,8 @@ private struct CustomerInvoiceBookPage: View {
                                 .font(Theme.customerFont(type.total, weight: .medium)).monospacedDigit()
                         }
                         CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: invoice.lines, type: type, rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"), readingAccess: readingAccess)
+                    CustomerIncludedLines(lines: invoice.lines, type: type, rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"), readingAccess: readingAccess,
+                                          descriptionContext: "INV-\(invoice.id.suffix(4).uppercased())")
                     } else {
                         Text("These amounts couldn't be verified. Hand the device back to your technician.").font(Theme.customerFont(type.body))
                     }
