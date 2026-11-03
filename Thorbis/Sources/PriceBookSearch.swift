@@ -111,20 +111,34 @@ struct PriceBookSearchIndex {
               usage: [String: PriceBookUsage] = [:], now: Date = Date(),
               excludingIDs: Set<String> = [], limit: Int? = nil, offset: Int = 0) -> PriceBookSearchPage {
         let queryWords = Self.words(query)
-        let key = CacheKey(query: query, kind: kind, usage: usage, now: now, excluded: excludingIDs)
-        let ordered: [Entry]
-        if let cached = cache.get(key) {
-            ordered = cached
-        } else {
-            ordered = orderedEntries(queryWords: queryWords, kind: kind, usage: usage, now: now, excludingIDs: excludingIDs)
-            cache.put(key, entries: ordered)
-        }
+        let ordered = rankedEntries(query, kind: kind, usage: usage, now: now, excludingIDs: excludingIDs)
         let pageSize = max(1, limit ?? max(1, ordered.count))
         let start = min(max(0, offset), ordered.isEmpty ? 0 : ((ordered.count - 1) / pageSize) * pageSize)
         let results = ordered.dropFirst(start).prefix(pageSize).map {
             PriceBookSearchResult(item: $0.item, highlights: Self.highlights(in: $0.item.description, words: queryWords))
         }
         return PriceBookSearchPage(results: results, total: ordered.count, offset: start)
+    }
+
+    /// Finds the page containing an existing item without formatting the entire catalog.
+    func pageOffset(containing id: String, query: String, kind: PriceBookKindFilter,
+                    usage: [String: PriceBookUsage], now: Date, excludingIDs: Set<String>,
+                    limit: Int = resultLimit) -> Int? {
+        let ordered = rankedEntries(query, kind: kind, usage: usage, now: now, excludingIDs: excludingIDs)
+        guard let position = ordered.firstIndex(where: { $0.item.id == id }) else { return nil }
+        let pageSize = max(1, limit)
+        return (position / pageSize) * pageSize
+    }
+
+    private func rankedEntries(_ query: String, kind: PriceBookKindFilter,
+                               usage: [String: PriceBookUsage], now: Date,
+                               excludingIDs: Set<String>) -> [Entry] {
+        let key = CacheKey(query: query, kind: kind, usage: usage, now: now, excluded: excludingIDs)
+        if let cached = cache.get(key) { return cached }
+        let ordered = orderedEntries(queryWords: Self.words(query), kind: kind, usage: usage,
+                                     now: now, excludingIDs: excludingIDs)
+        cache.put(key, entries: ordered)
+        return ordered
     }
 
     private func orderedEntries(queryWords: [String], kind: PriceBookKindFilter,
@@ -376,6 +390,8 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var loading = false
     /// True when the visible snapshot has more server pages that have not loaded.
     @Published private(set) var isPartial = false
+    @Published private(set) var origin: String?
+    @Published private(set) var needsScopedRefresh = false
     @Published private(set) var error: String?
     @Published private(set) var usage: [String: PriceBookUsage] = [:]
     /// Local stars (this device only).
@@ -383,6 +399,8 @@ final class PriceBookCatalog: ObservableObject {
     private(set) var organizationID: String?
     private var lastRefresh: Date?
     private var hasCompleteSnapshot = false
+    private var lastAPIGeneration: UUID?
+    private var partialAPIGeneration: UUID?
     private(set) var context: PriceBookCatalogContext?
     private var loadingRequest: (context: PriceBookCatalogContext, apiGeneration: UUID, id: UUID, task: Task<Void, Never>)?
 
@@ -390,20 +408,34 @@ final class PriceBookCatalog: ObservableObject {
     func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID, force: Bool = false) async {
         guard !Task.isCancelled else { return }
         let apiGeneration = api.requestGeneration
+        let requestedOrigin = api.normalizedOrigin
         let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration)
-        if context != requested {
+        if context != requested || origin != requestedOrigin {
             context = requested
+            origin = requestedOrigin
             self.organizationID = organizationID
-            let cached = organizationID.flatMap(Self.readCache)
+            let cached = organizationID.flatMap { org in requestedOrigin.flatMap { Self.readCache(org, origin: $0) } }
+            needsScopedRefresh = cached == nil && (organizationID.map(Self.hasLegacyCache) ?? false)
             hasCompleteSnapshot = cached != nil
             isPartial = false
+            partialAPIGeneration = nil
             apply(cached ?? [])
             usage = organizationID.map { PriceBookUsageStore(organizationID: $0).load() } ?? [:]
             favorites = organizationID.map { PriceBookFavoritesStore(organizationID: $0).load() } ?? []
             lastRefresh = nil
             error = nil
+            lastAPIGeneration = nil
+        } else if lastAPIGeneration != nil, lastAPIGeneration != apiGeneration {
+            lastRefresh = nil
+            if isPartial {
+                let cached = organizationID.flatMap { org in requestedOrigin.flatMap { Self.readCache(org, origin: $0) } }
+                hasCompleteSnapshot = cached != nil
+                isPartial = false
+                partialAPIGeneration = nil
+                apply(cached ?? [])
+            }
         }
-        guard let organizationID else {
+        guard let organizationID, let requestedOrigin else {
             loadingRequest?.task.cancel()
             loadingRequest = nil
             loading = false
@@ -416,20 +448,21 @@ final class PriceBookCatalog: ObservableObject {
         }
         loadingRequest?.task.cancel()
         let request = UUID()
+        lastAPIGeneration = apiGeneration
         loading = true
         // The catalog owns this work so closing its initiating view cannot strand other callers.
         let task = Task {
-            await self.load(api: api, organizationID: organizationID, context: requested,
+            await self.load(api: api, organizationID: organizationID, origin: requestedOrigin, context: requested,
                             apiGeneration: apiGeneration, request: request)
         }
         loadingRequest = (requested, apiGeneration, request, task)
         await task.value
     }
 
-    private func load(api: APIClient, organizationID: String, context requested: PriceBookCatalogContext,
+    private func load(api: APIClient, organizationID: String, origin requestedOrigin: String, context requested: PriceBookCatalogContext,
                       apiGeneration: UUID, request: UUID) async {
         let current: @MainActor () -> Bool = {
-            self.context == requested && self.loadingRequest?.id == request &&
+            self.context == requested && self.origin == requestedOrigin && self.loadingRequest?.id == request &&
                 api.requestGeneration == apiGeneration && !Task.isCancelled
         }
         defer {
@@ -444,7 +477,7 @@ final class PriceBookCatalog: ObservableObject {
             var cursor: String?
             var pages = 0
             // Never replace a useful complete offline snapshot with a partial refresh.
-            let exposePages = !hasCompleteSnapshot
+            let exposePages = !hasCompleteSnapshot || items.isEmpty
             repeat {
                 guard current() else { return }
                 let page = try await api.priceBookItems(limit: 200, cursor: cursor)
@@ -452,9 +485,12 @@ final class PriceBookCatalog: ObservableObject {
                 for item in page.items where seen.insert(item.id).inserted { all.append(item) }
                 cursor = page.nextCursor
                 pages += 1
-                if exposePages, cursor != nil {
-                    isPartial = true
+                // Build the index once for the first page and once for the final
+                // snapshot, rather than reindexing an ever-growing catalog per page.
+                if exposePages, pages == 1, cursor != nil {
+                    partialAPIGeneration = apiGeneration
                     apply(all)
+                    isPartial = true
                 }
             } while cursor != nil && pages < Self.maximumPages
             guard current() else { return }
@@ -462,12 +498,14 @@ final class PriceBookCatalog: ObservableObject {
                 throw Problem(title: "Couldn't load the whole price book", status: nil,
                               detail: "Refresh the catalog before using items that are missing.")
             }
-            isPartial = false
             apply(all)
+            isPartial = false
+            partialAPIGeneration = nil
             hasCompleteSnapshot = true
             lastRefresh = Date()
             error = nil
-            Self.writeCache(all, organizationID: organizationID)
+            Self.writeCache(all, organizationID: organizationID, origin: requestedOrigin)
+            needsScopedRefresh = false
         } catch is CancellationError {
         } catch {
             guard current() else { return }
@@ -489,6 +527,12 @@ final class PriceBookCatalog: ObservableObject {
         items.first { $0.id == id }
     }
 
+    /// A partial page belongs to the precise API generation that returned it.
+    func isCurrent(_ requested: PriceBookCatalogContext, api: APIClient) -> Bool {
+        context == requested && origin != nil && origin == api.normalizedOrigin &&
+        (!isPartial || partialAPIGeneration == api.requestGeneration)
+    }
+
     private func apply(_ items: [PriceBookListItem]) {
         self.items = items
         index = PriceBookSearchIndex(items: items)
@@ -502,6 +546,12 @@ final class PriceBookCatalog: ObservableObject {
         let revision: Int
     }
 
+    private struct CachedCatalog: Codable {
+        let version: Int
+        let origin: String
+        let items: [CachedItem]
+    }
+
     private static var directory: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("PriceBook", isDirectory: true)
@@ -512,23 +562,29 @@ final class PriceBookCatalog: ObservableObject {
         return directory?.appendingPathComponent("\(organizationID.lowercased()).json")
     }
 
-    private static func readCache(_ organizationID: String) -> [PriceBookListItem]? {
+    private static func readCache(_ organizationID: String, origin: String) -> [PriceBookListItem]? {
         guard let url = cacheURL(organizationID), let data = try? Data(contentsOf: url),
-              let cached = try? JSONDecoder().decode([CachedItem].self, from: data) else { return nil }
-        return cached.map {
+              let cached = try? JSONDecoder().decode(CachedCatalog.self, from: data),
+              cached.version == 1, cached.origin == origin else { return nil }
+        return cached.items.map {
             PriceBookListItem(id: $0.id, description: $0.description, unit: $0.unit, kind: $0.kind,
                               taxClassification: $0.taxClassification, sellPrice: $0.sellPrice,
                               revision: $0.revision, archivedAt: nil)
         }
     }
 
-    private static func writeCache(_ items: [PriceBookListItem], organizationID: String) {
+    private static func hasLegacyCache(_ organizationID: String) -> Bool {
+        guard let url = cacheURL(organizationID), let data = try? Data(contentsOf: url) else { return false }
+        return (try? JSONDecoder().decode([CachedItem].self, from: data)) != nil
+    }
+
+    private static func writeCache(_ items: [PriceBookListItem], organizationID: String, origin: String) {
         guard let url = cacheURL(organizationID), let directory else { return }
         let active = items.filter { $0.archivedAt == nil }.map {
             CachedItem(id: $0.id, description: $0.description, unit: $0.unit, kind: $0.kind,
                        taxClassification: $0.taxClassification, sellPrice: $0.sellPrice, revision: $0.revision)
         }
-        guard let data = try? JSONEncoder().encode(active) else { return }
+        guard let data = try? JSONEncoder().encode(CachedCatalog(version: 1, origin: origin, items: active)) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? data.write(to: url, options: [.atomic, .completeFileProtection])
     }
@@ -538,6 +594,10 @@ final class PriceBookCatalog: ObservableObject {
         organizationID = nil
         lastRefresh = nil
         context = nil
+        origin = nil
+        needsScopedRefresh = false
+        lastAPIGeneration = nil
+        partialAPIGeneration = nil
         loadingRequest?.task.cancel()
         loadingRequest = nil
         error = nil

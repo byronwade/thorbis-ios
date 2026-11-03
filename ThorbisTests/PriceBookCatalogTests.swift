@@ -39,6 +39,31 @@ final class PriceBookCatalogTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL(org).path))
     }
 
+    func testFirstPageRemainsStableUntilCompleteCatalogIsReady() async throws {
+        let org = UUID().uuidString.lowercased()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let rows: (ClosedRange<Int>) -> [(Int, String)] = { range in
+            range.map { ($0, "Catalog item \($0)") }
+        }
+        let api = client([.init(200, try page(rows(1...200), cursor: id(9000))),
+                          .init(200, try page(rows(201...400), cursor: id(9001))),
+                          .init(200, try page(rows(401...600)), gate: gate)])
+        let catalog = PriceBookCatalog()
+        let refresh = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: UUID(), force: true) }
+        try await waitForRequests(3)
+        XCTAssertEqual(catalog.items.count, 200, "Do not reorder visible results or reindex on each page")
+        XCTAssertEqual(catalog.items.first?.id, id(1))
+        XCTAssertEqual(catalog.items.last?.id, id(200))
+        XCTAssertTrue(catalog.isPartial)
+        gate.release()
+        await refresh.value
+        XCTAssertEqual(catalog.items.count, 600)
+        XCTAssertEqual(catalog.index.search("item 600").first?.id, id(600))
+        XCTAssertFalse(catalog.isPartial)
+    }
+
     func testRefreshingCompleteCacheDoesNotReplaceItWithAPartialPage() async throws {
         let org = UUID().uuidString.lowercased(), generation = UUID()
         defer { removeOwnCache(org) }
@@ -58,6 +83,110 @@ final class PriceBookCatalogTests: XCTestCase {
         gate.release()
         await refresh.value
         XCTAssertEqual(catalog.items.map(\.id), [id(2), id(3)])
+    }
+
+    func testAnEmptyCompleteCacheDoesNotHideNewlyLoadedItems() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([])),
+                          .init(200, try page([(1, "New item")], cursor: id(9000))),
+                          .init(200, try page([(2, "Later item")]), gate: gate)])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true)
+        let savedEmpty = try Data(contentsOf: cacheURL(org))
+        let refresh = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true) }
+        try await waitForRequests(3)
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertTrue(catalog.isPartial)
+        XCTAssertEqual(try Data(contentsOf: cacheURL(org)), savedEmpty)
+        gate.release()
+        await refresh.value
+    }
+
+    func testChangedAPIGenerationDoesNotLeavePartialItemsVisibleDuringNewRead() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let oldGate = URLProtocolFixture.Gate(), newGate = URLProtocolFixture.Gate()
+        defer { oldGate.release(); newGate.release() }
+        let api = client([.init(200, try page([(1, "Old scope")], cursor: id(9000))),
+                          .init(200, try page([(2, "Old later")]), gate: oldGate),
+                          .init(200, try page([(3, "New scope")]), gate: newGate)])
+        let catalog = PriceBookCatalog()
+        let old = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true) }
+        try await waitForRequests(2)
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        api.invalidateRequests()
+        let context = PriceBookCatalogContext(organizationID: org, sessionGeneration: generation)
+        XCTAssertFalse(catalog.isCurrent(context, api: api), "An old partial page must not be selectable even before refresh runs")
+        let next = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true) }
+        try await waitForRequests(3)
+        XCTAssertTrue(catalog.items.isEmpty, "Old partial items must not remain visible in a new request scope")
+        newGate.release(); oldGate.release()
+        await next.value; await old.value
+        XCTAssertEqual(catalog.items.map(\.id), [id(3)])
+    }
+
+    func testCachedCatalogFromAnotherOriginIsNotShown() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([(1, "Production item")])),
+                          .init(200, try page([(2, "Local item")]), gate: gate)])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true)
+        api.baseURL = "http://localhost:4321"
+        XCTAssertFalse(catalog.isCurrent(.init(organizationID: org, sessionGeneration: generation), api: api))
+        let refresh = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true) }
+        try await waitForRequests(2)
+        XCTAssertTrue(catalog.items.isEmpty, "A new API origin must not show the other environment's saved items")
+        gate.release()
+        await refresh.value
+        XCTAssertEqual(catalog.items.map(\.id), [id(2)])
+    }
+
+    func testSameOriginGenerationRefreshKeepsCompleteSnapshotWhileLoading() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([(1, "Saved item")])),
+                          .init(200, try page([(2, "Updated item")]), gate: gate)])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true)
+        api.invalidateRequests()
+        let refresh = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation) }
+        try await waitForRequests(2)
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertFalse(catalog.isPartial)
+        gate.release()
+        await refresh.value
+        XCTAssertEqual(catalog.items.map(\.id), [id(2)])
+    }
+
+    func testLegacyCacheWithoutOriginIsNotTrusted() async throws {
+        let org = UUID().uuidString.lowercased()
+        defer { removeOwnCache(org) }
+        let file = cacheURL(org)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let legacy = """
+        [{"id":"\(id(1))","description":"Unscoped item","unit":"flat","kind":"service","taxClassification":"taxable","sellPrice":{"amount":10000,"currency":"USD"},"revision":4}]
+        """
+        try Data(legacy.utf8).write(to: file)
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([(2, "Current item")]), gate: gate)])
+        let catalog = PriceBookCatalog()
+        let refresh = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: UUID(), force: true) }
+        try await waitForRequests(1)
+        XCTAssertTrue(catalog.items.isEmpty, "A cache without origin provenance must not be exposed")
+        XCTAssertTrue(catalog.needsScopedRefresh)
+        gate.release()
+        await refresh.value
+        XCTAssertEqual(catalog.items.map(\.id), [id(2)])
+        XCTAssertFalse(catalog.needsScopedRefresh)
     }
 
     func testAPIScopeChangeBeforeSharedLoadStartsCannotFillThePreviousWorkspaceCache() async throws {

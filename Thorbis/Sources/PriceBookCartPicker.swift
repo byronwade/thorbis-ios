@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct PriceBookPickerLoadScope: Equatable {
+    let context: PriceBookCatalogContext
+    let apiGeneration: UUID
+}
+
 /// The price book as a cart (EB-01..EB-07): the search field is focused when it opens, this
 /// device's favourites and recent items come first, the category sits in a filter circle, and
 /// every "+" adds one more without closing. "Done · 4 items" goes back to the builder.
@@ -21,6 +26,7 @@ struct PriceBookCartPicker: View {
     let refresh: (_ force: Bool) async -> Void
 
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var query = ""
@@ -65,7 +71,7 @@ struct PriceBookCartPicker: View {
         .sensoryFeedback(.success, trigger: added)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .task(id: context) {
+        .task(id: PriceBookPickerLoadScope(context: context, apiGeneration: api.requestGeneration)) {
             await refresh(false)
         }
         .task {
@@ -131,7 +137,7 @@ struct PriceBookCartPicker: View {
     }
 
     private func add(_ item: PriceBookListItem) {
-        guard canUsePriceBook, catalog.context == context else { return }
+        guard canUsePriceBook, catalog.isCurrent(context, api: api) else { return }
         if let message = addItem(item) {
             error = message
             return
