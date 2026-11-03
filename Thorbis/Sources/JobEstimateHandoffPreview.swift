@@ -232,11 +232,20 @@ struct JobEstimateHandoffReceiptMetadata: UIViewRepresentable {
 
 struct JobEstimateHandoffPreviewControls: View {
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
     @State private var proof = ""
     var body: some View {
         DisclosureGroup("Sample testing controls") {
             Button("Change sample workspace shortly") { delayed { JobEstimateHandoffPreview.shared.changeWorkspace() } }
             Button("End sample session shortly") { delayed(restore: true) { JobEstimateHandoffPreview.shared.endSession() } }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-retire-api") {
+                Button("Retire sample API shortly") {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(20))
+                        api.invalidateRequests()
+                    }
+                }
+            }
             Button("Choose sample workspace shortly") { delayed(restore: true) { JobEstimateHandoffPreview.shared.chooseWorkspace() } }
             Button("Interrupt next membership read") { JobEstimateHandoffPreview.shared.interruptNextMembership() }
             Button("Interrupt next signature upload") { JobEstimateHandoffPreview.shared.interruptNextUpload() }

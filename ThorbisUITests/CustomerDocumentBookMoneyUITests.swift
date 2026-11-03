@@ -4,7 +4,7 @@ import XCTest
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
     func testLongInvoiceDescriptionOpensReadOnlyAndReturnsToInvoice() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description", "--paper-preview-job-invoice-signed"])
-        let more = app.buttons["Show more"]
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
         XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
         XCTAssertTrue(text("Final invoice detail: leave the site clean.", in: app).exists)

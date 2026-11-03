@@ -106,7 +106,7 @@ struct JobEstimateHandoffView: View {
                 let selected = model.selectedIDs.contains(record.id)
                 if selected, !model.options(for: record.id).isEmpty {
                     Text("Choose one package for this estimate").font(Theme.customerFont(type.body))
-                    ForEach(model.options(for: record.id)) { option in
+                    ForEach(Array(model.options(for: record.id).enumerated()), id: \.element.id) { index, option in
                         VStack(alignment: .leading, spacing: 4) {
                             Button { model.chooseOption(estimateID: record.id, optionID: option.id) } label: {
                                 HStack(alignment: .top, spacing: 12) {
@@ -121,7 +121,7 @@ struct JobEstimateHandoffView: View {
                             if !option.description.isEmpty {
                                 ReadOnlyDocumentDescription(text: option.description, fontSize: type.body,
                                                             access: selectionDescriptionAccess(for: record), customerFacing: true,
-                                                            accessibilityContext: "EST-\(record.id.suffix(4).uppercased()), \(option.title)")
+                                                            accessibilityContext: "Estimate \((model.records.firstIndex(where: { $0.id == record.id }) ?? 0) + 1), EST-\(record.id.suffix(4).uppercased()), package \(index + 1)")
                                     .padding(.leading, 36)
                             }
                         }
@@ -186,7 +186,8 @@ struct JobEstimateHandoffView: View {
             Text("Review selected work").font(Theme.customerFont(type.heading, weight: .medium)).accessibilityAddTraits(.isHeader)
             Text("\(model.reviewed.count) separate estimates. You'll approve and sign each one.")
                 .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
-            ForEach(model.reviewed) { item in
+            ForEach(Array(model.reviewed.enumerated()), id: \.element.id) { index, item in
+                let reference = "Estimate \(index + 1), EST-\(item.id.suffix(4).uppercased())"
                 let option = item.revision.options?.first(where: { $0.id == item.optionID })
                 Text(item.revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                 Text("EST-\(item.id.suffix(4).uppercased()) · Revision \(item.revision.revisionNumber)").font(Theme.customerMonoFont(type.small)).foregroundStyle(Theme.muted)
@@ -197,7 +198,7 @@ struct JobEstimateHandoffView: View {
                     if !option.description.isEmpty {
                         ReadOnlyDocumentDescription(text: option.description, fontSize: type.body,
                                                     access: descriptionAccess(for: item), customerFacing: true,
-                                                    accessibilityContext: "EST-\(item.id.suffix(4).uppercased()), \(option.title)")
+                                                    accessibilityContext: "\(reference), package \((item.revision.options?.firstIndex(where: { $0.id == option.id }) ?? 0) + 1)")
                     }
                 }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
@@ -206,7 +207,7 @@ struct JobEstimateHandoffView: View {
                     CustomerIncludedLines(lines: lines, type: type,
                                           rows: customerAmountRows(amounts, currency: currency, invoice: false),
                                           readingAccess: descriptionAccess(for: item),
-                                          descriptionContext: "EST-\(item.id.suffix(4).uppercased())")
+                                          descriptionContext: reference)
                 }
             }
             ForEach(selectedTotals, id: \.currency) { value in
