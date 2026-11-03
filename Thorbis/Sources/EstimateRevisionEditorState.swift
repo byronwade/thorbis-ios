@@ -269,7 +269,7 @@ struct EstimateRevisionEditorState: Equatable {
         for index in options.indices { options[index].lines.classifyGroups(kinds: kinds) }
     }
 
-    func makeRequest(optionsFeatureEnabled: Bool, canDiscount: Bool) throws -> FieldEstimateReviseRequest {
+    func makeRequest(optionsFeatureEnabled: Bool, canDiscount: Bool, extendedTextVerified: Bool = false) throws -> FieldEstimateReviseRequest {
         guard canRevise else { throw EstimateRevisionEditorError.unsupportedStatus }
         let revision: Int
         if estimate.status == "draft" {
@@ -286,7 +286,10 @@ struct EstimateRevisionEditorState: Equatable {
         let cleanedTitle = Self.cleaned(title)
         guard !cleanedTitle.isEmpty else { throw EstimateRevisionEditorError.titleRequired }
         guard cleanedTitle.utf16.count <= 200 else { throw EstimateRevisionEditorError.titleTooLong }
-        let requestLines = try Self.makeLines(lines, storesGroups: storesLineGroups)
+        let descriptions = (lines + options.flatMap(\.lines)).map(\.description)
+        if let problem = CommercialDescriptionPolicy.problem(descriptions, kind: .estimate,
+            optionCount: options.count, capabilityVerified: extendedTextVerified) { throw problem }
+        let requestLines = try Self.makeLines(lines, storesGroups: storesLineGroups, extendedTextVerified: extendedTextVerified)
         guard options.count <= 8 else { throw EstimateRevisionEditorError.tooManyOptions }
         var identities = Set<String>()
         let requestOptions = try options.map { option -> FieldEstimateOptionRequest in
@@ -301,7 +304,7 @@ struct EstimateRevisionEditorState: Equatable {
                 id: identity,
                 title: optionTitle,
                 description: Self.cleaned(option.description),
-                lines: try Self.makeLines(option.lines, storesGroups: storesLineGroups)
+                lines: try Self.makeLines(option.lines, storesGroups: storesLineGroups, extendedTextVerified: extendedTextVerified)
             )
         }
         if !canDiscount,
@@ -356,7 +359,7 @@ struct EstimateRevisionEditorState: Equatable {
         EstimateRevisionLineDraft(description: "", quantity: "1", unitPrice: "", source: .manual)
     }
 
-    private static func makeLines(_ drafts: [EstimateRevisionLineDraft], storesGroups: Bool) throws -> [FieldEstimateLineInput] {
+    private static func makeLines(_ drafts: [EstimateRevisionLineDraft], storesGroups: Bool, extendedTextVerified: Bool) throws -> [FieldEstimateLineInput] {
         guard !drafts.isEmpty else { throw EstimateRevisionEditorError.noLines }
         guard drafts.count <= 500 else { throw EstimateRevisionEditorError.tooManyLines }
         return try drafts.map { draft in
@@ -365,7 +368,7 @@ struct EstimateRevisionEditorState: Equatable {
             }
             let description = cleaned(draft.description)
             guard !description.isEmpty else { throw EstimateRevisionEditorError.descriptionRequired }
-            guard description.utf16.count <= 200,
+            guard description.utf16.count <= (extendedTextVerified ? 4_000 : 200),
                   !description.unicodeScalars.contains(where: { $0.value == 0 }) else {
                 throw EstimateRevisionEditorError.descriptionTooLong
             }

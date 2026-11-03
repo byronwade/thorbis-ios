@@ -412,8 +412,13 @@ struct InvoiceLineEditorView: View {
         busy = true
         defer { busy = false }
         do {
+            let descriptions = editor.lines.map { $0.description.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions, kind: .invoice)
+            let verified = requiresExtended ? await session.verifyExtendedCommercialText() : false
+            if requiresExtended && !verified { throw CommercialDescriptionPolicy.Problem.unavailable }
+            guard canEdit else { throw CommercialDescriptionPolicy.Problem.unavailable }
             commitPrices()
-            let request = try editor.makeRequest()
+            let request = try editor.makeRequest(extendedTextVerified: verified)
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
             addedLineSelection = nil
             onSaved(updated)
@@ -463,8 +468,13 @@ struct InvoiceLineEditorView: View {
         do {
             commitPrices()
             var current = editor.invoice
+            let descriptions = editor.lines.map { $0.description.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions, kind: .invoice)
+            let verified = requiresExtended ? await session.verifyExtendedCommercialText() : false
+            if requiresExtended && !verified { throw CommercialDescriptionPolicy.Problem.unavailable }
+            guard canEdit, canIssue else { throw CommercialDescriptionPolicy.Problem.unavailable }
             if editor.hasChanges {
-                current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())
+                current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest(extendedTextVerified: verified))
                 addedLineSelection = nil
                 editor = InvoiceLineEditorState(invoice: current)
                 onSaved(current)

@@ -471,8 +471,10 @@ struct EstimateRevisionEditorView: View {
         let lines = editor.lines + editor.options.flatMap(\.lines)
         if lines.contains(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
             descriptionProblem = EstimateRevisionEditorError.priceBookOriginalTooLong.localizedDescription
-        } else if lines.contains(where: { $0.estimateDescriptionProblem == .tooLong }) {
-            descriptionProblem = "Item descriptions can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before saving."
+        } else if let problem = CommercialDescriptionPolicy.problem(lines.map(\.description), kind: .estimate,
+            optionCount: editor.options.count,
+            capabilityVerified: session.isFeatureOn("commercial_extended_descriptions") && !session.isOffline) {
+            descriptionProblem = problem.localizedDescription
         } else {
             descriptionProblem = nil
         }
@@ -488,21 +490,25 @@ struct EstimateRevisionEditorView: View {
             return
         }
         let allLines = editor.lines + editor.options.flatMap(\.lines)
-        if let line = allLines.first(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong })
-            ?? allLines.first(where: { $0.estimateDescriptionProblem == .tooLong }) {
+        if let line = allLines.first(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
             refreshDescriptionProblem()
             expandedLine = line.id
             revealProblem += 1
             return
         }
+        let descriptions = allLines.map(\.description)
+        let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, kind: .estimate)
         descriptionProblem = nil
         busy = true
         defer { busy = false }
         do {
+            let verified = requiresExtended ? await session.verifyExtendedCommercialText() : false
+            if requiresExtended && !verified { throw CommercialDescriptionPolicy.Problem.unavailable }
+            guard canEdit else { throw CommercialDescriptionPolicy.Problem.unavailable }
             commitPrices()
             let revised = try await api.reviseFieldEstimate(
                 editor.estimate.id,
-                request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount)
+                request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount, extendedTextVerified: verified)
             )
             onSaved(revised)
             dismiss()

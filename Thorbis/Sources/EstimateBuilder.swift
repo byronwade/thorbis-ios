@@ -203,12 +203,16 @@ extension EstimateRevisionLineDraft {
     /// Price Book sources are snapshotted by the server, so changing the displayed line
     /// cannot repair an overlong original revision.
     var estimateDescriptionProblem: EstimateDescriptionProblem? {
+        estimateDescriptionProblem(allowExtended: false)
+    }
+
+    func estimateDescriptionProblem(allowExtended: Bool) -> EstimateDescriptionProblem? {
         if case .priceBookSelection = source,
            let original = priceBookOriginal?.description.trimmingCharacters(in: .whitespacesAndNewlines),
            original.utf16.count > 200 { return .priceBookOriginalTooLong }
         let value = description.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty { return .empty }
-        if value.utf16.count > 200 { return .tooLong }
+        if value.utf16.count > (allowExtended ? 4_000 : 200) { return .tooLong }
         return nil
     }
 

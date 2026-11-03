@@ -252,16 +252,18 @@ struct InvoiceLineEditorState: Equatable {
         return total > 0 ? total : nil
     }
 
-    func makeRequest() throws -> FieldInvoiceLinesRequest {
+    func makeRequest(extendedTextVerified: Bool = false) throws -> FieldInvoiceLinesRequest {
         try requireDraft()
         guard invoice.currency == "USD" else { throw InvoiceLineEditorError.unsupportedCurrency }
         guard !lines.isEmpty else { throw InvoiceLineEditorError.noLines }
         guard lines.count <= 500 else { throw InvoiceLineEditorError.tooManyLines }
+        if let problem = CommercialDescriptionPolicy.problem(lines.map(\.description), kind: .invoice,
+            capabilityVerified: extendedTextVerified) { throw problem }
 
         let encodedLines = try lines.map { draft -> FieldInvoiceLineInput in
             let description = draft.description.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !description.isEmpty else { throw InvoiceLineEditorError.descriptionRequired }
-            guard description.unicodeScalars.count <= 211 else { throw InvoiceLineEditorError.descriptionTooLong }
+            guard extendedTextVerified || description.unicodeScalars.count <= 211 else { throw InvoiceLineEditorError.descriptionTooLong }
             guard let quantity = Int(draft.quantity.trimmingCharacters(in: .whitespacesAndNewlines)),
                   (1...100_000).contains(quantity) else { throw InvoiceLineEditorError.invalidQuantity }
             let unitPrice = try Self.parsePrice(draft.unitPrice)
