@@ -58,6 +58,21 @@ durable attempt reconciliation, controller-level asynchronous tests and real
 device qualification remain outstanding. Do not enable Tap to Pay on the
 strength of the candidate or its focused simulator tests.
 
+The reviewed-amount safeguard compares the amount and currency presented to
+the technician with both the server response and Stripe's retrieved intent,
+and checks locally visible invoice terms before confirmation. A standalone
+comparison test observed an expected failing result before the comparison was
+implemented; the focused simulator suite passed 11 tests. These checks do not
+exercise a full charge or prove protection against a later change on another
+device. Server-side concurrency enforcement and end-to-end verification remain
+necessary.
+
+Discovery still requires lifecycle work: the current SDK cancelable is not
+stopped when authorization changes after a reader is discovered, and an empty
+discovery update can wait indefinitely. Do not release the Terminal lease as
+idle until cancellation is confirmed; quarantine it if cancellation cannot be
+verified. Neither scenario is qualified by the tests above.
+
 - Fake-SDK call-order tests for same/different/unknown scope, nil location,
   disconnect failure, clear failure, reconnect failure, stale callbacks and two
   simultaneous attempts. Confirm no token request or card collection occurs

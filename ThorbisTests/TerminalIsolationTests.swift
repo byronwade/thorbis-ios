@@ -38,6 +38,17 @@ final class TerminalIsolationTests: XCTestCase {
         XCTAssertFalse(TerminalIsolation.tokenMatches(expected: "", actual: ""))
     }
 
+    func testPaymentMustMatchAmountAndCurrencyReviewedByTechnician() {
+        let reviewed = FieldMoney(amount: 12_345, currency: "USD")
+        XCTAssertTrue(TerminalIsolation.matchesReviewedPayment(reviewed, server: reviewed, stripeAmount: 12_345, stripeCurrency: "usd"))
+        XCTAssertFalse(TerminalIsolation.matchesReviewedPayment(reviewed, server: FieldMoney(amount: 12_346, currency: "USD"), stripeAmount: 12_346, stripeCurrency: "usd"))
+        XCTAssertFalse(TerminalIsolation.matchesReviewedPayment(reviewed, server: FieldMoney(amount: 12_345, currency: "CAD"), stripeAmount: 12_345, stripeCurrency: "cad"))
+        XCTAssertFalse(TerminalIsolation.matchesReviewedPayment(reviewed, server: reviewed, stripeAmount: 12_346, stripeCurrency: "usd"))
+        XCTAssertFalse(TerminalIsolation.matchesReviewedPayment(reviewed, server: reviewed, stripeAmount: 12_345, stripeCurrency: "cad"))
+        let zero = FieldMoney(amount: 0, currency: "USD")
+        XCTAssertFalse(TerminalIsolation.matchesReviewedPayment(zero, server: zero, stripeAmount: 0, stripeCurrency: "usd"))
+    }
+
     func testResetWithoutReaderStillClearsAndClearFailurePropagates() async {
         var calls: [String] = []
         do {

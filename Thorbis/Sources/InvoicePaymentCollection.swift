@@ -1164,15 +1164,19 @@ struct InvoicePaymentCollectionSheet: View {
         let actor = session.user?.id, organization = session.activeOrganization?.id
         let sessionGeneration = session.generation, authority = session.authorityRevision
         let apiGeneration = api.requestGeneration, origin = api.normalizedOrigin
-        guard let actor, let organization, let origin else { return }
+        guard let actor, let organization, let origin, let cents = model.collectableCents,
+              let invoice = model.invoice, cents > 0 else { return }
+        let reviewed = FieldMoney(amount: cents, currency: invoice.currency)
         let scope = TerminalAttemptScope(actor: actor, organization: organization, sessionGeneration: sessionGeneration,
                                          authorityRevision: authority, apiGeneration: apiGeneration, origin: origin)
-        await tapToPay.charge(api: api, scope: scope, authorized: {
+        await tapToPay.charge(api: api, scope: scope, reviewed: reviewed, authorized: {
             return session.phase == .ready && session.user?.id == actor &&
                 session.activeOrganization?.id == organization && session.generation == sessionGeneration &&
                 session.authorityRevision == authority && api.requestGeneration == apiGeneration &&
                 api.normalizedOrigin == origin && session.isFeatureOn(TapToPayController.feature) &&
                 session.can("invoice.payment.create", feature: "payments")
+        }, termsStillCurrent: {
+            model.canOfferCollection && model.collectableCents == reviewed.amount && model.invoice?.currency == reviewed.currency
         }) { [model] intent in
             await model.load()
             return model.hasRecordedCardPresentPayment(intent)

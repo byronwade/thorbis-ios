@@ -45,7 +45,7 @@ final class TapToPayReadinessTests: XCTestCase {
 
         let scope = TerminalAttemptScope(actor: "actor", organization: "org", sessionGeneration: UUID(),
                                          authorityRevision: UUID(), apiGeneration: UUID(), origin: "https://app.thorbis.com")
-        await controller.charge(api: api, scope: scope, authorized: { true }) { _ in
+        await controller.charge(api: api, scope: scope, reviewed: FieldMoney(amount: 100, currency: "USD"), authorized: { true }, termsStillCurrent: { true }) { _ in
             refreshed = true
             return false
         }

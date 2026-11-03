@@ -30,6 +30,13 @@ final class TerminalIsolation {
         !expected.isEmpty && expected == actual
     }
 
+    static func matchesReviewedPayment(_ reviewed: FieldMoney, server: FieldMoney,
+                                       stripeAmount: Int, stripeCurrency: String) -> Bool {
+        reviewed.amount > 0 && reviewed.currency == "USD" &&
+            reviewed == server && stripeAmount == reviewed.amount &&
+            stripeCurrency.uppercased() == reviewed.currency
+    }
+
     func release(_ id: UUID, uncertain: Bool) {
         guard owner == id else { return }
         if uncertain { needsReconciliation = true }

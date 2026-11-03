@@ -71,7 +71,8 @@ final class TapToPayController: ObservableObject {
 
     /// Runs one charge for the invoice balance. `refresh` reloads the invoice's payments and
     /// returns true only once this intent's webhook-settled payment shows up.
-    func charge(api: APIClient, scope: TerminalAttemptScope, authorized: @escaping @MainActor () -> Bool,
+    func charge(api: APIClient, scope: TerminalAttemptScope, reviewed: FieldMoney, authorized: @escaping @MainActor () -> Bool,
+                termsStillCurrent: @escaping @MainActor () -> Bool,
                 refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
         guard !busy else { return }
         guard Self.buildEnabled, Self.deviceSupported else {
@@ -101,14 +102,23 @@ final class TapToPayController: ObservableObject {
                 outcomeUncertain = false
             }
             self.intent = intent
-            guard authorized() else { throw CancellationError() }
+            guard authorized(), termsStillCurrent() else { throw CancellationError() }
+            guard TerminalIsolation.matchesReviewedPayment(reviewed, server: intent.amount,
+                stripeAmount: intent.amount.amount, stripeCurrency: intent.amount.currency) else {
+                throw Problem(title: "Payment changed", status: 409, detail: "The invoice amount changed. Review the invoice before collecting payment.")
+            }
             try await TerminalSetup.shared.connect(api: api, invoiceID: invoiceID, locationID: intent.locationId, lease: lease, authorized: authorized)
-            guard authorized() else { throw CancellationError() }
+            guard authorized(), termsStillCurrent() else { throw CancellationError() }
             let paymentIntent = try await Terminal.shared.retrievePaymentIntent(clientSecret: intent.clientSecret)
-            guard authorized() else { throw CancellationError() }
+            guard authorized(), termsStillCurrent() else { throw CancellationError() }
+            guard let stripeAmount = Int(exactly: paymentIntent.amount),
+                  TerminalIsolation.matchesReviewedPayment(reviewed, server: intent.amount,
+                      stripeAmount: stripeAmount, stripeCurrency: paymentIntent.currency) else {
+                throw Problem(title: "Payment changed", status: 409, detail: "The payment amount changed. Review the invoice before collecting payment.")
+            }
             phase = .waitingForCard
             let collected = try await Terminal.shared.collectPaymentMethod(paymentIntent)
-            guard authorized() else { throw CancellationError() }
+            guard authorized(), termsStillCurrent() else { throw CancellationError() }
             phase = .processing
             outcomeUncertain = true
             _ = try await Terminal.shared.confirmPaymentIntent(collected)
