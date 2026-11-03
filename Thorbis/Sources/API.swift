@@ -245,6 +245,24 @@ final class APIClient: ObservableObject {
         return try decodeResponse(response)
     }
 
+    /// Held invoice-reader path. A saved result remains available for offline
+    /// display but cannot establish fresh response provenance. This method does
+    /// not establish authorization, safe redirects or document membership.
+    func invoiceEvidenceGET<T: Decodable>(_ path: String, cursor: String? = nil) async throws -> (value: T, source: InvoiceResponseSource) {
+        // Only collection, exact invoice, or exact job-invoice paths belong
+        // to this held experiment. It must not become a general GET bypass.
+        let segments = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        let invoicePath = segments == ["v1", "invoices"] ||
+            (segments.count == 3 && segments[0] == "v1" && segments[1] == "invoices" && UUID(uuidString: segments[2]) != nil) ||
+            (segments.count == 4 && segments[0] == "v1" && segments[1] == "jobs" && UUID(uuidString: segments[2]) != nil && segments[3] == "invoices")
+        guard path == "/" + segments.joined(separator: "/"), invoicePath,
+              cursor.map({ !$0.isEmpty }) ?? true else {
+            throw Problem(title: "Invalid invoice evidence request", status: nil, detail: nil)
+        }
+        let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor, invoiceEvidenceRead: true)
+        return (try decodeResponse(response), response.source)
+    }
+
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
         let response = try await sendData(method, path, body: body, queryItems: queryItems, cursor: cursor, authed: authed)
         return try decodeResponse(response)
@@ -413,9 +431,10 @@ final class APIClient: ObservableObject {
         let data: Data
         let status: Int
         let contentType: String?
+        let source: InvoiceResponseSource
     }
 
-    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil) async throws -> DataResponse {
+    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil, invoiceEvidenceRead: Bool = false) async throws -> DataResponse {
         let generation = requestGeneration
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
@@ -428,7 +447,7 @@ final class APIClient: ObservableObject {
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
-        let freshRead = requireFresh || (SavedCopies.liveOnly && method.uppercased() == "GET")
+        let freshRead = requireFresh || invoiceEvidenceRead || (SavedCopies.liveOnly && method.uppercased() == "GET")
         var req = URLRequest(url: url, cachePolicy: freshRead ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
         if freshRead { req.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
         req.httpMethod = method
@@ -443,7 +462,7 @@ final class APIClient: ObservableObject {
         let readKey = isJSONRead ? SavedCopies.key(origin: requestOrigin, path: path, query: requestQueryItems) : nil
         let epoch = mutationEpoch
         let reuseKey = readKey.flatMap { Self.reusesRecentRead(path, query: requestQueryItems) ? $0 : nil }
-        if let reuseKey, !SavedCopies.liveOnly, let recent = recentReads[reuseKey], recent.epoch == epoch,
+        if let reuseKey, !SavedCopies.liveOnly, !invoiceEvidenceRead, let recent = recentReads[reuseKey], recent.epoch == epoch,
            recent.generation == generation, Date().timeIntervalSince(recent.at) < Self.recentReadWindow {
             PerfProbe.request(method, path, note: "reused")
             return recent.response
@@ -455,7 +474,7 @@ final class APIClient: ObservableObject {
                   let copy = SavedCopyStore.shared.read(scope: copyScope, key: keptKey) else { return nil }
             if savedCopyPaths[path] != copy.savedAt { savedCopyPaths[path] = copy.savedAt }
             PerfProbe.request(method, path, note: "saved copy")
-            return DataResponse(data: copy.data, status: 200, contentType: "application/json")
+            return DataResponse(data: copy.data, status: 200, contentType: "application/json", source: .savedCopy)
         }
         if keptKey != nil, knownOffline, !SavedCopies.liveOnly, let copy = savedCopy() { return copy }
         if let copyScope, let keptKey, SavedCopyStore.shared.exists(scope: copyScope, key: keptKey) {
@@ -516,7 +535,13 @@ final class APIClient: ObservableObject {
             }
             throw Problem(title: "HTTP \(code)", status: code, detail: nil)
         }
-        let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"))
+        if invoiceEvidenceRead {
+            guard let http = resp as? HTTPURLResponse, http.url == url,
+                  http.statusCode == 200, http.value(forHTTPHeaderField: "Content-Range") == nil else {
+                throw Problem(title: "Incomplete invoice response", status: code, detail: "A complete invoice read is required.")
+            }
+        }
+        let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"), source: .network)
         if let reuseKey, mutationEpoch == epoch {
             recentReads[reuseKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
             if recentReads.count > 200 { recentReads = recentReads.filter { Date().timeIntervalSince($0.value.at) < Self.recentReadWindow } }

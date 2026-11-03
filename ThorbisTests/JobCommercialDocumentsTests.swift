@@ -142,6 +142,25 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
     }
 
+    func testInvoiceEvidenceLabelsEachMixedPageIndependently() async throws {
+        let cursor = id(990)
+        let client = api([.init(200, page([invoice(50)], cursor: cursor)), URLProtocolFixture.offline,
+                          .init(200, page([invoice(52)]))])
+        client.savedCopyScope = "invoice-provenance-\(UUID().uuidString)"
+        let _: Items<InvoiceRecord> = try await client.send("GET", "/v1/invoices")
+        try await waitForSavedInvoice(client, path: "/v1/invoices")
+        client.invalidateRequests()
+        let saved = try await client.fieldInvoiceEvidencePage()
+        XCTAssertEqual(saved.source, .savedCopy)
+        XCTAssertEqual(saved.items.map(\.id), [id(50)])
+        XCTAssertEqual(saved.nextCursor, cursor)
+        let live = try await client.fieldInvoiceEvidencePage(cursor: cursor)
+        XCTAssertEqual(live.source, .network)
+        XCTAssertEqual(live.items.map(\.id), [id(52)])
+        XCTAssertNil(live.nextCursor)
+        XCTAssertEqual(saved.source, .savedCopy, "The later live page cannot relabel the saved page")
+    }
+
     func testJobInvoiceMixedSavedAndLivePagesAreVisibleButNotFresh() async throws {
         let cursor = id(990)
         let path = "/v1/jobs/\(id(100))/invoices"
