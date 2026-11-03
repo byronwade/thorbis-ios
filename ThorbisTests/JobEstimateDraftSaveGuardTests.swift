@@ -32,4 +32,15 @@ import XCTest
         XCTAssertFalse(gate.requiresRetry)
     }
 
+    func testSuccessfulRetryClearsOnlyDraftPersistErrors() {
+        XCTAssertNil(JobEstimateDraftSaveGuard.resolvedError(JobEstimateDraftSaveGuard.saveFailedMessage))
+        XCTAssertNil(JobEstimateDraftSaveGuard.resolvedError(JobEstimateDraftSaveGuard.removeFailedMessage))
+        XCTAssertEqual(
+            JobEstimateDraftSaveGuard.resolvedError("The save could not be confirmed. Check Estimates or ask your office before starting another. Your text is still here."),
+            "The save could not be confirmed. Check Estimates or ask your office before starting another. Your text is still here."
+        )
+        XCTAssertEqual(JobEstimateDraftSaveGuard.resolvedError("You don’t have permission to save the file."),
+                       "You don’t have permission to save the file.")
+    }
+
 }

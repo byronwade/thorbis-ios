@@ -14,6 +14,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
         let retry = app.buttons["Try saving draft again"]
         XCTAssertTrue(retry.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "could not be saved on this phone")).firstMatch.waitForExistence(timeout: 5))
         let title = app.textFields["Estimate title"]
         XCTAssertTrue(title.exists)
         let top = app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))

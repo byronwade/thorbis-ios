@@ -163,16 +163,23 @@ struct NewEstimateView: View {
             guard wroteFreshDraft, let draftScope else { return jobID == nil || !jobDraftSaveGuard.requiresRetry }
             let remove = { try CommercialDraftStore.shared.remove(scope: draftScope) }
             if jobID != nil {
-                guard jobDraftSaveGuard.attempt(remove) else { error = "The undone draft could not be removed from this phone. Try again before closing."; return false }
+                guard jobDraftSaveGuard.attempt(remove) else { error = JobEstimateDraftSaveGuard.removeFailedMessage; return false }
             } else {
-                do { try remove() } catch { self.error = "The undone draft could not be removed from this phone. Try again before closing."; return false }
+                do { try remove() } catch { self.error = JobEstimateDraftSaveGuard.removeFailedMessage; return false }
             }
-            wroteFreshDraft = false; return true
+            wroteFreshDraft = false; clearResolvedDraftPersistError(); return true
         }
-        do { try saveDraft(leavingOriginalScope: leavingOriginalScope) }
-        catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again."; return false }
+        guard holdDraft(leavingOriginalScope: leavingOriginalScope) else { return false }
         if !didRecoverDraft { wroteFreshDraft = true }
         return true
+    }
+    private func clearResolvedDraftPersistError() {
+        error = JobEstimateDraftSaveGuard.resolvedError(error)
+    }
+    @discardableResult private func holdDraft(uncertain: Bool? = nil, leavingOriginalScope: Bool = false) -> Bool {
+        do { try saveDraft(uncertain: uncertain, leavingOriginalScope: leavingOriginalScope); clearResolvedDraftPersistError(); return true }
+        catch is CancellationError { return false }
+        catch { self.error = JobEstimateDraftSaveGuard.saveFailedMessage; return false }
     }
     private func restoreDraft() {
         guard scopeMatches, let draftScope else { return }
@@ -242,7 +249,7 @@ struct NewEstimateView: View {
     private func discardDraft() {
         if jobID != nil && jobDraftSaveGuard.requiresRetry {
             guard ownsDraft, persistDraft(leavingOriginalScope: true) else {
-                error = "This draft could not be saved on this phone. Keep this screen open and try again."
+                error = JobEstimateDraftSaveGuard.saveFailedMessage
                 return
             }
         }
@@ -517,7 +524,7 @@ struct NewEstimateView: View {
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
             if jobID != nil && jobDraftSaveGuard.requiresRetry {
                 Button("Try saving draft again") {
-                    if persistDraft(), error == "This draft could not be saved on this phone. Keep this screen open and try again." || error == "The undone draft could not be removed from this phone. Try again before closing." { error = nil }
+                    _ = persistDraft()
                 }.buttonStyle(.bordered)
             }
         }
@@ -696,7 +703,7 @@ struct NewEstimateView: View {
                     }
                 }
                 let submitted = creationRequest()
-                try saveDraft(uncertain: true)
+                guard holdDraft(uncertain: true) else { return }
                 createInFlight = true
                 createStarted = true
                 estimate = try await api.createFieldEstimate(submitted)
@@ -731,7 +738,7 @@ struct NewEstimateView: View {
                     return false
                 }
                 requiresGroupDisclosure = groupResult == .missing && groupsMatter
-                try saveDraft(leavingOriginalScope: true)
+                guard holdDraft(leavingOriginalScope: true) else { return }
                 guard creationScope == scope else { return }
                 if requiresManualReview {
                     error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but its details differ from your submission. Ask your office to review it."
@@ -756,7 +763,7 @@ struct NewEstimateView: View {
                 do {
                     // A lost response can follow a committed link. Keep a durable hold until
                     // success and cleanup are confirmed, so a relaunch cannot blindly retry.
-                    try saveDraft(uncertain: true)
+                    guard holdDraft(uncertain: true) else { return }
                     createOutcomeUncertain = true
                     let link = try await api.linkFieldEstimate(jobID: jobID, estimateID: estimate.id)
                     guard creationScope == scope else { return }
