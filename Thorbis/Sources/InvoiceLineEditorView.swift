@@ -18,6 +18,13 @@ struct InvoiceLineEditorView: View {
     @State private var error: String?
     @State private var originalScope: EstimateCreationScope?
     @State private var scopeCaptured = false
+    @State private var recoveryBlocked = false
+    @State private var draftOwner = UUID()
+    @State private var ownsDraft = false
+    @State private var viewVisible = false
+    @State private var didRestoreDraft = false
+    @State private var intentionallyDiscarded = false
+    @State private var cleanupFailedAfterSave = false
     @State private var staleRevision = false
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var addedLineSelection: InvoiceCatalogLineSelection?
@@ -39,6 +46,33 @@ struct InvoiceLineEditorView: View {
         guard let originalScope, let currentScope else { return false }
         return originalScope.sameIdentityAndTransport(as: currentScope)
     }
+    private var draftScope: CommercialDraftScope? {
+        guard let originalScope else { return nil }
+        return .init(actor: originalScope.actorID, organization: originalScope.organizationID,
+                     origin: originalScope.origin, kind: "invoice-lines", document: invoice.id)
+    }
+    private func restoreDraft() {
+        guard scopeMatches, session.can("invoice.edit", feature: "invoicing"), let draftScope else { return }
+        do {
+            guard let draft = try CommercialDraftStore.shared.load(CommercialInvoiceDraft.self, scope: draftScope) else { return }
+            do { try draft.apply(to: &editor) }
+            catch CommercialDraftRecoveryError.differentRevision {
+                recoveryBlocked = true
+                try draft.apply(to: &editor, requireMatchingRevision: false)
+                error = CommercialDraftRecoveryError.differentRevision.localizedDescription
+            }
+        } catch { recoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone." }
+    }
+    private func persistDraft(leavingOriginalScope: Bool = false) {
+        guard !intentionallyDiscarded, ownsDraft, (scopeMatches || leavingOriginalScope), !recoveryBlocked, let draftScope else { return }
+        do { try CommercialDraftStore.shared.save(CommercialInvoiceDraft(state: editor), scope: draftScope) }
+        catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again." }
+    }
+    private func discardDraft() {
+        guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
+        do { try CommercialDraftStore.shared.remove(scope: draftScope); intentionallyDiscarded = true; dismiss() }
+        catch { self.error = "The saved draft could not be removed. Try again." }
+    }
 
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
@@ -47,7 +81,7 @@ struct InvoiceLineEditorView: View {
     }
 
     private var canEdit: Bool {
-        scopeMatches && editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+        scopeMatches && ownsDraft && !recoveryBlocked && !cleanupFailedAfterSave && editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
     }
 
     private var canUsePriceBook: Bool {
@@ -55,14 +89,18 @@ struct InvoiceLineEditorView: View {
     }
 
     private var canIssue: Bool {
-        scopeMatches && editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
+        scopeMatches && ownsDraft && !recoveryBlocked && !cleanupFailedAfterSave && editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
     }
 
     private var linesDisabled: Bool { busy || !canEdit || editor.hasUnsupportedLineSources }
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView { content }
+            ScrollView {
+                if !scopeMatches || !session.can("invoice.edit", feature: "invoicing") {
+                    ContentUnavailableView("Workspace changed", systemImage: "lock", description: Text("Return to the original account and workspace to see your saved draft."))
+                } else { content }
+            }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: focus) { _, value in
                     guard let id = value?.lineID else { return }
@@ -80,15 +118,21 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ThorbisToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                Button(cleanupFailedAfterSave ? "Close" : "Cancel") { if cleanupFailedAfterSave { dismiss() } else if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
             }
         }
         .keyboardDoneButton()
         .onAppear {
-            guard !scopeCaptured else { return }
-            scopeCaptured = true
-            originalScope = currentScope
+            viewVisible = true
+            if !scopeCaptured { scopeCaptured = true; originalScope = currentScope }
+            guard scopeMatches, session.can("invoice.edit", feature: "invoicing"), let draftScope else { return }
+            guard CommercialDraftStore.shared.acquire(scope: draftScope, owner: draftOwner) else {
+                recoveryBlocked = true; error = "This draft is already open in another window."; return
+            }
+            ownsDraft = true
+            if !didRestoreDraft { didRestoreDraft = true; restoreDraft() }
         }
+        .onDisappear { viewVisible = false; if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
         .task(id: catalogContext) { await refreshCatalog() }
         .onChange(of: catalogContext) { previous, current in
             if !previous.preservesInvoicePickerState(comparedTo: current) {
@@ -96,8 +140,18 @@ struct InvoiceLineEditorView: View {
                 showPriceBook = false
             }
         }
-        .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-        .safeAreaInset(edge: .bottom) { invoiceCommitActions }
+        .discardChangesGuard(hasChanges: editor.hasChanges || recoveryBlocked, busy: busy, isPresented: $confirmDiscard) { discardDraft() }
+        .onChange(of: editor) { _, _ in persistDraft() }
+        .onChange(of: scopeMatches) { wasMatching, matches in
+            if !matches {
+                if wasMatching { persistDraft(leavingOriginalScope: true) }
+                showPriceBook = false; addedLineSelection = nil; focus = nil
+            }
+        }
+        .onChange(of: session.can("invoice.edit", feature: "invoicing")) { _, allowed in
+            if !allowed { showPriceBook = false; addedLineSelection = nil; focus = nil }
+        }
+        .safeAreaInset(edge: .bottom) { if scopeMatches && session.can("invoice.edit", feature: "invoicing") { invoiceCommitActions } }
         .thorbisConfirm("Issue invoice?",
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
@@ -429,7 +483,7 @@ struct InvoiceLineEditorView: View {
         }
         guard editor.hasChanges else { return }
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
             let descriptions = editor.lines.map { $0.description.trimmingCharacters(in: .whitespacesAndNewlines) }
             let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions, kind: .invoice)
@@ -440,8 +494,15 @@ struct InvoiceLineEditorView: View {
             let request = try editor.makeRequest(extendedTextVerified: verified)
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
             guard scopeMatches, canEdit else { error = "The workspace or access changed. Your edits are still here. Check the original workspace before retrying."; return }
+            intentionallyDiscarded = true
             addedLineSelection = nil
             onSaved(updated)
+            do { if ownsDraft, let draftScope { try CommercialDraftStore.shared.remove(scope: draftScope) } }
+            catch {
+                cleanupFailedAfterSave = true
+                self.error = "The invoice was saved, but its local draft could not be removed. Close this screen and check the saved invoice before making another change."
+                return
+            }
             dismiss()
         } catch is CancellationError {
         } catch {
@@ -466,7 +527,7 @@ struct InvoiceLineEditorView: View {
     private func reloadLatest() async {
         guard scopeMatches else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
             let current = try await api.liveFieldInvoice(invoice.id)
             guard scopeMatches else { error = "The workspace changed. Your edits are still here."; return }
@@ -486,7 +547,7 @@ struct InvoiceLineEditorView: View {
             return
         }
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
             commitPrices()
             var current = editor.invoice
@@ -504,13 +565,24 @@ struct InvoiceLineEditorView: View {
             }
             let issued = try await api.issueFieldInvoice(invoice.id, expectedLinesRevision: current.linesRevision)
             guard scopeMatches, canIssue else { error = "The workspace or access changed. Check the invoice in the original workspace."; return }
+            intentionallyDiscarded = true
             onSaved(issued)
+            do { if ownsDraft, let draftScope { try CommercialDraftStore.shared.remove(scope: draftScope) } }
+            catch {
+                cleanupFailedAfterSave = true
+                self.error = "The invoice was issued, but its local draft could not be removed. Close this screen and check the issued invoice before making another change."
+                return
+            }
             dismiss()
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
             staleRevision = (error as? Problem)?.status == 409
         }
+    }
+    private func releaseDraft() {
+        if ownsDraft, let draftScope { CommercialDraftStore.shared.release(scope: draftScope, owner: draftOwner) }
+        ownsDraft = false
     }
 }
 

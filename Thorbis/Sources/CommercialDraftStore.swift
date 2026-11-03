@@ -1,0 +1,89 @@
+import CryptoKit
+import Foundation
+
+/// A local draft belongs to the authenticated person, workspace, server and paper it came from.
+struct CommercialDraftScope: Codable, Hashable {
+    let actor: String
+    let organization: String
+    let origin: String
+    let kind: String
+    let document: String
+}
+
+/// Unsaved work is deliberately independent of the disposable server-response cache. It survives
+/// sign-out, but can only be looked up using the original authenticated scope. The file system
+/// provides device-bound data protection, and the directory is excluded from backups.
+@MainActor final class CommercialDraftStore {
+    #if DEBUG
+    static let shared: CommercialDraftStore = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("--paper-preview") else { return CommercialDraftStore() }
+        let requested = arguments.firstIndex(of: "--commercial-draft-test-id").flatMap { index in
+            arguments.indices.contains(index + 1) ? UUID(uuidString: arguments[index + 1]) : nil
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CommercialDraftPreview-\((requested ?? UUID()).uuidString)")
+        if arguments.contains("--commercial-draft-test-cleanup-fails") {
+            return CommercialDraftStore(directory: directory, removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
+        }
+        return CommercialDraftStore(directory: directory)
+    }()
+    #else
+    static let shared = CommercialDraftStore()
+    #endif
+    private let directory: URL
+    private let removeItem: (URL) throws -> Void
+    private var owners: [CommercialDraftScope: UUID] = [:]
+
+    private struct Envelope<Value: Codable>: Codable {
+        let version: Int
+        let scope: CommercialDraftScope
+        let value: Value
+    }
+
+    init(directory: URL? = nil, removeItem: ((URL) throws -> Void)? = nil) {
+        self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CommercialDrafts", isDirectory: true)
+        self.removeItem = removeItem ?? { try FileManager.default.removeItem(at: $0) }
+    }
+
+    /// One editor per scope in this app process prevents two windows silently replacing each
+    /// other's unfinished work. A different device still relies on the server revision guard.
+    func acquire(scope: CommercialDraftScope, owner: UUID) -> Bool {
+        guard owners[scope] == nil || owners[scope] == owner else { return false }
+        owners[scope] = owner
+        return true
+    }
+    func release(scope: CommercialDraftScope, owner: UUID) {
+        if owners[scope] == owner { owners.removeValue(forKey: scope) }
+    }
+
+    private func file(for scope: CommercialDraftScope) throws -> URL {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let digest = SHA256.hash(data: try encoder.encode(scope)).map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent(digest + ".json")
+    }
+
+    func save<Value: Codable>(_ value: Value, scope: CommercialDraftScope) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var folder = directory
+        var resources = URLResourceValues()
+        resources.isExcludedFromBackup = true
+        try folder.setResourceValues(resources)
+        let data = try JSONEncoder().encode(Envelope(version: 1, scope: scope, value: value))
+        try data.write(to: file(for: scope), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    func load<Value: Codable>(_ type: Value.Type, scope: CommercialDraftScope) throws -> Value? {
+        let url = try file(for: scope)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let envelope = try JSONDecoder().decode(Envelope<Value>.self, from: Data(contentsOf: url))
+        guard envelope.version == 1, envelope.scope == scope else { throw CocoaError(.fileReadCorruptFile) }
+        return envelope.value
+    }
+
+    func remove(scope: CommercialDraftScope) throws {
+        let url = try file(for: scope)
+        if FileManager.default.fileExists(atPath: url.path) { try removeItem(url) }
+    }
+}

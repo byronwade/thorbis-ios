@@ -1,0 +1,11 @@
+# Commercial draft recovery
+
+Keep complete unfinished estimate and invoice editor state locally, with protected files scoped to authenticated actor, workspace, API origin, document kind and identity. Recovery must not bypass permission checks or original server revision checks. Drafts survive app termination and session changes, including sign-out, but are offered only after the same identity returns. Explicit discard and confirmed save remove the matching draft; failures leave it intact. A changed server revision must retain the recovered work and require an explicit review instead of submitting against a different version.
+
+1. Test a protected, atomic store for scope isolation, exact text round trips, write failures and removal. Use hashed filenames and exclude files from backups.
+2. Serialize editor state independently of network request encoding, including unsupported provenance and invalid in-progress values. Test round trips for catalog source variants and multiline Unicode.
+3. Integrate autosave, identity capture, safe restoration, conflict review and cleanup into existing estimate and invoice editors. Test session switches, relaunch, save failures and stale versions.
+4. Cover new-estimate drafts separately: write an uncertainty marker before sending a create request, and recover it in a state that cannot create a duplicate after an unknown response. Preserve the job and customer identity and all line evidence.
+5. Run exact-source unit and simulator lifecycle checks when the shared build slot is available. Do not deploy until backend capability rollout and independent financial review are complete.
+
+When local cleanup fails after a verified server write, keep the server result, show the cleanup failure and prevent another operation from that editor. Existing-document recovery must reject a mismatched revision. A new-estimate journal records an uncertain outcome before both create and job-link requests. A create with no known estimate ID requires an operator check; a known ID can be retried only after fresh estimate and job checks. The production same-job link endpoint returns the existing link for a repeat request and rejects a link to a different job (production deployment `001c3ab`, verified 2026-11-02). This remains dependent on retaining that server contract.

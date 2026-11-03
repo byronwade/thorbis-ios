@@ -13,6 +13,17 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     private var jobReads = 0
     private var savedEstimate: [String: Any]?
     private var heldReply: (@Sendable () -> Void)?
+    private let savedEstimateKey: String?
+
+    private init() {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "--commercial-draft-test-id"),
+           arguments.indices.contains(index + 1), let id = UUID(uuidString: arguments[index + 1]) {
+            let key = "estimate-recovery-preview-\(id.uuidString)"
+            savedEstimateKey = key
+            savedEstimate = UserDefaults.standard.dictionary(forKey: key)
+        } else { savedEstimateKey = nil }
+    }
 
     static var enabled: Bool {
         PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-recovery")
@@ -100,14 +111,21 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
                 estimate["locationId"] = "00000000-0000-4000-8000-000000009999"
             }
             lock.withLock { savedEstimate = estimate }
+            // UserDefaults posts SwiftUI notifications synchronously; never post while holding
+            // the counter lock, because the UI reads counts under that same lock.
+            if let savedEstimateKey { UserDefaults.standard.set(estimate, forKey: savedEstimateKey) }
             return Reply(status: 201, payload: estimate, hold: ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold"))
         }
         let expected = "/v1/jobs/\(PaperPreview.jobID)/estimates/\(Self.estimateID)/link"
         guard path == expected else { return nil }
         let attempt = lock.withLock { links += 1; return links }
-        if attempt == 1 { return Reply(status: 503, payload: ["title": "Sample connection unavailable", "status": 503]) }
+        let arguments = ProcessInfo.processInfo.arguments
+        if attempt == 1 && !arguments.contains("--paper-preview-estimate-recovery-link-success") && !arguments.contains("--paper-preview-estimate-link-hold") {
+            return Reply(status: 503, payload: ["title": "Sample connection unavailable", "status": 503])
+        }
         return Reply(status: 201, payload: ["id": "00000000-0000-4000-8000-000000008903", "jobId": PaperPreview.jobID,
-                                                  "estimateId": Self.estimateID, "linkedAt": "2026-10-29T00:00:00Z"])
+                                                  "estimateId": Self.estimateID, "linkedAt": "2026-10-29T00:00:00Z"],
+                     hold: arguments.contains("--paper-preview-estimate-link-hold"))
     }
 }
 #endif
