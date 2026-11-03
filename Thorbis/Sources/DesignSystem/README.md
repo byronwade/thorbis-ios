@@ -53,13 +53,10 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   (`PaperEmptyState`), loading is `SkeletonList` / `SkeletonRows`, banners are calm strips,
   toasts are `ThorbisToast` and only confirm what the screen already shows.
 - **Navigation (phone):** a side drawer (`AppDrawer`, `../DrawerNavigation.swift`) after the Claude
-  and ChatGPT iOS apps, reachable from every screen of a place. Roots show `DrawerMenuCircle` top
+  and ChatGPT iOS apps, opened from each place's root screen. Roots show `DrawerMenuCircle` top
   left — `PaperHeader` draws it when the shell sets `\.paperDrawer` (roots only); roots without a
-  Paper header or with a visible bar get it in the bar (`DrawerCircleInBar`). Pushed screens get it
-  from `.thorbisBackButton()` / `thorbisDestination`, which reads `\.paperDrawerReach` and puts the
-  circle top left with `ThorbisCompactBackButton` beside it; inside a sheet or cover
-  (`PresentationProbe`) and in customer mode (`CustomerModeContainer` clears both keys) it keeps
-  `ThorbisBackButton` alone. Edge swipe opens the drawer on roots; on pushed screens it is Back.
+  Paper header or with a visible bar get it in the bar (`DrawerCircleInBar`). Pushed screens keep
+  `ThorbisBackButton` alone (`.thorbisBackButton()` / `thorbisDestination`), as C-Job shows. Edge swipe opens the drawer on roots; on pushed screens it is Back.
   Which places it lists comes from `DrawerSections.make` (`../CreamSheet.swift`): every place the
   role can open, grouped under Work, Money, Shop and On this phone (Fleet, Equipment, Agreements,
   saved work), with explicit Edit-menu pins leading in a Pinned section; nothing is folded away.

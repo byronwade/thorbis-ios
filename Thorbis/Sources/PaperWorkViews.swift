@@ -764,59 +764,78 @@ private struct ScheduleHero<Commit: View>: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
-            NavigationLink(value: job) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(headline).font(Theme.font(20, weight: .medium)).tracking(-0.2)
-                        .foregroundStyle(Theme.foreground)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(supporting).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                                                              : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-                    layout {
-                        // v2: the status is a word; its small mark sits beside it in the hue.
-                        TimelineView(.everyMinute) { context in
-                            StatusLabel(tone: tone, word: statusWord(now: context.date), pending: pendingStatus != nil)
-                        }
-                        Text(when).font(Theme.font(13, weight: .medium)).monospacedDigit()
-                            .foregroundStyle(Theme.muted)
+            // C-Today: the stop leads with its map strip; the drive time stays in the meta line.
+            if nextStop { map }
+            VStack(alignment: .leading, spacing: 0) {
+                NavigationLink(value: job) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(headline).font(Theme.font(20, weight: .medium)).tracking(-0.2)
+                            .foregroundStyle(Theme.foreground)
+                            .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier(etaMinutes != nil ? "next-stop-eta" : "next-stop-time")
+                        Text(supporting).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                        layout {
+                            // v2: the status is a word; its small mark sits beside it in the hue.
+                            TimelineView(.everyMinute) { context in
+                                StatusLabel(tone: tone, word: statusWord(now: context.date), pending: pendingStatus != nil)
+                            }
+                            Text(when).font(Theme.font(13, weight: .medium)).monospacedDigit()
+                                .foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier(etaMinutes != nil ? "next-stop-eta" : "next-stop-time")
+                        }
+                        .padding(.top, 6)
                     }
-                    .padding(.top, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .jobContextMenu(job, customer: customer)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(accessibilitySummary)
-            .accessibilityHint("Opens the job")
-            .accessibilityIdentifier(nextStop ? "next-stop-card" : "schedule-hero")
-            // Outside the link, so Open Settings and dismiss never open the job.
-            if nextStop, let locationNotice {
-                NextStopLocationNotice(dismiss: locationNotice).padding(.top, 12)
-            }
-            // One row: the commit, then the quiet circles. At accessibility sizes the circles go
-            // under the commit so its words never squeeze.
-            let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                                                       : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-            actions {
-                commit()
-                if hasCircles {
-                    HStack(spacing: 8) { circles }
+                .buttonStyle(.plain)
+                .jobContextMenu(job, customer: customer)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(accessibilitySummary)
+                .accessibilityHint("Opens the job")
+                .accessibilityIdentifier(nextStop ? "next-stop-card" : "schedule-hero")
+                // Outside the link, so Open Settings and dismiss never open the job.
+                if nextStop, let locationNotice {
+                    NextStopLocationNotice(dismiss: locationNotice).padding(.top, 12)
                 }
+                // One row: the commit, then the quiet circles. At accessibility sizes the circles go
+                // under the commit so its words never squeeze.
+                let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                                           : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+                actions {
+                    commit()
+                    if hasCircles {
+                        HStack(spacing: 8) { circles }
+                    }
+                }
+                .padding(.top, 16)
             }
-            .padding(.top, 16)
+            .padding(16)
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         // v2: no coloured side rail; "you are here" is the status word and its mark (D-018).
         .background(ThorbisPanelStyle(), in: shape)
+        .clipShape(shape)
+    }
+
+    /// The map strip; with an address on file it opens driving directions in Maps.
+    @ViewBuilder private var map: some View {
+        let strip = MapStrip(aspect: 3, hasPlace: place?.directions != nil)
+        if let directions = place?.directions {
+            Button { openURL(directions) } label: { strip }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Directions to \(headline)")
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("next-stop-map")
+        } else {
+            strip
+        }
     }
 
     private var hasCircles: Bool { nextStop && (place?.directions != nil || place?.call != nil) }

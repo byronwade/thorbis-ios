@@ -302,6 +302,28 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await model.reviewSelected()
         XCTAssertEqual(model.reviewed.map(\.id), [a,b]); XCTAssertEqual(model.reviewed.map(\.revision.totalAmount), [19000,19000])
     }
+    func testRefreshedNewRevisionDoesNotShowCachedPriorPackageTerms() async throws {
+        var updated = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(packageRecord().utf8)) as? [String: Any])
+        updated["currentRevisionNumber"] = 2
+        var newOptions = try packageOptions()
+        newOptions[0]["description"] = "Current revision package description"
+        updated["options"] = newOptions
+        let newRecord = String(decoding: try JSONSerialization.data(withJSONObject: updated), as: UTF8.self)
+        let model = try await ready([.init(200, jobJSON), .init(200, membership([a])), .init(200, try packageRecord()),
+                                     .init(200, try packageRecord()), .init(200, try packageRevision()),
+                                     .init(200, jobJSON), .init(200, membership([a])), .init(200, newRecord)])
+        await model.refresh()
+        model.setSelected(a, selected: true)
+        model.chooseOption(estimateID: a, optionID: packageID)
+        await model.reviewSelected()
+        XCTAssertEqual(model.options(for: a).first?.description, "Sample description")
+        await model.refresh()
+        XCTAssertEqual(model.records.first?.currentRevisionNumber, 2)
+        XCTAssertNil(model.revision(for: a), "An old issued revision cannot describe new terms")
+        XCTAssertEqual(model.options(for: a).first?.description, "Current revision package description")
+        XCTAssertTrue(URLProtocolFixture.recorded.allSatisfy { $0.method == "GET" })
+    }
+
     func testRefreshingPartialSuccessKeepsUnknownAttemptAndReviewedSelection() async throws {
         let model = try await ready([.init(200, jobJSON), .init(200, membership([a,b])), .init(200, record(a)), .init(200, record(b)), .init(200, record(a)), .init(200, revision(a)), .init(200, record(b)), .init(200, revision(b)), .init(200, jobJSON), .init(200, membership([a,b])), .init(200, record(a, status: "approved")), .init(200, record(b))])
         await model.refresh(); model.setSelected(a, selected: true); model.setSelected(b, selected: true); await model.reviewSelected()

@@ -121,7 +121,21 @@ enum PaperPreview {
                                     unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)
             draft = changed(draft, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([invalid]))])
         }
-        return [changed(estimate, ["title": "Main drain repair", "options": NSNull()]), draft,
+        var main = changed(estimate, ["title": "Main drain repair", "options": NSNull()])
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-review-states") {
+            main = changed(main, ["status": "declined"])
+            draft = changed(draft, ["status": "approved"])
+        }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-multiple-options"),
+           let original = estimate.options,
+           var options = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [[String: Any]],
+           var second = options.first {
+            second["id"] = "00000000-0000-4000-8000-000000009219"
+            second["title"] = "Second complete package"
+            options.append(second)
+            main = changed(estimate, ["title": "Main drain repair", "options": options])
+        }
+        return [main, draft,
                 changed(estimate, ["id": "00000000-0000-4000-8000-000000002239", "title": "Other job estimate", "options": NSNull()])]
     }
     static var jobDocumentInvoices: [InvoiceRecord] {
@@ -289,6 +303,13 @@ enum PaperPreview {
         return PreviewRefundIntentStore.shared
     }
     @MainActor static func api() -> APIClient {
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"),
+           let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            // Isolate this preview from an earlier preview's complete sample snapshot.
+            let sample = cache.appendingPathComponent("PriceBook", isDirectory: true)
+                .appendingPathComponent("\(organizationID.lowercased()).json")
+            try? FileManager.default.removeItem(at: sample)
+        }
         if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-many") {
             UserDefaults.standard.removeObject(forKey: "priceBookUsage.\(organizationID)")
         }
@@ -681,6 +702,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if let preview = EstimateRecoveryPreview.shared.reply(for: request), let url = request.url,
+           let response = HTTPURLResponse(url: url, statusCode: preview.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
+            let deliver: @Sendable () -> Void = { [weak self] in
+                guard let self else { return }
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                if let body = try? JSONSerialization.data(withJSONObject: preview.payload) { self.client?.urlProtocol(self, didLoad: body) }
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+            if preview.hold { EstimateRecoveryPreview.shared.hold(deliver) } else { deliver() }
+            return
+        }
         if PaperPreview.isJobEstimateHandoff, let response = JobEstimateHandoffPreview.shared.response(request) {
             if let error = response.error { client?.urlProtocol(self, didFailWithError: error); return }
             guard let url = request.url, let http = HTTPURLResponse(url: url, statusCode: response.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type":"application/json"]) else { return }
@@ -696,6 +728,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        // Keep the second catalog page pending to exercise honest partial search states.
+        if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"), url.path == "/v1/query",
+           let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           query.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }),
+           query.contains(where: { $0.name == "cursor" }) {
+            return
+        }
         // Left unanswered on purpose: the screen keeps showing what it draws while it waits.
         if PaperPreview.enabled, let held = PaperPreview.heldPath, url.path == held { return }
         // `--paper-preview-payment-timeout`: recording a payment times out, so Collect payment shows its pending state.
@@ -1066,6 +1106,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "months": months.map { ["month": $0.0, "revenue": $0.1, "collected": $0.2] },
                     "receivable": ["openInvoices": 9, "balance": 733_000, "overdueInvoices": 2, "overdueBalance": 620_000]] as [String: Any]
         }
+        if PaperPreview.screen == "customer-money",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-money-partial") {
+            var invoice = (jsonObject(PaperPreview.issuedInvoice) as? [String: Any]) ?? [:]
+            invoice["amountPaid"] = 10_000
+            if path == "/v1/invoices" { return ["items": matchingCustomer([invoice], queryItems: queryItems)] }
+            if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" { return ["items": [invoice]] }
+            if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" { return invoice }
+            if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/payments" {
+                var payment = (jsonObject(PaperPreview.refundPayment) as? [String: Any]) ?? [:]
+                payment["id"] = "00000000-0000-4000-8000-000000002260"
+                payment["invoiceId"] = PaperPreview.issuedInvoice.id
+                payment["amount"] = ["amount": 10_000, "currency": "USD"]
+                payment["netAmount"] = ["amount": 10_000, "currency": "USD"]
+                payment["idempotencyKey"] = "paper-preview-customer-partial-payment"
+                return ["items": [payment]]
+            }
+        }
         if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
             if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
@@ -1148,6 +1205,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-group-feature") { enabledFeatures.append("estimate_line_groups") }
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
@@ -1242,11 +1300,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                         "items": items, "nextCursor": later ? NSNull() : cursor, "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
             }
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
-               ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages"),
+               (ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages") ||
+                ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial")),
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
                 let cursor = "00000000-0000-4000-8000-000000009988"
                 let later = queryItems.first(where: { $0.name == "cursor" })?.value == cursor
-                let rows = later ? [(9999, "Camera sewer inspection")] : (1...50).map { (9700 + $0, "Plumbing catalog service \($0)") }
+                let longTitle = "Camera sewer inspection with detailed video documentation, full pipe assessment, and a written repair recommendation"
+                let title = ProcessInfo.processInfo.arguments.contains("--paper-preview-long-catalog-title") ? longTitle : "Camera sewer inspection"
+                let rows = later ? [(9999, title)] : (1...50).map { (9700 + $0, "Plumbing catalog service \($0)") }
                 let items: [[String: Any]] = rows.map { number, title in
                     let id = String(format: "00000000-0000-4000-8000-%012d", number)
                     return ["id": id, "resourceId": "price_book_items", "label": title, "subtitle": "Service · flat",
@@ -1704,6 +1765,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                  "customerId": "00000000-0000-4000-8000-00000000\(customer)", "title": title, "status": "open",
                  "createdAt": created, "updatedAt": created, "allowedTransitions": [String]()] as [String: Any]
             }
+        }
+        // The visit someone is on (Chen's water heater) has its site on every screen, so the iPad
+        // sidebar's "On now" card leads with the same street on every place. The sample job keeps
+        // its per-screen site: its screens show the title when it has none.
+        listed = listed.map { row in
+            row["status"] as? String == "in_progress" && row["locationId"] == nil && row["id"] as? String != PaperPreview.jobID
+                ? row.merging(["locationId": PaperPreview.homeLocationID]) { _, new in new } : row
         }
         return listed
     }

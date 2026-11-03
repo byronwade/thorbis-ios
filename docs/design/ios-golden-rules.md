@@ -97,12 +97,12 @@ source evidence; verify platform/API/version claims before relying on them.
    aligning navigation; the sample tab diagram is not a completed migration.
    *Redesign, 31 October 2026 (drawer, simplified after build 125):* the iPhone
    navigates with a side drawer in the style of the Claude and ChatGPT iOS apps;
-   the floating tab bar and the More screen are gone. The drawer is reachable from
-   every screen of a place: roots lead their header with a round menu circle at
-   top left (their own circles — filter, + — stay right), and pushed screens (job,
-   customer, estimate, invoice, …) show the same circle at top left with a compact
-   back chevron beside it. An edge swipe opens the drawer on roots only; on a
-   pushed screen it stays Back. Sheets, full-screen covers and customer mode never
+   the floating tab bar and the More screen are gone. Roots lead their header with
+   a round menu circle at top left (their own circles — filter, + — stay right).
+   *Cream sheet, 1 November 2026 (C-Job, build 140):* pushed screens (job,
+   customer, estimate, invoice, …) show the round Back circle alone at top left, with
+   no menu circle beside it; the drawer opens from the place's root. An edge swipe
+   opens the drawer on roots only; on a pushed screen it stays Back. Sheets, full-screen covers and customer mode never
    show the circle. Picking a place opens it (the place showing returns to its
    root); every place keeps its own stack, so a job left open is still there when
    the person comes back. The drawer is about 80% of the screen and pushes the

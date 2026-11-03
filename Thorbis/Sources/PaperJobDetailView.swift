@@ -198,13 +198,19 @@ struct JobDetailView: View {
                         .padding(.top, selectedTab == "Overview" ? (isOnSite ? 12 : 14) : 8)
                         .padding(.bottom, 28)
                     } header: {
-                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card) }
+                        // Inset 1pt so the pinned tabs never cut the sheet's rim.
+                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card.padding(.horizontal, 1)) }
                     }
                     }
                     }
+                    // Each section gets a scroll view of its own, starting at the top. Kept at the old
+                    // offset, a section shorter than where the page was scrolled to (Money opened from
+                    // Due on site far down Overview) had the lazy stack measure its content short, then
+                    // long, then short again every frame, never settling (the app hung). A scrollTo
+                    // from there did not help: the offset never moved.
+                    .id(selectedTab)
                     // A section opened while the tabs are pinned (the pinned tabs, or Due on site, Open
-                    // and See all far down the page) starts at its top. Left at the old offset, the
-                    // shorter section had the scroll view re-adjusting its offset every frame (a hang).
+                    // and See all far down the page) starts at its top, with the tabs still pinned.
                     .onChange(of: selectedTab) {
                         guard tabsPinned else { return }
                         proxy.scrollTo("job-sections", anchor: .top)
@@ -332,7 +338,7 @@ struct JobDetailView: View {
             if let id = createdEstimateID { createdEstimateID = nil; openEstimate = OpenedEstimate(id: id, present: false) }
         }) { SheetSurface {
             if let job {
-                NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { estimate in
+                NewEstimateView(customerID: job.customerId, jobID: job.id, locationID: job.locationId, title: job.title) { estimate in
                     createdEstimateID = estimate.id
                     Task { await loadJobEstimates(job) }
                 }
@@ -442,6 +448,7 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
+            Group {
             if job != nil, selectedTab == "Activity", !showsPhotos, session.can("job.note", feature: "jobs") {
                 // JobActivity.dc.html: the composer stays at the bottom, quick notes above it.
                 // Its ground runs past the home indicator to the screen's edge, so no timeline
@@ -451,6 +458,10 @@ struct JobDetailView: View {
                         Theme.card.padding(.bottom, -120).ignoresSafeArea()
                     }
             } else if !typeSize.isAccessibilitySize { primaryAction.environment(\.thorbisSheetCanvas, true) }
+            }
+            // 1pt in from each side, so every bar (Overview, Money, Activity's composer) sits inside
+            // the job's sheet and the sheet's rim runs on to the bottom edge.
+            .padding(.horizontal, 1)
         }
         .sheet(isPresented: $showPause) { SheetSurface {
             // v2 modal: two sunk fields, one ink commit in the sheet's pad. The commit is never
@@ -1441,11 +1452,24 @@ struct JobDetailView: View {
                 if let balance = invoiceBalanceCents, balance > 0 {
                     // What is owed now, in the type colour; it opens Money.
                     Button { withMotion(.snappy) { selectedTab = "Money" } } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                            Spacer(minLength: 8)
-                            Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
-                                .foregroundStyle(Theme.foreground)
+                        let amount = Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Group {
+                            if typeSize.isAccessibilitySize {
+                                // The amount reads under the label, as in `moneyLine`: side by side it
+                                // broke mid-number ("$340.0" over "0").
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    amount
+                                }
+                            } else {
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    Spacer(minLength: 8)
+                                    amount
+                                }
+                            }
                         }
                         .padding(.horizontal, 16).padding(.vertical, 11)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -1482,21 +1506,18 @@ struct JobDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The estimate's word and mark as its own page and the lists show them (`DocumentStatus`).
     private func estimateWord(_ status: String) -> (String, StatusTone) {
-        switch status {
-        case "approved": ("Approved", .done)
-        case "sent": ("Sent", .dispatched)
-        case "declined": ("Declined", .attention)
-        default: (status.statusLabel, .unscheduled)
-        }
+        let document = DocumentStatus(estimateStatus: status)
+        return (document.word, document.tone)
     }
 
+    /// The invoice's word and mark as its own page and the lists show them; an issued invoice with
+    /// nothing left to collect still reads "Issued".
     private func invoiceWord(_ invoice: InvoiceRecord, due: Int?) -> (String, StatusTone) {
-        switch invoice.status {
-        case "issued": (due ?? 0) > 0 ? ("Unpaid", .inProgress) : ("Issued", .unscheduled)
-        case "paid": ("Paid", .done)
-        default: (invoice.status.statusLabel, .unscheduled)
-        }
+        if invoice.status == "issued", invoice.amountPaid == 0, (due ?? 0) <= 0 { return ("Issued", .unscheduled) }
+        let document = DocumentStatus(invoice: invoice)
+        return (document.word, document.tone)
     }
 
     /// Open follow-ups, waiting on the office; Open goes to the follow-ups screen.
@@ -1698,7 +1719,7 @@ struct JobDetailView: View {
         JobPanel(dividers: false) {
         VStack(alignment: .leading, spacing: 0) {
             // The visit's time and the job number are said once, in the header (chip and eyebrow).
-            DisclosureGroup("More job details") {
+            DisclosureGroup {
                 if let created = JobFiltering.date(job.createdAt) {
                     PaperDetailRow("Booked", value: created.formatted(.dateTime.month(.abbreviated).day().year()))
                 }
@@ -1710,10 +1731,14 @@ struct JobDetailView: View {
                         }
                     }
                 }
+            } label: {
+                // The whole row toggles, 44pt tall; the bare title was a 25pt target.
+                Text("More job details")
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .font(Theme.font(15, weight: .medium))
             .tint(Theme.foreground)
-            .frame(minHeight: 44)
         }
         .padding(.horizontal, 16).padding(.vertical, 4)
         }
@@ -1746,10 +1771,10 @@ struct JobDetailView: View {
                                     message: "Build one from the price book.")
                 }
                 if !jobEstimates.isEmpty || !unavailable.isEmpty {
-                    JobPanel {
+                    VStack(alignment: .leading, spacing: 10) {
                         ForEach(jobEstimates) { estimate in
                             NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId).thorbisBackButton() } label: {
-                                JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true).onWell()
+                                JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true).asJobEstimateCard()
                             }
                             .buttonStyle(RowPressStyle())
                             .accessibilityIdentifier("job-estimate-\(estimate.id)")
@@ -1757,7 +1782,7 @@ struct JobDetailView: View {
                         }
                         ForEach(unavailable, id: \.self) { id in
                             JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
-                                           status: "unavailable", amount: nil, fresh: false).onWell()
+                                           status: "unavailable", amount: nil, fresh: false).asJobEstimateCard()
                                 // A container keeps the id on the card itself; without one it lands on each text.
                                 .accessibilityElement(children: .contain)
                                 .accessibilityIdentifier("job-estimate-unavailable-\(id)")
@@ -2059,17 +2084,27 @@ struct JobDetailView: View {
     /// JobActivity.dc.html: quick notes, then the field with the mic and a camera circle. Send
     /// takes the camera's place once there is something to save.
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // At accessibility sizes the bar stays a strip under the timeline (it took a third of the
+        // phone): the chips stop growing at the first accessibility size and still scroll in one
+        // row, the field at the second, starting at one line and growing to three, with less air.
+        let roomy = !typeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: roomy ? 8 : 4) {
             QuickNotesRow { phrase in note = NoteDraftText.joined(note, phrase) }
                 .disabled(dictation.isListening)
                 .padding(.horizontal, Theme.gutter)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(dictation.isListening ? "Listening…" : "Add a note", text: $note, prompt: .placeholder(dictation.isListening ? "Listening…" : "Add a note"), axis: .vertical)
                     .font(Theme.font(16))
-                    .lineLimit(1...6)
+                    .lineLimit(roomy ? 1...6 : 1...3)
                     .focused($noteFocused)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                    .panelBackground(cornerRadius: 23)
+                    .padding(.horizontal, 16).padding(.vertical, roomy ? 12 : 6)
+                    .frame(minHeight: 44)
+                    // The sunk field and its 1px rim: the panel ground matched the bar's, so the
+                    // field had no edge in light or dark.
+                    .background(Theme.field, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false))
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .accessibilityIdentifier("job-note-field")
                 DictateNoteButton(isListening: dictation.isListening) {
                     if dictation.isListening { dictation.stop(); return }
@@ -2112,7 +2147,7 @@ struct JobDetailView: View {
                 .padding(.horizontal, Theme.gutter)
             }
         }
-        .padding(.top, 10).padding(.bottom, 8)
+        .padding(.top, roomy ? 10 : 4).padding(.bottom, roomy ? 8 : 4)
     }
 
     private var canSaveNote: Bool {

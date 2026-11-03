@@ -2,7 +2,7 @@ import Foundation
 
 // The API's full field records are separate from the lightweight types used by
 // the original schedule prototype. Missing domain fields are omitted in JSON.
-struct JobRecord: Codable, Identifiable, Hashable {
+struct JobRecord: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let organizationId: String
     let customerId: String
@@ -219,7 +219,7 @@ struct ServiceLocationCollectionState {
     }
 }
 
-struct JobNoteRecord: Codable, Identifiable, Hashable {
+struct JobNoteRecord: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let organizationId: String
     let jobId: String
@@ -229,7 +229,7 @@ struct JobNoteRecord: Codable, Identifiable, Hashable {
 }
 
 /// Legacy photos are raw-byte uploads; this is only the metadata list record.
-struct JobPhotoRecord: Codable, Identifiable, Hashable {
+struct JobPhotoRecord: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let organizationId: String
     let jobId: String
@@ -572,13 +572,13 @@ struct ServiceLocationDraft {
     }
 }
 
-struct FieldMoney: Codable, Hashable {
+struct FieldMoney: Codable, Hashable, Sendable {
     let amount: Int
     let currency: String
 }
 
 /// Stored line provenance may contain additional server-derived fields.
-struct FieldEstimateLineSourceSnapshot: Codable, Hashable {
+struct FieldEstimateLineSourceSnapshot: Codable, Hashable, Sendable {
     let kind: String
     let priceBookItemId: String?
     let priceBookRevision: Int?
@@ -619,7 +619,7 @@ struct FieldEstimateLineSourceSnapshot: Codable, Hashable {
     }
 }
 
-struct FieldLineSource: Codable, Hashable {
+struct FieldLineSource: Codable, Hashable, Sendable {
     let kind: String
     let priceBookItemId: String?
     let priceBookRevision: Int?
@@ -687,7 +687,7 @@ struct FieldLineSource: Codable, Hashable {
     }
 }
 
-struct FieldLine: Codable, Identifiable, Hashable {
+struct FieldLine: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let description: String
     let quantity: Int
@@ -729,7 +729,7 @@ struct EstimateRecord: Codable, Identifiable, Hashable {
 }
 
 /// A signature recorded with an estimate approval or an invoice authorization.
-struct FieldSignatureRecord: Codable, Hashable {
+struct FieldSignatureRecord: Codable, Hashable, Sendable {
     let id: String
     let signerName: String
     let signedAt: String
@@ -738,13 +738,13 @@ struct FieldSignatureRecord: Codable, Hashable {
     var linesRevision: Int? = nil
 }
 
-struct FieldPhysicalServiceEvidence: Codable, Hashable {
+struct FieldPhysicalServiceEvidence: Codable, Hashable, Sendable {
     let id: String
     let performedAt: String
     let description: String
 }
 
-struct InvoiceRecord: Codable, Identifiable, Hashable {
+struct InvoiceRecord: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let organizationId: String
     let customerId: String
@@ -814,7 +814,7 @@ struct FieldEstimateLineInput: Encodable {
     }
 }
 
-struct JobEstimateLink: Codable, Identifiable, Hashable {
+struct JobEstimateLink: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let jobId: String
     let estimateId: String
@@ -872,7 +872,7 @@ enum FieldProgressRequest: Encodable {
     }
 }
 
-struct MediaAssetRecord: Codable, Identifiable, Hashable {
+struct MediaAssetRecord: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let organizationId: String
     let jobId: String
@@ -1003,15 +1003,18 @@ extension APIClient {
         return "\(base)/\(id)\(suffix)"
     }
 
-    private func allFieldPages<T: Decodable>(_ path: String, queryItems: [URLQueryItem] = []) async throws -> [T] {
+    private func allFieldPages<T: Decodable>(_ path: String, queryItems: [URLQueryItem] = [],
+                                             isCurrent: @MainActor () -> Bool = { true }) async throws -> [T] {
         let generation = requestGeneration
         var items: [T] = []
         var cursor: String?
         var seen = Set<String>()
         repeat {
             try Task.checkCancellation()
-            guard generation == requestGeneration else { throw CancellationError() }
+            guard generation == requestGeneration, isCurrent() else { throw CancellationError() }
             let page: FieldPage<T> = try await send("GET", path, queryItems: queryItems, cursor: cursor)
+            try Task.checkCancellation()
+            guard generation == requestGeneration, isCurrent() else { throw CancellationError() }
             items.append(contentsOf: page.items)
             cursor = page.nextCursor
             if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
@@ -1022,9 +1025,9 @@ extension APIClient {
     }
 
     func fieldJobs() async throws -> [JobRecord] { try await allFieldPages("/v1/jobs") }
-    func fieldJobs(customerID: String) async throws -> [JobRecord] {
+    func fieldJobs(customerID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobRecord] {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
-        return try await allFieldPages("/v1/jobs", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
+        return try await allFieldPages("/v1/jobs", queryItems: [URLQueryItem(name: "customerId", value: customerID)], isCurrent: isCurrent)
     }
     func fieldJob(_ id: String, requireFresh: Bool = false) async throws -> JobRecord { try await send("GET", fieldPath("/v1/jobs", id: id), requireFresh: requireFresh) }
     func createFieldJob(_ request: FieldJobCreate) async throws -> JobRecord {
@@ -1108,17 +1111,19 @@ extension APIClient {
     }
 
     func fieldEstimates() async throws -> [EstimateRecord] { try await allFieldPages("/v1/estimates") }
-    func fieldEstimates(customerID: String) async throws -> [EstimateRecord] {
+    func fieldEstimates(customerID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [EstimateRecord] {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
-        return try await allFieldPages("/v1/estimates", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
+        return try await allFieldPages("/v1/estimates", queryItems: [URLQueryItem(name: "customerId", value: customerID)], isCurrent: isCurrent)
     }
-    func fieldEstimate(_ id: String) async throws -> EstimateRecord { try await send("GET", fieldPath("/v1/estimates", id: id)) }
+    func fieldEstimate(_ id: String, requireFresh: Bool = false) async throws -> EstimateRecord {
+        try await send("GET", fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
+    }
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
     }
     /// Estimates related to a job (`GET /v1/jobs/{id}/estimates`), as link records.
-    func fieldJobEstimateLinks(_ jobID: String) async throws -> [JobEstimateLink] {
-        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"))
+    func fieldJobEstimateLinks(_ jobID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobEstimateLink] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"), isCurrent: isCurrent)
     }
     /// Links an existing estimate to a job without changing the job's origin.
     func linkFieldEstimate(jobID: String, estimateID: String) async throws -> JobEstimateLink {
@@ -1127,22 +1132,22 @@ extension APIClient {
     }
 
     func fieldInvoices() async throws -> [InvoiceRecord] { try await allFieldPages("/v1/invoices") }
-    func fieldInvoices(customerID: String) async throws -> [InvoiceRecord] {
+    func fieldInvoices(customerID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [InvoiceRecord] {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
-        return try await allFieldPages("/v1/invoices", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
+        return try await allFieldPages("/v1/invoices", queryItems: [URLQueryItem(name: "customerId", value: customerID)], isCurrent: isCurrent)
     }
     func fieldInvoice(_ id: String) async throws -> InvoiceRecord { try await send("GET", fieldPath("/v1/invoices", id: id)) }
     /// A job's invoices, drafts included (`GET /v1/jobs/{id}/invoices`). Unlike the invoice list this
     /// answers for a technician through the assigned job, so a fresh device still sees the job's paper.
-    func fieldJobInvoices(_ jobID: String) async throws -> [InvoiceRecord] {
-        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/invoices"))
+    func fieldJobInvoices(_ jobID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [InvoiceRecord] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/invoices"), isCurrent: isCurrent)
     }
     func ensureFieldCompletionInvoice(_ jobID: String) async throws -> InvoiceRecord {
         try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/completion-invoice"), body: EmptyObject())
     }
 
-    func fieldMedia(_ jobID: String, includeArchived: Bool = false) async throws -> [MediaAssetRecord] {
-        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : [])
+    func fieldMedia(_ jobID: String, includeArchived: Bool = false, isCurrent: @MainActor () -> Bool = { true }) async throws -> [MediaAssetRecord] {
+        try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : [], isCurrent: isCurrent)
     }
 
     func fieldMediaPage(_ jobID: String, cursor: String? = nil, kind: String? = nil) async throws -> JobMediaPage {

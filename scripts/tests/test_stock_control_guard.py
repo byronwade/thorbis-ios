@@ -17,7 +17,11 @@ class StockControlGuardTests(unittest.TestCase):
             sources = root / "Thorbis/Sources"
             sources.mkdir(parents=True)
             shutil.copy(ROOT / "scripts/lint-stock-controls.sh", root / "scripts")
-            shutil.copy(ROOT / "scripts/.stock-controls-allowlist", root / "scripts")
+            # Exercise the guard with a stable fixture, independent of the app's
+            # current allowlist (which can shrink when legacy controls are removed).
+            (root / "scripts/.stock-controls-allowlist").write_text(
+                "Thorbis/Sources/PaperJobDetailView.swift\t2\tMenu {\n"
+            )
             checker = ROOT / "scripts/lint_stock_controls.py"
             if checker.exists():
                 shutil.copy(checker, root / "scripts")

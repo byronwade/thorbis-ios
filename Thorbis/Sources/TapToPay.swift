@@ -119,7 +119,7 @@ final class TapToPayController: ObservableObject {
             case .canceled: return "Payment canceled."
             case .declinedByStripeAPI, .declinedByReader: return "The card was declined. Try another card."
             case .tapToPayReaderTOSAcceptanceRequiresiCloudSignIn, .tapToPayReaderTOSNotYetAccepted:
-                return "Accept Apple's Tap to Pay terms to start taking cards on this iPhone."
+                return "Tap to Pay needs setup. Ask an authorized administrator to accept Apple's terms."
             case .commandNotAllowed:
                 return "Tap to Pay isn't available on this iPhone with the current setup. Use a payment link or another method."
             default: break
@@ -162,8 +162,14 @@ final class TerminalSetup: NSObject {
         if Terminal.shared.connectedReader != nil { return }
         let discovery = try TapToPayDiscoveryConfigurationBuilder().build()
         let reader = try await Discovery().first(discovery)
-        let config = try TapToPayConnectionConfigurationBuilder(delegate: ReaderEvents.shared, locationId: locationID).build()
+        let config = try connectionConfiguration(locationID: locationID)
         _ = try await Terminal.shared.connectReader(reader, connectionConfig: config)
+    }
+
+    func connectionConfiguration(locationID: String) throws -> TapToPayConnectionConfiguration {
+        try TapToPayConnectionConfigurationBuilder(delegate: ReaderEvents.shared, locationId: locationID)
+            .setTosAcceptancePermitted(false)
+            .build()
     }
 }
 

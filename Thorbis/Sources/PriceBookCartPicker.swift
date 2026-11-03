@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct PriceBookPickerLoadScope: Equatable {
+    let context: PriceBookCatalogContext
+    let apiGeneration: UUID
+}
+
 /// The price book as a cart (EB-01..EB-07): the search field is focused when it opens, this
 /// device's favourites and recent items come first, the category sits in a filter circle, and
 /// every "+" adds one more without closing. "Done · 4 items" goes back to the builder.
@@ -21,23 +26,35 @@ struct PriceBookCartPicker: View {
     let refresh: (_ force: Bool) async -> Void
 
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var query = ""
     @State private var kind = PriceBookKindFilter.all
     @State private var added = 0
     @State private var error: String?
     @FocusState private var focus: EstimateBuilderFocus?
+    #if DEBUG
+    @State private var previewRevalidated = false
+    #endif
 
     private var context: PriceBookCatalogContext {
-        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
+        .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            if typeSize.isAccessibilitySize {
+                searchHeader
+            } else {
+                header
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if typeSize.isAccessibilitySize {
+                        titleHeader.padding(.horizontal, Theme.gutter)
+                    }
                     if let notice { ErrorBanner(message: notice).padding(.horizontal, Theme.gutter) }
                     if let error { ErrorBanner(message: error).padding(.horizontal, Theme.gutter) }
                     if !canUsePriceBook, addCustomLine == nil {
@@ -65,7 +82,7 @@ struct PriceBookCartPicker: View {
         .sensoryFeedback(.success, trigger: added)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .task(id: context) {
+        .task(id: PriceBookPickerLoadScope(context: context, apiGeneration: api.requestGeneration)) {
             await refresh(false)
         }
         .task {
@@ -79,15 +96,33 @@ struct PriceBookCartPicker: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Add items").font(Theme.font(20, weight: .medium)).foregroundStyle(Theme.foreground)
-                    Text("To \(destination)").font(Theme.font(14)).foregroundStyle(Theme.muted)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 8)
+            titleHeader
+            searchControls
+        }
+        .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 10)
+    }
+
+    private var titleHeader: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add items").font(Theme.font(20, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text("To \(destination)").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            if !typeSize.isAccessibilitySize {
                 PaperCircleButton(symbol: "xmark", label: "Close", size: 36, action: { dismiss() })
             }
+        }
+    }
+
+    private var searchHeader: some View {
+        searchControls
+            .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 10)
+    }
+
+    private var searchControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
@@ -112,6 +147,9 @@ struct PriceBookCartPicker: View {
                 .frame(minHeight: 50)
                 .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+                if typeSize.isAccessibilitySize {
+                    PaperCircleButton(symbol: "xmark", label: "Close", size: 44, action: { dismiss() })
+                }
                 if canUsePriceBook {
                     ThorbisMenu(items: PriceBookKindFilter.allCases.map { filter in
                         ThorbisMenuItem(filter.title, isSelected: filter == kind) { kind = filter }
@@ -123,15 +161,26 @@ struct PriceBookCartPicker: View {
                     .sensoryFeedback(.selection, trigger: kind)
                 }
             }
+            #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-picker-revalidation") {
+                Button("Refresh sample authority") {
+                    Task { await session.revalidate(); previewRevalidated = true }
+                }.accessibilityIdentifier("price-book-preview-revalidate")
+                if previewRevalidated {
+                    Text("Sample authority refreshed").accessibilityIdentifier("price-book-preview-revalidated")
+                }
+            }
+            #endif
             if kind != .all {
                 Text("Showing \(kind.title.lowercased())").font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 10)
     }
 
     private func add(_ item: PriceBookListItem) {
-        guard canUsePriceBook, catalog.context == context else { return }
+        guard canUsePriceBook, session.can("pricebook.view", feature: "price_book"),
+              session.priceBookAuthority == context.authority,
+              catalog.isCurrent(context, api: api) else { return }
         if let message = addItem(item) {
             error = message
             return

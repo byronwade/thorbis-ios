@@ -13,6 +13,120 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-03-customer-records-loading",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "person.crop.rectangle.stack", title: "Faster customer records",
+                      detail: "Customer histories with several jobs can load more quickly."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-03-job-estimate-status",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "doc.text", title: "See estimate progress",
+                      detail: "See which job estimates are drafts or awaiting approval at a glance."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-back-alone",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "chevron.backward", title: "One Back button on job pages",
+                      detail: "Job, customer and money pages show one round Back button. The menu opens from where you started."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-invoice-keyboard-catalog",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Easier invoice editing",
+                      detail: "Close an invoice item and add price book items more easily while the keyboard is open."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-customer-estimate-details",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Read estimate details",
+                      detail: "Open long item and package details while reviewing work with your customer."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-price-book-first-items",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "book", title: "Start with loaded items",
+                      detail: "See the first price book items while the rest load, with a clear note when search is incomplete."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-11-02-estimate-text",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "text.alignleft", title: "Keep your estimate wording",
+                      detail: "Long item text stays in the editor, with guidance when it needs to be shortened to save."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-job-estimate-location",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Create estimates at the job site",
+                      detail: "New job estimates use the job’s location, so they can be added to that job."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-customer-money-rows",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Find a customer's documents faster",
+                      detail: "See each estimate and invoice's reference, status, and available total on the customer page."),
+            ],
+            fixes: 0
+        ),
+        ReleaseNote(
+            id: "2026-11-02-clear-note-box",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "text.bubble", title: "The note box is easy to spot",
+                      detail: "In a job's Activity, the note box has its own edge in light and dark, so you can see where to type."),
+                .init(symbol: "creditcard", title: "Done stays off Record payment",
+                      detail: "With the number pad up in Collect payment, Done sits above the record button instead of over it."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-11-02-steady-job-page",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Job sections open without a freeze",
+                      detail: "Opening Money from far down a job, such as Due on site, shows it from the top and keeps the app moving."),
+                .init(symbol: "text.bubble", title: "More room for notes at large text",
+                      detail: "With the largest text sizes, quick notes and the note box take less of the screen in Activity."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-11-01-document-status",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "doc.text", title: "Estimates and invoices read the same",
+                      detail: "Sent and Unpaid show the same mark on the job, in search and on the estimate or invoice."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
+            id: "2026-11-01-cream-polish",
+            date: "2026-11-01",
+            highlights: [
+                .init(symbol: "list.bullet", title: "iPad's day reads as one list",
+                      detail: "On iPad, today's stops sit together in one list beside the job, not as separate cards."),
+            ],
+            fixes: 3
+        ),
+        ReleaseNote(
             id: "2026-11-01-cream-sheet",
             date: "2026-11-01",
             highlights: [

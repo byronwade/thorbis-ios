@@ -209,7 +209,7 @@ private enum CustomerContactSheetItem: Identifiable {
 }
 
 /// Identity and authority that authorized a compiled customer record.
-struct CustomerRecordsScope: Equatable {
+struct CustomerRecordsScope: Equatable, Sendable {
     let actorID: String
     let organizationID: String
     let customerID: String
@@ -1005,7 +1005,6 @@ struct CustomerDetailView: View {
                     SkeletonRows(count: 3, inset: 0)
                 } else if let visible {
                     CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: { await loadRecords() }, parts: parts)
-                        .accessibilityIdentifier("customer-records")
                 }
             }
         }
@@ -1028,8 +1027,10 @@ struct CustomerDetailView: View {
         recordsError = nil
         defer { if recordsLoadGeneration == request { recordsLoading = false } }
         do {
+            let recordsSession = session
             let compiled = try await CustomerJobCompilationLoader.load(customerID: scope.customerID,
-                organizationID: scope.organizationID, api: api, access: scope.access)
+                organizationID: scope.organizationID, api: api, access: scope.access,
+                isCurrent: { scope.isCurrent(session: recordsSession) })
             guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
             records = compiled
             recordsPublishedScope = scope

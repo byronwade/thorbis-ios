@@ -5,6 +5,26 @@ final class EstimateRevisionEditorTests: XCTestCase {
     private let estimateID = "00000000-0000-4000-8000-000000000008"
     private let optionID = "00000000-0000-4000-8000-000000000010"
 
+    func testRevisionRejectsOverlongCatalogOriginalInMainAndOptionLines() throws {
+        let original = String(repeating: "🚰", count: 101)
+        let item = PriceBookListItem(id: "11111111-1111-4111-8111-111111111111", description: original,
+                                     unit: "each", kind: "material", taxClassification: "taxable",
+                                     sellPrice: .init(amount: 1200, currency: "USD"), revision: 7, archivedAt: nil)
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate())
+        try state.addPriceBookItem(item)
+        state.lines[state.lines.count - 1].description = "Short version"
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .priceBookOriginalTooLong)
+        }
+        state.lines.removeLast()
+        state.options.append(.init(id: optionID, title: "Option", description: "", lines: []))
+        try state.addPriceBookItem(item, optionID: optionID)
+        state.options[0].lines[0].description = "Short version"
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
+            XCTAssertEqual($0 as? EstimateRevisionEditorError, .priceBookOriginalTooLong)
+        }
+    }
+
     private func makeEstimate(status: String = "sent", lines: String? = nil,
                               options: String? = nil, revision: Int? = 2) throws -> EstimateRecord {
         let lineJSON = lines ?? #"[{"id":"00000000-0000-4000-8000-000000000009","description":"Repair","quantity":2,"unitPrice":{"amount":1250,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000004","capturedAt":"2026-10-26T12:00:00Z"}}]"#

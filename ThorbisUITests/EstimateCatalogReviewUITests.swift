@@ -43,6 +43,78 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         XCTAssertTrue(editableLine.waitForExistence(timeout: 5))
     }
 
+    func testLongCustomDescriptionRemainsEditableAndExplainsSaveLimit() {
+        checkLongCustomDescriptionAtKeyboard(largeText: false)
+    }
+
+    func testLongCustomDescriptionAndSaveStayReachableAtLargestText() {
+        checkLongCustomDescriptionAtKeyboard(largeText: true)
+    }
+
+    private func checkLongCustomDescriptionAtKeyboard(largeText: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        app.launch()
+        openPicker(app.buttons.matching(identifier: "estimate-add-item").firstMatch, in: app)
+        let search = app.textFields["price-book-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        let fullDescription = String(repeating: "scope ", count: 40) + "last words"
+        search.typeText(fullDescription)
+        let add = app.buttons["price-book-add-custom"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        if largeText { XCTAssertLessThanOrEqual(add.frame.height, app.frame.height / 2, "A long query must not make the custom-item action taller than half the screen") }
+        add.tap()
+        let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
+        XCTAssertTrue(description.waitForExistence(timeout: 10))
+        XCTAssertEqual(description.value as? String, fullDescription)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.frame.intersects(keyboardDone.frame), "The keyboard Done control must not cover any part of Save")
+        save.tap()
+        let warning = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Error: Item descriptions can be up to 200 characters")).firstMatch
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        XCTAssertTrue(warning.isHittable, "The warning must remain visible while the keyboard is open")
+        XCTAssertTrue(save.isHittable, "Save must remain reachable while the warning is displayed")
+        XCTAssertEqual(description.value as? String, fullDescription)
+    }
+
+    func testRevisionShowsLengthWarningWhenSavingWithNumberKeyboardOpen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        // This preview has a sent revision and valid manual/Price Book source identities.
+        // The builder-line showcase intentionally includes incomplete Price Book provenance,
+        // which correctly disables editing and is not a suitable editor fixture.
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision"]
+        app.launch()
+        let line = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Compressor diagnostic")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 30))
+        line.tap()
+        let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
+        XCTAssertTrue(description.waitForExistence(timeout: 30))
+        XCTAssertTrue(description.isEnabled, "The revision fixture must be editable with supported provenance")
+        description.tap()
+        description.typeText(String(repeating: "x", count: 201))
+        let price = app.textFields["Price each in dollars"]
+        XCTAssertTrue(price.waitForExistence(timeout: 5))
+        price.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save revised draft")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertTrue(save.isHittable)
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        XCTAssertFalse(save.frame.intersects(keyboardDone.frame), "The keyboard Done control must not cover any part of Save")
+        save.tap()
+        let warning = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Error: Item descriptions can be up to 200 characters")).firstMatch
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+    }
+
     func testReviewKeepsCatalogItemInItsChosenOption() {
         continueAfterFailure = false
         let app = XCUIApplication()

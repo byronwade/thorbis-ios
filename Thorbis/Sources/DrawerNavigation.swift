@@ -239,48 +239,6 @@ struct AppDrawer: View {
     }
 }
 
-// MARK: - The menu circle on pushed screens
-
-/// The drawer as every screen in a phone place sees it, pushed screens included. Set by the phone
-/// shell only (nil on iPad). Sheets and full-screen covers never show it: `ThorbisBackButton`
-/// checks it is not inside a presentation, and customer mode clears it outright.
-private struct PaperDrawerReachKey: EnvironmentKey {
-    static let defaultValue: PaperDrawerControl? = nil
-}
-extension EnvironmentValues {
-    var paperDrawerReach: PaperDrawerControl? {
-        get { self[PaperDrawerReachKey.self] }
-        set { self[PaperDrawerReachKey.self] = newValue }
-    }
-}
-
-/// Reports whether the view sits inside a sheet or full-screen cover (any presented controller),
-/// so a pushed screen there keeps Back alone.
-struct PresentationProbe: UIViewRepresentable {
-    @Binding var presented: Bool
-
-    func makeUIView(context: Context) -> ProbeView {
-        let view = ProbeView()
-        view.report = { value in if presented != value { presented = value } }
-        return view
-    }
-
-    func updateUIView(_ uiView: ProbeView, context: Context) {}
-
-    final class ProbeView: UIView {
-        var report: ((Bool) -> Void)?
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            guard window != nil else { return }
-            var responder: UIResponder? = self
-            while let next = responder?.next, !(next is UIViewController) { responder = next }
-            let controller = responder?.next as? UIViewController
-            let presented = controller?.presentingViewController != nil
-            DispatchQueue.main.async { [weak self] in self?.report?(presented) }
-        }
-    }
-}
-
 /// The card's outline: a rounded rectangle grown past the view's frame by the safe areas, so the
 /// card's rounded top and bottom sit at the screen's edges rather than under the status bar.
 struct DrawerCardShape: InsettableShape {

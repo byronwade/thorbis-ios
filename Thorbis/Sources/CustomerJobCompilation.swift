@@ -207,18 +207,27 @@ enum CustomerRecordLabel {
 enum CustomerJobCompilationLoader {
     /// Loads the customer's jobs, then each job's notes, media, and the estimate links and invoices
     /// this person can read. There is no customer-wide media or notes route; the groups are built from the job routes.
-    static func load(customerID: String, organizationID: String, api: APIClient, access: CustomerRecordAccess = .all) async throws -> CustomerJobCompilation {
-        let receivedJobs = access.jobs ? try await api.fieldJobs(customerID: customerID) : []
+    static func load(customerID: String, organizationID: String, api: APIClient,
+                     access: CustomerRecordAccess = .all,
+                     isCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> CustomerJobCompilation {
+        let requestGeneration = api.requestGeneration
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
+        let receivedJobs = access.jobs ? try await api.fieldJobs(customerID: customerID, isCurrent: isCurrent) : []
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         let jobs = receivedJobs.filter { $0.customerId == customerID && $0.organizationId == organizationID }
         let receivedContacts = try await api.fieldContacts(customerID)
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         let contacts = receivedContacts.filter { $0.customerId == customerID && $0.organizationId == organizationID }
         let receivedLocations = try await api.fieldLocations(customerID)
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         let locations = receivedLocations.filter { $0.customerId == customerID && $0.organizationId == organizationID }
         let identityIncomplete = jobs.count != receivedJobs.count || contacts.count != receivedContacts.count || locations.count != receivedLocations.count
-        let receivedEstimates = access.estimates ? try await api.fieldEstimates(customerID: customerID) : []
+        let receivedEstimates = access.estimates ? try await api.fieldEstimates(customerID: customerID, isCurrent: isCurrent) : []
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         let estimates = receivedEstimates.filter { $0.customerId == customerID && $0.organizationId == organizationID }
         var estimatesIncomplete = estimates.count != receivedEstimates.count
-        let receivedInvoices = access.invoices ? try await api.fieldInvoices(customerID: customerID) : []
+        let receivedInvoices = access.invoices ? try await api.fieldInvoices(customerID: customerID, isCurrent: isCurrent) : []
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         var invoices = receivedInvoices.filter { $0.customerId == customerID && $0.organizationId == organizationID }
         var invoicesIncomplete = invoices.count != receivedInvoices.count
         var notesIncomplete = false
@@ -229,43 +238,41 @@ enum CustomerJobCompilationLoader {
         var linksByJob: [String: [JobEstimateLink]] = [:]
         var mediaIncompleteJobIDs = Set<String>()
         var documentIncompleteJobIDs = Set<String>()
-        for job in jobs {
-            let receivedNotes = try await api.fieldNotes(job.id)
-            let notes = receivedNotes.filter { $0.organizationId == organizationID && $0.jobId == job.id }
-            if notes.count != receivedNotes.count { notesIncomplete = true }
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
+        let jobReads = try await mapJobs(jobs) { job in
+            try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
+            return try await readJob(job, api: api, access: access, generation: requestGeneration, isCurrent: isCurrent)
+        }
+        for (job, read) in zip(jobs, jobReads) {
+            let notes = read.notes.filter { $0.organizationId == organizationID && $0.jobId == job.id }
+            if notes.count != read.notes.count { notesIncomplete = true }
             notesByJob[job.id] = notes
-            do {
-                mediaByJob[job.id] = try await api.fieldMedia(job.id, includeArchived: true)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch let problem as Problem where problem.status == 401 {
-                throw problem
-            } catch {
+            if let media = read.media {
+                mediaByJob[job.id] = media
+            } else {
                 mediaIncompleteJobIDs.insert(job.id)
                 documentIncompleteJobIDs.insert(job.id)
             }
-            if access.estimates {
-                let receivedLinks = try await api.fieldJobEstimateLinks(job.id)
-                let links = receivedLinks.filter { $0.jobId == job.id && estimateIDs.contains($0.estimateId) }
-                if links.count != receivedLinks.count { estimatesIncomplete = true }
-                linksByJob[job.id] = links
-            }
-            if access.invoices {
-                for invoice in try await jobInvoices(job.id, api: api) {
-                    guard invoice.organizationId == organizationID && invoice.customerId == customerID && invoice.jobId == job.id else {
-                        invoicesIncomplete = true
-                        continue
-                    }
-                    if seenInvoices.insert(invoice.id).inserted { invoices.append(invoice) }
+            let links = read.links.filter { $0.jobId == job.id && estimateIDs.contains($0.estimateId) }
+            if links.count != read.links.count { estimatesIncomplete = true }
+            if access.estimates { linksByJob[job.id] = links }
+            for invoice in read.invoices {
+                guard invoice.organizationId == organizationID && invoice.customerId == customerID && invoice.jobId == job.id else {
+                    invoicesIncomplete = true
+                    continue
                 }
+                if seenInvoices.insert(invoice.id).inserted { invoices.append(invoice) }
             }
         }
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         var history: [CustomerHistoryEntry] = []
         var cursor: String?
         var seen = Set<String>()
         var activityIncomplete = false
         repeat {
+            try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
             let page = try await api.fieldCustomerHistory(customerID, cursor: cursor)
+            try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
             history.append(contentsOf: page.items)
             cursor = page.nextCursor
             if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
@@ -274,19 +281,27 @@ enum CustomerJobCompilationLoader {
             }
         } while cursor != nil
         var legacyPhotosByJob: [String: [JobPhotoRecord]] = [:]
-        for job in jobs {
-            // Without the archived-inclusive list, a legacy row could resurrect an archived photo.
-            guard mediaByJob[job.id] != nil else { continue }
+        // Only an archived-inclusive media read permits a legacy photo fallback.
+        let photoJobs = jobs.filter { mediaByJob[$0.id] != nil }
+        let photoReads = try await mapJobs(photoJobs) { job in
+            try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
             do {
-                legacyPhotosByJob[job.id] = try await api.fieldPhotos(job.id)
+                let photos = try await api.fieldPhotos(job.id)
+                try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
+                return PhotoRead(photos: photos)
             } catch is CancellationError {
                 throw CancellationError()
             } catch let problem as Problem where problem.status == 401 {
                 throw problem
             } catch {
-                mediaIncompleteJobIDs.insert(job.id)
+                return PhotoRead(photos: nil)
             }
         }
+        for (job, read) in zip(photoJobs, photoReads) {
+            if let photos = read.photos { legacyPhotosByJob[job.id] = photos }
+            else { mediaIncompleteJobIDs.insert(job.id) }
+        }
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         return CustomerJobCompilation.assemble(
             jobs: jobs,
             contacts: contacts,
@@ -311,11 +326,72 @@ enum CustomerJobCompilationLoader {
         )
     }
 
+    /// Results are merged in the original job order, regardless of completion order.
+    /// Keep the fan-out bounded so a large customer cannot flood the service.
+    private static func mapJobs<Value: Sendable>(
+        _ jobs: [JobRecord],
+        operation: @escaping @MainActor @Sendable (JobRecord) async throws -> Value
+    ) async throws -> [Value] {
+        // Small profiles do not need parallel fan-out.
+        if jobs.count <= 2 {
+            var values: [Value] = []
+            for job in jobs { try Task.checkCancellation(); values.append(try await operation(job)) }
+            return values
+        }
+        return try await withThrowingTaskGroup(of: (Int, Value).self) { group in
+            var next = 0
+            var values: [(Int, Value)] = []
+            func submit(_ index: Int) {
+                let job = jobs[index]
+                group.addTask { (index, try await operation(job)) }
+            }
+            while next < min(4, jobs.count) { submit(next); next += 1 }
+            while let result = try await group.next() {
+                try Task.checkCancellation()
+                values.append(result)
+                if next < jobs.count { submit(next); next += 1 }
+            }
+            return values.sorted { $0.0 < $1.0 }.map { $0.1 }
+        }
+    }
+
+    // DTO snapshots cross the task-group boundary; API calls remain main-actor isolated.
+    private struct JobRead: Sendable {
+        let notes: [JobNoteRecord]
+        let media: [MediaAssetRecord]?
+        let links: [JobEstimateLink]
+        let invoices: [InvoiceRecord]
+    }
+    private struct PhotoRead: Sendable { let photos: [JobPhotoRecord]? }
+
+    private static func requireCurrent(_ api: APIClient, generation: UUID, isCurrent: @MainActor () -> Bool) throws {
+        try Task.checkCancellation()
+        guard api.requestGeneration == generation, isCurrent() else { throw CancellationError() }
+    }
+
+    private static func readJob(_ job: JobRecord, api: APIClient, access: CustomerRecordAccess, generation: UUID,
+                                isCurrent: @MainActor () -> Bool) async throws -> JobRead {
+        try requireCurrent(api, generation: generation, isCurrent: isCurrent)
+        let notes = try await api.fieldNotes(job.id)
+        try requireCurrent(api, generation: generation, isCurrent: isCurrent)
+        let media: [MediaAssetRecord]?
+        do { media = try await api.fieldMedia(job.id, includeArchived: true, isCurrent: isCurrent) }
+        catch is CancellationError { throw CancellationError() }
+        catch let problem as Problem where problem.status == 401 { throw problem }
+        catch { media = nil }
+        try requireCurrent(api, generation: generation, isCurrent: isCurrent)
+        let links = access.estimates ? try await api.fieldJobEstimateLinks(job.id, isCurrent: isCurrent) : []
+        try requireCurrent(api, generation: generation, isCurrent: isCurrent)
+        let invoices = access.invoices ? try await jobInvoices(job.id, api: api, isCurrent: isCurrent) : []
+        try requireCurrent(api, generation: generation, isCurrent: isCurrent)
+        return JobRead(notes: notes, media: media, links: links, invoices: invoices)
+    }
+
     /// The organization invoice list is empty for a technician who can still read the job.
     /// A server without this route (404 or 405) keeps the customer list. Any other failure still fails the load.
-    private static func jobInvoices(_ jobID: String, api: APIClient) async throws -> [InvoiceRecord] {
+    private static func jobInvoices(_ jobID: String, api: APIClient, isCurrent: @MainActor () -> Bool) async throws -> [InvoiceRecord] {
         do {
-            return try await api.fieldJobInvoices(jobID)
+            return try await api.fieldJobInvoices(jobID, isCurrent: isCurrent)
         } catch let problem as Problem where problem.status == 404 || problem.status == 405 {
             return []
         }
