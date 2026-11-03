@@ -8,6 +8,7 @@ struct EstimateRevisionEditorView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var editor: EstimateRevisionEditorState
     @State private var persistenceBaseline: EstimateRevisionEditorState
     @State private var busy = false
@@ -28,6 +29,9 @@ struct EstimateRevisionEditorView: View {
     @State private var descriptionProblem: String?
     @State private var staleRevision = false
     @State private var confirmReload = false
+    @State private var pendingReload: EstimateRecord?
+    @State private var pendingReloadScope: EstimateCreationScope?
+    @State private var pendingReloadAttempt: UUID?
     @State private var confirmDiscard = false
     @State private var picker: EstimateBuilderTarget?
     @State private var discountTarget: EstimateBuilderTarget?
@@ -90,6 +94,9 @@ struct EstimateRevisionEditorView: View {
         } catch { recoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone." }
     }
     private func verifyDraftAccess() async {
+        guard !Task.isCancelled else { return }
+        accessAttempt = UUID()
+        invalidatePendingReload()
         guard viewVisible, ownsDraft, scopeMatches, let expected = currentScope,
               session.can("estimate.create", feature: "estimates") else { return }
         if !didRecoverDraft && verifiedScope == expected { return }
@@ -206,7 +213,7 @@ struct EstimateRevisionEditorView: View {
                                     ? "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
                                     : "Connect to verify access to this document. Your draft stays on this phone."))
                                 if recoveryBlocked && verifiedScope == currentScope && scopeMatches && staleRevision {
-                                    Button("Review latest and discard draft") { confirmReload = true }
+                                    Button("Review latest and discard draft") { Task { await reloadLatest() } }
                                         .buttonStyle(.bordered)
                                 } else if scopeMatches && ownsDraft {
                                     Button("Try again") { Task { await verifyDraftAccess() } }
@@ -256,9 +263,11 @@ struct EstimateRevisionEditorView: View {
                                     .accessibilityValue(EstimateRecoveryPreview.shared.reloadHoldState)
                             }
                             Button("Dismiss held reload") {
+                                CommercialDraftStore.trace("debug dismiss")
                                 dismiss()
                                 Task { @MainActor in
                                     try? await Task.sleep(for: .milliseconds(500))
+                                    CommercialDraftStore.trace("debug release")
                                     EstimateRecoveryPreview.shared.release()
                                 }
                             }.accessibilityIdentifier("estimate-held-reload-dismiss")
@@ -274,6 +283,9 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func openDraft() {
+                #if DEBUG
+                CommercialDraftStore.trace("open scene=\(String(describing: scenePhase))")
+                #endif
                 viewVisible = true
                 if !scopeCaptured { scopeCaptured = true; originalScope = currentScope }
                 guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
@@ -299,10 +311,26 @@ struct EstimateRevisionEditorView: View {
             .onAppear { openDraft() }
             .task(id: draftAccessKey) { await verifyDraftAccess() }
             .onChange(of: session.isOffline) { _, offline in
-                if offline { accessAttempt = UUID(); if didRecoverDraft { verifiedScope = nil } }
-                if !offline && verifiedScope != currentScope { Task { await verifyDraftAccess() } }
+                if offline { accessAttempt = UUID(); invalidatePendingReload(); if didRecoverDraft { verifiedScope = nil } }
             }
-            .onDisappear { viewVisible = false; accessAttempt = UUID(); if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
+            .onChange(of: scenePhase) { _, phase in
+                #if DEBUG
+                CommercialDraftStore.trace("scene \(String(describing: phase))")
+                #endif
+                if phase != .active {
+                    invalidatePendingReload()
+                    accessAttempt = UUID()
+                    if didRecoverDraft { verifiedScope = nil }
+                } else if didRecoverDraft && verifiedScope != currentScope {
+                    Task { await verifyDraftAccess() }
+                }
+            }
+            .onDisappear {
+                #if DEBUG
+                CommercialDraftStore.trace("disappear busy=\(busy)")
+                #endif
+                viewVisible = false; accessAttempt = UUID(); invalidatePendingReload(); if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() }
+            }
             .trackKeyboard($keyboardUp)
     }
 
@@ -357,7 +385,7 @@ struct EstimateRevisionEditorView: View {
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
                             isPresented: $confirmReload,
-                            actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+                            actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { applyPendingReload() }])
             #if DEBUG
             .task {
                 guard PaperPreview.enabled else { return }
@@ -393,7 +421,7 @@ struct EstimateRevisionEditorView: View {
         VStack(alignment: .leading, spacing: 18) {
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
             if staleRevision {
-                Button { confirmReload = true } label: {
+                Button { Task { await reloadLatest() } } label: {
                     Label("Review latest estimate", systemImage: "arrow.clockwise")
                         .font(Theme.font(14, weight: .medium))
                         .foregroundStyle(Theme.brandText)
@@ -742,6 +770,9 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func reloadLatest() async {
+        #if DEBUG
+        CommercialDraftStore.trace("reload start")
+        #endif
         guard scopeMatches, let expected = currentScope, ownsDraft else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
         let attempt = UUID(); accessAttempt = attempt
@@ -751,11 +782,45 @@ struct EstimateRevisionEditorView: View {
         defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
             let latest = try await api.fieldEstimate(estimate.id, requireFresh: true)
-            guard !Task.isCancelled, viewVisible, !session.isOffline, accessAttempt == attempt,
+            #if DEBUG
+            CommercialDraftStore.trace("reload response visible=\(viewVisible) scene=\(String(describing: scenePhase)) sameAttempt=\(accessAttempt == attempt) cancelled=\(Task.isCancelled)")
+            #endif
+            guard !Task.isCancelled, viewVisible, scenePhase == .active, !session.isOffline, accessAttempt == attempt,
                   currentScope == expected, latest.id == estimate.id,
                   latest.organizationId == expected.organizationID,
-                  session.can("estimate.create", feature: "estimates"), let draftScope else { return }
-            // The confirmation authorizes deletion; do not discard an unsaved draft on failure.
+                  session.can("estimate.create", feature: "estimates"), draftScope != nil else { return }
+            pendingReload = latest
+            pendingReloadScope = expected
+            pendingReloadAttempt = attempt
+            confirmReload = true
+        } catch is CancellationError {
+        } catch {
+            #if DEBUG
+            CommercialDraftStore.trace("reload error type=\(String(describing: type(of: error)))")
+            #endif
+            self.error = "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
+        }
+    }
+
+    private func invalidatePendingReload() {
+        pendingReload = nil
+        pendingReloadScope = nil
+        pendingReloadAttempt = nil
+        confirmReload = false
+    }
+
+    private func applyPendingReload() {
+        guard viewVisible, scenePhase == .active, !session.isOffline, ownsDraft,
+              let expected = pendingReloadScope, pendingReloadAttempt == accessAttempt, currentScope == expected, verifiedScope == expected, scopeMatches,
+              session.can("estimate.create", feature: "estimates"), let latest = pendingReload,
+              latest.id == estimate.id, latest.organizationId == expected.organizationID,
+              let draftScope else {
+            invalidatePendingReload()
+            error = "The workspace changed or the document is unavailable. Your draft is still on this phone."
+            return
+        }
+        invalidatePendingReload()
+        do {
             try CommercialDraftStore.shared.remove(scope: draftScope)
             didRestoreDraft = false; didRecoverDraft = false; wroteFreshDraft = false
             editor = EstimateRevisionEditorState(estimate: latest)
@@ -764,7 +829,6 @@ struct EstimateRevisionEditorView: View {
             classifyLines()
             recoveryBlocked = false; staleRevision = false; error = nil
             didRestoreDraft = true; verifiedScope = expected
-        } catch is CancellationError {
         } catch {
             self.error = "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
         }

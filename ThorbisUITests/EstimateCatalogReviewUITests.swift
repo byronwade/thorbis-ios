@@ -100,7 +100,9 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         app.launch()
         let review = app.buttons["Review latest and discard draft"]
         XCTAssertTrue(review.waitForExistence(timeout: 20))
-        review.tap(); app.buttons["Reload and discard my edits"].tap()
+        review.tap()
+        XCTAssertTrue(app.buttons["Reload and discard my edits"].waitForExistence(timeout: 15))
+        app.buttons["Reload and discard my edits"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "draft could not be cleared")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(review.exists)
         app.terminate()
@@ -114,21 +116,22 @@ final class EstimateCatalogReviewUITests: XCTestCase {
     func testLateReloadAfterDismissalKeepsRecoveredDraft() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        let traceID = UUID().uuidString
+        print("DRAFT_TRACE_ID \(traceID)")
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
-            "--commercial-draft-test-id", UUID().uuidString]
+            "--commercial-draft-test-id", traceID, "--commercial-draft-test-trace"]
         app.launch()
         let title = app.textFields["Estimate title"]
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         let original = title.value as? String ?? ""
-        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" retained")
-        XCTAssertEqual(title.value as? String, original + " retained")
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText("x")
+        XCTAssertEqual(title.value as? String, original + "x")
         app.terminate()
         app.launchArguments.append("--paper-preview-estimate-recovery-held-reload")
         app.launch()
         let review = app.buttons["Review latest and discard draft"]
         XCTAssertTrue(review.waitForExistence(timeout: 20))
         review.tap()
-        app.buttons["Reload and discard my edits"].tap()
         let count = app.staticTexts["estimate-held-reload-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 10))
         expectation(for: NSPredicate(format: "value == %@", "waiting"), evaluatedWith: count)
@@ -144,7 +147,65 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         app.launch()
         let reopened = app.textFields["Estimate title"]
         XCTAssertTrue(reopened.waitForExistence(timeout: 20))
-        XCTAssertEqual(reopened.value as? String, original + " retained")
+        XCTAssertEqual(reopened.value as? String, original + "x")
+    }
+
+    func testCancelReloadConfirmationKeepsRecoveredDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText("x")
+        XCTAssertEqual(title.value as? String, original + "x")
+        app.terminate()
+        app.launchArguments.append("--paper-preview-estimate-recovery-newer-revision")
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let discard = app.buttons["Reload and discard my edits"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 15))
+        let cancels = app.buttons.matching(identifier: "Cancel")
+        XCTAssertGreaterThan(cancels.count, 0)
+        cancels.element(boundBy: cancels.count - 1).tap()
+        XCTAssertTrue(discard.waitForNonExistence(timeout: 10))
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-estimate-recovery-newer-revision" }
+        app.launch()
+        let reopened = app.textFields["Estimate title"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 20))
+        XCTAssertEqual(reopened.value as? String, original + "x")
+    }
+
+    func testConfirmReloadDiscardsRecoveredDraftAfterFreshRead() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText("x")
+        XCTAssertEqual(title.value as? String, original + "x")
+        app.terminate()
+        app.launchArguments.append("--paper-preview-estimate-recovery-newer-revision")
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let discard = app.buttons["Reload and discard my edits"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 15)); discard.tap()
+        XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.textFields["Estimate title"].value as? String, original)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-estimate-recovery-newer-revision" }
+        app.launch()
+        let reopened = app.textFields["Estimate title"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 20))
+        XCTAssertEqual(reopened.value as? String, original)
     }
 
     func testFailedCleanupAfterUndoStillRequiresDiscardConfirmation() {

@@ -15,6 +15,18 @@ struct CommercialDraftScope: Codable, Hashable {
 /// provides device-bound data protection, and the directory is excluded from backups.
 @MainActor final class CommercialDraftStore {
     #if DEBUG
+    static func trace(_ message: String) {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("--commercial-draft-test-trace"),
+              let index = arguments.firstIndex(of: "--commercial-draft-test-id"),
+              arguments.indices.contains(index + 1), let id = UUID(uuidString: arguments[index + 1]) else { return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("CommercialDraftTrace-\(id.uuidString).log")
+        if !FileManager.default.fileExists(atPath: url.path) { _ = FileManager.default.createFile(atPath: url.path, contents: nil) }
+        guard let file = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? file.close() }
+        try? file.seekToEnd()
+        try? file.write(contentsOf: Data("\(Date().timeIntervalSince1970) \(message)\n".utf8))
+    }
     static let shared: CommercialDraftStore = {
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains("--paper-preview") else { return CommercialDraftStore() }
@@ -65,6 +77,9 @@ struct CommercialDraftScope: Codable, Hashable {
     }
 
     func save<Value: Codable>(_ value: Value, scope: CommercialDraftScope) throws {
+        #if DEBUG
+        Self.trace("save \(scope.kind)")
+        #endif
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var folder = directory
         var resources = URLResourceValues()
@@ -76,6 +91,9 @@ struct CommercialDraftScope: Codable, Hashable {
 
     func load<Value: Codable>(_ type: Value.Type, scope: CommercialDraftScope) throws -> Value? {
         let url = try file(for: scope)
+        #if DEBUG
+        Self.trace("load \(scope.kind) exists=\(FileManager.default.fileExists(atPath: url.path))")
+        #endif
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let envelope = try JSONDecoder().decode(Envelope<Value>.self, from: Data(contentsOf: url))
         guard envelope.version == 1, envelope.scope == scope else { throw CocoaError(.fileReadCorruptFile) }
@@ -84,6 +102,9 @@ struct CommercialDraftScope: Codable, Hashable {
 
     func remove(scope: CommercialDraftScope) throws {
         let url = try file(for: scope)
+        #if DEBUG
+        Self.trace("remove \(scope.kind) exists=\(FileManager.default.fileExists(atPath: url.path))")
+        #endif
         if FileManager.default.fileExists(atPath: url.path) { try removeItem(url) }
     }
 }
