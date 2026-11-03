@@ -44,6 +44,7 @@ struct CommercialDraftScope: Codable, Hashable {
     #endif
     private let directory: URL
     private let removeItem: (URL) throws -> Void
+    private let writeItem: (Data, URL) throws -> Void
     private var owners: [CommercialDraftScope: UUID] = [:]
 
     private struct Envelope<Value: Codable>: Codable {
@@ -52,10 +53,12 @@ struct CommercialDraftScope: Codable, Hashable {
         let value: Value
     }
 
-    init(directory: URL? = nil, removeItem: ((URL) throws -> Void)? = nil) {
+    init(directory: URL? = nil, removeItem: ((URL) throws -> Void)? = nil,
+         writeItem: ((Data, URL) throws -> Void)? = nil) {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CommercialDrafts", isDirectory: true)
         self.removeItem = removeItem ?? { try FileManager.default.removeItem(at: $0) }
+        self.writeItem = writeItem ?? { data, url in try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
     }
 
     /// One editor per scope in this app process prevents two windows silently replacing each
@@ -68,6 +71,7 @@ struct CommercialDraftScope: Codable, Hashable {
     func release(scope: CommercialDraftScope, owner: UUID) {
         if owners[scope] == owner { owners.removeValue(forKey: scope) }
     }
+    func isOwned(scope: CommercialDraftScope, owner: UUID) -> Bool { owners[scope] == owner }
 
     private func file(for scope: CommercialDraftScope) throws -> URL {
         let encoder = JSONEncoder()
@@ -86,7 +90,7 @@ struct CommercialDraftScope: Codable, Hashable {
         resources.isExcludedFromBackup = true
         try folder.setResourceValues(resources)
         let data = try JSONEncoder().encode(Envelope(version: 1, scope: scope, value: value))
-        try data.write(to: file(for: scope), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try writeItem(data, file(for: scope))
     }
 
     func load<Value: Codable>(_ type: Value.Type, scope: CommercialDraftScope) throws -> Value? {
