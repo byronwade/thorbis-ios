@@ -32,3 +32,16 @@ add-ons, server support for paragraph-length line descriptions, durable draft
 recovery, atomic estimate compare-and-link and qualified on-site payment methods
 remain separate work. Simulator results do not establish live payment behavior,
 physical-device accessibility or TestFlight availability.
+
+## Stripe Terminal symbol investigation
+
+The resolved Stripe Terminal SDK is 5.8.1. Its downloaded XCFramework contains
+no dSYM directories, and Stripe's [SDK changelog](https://github.com/stripe/stripe-terminal-ios/blob/5.8.1/CHANGELOG.md)
+records that dSYMs stopped being bundled with the framework in 5.0.0. Stripe's
+[5.8.1 release](https://github.com/stripe/stripe-terminal-ios/releases/tag/5.8.1)
+lists only the framework ZIP as a release asset. The Thorbis archive does contain
+dSYMs for the app and widget; their presence does not supply the missing Stripe
+framework symbols. Obtain matching symbols from Stripe if available before
+relying on symbolicated framework crash reports; changing Xcode's app symbol
+setting cannot recreate vendor debug information. No symbol workaround has been
+verified.
