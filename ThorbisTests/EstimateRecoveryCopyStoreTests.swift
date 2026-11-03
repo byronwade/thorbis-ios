@@ -91,4 +91,20 @@ import XCTest
         XCTAssertEqual(edits.read(for: key), edited)
     }
 
+    func testUnchangedSeparateEditGetsDistinctIDAndRetryKeepsItsIdentity() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let draft = Draft(title: "Unchanged", lines: ["Details"]), session = UUID()
+        let attempts = EstimateRecoveryCopyAttempts<Scope, Draft>(), store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory)
+        var source: UUID?, copied: UUID?, retried: UUID?
+        try attempts.perform(draft, scope: scope) { id, value in source = id; try store.install(value, scope: scope, id: id) }
+        try attempts.perform(draft, scope: scope, intentID: session) { id, value in copied = id; try store.install(value, scope: scope, id: id) }
+        XCTAssertNotEqual(source, copied)
+        try attempts.perform(draft, scope: scope, intentID: session) { id, value in retried = id; try store.install(value, scope: scope, id: id) }
+        XCTAssertEqual(copied, retried)
+        XCTAssertEqual(try store.read(scope: scope, id: XCTUnwrap(source)), draft)
+        XCTAssertEqual(try store.read(scope: scope, id: XCTUnwrap(copied)), draft)
+    }
+
 }

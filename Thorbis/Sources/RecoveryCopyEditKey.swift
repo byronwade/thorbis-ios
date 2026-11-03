@@ -5,3 +5,9 @@ struct RecoveryCopyEditKey<Scope: Hashable>: Hashable {
     let scope: Scope
     let sourceID: UUID
 }
+
+/// Session identity survives view recreation while the process-local edit exists.
+struct RecoveryCopyEditState<Draft> {
+    let draft: Draft
+    let sessionID: UUID
+}
