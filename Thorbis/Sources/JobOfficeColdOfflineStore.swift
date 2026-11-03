@@ -9,16 +9,19 @@ struct JobOfficeColdScope: Codable, Hashable {
     let actor, organization, origin, job: String
     let policyVersion: Int
     let authorityGeneration: String
+    /// SHA-256 of the verified server session ID; never the session token.
+    let sessionDigest: String
     let deadline: Date
     init(actor: String, organization: String, origin: String, job: String, policyVersion: Int,
-         authorityGeneration: String, deadline: Date) {
+         authorityGeneration: String, sessionDigest: String, deadline: Date) {
         self.actor = actor.lowercased(); self.organization = organization.lowercased()
         self.origin = origin; self.job = job.lowercased(); self.policyVersion = policyVersion
-        self.authorityGeneration = authorityGeneration; self.deadline = deadline
+        self.authorityGeneration = authorityGeneration; self.sessionDigest = sessionDigest; self.deadline = deadline
     }
     var identityIsValid: Bool {
         [actor, organization, job].allSatisfy { UUID(uuidString: $0) != nil && $0 == $0.lowercased() } &&
-        policyVersion > 0 && !authorityGeneration.isEmpty && deadline.timeIntervalSince1970.isFinite
+        policyVersion > 0 && !authorityGeneration.isEmpty && sessionDigest.count == 64 &&
+        sessionDigest.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } && deadline.timeIntervalSince1970.isFinite
     }
 }
 
@@ -92,7 +95,7 @@ struct JobOfficeColdScope: Codable, Hashable {
         guard scope.identityIsValid, APIClient.normalizedOrigin(scope.origin) == scope.origin,
               clock() < scope.deadline else { throw Failure.invalidScope }
         let fields = [scope.actor, scope.organization, scope.origin, scope.job, String(scope.policyVersion),
-                      scope.authorityGeneration, String(scope.deadline.timeIntervalSince1970.bitPattern)]
+                      scope.authorityGeneration, scope.sessionDigest, String(scope.deadline.timeIntervalSince1970.bitPattern)]
         return SHA256.hash(data: Data(fields.map { "\($0.utf8.count):\($0)" }.joined().utf8)).map { String(format: "%02x", $0) }.joined()
     }
     private func withLifecycleLock<T>(exclusive: Bool, _ action: () throws -> T) throws -> T {

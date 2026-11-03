@@ -18,7 +18,7 @@ import Security
         func removeAll() throws { if failDeletes { throw CocoaError(.fileWriteNoPermission) }; values.removeAll() }
     }
     private func scope(deadline: Date) -> JobOfficeColdScope {
-        .init(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: authority, deadline: deadline)
+        .init(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: authority, sessionDigest: String(repeating: "a", count: 64), deadline: deadline)
     }
     private func record() throws -> JobRecord {
         try JSONDecoder().decode(JobRecord.self, from: Data("{\"id\":\"\(job)\",\"organizationId\":\"\(org)\",\"customerId\":\"018f0000-0000-7000-8000-000000000004\",\"title\":\"Repair\",\"notes\":\"Office instructions\",\"status\":\"scheduled\",\"createdAt\":\"2026-11-03T00:00:00Z\",\"updatedAt\":\"2026-11-03T00:00:00Z\"}".utf8))
@@ -33,6 +33,10 @@ import Security
         let saved = try XCTUnwrap(store.completeLive(scope: scope, ticket: ticket, job: record(), stillAuthorized: true))
         let reopened = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now })
         XCTAssertEqual(reopened.offline(scope: scope, authorized: true)?.epoch, saved.epoch)
+        let differentSession = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: authority, sessionDigest: String(repeating: "b", count: 64), deadline: now.addingTimeInterval(60))
+        XCTAssertNil(reopened.offline(scope: differentSession, authorized: true))
+        let rawSession = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: authority, sessionDigest: "raw-session-id", deadline: now.addingTimeInterval(60))
+        XCTAssertThrowsError(try reopened.beginLive(scope: rawSession))
         let expired = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now.addingTimeInterval(61) })
         XCTAssertNil(expired.offline(scope: scope, authorized: true))
     }
@@ -86,7 +90,7 @@ import Security
         XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
         XCTAssertThrowsError(try store.beginLive(scope: scope))
         XCTAssertNil(store.offline(scope: scope, authorized: true))
-        let other = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: UUID().uuidString, deadline: now.addingTimeInterval(60))
+        let other = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: UUID().uuidString, sessionDigest: String(repeating: "a", count: 64), deadline: now.addingTimeInterval(60))
         XCTAssertNoThrow(try store.beginLive(scope: other))
     }
     func testActualKeychainAdapterCanReadAndUpdate() throws {

@@ -3,7 +3,8 @@
 The previous store binds a grant to ephemeral session, authority and API UUIDs,
 so it cannot provide cold offline access after relaunch. This separate,
 disconnected prototype uses stable actor, organization, normalized origin, job,
-policy version, authority generation and an authority deadline supplied by a
+policy version, authority generation, a SHA-256 digest of the server session ID,
+and an authority deadline supplied by a
 caller that has independently verified its persisted session. It never claims
 to know about a remote revocation while offline. The current wall clock is not a
 trusted anti-rollback clock; device clock manipulation and the quality of the
@@ -49,3 +50,14 @@ using a file-backed marker demonstrated pending/relaunch, failed marker write
 with a surviving barrier, and failed retirement followed by retry; these are
 not real-Keychain or iOS device evidence. XCTest source includes actual-Keychain,
 expiry, scoped lock, cleanup failure and retirement cases, but has not yet run.
+
+
+The first simulator run compiled the app and passed the twelve fake-marker
+cases, but the real-Keychain case failed with OSStatus -34018 under
+`CODE_SIGNING_ALLOWED=NO` (`/tmp/thorbis-job-office-cold-xcode.log`). The
+built app reports an ad-hoc linker signature with no visible entitlements,
+consistent with missing-entitlement behavior, but this has not yet been
+confirmed using a properly signed simulator or device build. The actual
+Keychain adapter must not be described as qualified. A caller must supply the
+verified session-ID digest, never a raw token; the cold scope rejects missing or
+malformed digests and isolates a changed digest.
