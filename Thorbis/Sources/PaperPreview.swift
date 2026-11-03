@@ -1291,7 +1291,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
                 let cursor = "00000000-0000-4000-8000-000000009988"
                 let later = queryItems.first(where: { $0.name == "cursor" })?.value == cursor
-                let rows = later ? [(9999, "Camera sewer inspection")] : (1...50).map { (9700 + $0, "Plumbing catalog service \($0)") }
+                let longTitle = "Camera sewer inspection with detailed video documentation, full pipe assessment, and a written repair recommendation"
+                let title = ProcessInfo.processInfo.arguments.contains("--paper-preview-long-catalog-title") ? longTitle : "Camera sewer inspection"
+                let rows = later ? [(9999, title)] : (1...50).map { (9700 + $0, "Plumbing catalog service \($0)") }
                 let items: [[String: Any]] = rows.map { number, title in
                     let id = String(format: "00000000-0000-4000-8000-%012d", number)
                     return ["id": id, "resourceId": "price_book_items", "label": title, "subtitle": "Service · flat",

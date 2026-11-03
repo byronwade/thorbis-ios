@@ -572,9 +572,76 @@ private struct PriceBookCatalogResultRow: View {
     let addItem: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if typeSize.isAccessibilitySize {
+            accessibilityRow
+        } else {
+            standardRow
+        }
+    }
+
+    /// Keep the add action reachable even when the item's full description grows
+    /// taller than the space between the keyboard and the Done bar.
+    @ViewBuilder private var accessibilityRow: some View {
         let item = result.item
-        let stacked = typeSize.isAccessibilitySize
+        HStack(alignment: .top, spacing: 4) {
+            if let toggleFavorite {
+                Button(action: toggleFavorite) {
+                    Image(systemName: favorite ? "star.fill" : "star")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(favorite ? Theme.foreground : Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(favorite ? "Remove \(item.description) from favourites" : "Add \(item.description) to favourites")
+            }
+            Button(action: addItem) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(PriceBookResultsList.highlighted(item.description, result.highlights))
+                        .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized) · \(item.unit)")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
+                        .font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    if let secondary = secondaryPrice {
+                        Text(secondary).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, toggleFavorite == nil ? 14 : 0)
+                .padding(.vertical, 8).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            // The compact add button below exposes the same complete information to VoiceOver.
+            .accessibilityHidden(true)
+            Button(action: addItem) {
+                ZStack(alignment: .topTrailing) {
+                    PaperCircleLabel(symbol: "plus", size: 36, fill: quantity == nil ? Theme.fill : Theme.brandSurface)
+                    if let quantity {
+                        Text("\(quantity)")
+                            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.onInk)
+                            .padding(.horizontal, 5).frame(minWidth: 20, minHeight: 20)
+                            .background(Theme.ink, in: Capsule()).offset(x: 2, y: -2)
+                    }
+                }
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add \(item.description), \(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized), \(item.unit), \(money(item.sellPrice.amount, currency: item.sellPrice.currency))\(secondaryPrice.map { ", \($0)" } ?? "")")
+            .accessibilityIdentifier("price-book-item-\(item.id)")
+            .accessibilityValue(quantity.map { "\($0) in draft" } ?? "Not added")
+            .accessibilityHint("Adds one to the current draft")
+            .padding(.trailing, 6).padding(.top, 8)
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: quantity ?? 0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: quantity)
+    }
+
+    @ViewBuilder private var standardRow: some View {
+        let item = result.item
+        let stacked = false
         HStack(alignment: .center, spacing: 4) {
             if let toggleFavorite {
                 Button(action: toggleFavorite) {
