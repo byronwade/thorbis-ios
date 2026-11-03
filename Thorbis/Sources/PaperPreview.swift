@@ -709,7 +709,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if preview.hold {
                 EstimateRecoveryPreview.shared.hold {
                     deliver()
-                    if EstimateRecoveryPreview.invoiceHeldReloadEnabled, let key = EstimateRecoveryPreview.invoiceDeliveryKey {
+                    if (EstimateRecoveryPreview.invoiceHeldReloadEnabled || EstimateRecoveryPreview.invoiceFinalReadHeldEnabled), let key = EstimateRecoveryPreview.invoiceDeliveryKey {
                         UserDefaults.standard.set(true, forKey: key)
                     }
                 }

@@ -46,6 +46,9 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     static var invoiceNewerRevisionEnabled: Bool {
         PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-recovery-newer-revision")
     }
+    static var invoiceFinalReadHeldEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-held")
+    }
     static var invoiceDeliveryKey: String? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "--commercial-draft-test-id"),
@@ -88,7 +91,7 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
             guard let data = try? JSONEncoder().encode(PaperPreview.invoice),
                   var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
             object["linesRevision"] = PaperPreview.invoice.linesRevision + revisionIncrement
-            return Reply(status: 200, payload: object, hold: Self.invoiceHeldReloadEnabled && shouldHold)
+            return Reply(status: 200, payload: object, hold: (Self.invoiceHeldReloadEnabled || Self.invoiceFinalReadHeldEnabled) && shouldHold)
         }
         if (Self.heldReloadEnabled || Self.newerRevisionEnabled), request.httpMethod == "GET",
            request.url?.path == "/v1/estimates/\(PaperPreview.estimate.id)" {

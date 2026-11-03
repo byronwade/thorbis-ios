@@ -21,6 +21,7 @@ struct InvoiceLineEditorView: View {
     #if DEBUG
     @State private var simulatedConfirmationInterruption = false
     @State private var sampleFinalReadResult = "idle"
+    @State private var sampleNetworkState = "online"
     #endif
     @State private var confirmIssue = false
     @State private var confirmDiscard = false
@@ -264,6 +265,22 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption") {
+                ThorbisToolbarItem(placement: .principal) {
+                    HStack {
+                        Text("Sample network").accessibilityIdentifier("invoice-confirm-network-state").accessibilityValue(sampleNetworkState)
+                        if sampleNetworkState == "offline" {
+                            Button("Restore sample connection") {
+                                Task { @MainActor in
+                                    PaperPreviewProtocol.simulateNoSignal = false
+                                    await session.revalidate()
+                                    sampleNetworkState = session.isOffline ? "offline" : "online"
+                                }
+                            }.accessibilityIdentifier("invoice-confirm-network-restore")
+                        }
+                    }
+                }
+            }
             if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-denied") || ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-changed")) {
                 ThorbisToolbarItem(placement: .principal) {
                     Text("Sample final read")
@@ -278,7 +295,7 @@ struct InvoiceLineEditorView: View {
                         .accessibilityValue(EstimateRecoveryPreview.invoiceDeliveryKey.map { UserDefaults.standard.bool(forKey: $0) } == true ? "delivered" : "not delivered")
                 }
             }
-            if EstimateRecoveryPreview.invoiceHeldReloadEnabled {
+            if EstimateRecoveryPreview.invoiceHeldReloadEnabled || EstimateRecoveryPreview.invoiceFinalReadHeldEnabled {
                 ThorbisToolbarItem(placement: .principal) {
                     HStack {
                         TimelineView(.periodic(from: .now, by: 0.2)) { _ in
@@ -351,10 +368,10 @@ struct InvoiceLineEditorView: View {
                 if network {
                     PaperPreviewProtocol.simulateNoSignal = true
                     await session.revalidate()
-                    PaperPreviewProtocol.simulateNoSignal = false
+                    sampleNetworkState = session.isOffline ? "offline" : "online"
                 }
                 if revision { EstimateRecoveryPreview.shared.advanceInvoiceRevision() }
-                await session.revalidate()
+                if revision { await session.revalidate() }
             }
         }
         #endif
@@ -758,6 +775,7 @@ struct InvoiceLineEditorView: View {
         busy = true
         let attempt = UUID(); accessAttempt = attempt; pendingReloadAttempt = attempt
         #if DEBUG
+        if EstimateRecoveryPreview.invoiceFinalReadHeldEnabled { EstimateRecoveryPreview.shared.armHeldReload() }
         if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-denied") {
             EstimateRecoveryPreview.shared.denyNextInvoiceRead()
         }

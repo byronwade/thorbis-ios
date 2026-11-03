@@ -135,6 +135,35 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertEqual(delivery.value as? String, "delivered")
     }
 
+    func testInvoiceDelayedFinalReadAfterDismissalKeepsDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--paper-preview-invoice-final-read-held"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15)); check.tap()
+        let state = app.staticTexts["invoice-held-reload-count"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "waiting"), evaluatedWith: state)
+        waitForExpectations(timeout: 10)
+        app.buttons["invoice-held-reload-dismiss"].tap()
+        XCTAssertTrue(state.waitForNonExistence(timeout: 10))
+        let delivered = XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)
+        delivered.isInverted = true; wait(for: [delivered], timeout: 2)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-final-read-held" }
+        app.launchArguments.append("--paper-preview-invoice-check-delivery")
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+        let delivery = app.staticTexts["invoice-reload-delivery"]
+        XCTAssertTrue(delivery.waitForExistence(timeout: 10))
+        XCTAssertEqual(delivery.value as? String, "delivered")
+    }
+
     func testInvoiceConfirmedReloadDiscardsDraft() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -188,6 +217,14 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let discard = app.buttons["Check latest before discarding"]
         XCTAssertTrue(discard.waitForExistence(timeout: 15))
         XCTAssertTrue(discard.waitForNonExistence(timeout: 20), "The stale confirmation must close when connectivity changes")
+        let network = app.staticTexts["invoice-confirm-network-state"]
+        XCTAssertTrue(network.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "offline"), evaluatedWith: network)
+        waitForExpectations(timeout: 15)
+        app.buttons["invoice-confirm-network-restore"].tap()
+        expectation(for: NSPredicate(format: "value == %@", "online"), evaluatedWith: network)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(discard.exists)
         app.terminate()
         app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-confirm-network-interruption" }
         app.launch(); assertSampleInvoiceQuantity(app, "2")
