@@ -17,6 +17,7 @@ struct NewEstimateView: View {
     @State private var originalScope: EstimateCreationScope?
     @State private var scopeCaptured = false
     @State private var draftRecoveryBlocked = false
+    @State private var memoryRecoveryPending = false
     @State private var jobDraftSaveGuard = JobEstimateDraftSaveGuard()
     @State private var createInFlight = false
     @State private var draftOwner = UUID()
@@ -135,15 +136,23 @@ struct NewEstimateView: View {
         return .init(actor: originalScope.actorID, organization: originalScope.organizationID,
                      origin: originalScope.origin, kind: "new-estimate", document: draftDocumentKey)
     }
+    private func currentDraft(uncertain: Bool? = nil) -> CommercialNewEstimateDraft {
+        CommercialNewEstimateDraft(customerID: customerID, title: title, lines: lines,
+            uncertain: uncertain ?? (createInFlight || createOutcomeUncertain), created: created,
+            requiresLocationVerification: requiresLocationVerification, requiresManualReview: requiresManualReview,
+            requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss)
+    }
+    private func holdUnpersistedDraft() {
+        guard jobID != nil, ownsDraft, didRestoreDraft, !draftRecoveryBlocked, !intentionallyDiscarded, let draftScope else { return }
+        CommercialDraftStore.unpersistedEstimates.hold(currentDraft(), for: draftScope)
+    }
     private func saveDraft(uncertain: Bool? = nil, leavingOriginalScope: Bool = false) throws {
         guard ownsDraft, (scopeMatches || leavingOriginalScope), let draftScope else {
             if jobID != nil { jobDraftSaveGuard.markFailed() }
             throw CancellationError()
         }
-        let draft = CommercialNewEstimateDraft(customerID: customerID, title: title, lines: lines,
-            uncertain: uncertain ?? (createInFlight || createOutcomeUncertain), created: created,
-            requiresLocationVerification: requiresLocationVerification, requiresManualReview: requiresManualReview,
-            requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss)
+        guard !memoryRecoveryPending else { throw CancellationError() }
+        let draft = currentDraft(uncertain: uncertain)
         let draftStore = CommercialDraftStore.shared
         if jobID != nil { try jobDraftSaveGuard.perform { try draftStore.save(draft, scope: draftScope) } }
         else { try draftStore.save(draft, scope: draftScope) }
@@ -156,6 +165,7 @@ struct NewEstimateView: View {
     }
     @discardableResult private func persistDraft(leavingOriginalScope: Bool = false) -> Bool {
         guard !intentionallyDiscarded, ownsDraft, didRestoreDraft, (scopeMatches || leavingOriginalScope), !draftRecoveryBlocked else { return false }
+        if memoryRecoveryPending { holdUnpersistedDraft(); return false }
         if !didRecoverDraft && !hasDraftChanges && created == nil && !createInFlight && !createOutcomeUncertain &&
             !(jobID != nil && jobDraftSaveGuard.requiresRetry && !wroteFreshDraft) {
             guard wroteFreshDraft, let draftScope else { return jobID == nil || !jobDraftSaveGuard.requiresRetry }
@@ -175,7 +185,9 @@ struct NewEstimateView: View {
     private func restoreDraft() {
         guard scopeMatches, let draftScope else { return }
         do {
-            guard let draft = try CommercialDraftStore.shared.load(CommercialNewEstimateDraft.self, scope: draftScope) else { return }
+            let pending = CommercialDraftStore.unpersistedEstimates.read(for: draftScope)
+            guard let draft = try pending ?? CommercialDraftStore.shared.load(CommercialNewEstimateDraft.self, scope: draftScope) else { return }
+            memoryRecoveryPending = pending != nil
             didRecoverDraft = true
             let recoveredLines = try draft.lines()
             customerID = draft.customerID; title = draft.title; lines = recoveredLines
@@ -183,7 +195,9 @@ struct NewEstimateView: View {
             createOutcomeUncertain = draft.uncertain
             requiresLocationVerification = draft.requiresLocationVerification; requiresManualReview = draft.requiresManualReview
             requiresGroupDisclosure = draft.requiresGroupDisclosure; acceptedGroupLoss = draft.acceptedGroupLoss
-            if draft.uncertain {
+            if memoryRecoveryPending {
+                error = "Your unsaved draft is in memory only and may be lost if the app closes. Keep the app open and ask your office for help."
+            } else if draft.uncertain {
                 error = draft.created == nil
                     ? "The previous save could not be confirmed. Check Estimates or ask your office before starting another. Your draft is still here."
                     : "The job link could not be confirmed. Retry to check the saved estimate and job."
@@ -235,6 +249,10 @@ struct NewEstimateView: View {
         verifiedCustomerID = expectedCustomer; verifiedCreatedID = expectedID; verifiedScope = expected
     }
     private func discardDraft() {
+        if memoryRecoveryPending {
+            error = "This draft cannot be discarded safely yet. Keep the app open and ask your office for help."
+            return
+        }
         if jobID != nil && jobDraftSaveGuard.requiresRetry {
             guard ownsDraft, persistDraft(leavingOriginalScope: true) else {
                 error = "This draft could not be saved on this phone. Keep this screen open and try again."
@@ -247,7 +265,7 @@ struct NewEstimateView: View {
         catch { self.error = "The saved draft could not be removed. Try again." }
     }
     private var canCommit: Bool {
-        if !resourceAuthorized || !ownsDraft || cleanupFailedAfterSave { return false }
+        if !resourceAuthorized || !ownsDraft || cleanupFailedAfterSave || memoryRecoveryPending { return false }
         if (createOutcomeUncertain && created == nil) || requiresManualReview { return false }
         if created != nil {
             let canView = session.can("estimate.view", feature: "estimates")
@@ -313,7 +331,13 @@ struct NewEstimateView: View {
             .onAppear { openDraft() }
             .task(id: draftCheckKey) { await verifyDraftAccess() }
             .onChange(of: session.isOffline) { _, offline in if offline { accessAttempt = UUID(); if didRecoverDraft { verifiedScope = nil } } }
-            .onDisappear { viewVisible = false; accessAttempt = UUID(); if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
+            .onDisappear {
+                viewVisible = false; accessAttempt = UUID()
+                if !busy {
+                    if !persistDraft(leavingOriginalScope: true) { holdUnpersistedDraft() }
+                    releaseDraft()
+                }
+            }
             .trackKeyboard($keyboardUp)
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
@@ -348,6 +372,15 @@ struct NewEstimateView: View {
                                     .accessibilityIdentifier("estimate-recovery-change-scope")
                                 Button("Allow sample saves") { CommercialDraftStore.previewFailCreatedWrites = false }
                                     .accessibilityIdentifier("estimate-recovery-allow-saves")
+                            }
+                            if ProcessInfo.processInfo.arguments.contains("--commercial-draft-test-switchable-writes") {
+                                Button("Fail sample saves") { CommercialDraftStore.previewFailAllWrites = true }
+                                    .accessibilityIdentifier("estimate-recovery-fail-saves")
+                            }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-parent-teardown") {
+                                Button("Simulate parent teardown") {
+                                    NotificationCenter.default.post(name: Notification.Name("ThorbisEstimateTestParentTeardown"), object: nil)
+                                }.accessibilityIdentifier("estimate-recovery-parent-teardown")
                             }
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
                                 Button("Revalidate sample") {
@@ -444,7 +477,7 @@ struct NewEstimateView: View {
             }
             PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
                            disabled: !canCommit,
-                           disabledReason: canCommit ? nil : (requiresManualReview ? "Ask your office to review the saved estimate." : createOutcomeUncertain ? "Check Estimates or ask your office before starting another." : created == nil ? "Your role can't create estimates. Ask your office." : jobID == nil ? "Your role can't view this estimate. Ask your office." : "Your role can't add this estimate to the job. Ask your office.")) {
+                           disabledReason: canCommit ? nil : (memoryRecoveryPending ? "Keep the app open and ask your office to help recover this draft." : requiresManualReview ? "Ask your office to review the saved estimate." : createOutcomeUncertain ? "Check Estimates or ask your office before starting another." : created == nil ? "Your role can't create estimates. Ask your office." : jobID == nil ? "Your role can't view this estimate. Ask your office." : "Your role can't add this estimate to the job. Ask your office.")) {
                 if requiresGroupDisclosure && !acceptedGroupLoss { confirmGroupLoss = true }
                 else if showProblems() { Task { await save() } }
             }
@@ -619,7 +652,7 @@ struct NewEstimateView: View {
     }
 
     private func save() async {
-        guard resourceAuthorized, ownsDraft, !cleanupFailedAfterSave else { error = "Your access changed. Your draft is still on this phone."; return }
+        guard resourceAuthorized, ownsDraft, !cleanupFailedAfterSave, !memoryRecoveryPending else { error = "Your access changed. Your draft is still on this phone."; return }
         guard !requiresManualReview, (!requiresGroupDisclosure || acceptedGroupLoss) else { return }
         guard recovery.mayProceed(validDraft: valid) else {
             if created == nil && !valid { _ = showProblems() }
@@ -636,7 +669,13 @@ struct NewEstimateView: View {
         focus = nil
         removed = nil
         busy = true
-        defer { busy = false; if !viewVisible { releaseDraft() } }
+        defer {
+            busy = false
+            if !viewVisible {
+                if jobDraftSaveGuard.requiresRetry || memoryRecoveryPending { holdUnpersistedDraft() }
+                releaseDraft()
+            }
+        }
         var createStarted = false
         do {
             let estimate: EstimateRecord

@@ -436,6 +436,11 @@ struct JobDetailView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("ThorbisEstimateTestParentTeardown"))) { _ in
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-parent-teardown") { showNewEstimate = false }
+        }
+        #endif
         .onDisappear { dictation.stop() }
         .onChange(of: selectedTab) { previous, tab in
             if tab != "Activity" { dictation.stop(); noteFocused = false }

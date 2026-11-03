@@ -16,6 +16,7 @@ struct CommercialDraftScope: Codable, Hashable {
 @MainActor final class CommercialDraftStore {
     #if DEBUG
     static var previewFailCreatedWrites = true
+    static var previewFailAllWrites = false
     static func trace(_ message: String) {
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains("--commercial-draft-test-trace"),
@@ -35,6 +36,15 @@ struct CommercialDraftScope: Codable, Hashable {
             arguments.indices.contains(index + 1) ? UUID(uuidString: arguments[index + 1]) : nil
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CommercialDraftPreview-\((requested ?? UUID()).uuidString)")
+        if arguments.contains("--commercial-draft-test-switchable-writes") {
+            return CommercialDraftStore(directory: directory, writeItem: { data, url in
+                if CommercialDraftStore.previewFailAllWrites { throw CocoaError(.fileWriteNoPermission) }
+                try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            })
+        }
+        if arguments.contains("--commercial-draft-test-all-writes-fail") {
+            return CommercialDraftStore(directory: directory, writeItem: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+        }
         if arguments.contains("--commercial-draft-test-created-write-fails") {
             return CommercialDraftStore(directory: directory, writeItem: { data, url in
                 let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -51,6 +61,8 @@ struct CommercialDraftScope: Codable, Hashable {
     #else
     static let shared = CommercialDraftStore()
     #endif
+    /// Retains unsaved work only for this app process after an editor vanishes.
+    static let unpersistedEstimates = VolatileDraftRecovery<CommercialDraftScope, CommercialNewEstimateDraft>()
     private let directory: URL
     private let removeItem: (URL) throws -> Void
     private let writeItem: (Data, URL) throws -> Void

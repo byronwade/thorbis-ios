@@ -120,6 +120,66 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         assertOpenedSavedEstimate(in: app, counts: "creates=1,links=1,estimateReads=1,jobReads=1")
     }
 
+    func testParentTeardownRetainsFailedDraftInProcessUntilReopen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-working-job",
+            "--paper-preview-estimate-create-recovery", "--commercial-draft-test-all-writes-fail",
+            "--paper-preview-estimate-parent-teardown", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 30)); if !add.isHittable { app.swipeUp() }; add.tap()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" preserved")
+        XCTAssertEqual(title.value as? String, original + " preserved")
+        let teardown = app.buttons["estimate-recovery-parent-teardown"]
+        XCTAssertTrue(teardown.waitForExistence(timeout: 5)); teardown.tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(add.waitForExistence(timeout: 10)); if !add.isHittable { app.swipeUp() }; add.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        XCTAssertEqual(title.value as? String, original + " preserved")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "memory only")).firstMatch.waitForExistence(timeout: 5))
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertFalse(save.isEnabled, "Do not send an unreconciled in-memory draft")
+    }
+
+    func testMemoryDraftDiscardDoesNotRevealOlderAutosave() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-working-job",
+            "--paper-preview-estimate-create-recovery", "--commercial-draft-test-switchable-writes",
+            "--paper-preview-estimate-parent-teardown", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 30)); if !add.isHittable { app.swipeUp() }; add.tap()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" before")
+        XCTAssertEqual(title.value as? String, original + " before")
+        let fail = app.buttons["estimate-recovery-fail-saves"]
+        XCTAssertTrue(fail.waitForExistence(timeout: 5)); fail.tap()
+        title.tap(); title.typeText(" after")
+        XCTAssertEqual(title.value as? String, original + " before after")
+        let teardown = app.buttons["estimate-recovery-parent-teardown"]
+        XCTAssertTrue(teardown.waitForExistence(timeout: 5)); teardown.tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(add.waitForExistence(timeout: 10)); if !add.isHittable { app.swipeUp() }; add.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        XCTAssertEqual(title.value as? String, original + " before after")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5)); app.buttons["Discard changes"].tap()
+        XCTAssertTrue(title.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "cannot be discarded safely")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["estimate-recovery-parent-teardown"].tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(add.waitForExistence(timeout: 10)); if !add.isHittable { app.swipeUp() }; add.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        XCTAssertEqual(title.value as? String, original + " before after")
+    }
+
     func testCancelCustomerOnlyEditRequiresConfirmationAndDoesNotRestoreCanceledCustomer() {
         continueAfterFailure = false
         let app = XCUIApplication()
