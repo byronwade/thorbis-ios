@@ -11,6 +11,8 @@ struct EstimateRevisionEditorView: View {
     @State private var editor: EstimateRevisionEditorState
     @State private var busy = false
     @State private var error: String?
+    @State private var originalScope: EstimateCreationScope?
+    @State private var scopeCaptured = false
     @State private var descriptionProblem: String?
     @State private var staleRevision = false
     @State private var confirmReload = false
@@ -33,7 +35,19 @@ struct EstimateRevisionEditorView: View {
     }
 
     private var canRevise: Bool {
-        editor.canRevise && session.can("estimate.create", feature: "estimates")
+        scopeMatches && editor.canRevise && session.can("estimate.create", feature: "estimates")
+    }
+
+    private var currentScope: EstimateCreationScope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let org = session.activeOrganization?.id, org == estimate.organizationId,
+              let origin = api.normalizedOrigin else { return nil }
+        return .init(actorID: actor, organizationID: org, sessionGeneration: session.generation,
+                     authorityRevision: session.authorityRevision, requestGeneration: api.requestGeneration, origin: origin)
+    }
+    private var scopeMatches: Bool {
+        guard let originalScope, let currentScope else { return false }
+        return originalScope.sameIdentityAndTransport(as: currentScope)
     }
 
     /// Good / better / best stays behind its flag (`estimate_option_signing`).
@@ -113,6 +127,11 @@ struct EstimateRevisionEditorView: View {
                 }
             }
             .keyboardDoneButton()
+            .onAppear {
+                guard !scopeCaptured else { return }
+                scopeCaptured = true
+                originalScope = currentScope
+            }
             .trackKeyboard($keyboardUp)
             .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .sheet(item: $picker) { target in SheetSurface {
@@ -510,6 +529,7 @@ struct EstimateRevisionEditorView: View {
                 editor.estimate.id,
                 request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount, extendedTextVerified: verified)
             )
+            guard scopeMatches else { error = "The workspace changed. Your edits are still here. Check the original workspace before retrying."; return }
             onSaved(revised)
             dismiss()
         } catch is CancellationError {
@@ -520,10 +540,12 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func reloadLatest() async {
+        guard scopeMatches else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
         defer { busy = false }
         do {
             let latest = try await api.liveFieldEstimate(estimate.id)
+            guard scopeMatches else { error = "The workspace changed. Your edits are still here."; return }
             editor = EstimateRevisionEditorState(estimate: latest)
             editor.storesLineGroups = storesLineGroups
             classifyLines()

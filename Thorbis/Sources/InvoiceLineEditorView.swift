@@ -16,6 +16,8 @@ struct InvoiceLineEditorView: View {
     @State private var confirmDiscard = false
     @State private var busy = false
     @State private var error: String?
+    @State private var originalScope: EstimateCreationScope?
+    @State private var scopeCaptured = false
     @State private var staleRevision = false
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var addedLineSelection: InvoiceCatalogLineSelection?
@@ -26,6 +28,18 @@ struct InvoiceLineEditorView: View {
         .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)
     }
 
+    private var currentScope: EstimateCreationScope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let org = session.activeOrganization?.id, org == invoice.organizationId,
+              let origin = api.normalizedOrigin else { return nil }
+        return .init(actorID: actor, organizationID: org, sessionGeneration: session.generation,
+                     authorityRevision: session.authorityRevision, requestGeneration: api.requestGeneration, origin: origin)
+    }
+    private var scopeMatches: Bool {
+        guard let originalScope, let currentScope else { return false }
+        return originalScope.sameIdentityAndTransport(as: currentScope)
+    }
+
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
         self.onSaved = onSaved
@@ -33,7 +47,7 @@ struct InvoiceLineEditorView: View {
     }
 
     private var canEdit: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+        scopeMatches && editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
     }
 
     private var canUsePriceBook: Bool {
@@ -41,7 +55,7 @@ struct InvoiceLineEditorView: View {
     }
 
     private var canIssue: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
+        scopeMatches && editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
     }
 
     private var linesDisabled: Bool { busy || !canEdit || editor.hasUnsupportedLineSources }
@@ -70,6 +84,11 @@ struct InvoiceLineEditorView: View {
             }
         }
         .keyboardDoneButton()
+        .onAppear {
+            guard !scopeCaptured else { return }
+            scopeCaptured = true
+            originalScope = currentScope
+        }
         .task(id: catalogContext) { await refreshCatalog() }
         .onChange(of: catalogContext) { _, _ in addedLineSelection = nil; showPriceBook = false }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
@@ -415,6 +434,7 @@ struct InvoiceLineEditorView: View {
             commitPrices()
             let request = try editor.makeRequest(extendedTextVerified: verified)
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
+            guard scopeMatches else { error = "The workspace changed. Your edits are still here. Check the original workspace before retrying."; return }
             addedLineSelection = nil
             onSaved(updated)
             dismiss()
@@ -439,10 +459,12 @@ struct InvoiceLineEditorView: View {
     }
 
     private func reloadLatest() async {
+        guard scopeMatches else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
         defer { busy = false }
         do {
             let current = try await api.liveFieldInvoice(invoice.id)
+            guard scopeMatches else { error = "The workspace changed. Your edits are still here."; return }
             addedLineSelection = nil
             editor = InvoiceLineEditorState(invoice: current)
             staleRevision = false
@@ -470,11 +492,13 @@ struct InvoiceLineEditorView: View {
             guard canEdit, canIssue else { throw CommercialDescriptionPolicy.Problem.unavailable }
             if editor.hasChanges {
                 current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest(extendedTextVerified: verified))
+                guard scopeMatches, canEdit, canIssue else { error = "The workspace changed. Your edits are still here."; return }
                 addedLineSelection = nil
                 editor = InvoiceLineEditorState(invoice: current)
                 onSaved(current)
             }
             let issued = try await api.issueFieldInvoice(invoice.id, expectedLinesRevision: current.linesRevision)
+            guard scopeMatches else { error = "The workspace changed. Check the invoice in the original workspace."; return }
             onSaved(issued)
             dismiss()
         } catch is CancellationError {
