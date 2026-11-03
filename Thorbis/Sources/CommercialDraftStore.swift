@@ -63,6 +63,20 @@ struct CommercialDraftScope: Codable, Hashable {
     #endif
     /// Retains unsaved work only for this app process after an editor vanishes.
     static let unpersistedEstimates = VolatileDraftRecovery<CommercialDraftScope, CommercialNewEstimateDraft>()
+    static let estimateRecoveryCopies: EstimateRecoveryCopyStore<CommercialDraftScope, CommercialNewEstimateDraft> = {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--paper-preview") {
+            let requested = arguments.firstIndex(of: "--commercial-draft-test-id").flatMap { index in
+                arguments.indices.contains(index + 1) ? UUID(uuidString: arguments[index + 1]) : nil
+            }
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("EstimateRecoveryPreview-\((requested ?? UUID()).uuidString)")
+            return EstimateRecoveryCopyStore(directory: folder)
+        }
+        #endif
+        return EstimateRecoveryCopyStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("EstimateRecoveryCopies", isDirectory: true))
+    }()
     private let directory: URL
     private let removeItem: (URL) throws -> Void
     private let writeItem: (Data, URL) throws -> Void
