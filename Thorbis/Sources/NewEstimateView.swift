@@ -46,6 +46,7 @@ struct NewEstimateView: View {
     @State private var acceptedGroupLoss = false
     @State private var confirmGroupLoss = false
     @State private var createOutcomeUncertain = false
+    @State private var heldAtomicOperation: AtomicEstimateCommand?
     @State private var memberPricing: MemberPricing?
     /// Shown after Save is pressed (validate on commit): what is missing, under its place.
     @State private var titleProblem: String?
@@ -139,7 +140,8 @@ struct NewEstimateView: View {
         let draft = CommercialNewEstimateDraft(customerID: customerID, title: title, lines: lines,
             uncertain: uncertain ?? (createInFlight || createOutcomeUncertain), created: created,
             requiresLocationVerification: requiresLocationVerification, requiresManualReview: requiresManualReview,
-            requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss)
+            requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss,
+            atomicOperation: heldAtomicOperation)
         try CommercialDraftStore.shared.save(draft, scope: draftScope)
     }
     private var hasDraftChanges: Bool {
@@ -169,10 +171,13 @@ struct NewEstimateView: View {
             let recoveredLines = try draft.lines()
             customerID = draft.customerID; title = draft.title; lines = recoveredLines
             created = draft.created; createdScope = draft.created == nil ? nil : originalScope
-            createOutcomeUncertain = draft.uncertain
+            heldAtomicOperation = draft.atomicOperation
+            createOutcomeUncertain = draft.uncertain || draft.atomicOperation != nil
             requiresLocationVerification = draft.requiresLocationVerification; requiresManualReview = draft.requiresManualReview
             requiresGroupDisclosure = draft.requiresGroupDisclosure; acceptedGroupLoss = draft.acceptedGroupLoss
-            if draft.uncertain {
+            if draft.atomicOperation != nil {
+                error = "This estimate save needs review. Ask your office to check the job before starting another."
+            } else if createOutcomeUncertain {
                 error = draft.created == nil
                     ? "The previous save could not be confirmed. Check Estimates or ask your office before starting another. Your draft is still here."
                     : "The job link could not be confirmed. Retry to check the saved estimate and job."
@@ -225,12 +230,13 @@ struct NewEstimateView: View {
     }
     private func discardDraft() {
         guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
-        if createOutcomeUncertain || createInFlight { dismiss(); return }
+        if createOutcomeUncertain || createInFlight || heldAtomicOperation != nil { dismiss(); return }
         do { try CommercialDraftStore.shared.remove(scope: draftScope); intentionallyDiscarded = true; dismiss() }
         catch { self.error = "The saved draft could not be removed. Try again." }
     }
     private var canCommit: Bool {
         if !resourceAuthorized || !ownsDraft || cleanupFailedAfterSave { return false }
+        if heldAtomicOperation != nil { return false }
         if (createOutcomeUncertain && created == nil) || requiresManualReview { return false }
         if created != nil {
             let canView = session.can("estimate.view", feature: "estimates")
@@ -239,7 +245,8 @@ struct NewEstimateView: View {
         return session.can("estimate.create", feature: "estimates")
     }
     private var recovery: EstimateCreationRecovery {
-        .init(isSaving: busy, savedEstimateID: created?.id, createOutcomeUncertain: createOutcomeUncertain)
+        .init(isSaving: busy, savedEstimateID: created?.id, createOutcomeUncertain: createOutcomeUncertain,
+              atomicOperationPending: heldAtomicOperation != nil)
     }
 
     var valid: Bool {

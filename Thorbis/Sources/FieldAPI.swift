@@ -835,6 +835,31 @@ struct FieldEstimateCreate: Encodable {
     }
 }
 
+extension AtomicEstimateCommand {
+    /// The server derives customer and location from the locked job. Before
+    /// enabling, the caller must freshly prove those facts match this draft.
+    static func fromBuilder(jobID: String, request: FieldEstimateCreate, actorID: String,
+                            organizationID: String, deviceID: String, policyVersion: Int,
+                            origin: String, createdAt: String, commandID: String) throws -> Self {
+        let lines: [Line] = try request.lines.map { line in
+            let source: Source?
+            switch line.source {
+            case nil: source = nil
+            case .manual?: source = .manual
+            case let .priceBookSelection(itemID, revision)?: source = .priceBook(itemID: itemID, revision: revision)
+            case .unsupported?: throw Invalid.payload
+            }
+            return .init(description: line.description, quantity: line.quantity,
+                         unitPrice: .init(amount: line.unitPrice.amount, currency: line.unitPrice.currency),
+                         source: source, group: line.group, showToCustomer: line.showToCustomer)
+        }
+        return try make(jobID: jobID, draftCustomerID: request.customerId, draftLocationID: request.locationId,
+                        title: request.title, lines: lines, actorID: actorID,
+                        organizationID: organizationID, deviceID: deviceID, policyVersion: policyVersion,
+                        origin: origin, createdAt: createdAt, commandID: commandID)
+    }
+}
+
 /// These cases produce only request shapes accepted by jobs.progress.
 enum FieldProgressRequest: Encodable {
     enum ArrivalMethod: String, Encodable { case manual, geofence }
@@ -996,6 +1021,23 @@ struct JobMediaPage: Decodable {
 
 @MainActor
 extension APIClient {
+    /// Held until a deployed server advertises this exact contract and the caller
+    /// persists the operation before first send. No REST fallback is safe here.
+    func sendAtomicEstimate(_ operation: AtomicEstimateCommand, actorID: String,
+                            organizationID: String, job: JobRecord, draftCustomerID: String,
+                            draftLocationID: String?, authorized: Bool) async throws -> AtomicEstimateCommand.Decision {
+        guard AtomicEstimateCommand.productionEnabled,
+              let origin = normalizedOrigin,
+              operation.maySend(actorID: actorID, organizationID: organizationID, jobID: job.id,
+                                origin: origin, authorized: authorized),
+              operation.matchesDraftJob(job, customerID: draftCustomerID, locationID: draftLocationID) else {
+            throw AtomicEstimateCommand.Invalid.scope
+        }
+        let generation = requestGeneration
+        let response: AtomicEstimateCommand.Response = try await send("POST", "/v1/commands", body: operation.batch())
+        guard generation == requestGeneration, origin == normalizedOrigin else { throw CancellationError() }
+        return operation.interpret(response)
+    }
     private func fieldPath(_ base: String, id: String, suffix: String = "") throws -> String {
         guard UUID(uuidString: id) != nil else {
             throw Problem(title: "Invalid record ID", status: nil, detail: id)

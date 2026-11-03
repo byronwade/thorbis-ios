@@ -1,0 +1,169 @@
+import Foundation
+
+/// Disconnected editor lifecycle prototype. It is not a permission check or a
+/// send implementation. The editor must still prove its live authority, guard
+/// every exit and coordinate all other writers before this may be wired.
+@MainActor final class AtomicEstimateEditorLifecycle {
+    enum State: Equatable { case notOpen, needsRestore, editable, saveFailed, writeUncertain, writeRetryRequired, stageUncertain, attemptPending, closed }
+    enum Failure: Error { case invalidState, unavailable }
+    enum WriteReconciliation: Equatable { case intendedDraftPresent, previousDraftPresent, previousDraftAbsent }
+    private(set) var state: State = .notOpen
+    private(set) var recoveredDraft: CommercialNewEstimateDraft?
+    private var recoveredBytes: Data?
+    private var sourceSnapshot: Data?
+    private var pendingWrite: Data?
+    private let store: CommercialDraftStore
+    private let journal: AtomicEstimateAttemptJournal
+    private let draftScope: CommercialDraftScope
+    private let owner: UUID
+    private let actorID, organizationID, origin, jobID: String
+    private let customerID: String
+    private let locationID: String?
+
+    init(store: CommercialDraftStore, draftScope: CommercialDraftScope, owner: UUID,
+         actorID: String, organizationID: String, origin: String, jobID: String,
+         customerID: String, locationID: String?) {
+        self.store = store; self.journal = AtomicEstimateAttemptJournal(store: store)
+        self.draftScope = draftScope; self.owner = owner
+        self.actorID = actorID; self.organizationID = organizationID; self.origin = origin; self.jobID = jobID
+        self.customerID = customerID; self.locationID = locationID
+    }
+
+    func open() throws {
+        guard state == .notOpen, [actorID, organizationID, jobID, customerID].allSatisfy({ UUID(uuidString: $0) != nil }),
+              locationID.map({ UUID(uuidString: $0) != nil }) ?? true, draftScope.kind == "new-estimate",
+              draftScope.actor.lowercased() == actorID.lowercased(),
+              draftScope.organization.lowercased() == organizationID.lowercased(), draftScope.origin == origin,
+              draftScope.document.lowercased() == "job:\(jobID.lowercased())|customer:\(customerID.lowercased())|location:\(locationID?.lowercased() ?? "")" else { throw Failure.invalidState }
+        guard try store.acquireCoordinatedDraft(scope: draftScope, owner: owner) else { throw Failure.unavailable }
+        do {
+            let loaded = try store.loadCoordinatedVersioned(CommercialNewEstimateDraft.self, scope: draftScope, owner: owner)
+            let existing = loaded?.value
+            sourceSnapshot = loaded?.bytes
+            if let existing {
+                guard existing.customerID.lowercased() == customerID.lowercased() else { throw Failure.unavailable }
+                // Codable can decode a structurally invalid saved line (for
+                // example, an unknown group). Preserve it and refuse editing.
+                // Incomplete quantity/price text is valid in an unsaved draft.
+                let lines = try existing.lines()
+                guard lines.count <= 500, Set(lines.map(\.id)).count == lines.count else { throw Failure.unavailable }
+                if existing.uncertain || existing.created != nil || existing.atomicOperation != nil ||
+                    existing.requiresManualReview || existing.requiresLocationVerification || existing.requiresGroupDisclosure {
+                    state = .attemptPending
+                    return
+                }
+            }
+            switch try journal.status(actorID: actorID, organizationID: organizationID, origin: origin, jobID: jobID) {
+            case .missing:
+                if let existing {
+                    let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+                    recoveredDraft = existing; recoveredBytes = try encoder.encode(existing)
+                    state = .needsRestore
+                } else { state = .editable } // local absence is not proof of no prior server write
+            case .legacyPending, .atomicPending: state = .attemptPending
+            }
+        } catch {
+            store.release(scope: draftScope, owner: owner)
+            throw error
+        }
+    }
+
+    /// Only the exact loaded draft can be acknowledged as restored; a caller
+    /// cannot replace saved work with fresh editor defaults on reopen.
+    func acknowledgeRestored(_ draft: CommercialNewEstimateDraft) throws {
+        guard state == .needsRestore, let expected = recoveredBytes else { throw Failure.invalidState }
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        guard try encoder.encode(draft) == expected else { throw Failure.invalidState }
+        recoveredBytes = nil; recoveredDraft = nil; state = .editable
+    }
+
+    func save(_ draft: CommercialNewEstimateDraft) throws {
+        guard state == .editable || state == .saveFailed, draft.customerID.lowercased() == customerID.lowercased() else { throw Failure.invalidState }
+        var attemptedWrite = false
+        do {
+            let current = try store.loadCoordinatedVersioned(CommercialNewEstimateDraft.self, scope: draftScope, owner: owner)
+            guard current?.bytes == sourceSnapshot else { throw Failure.unavailable }
+            let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+            let intended = try encoder.encode(draft)
+            pendingWrite = intended
+            attemptedWrite = true
+            try store.saveCoordinatedDraft(draft, scope: draftScope, owner: owner)
+            guard let saved = try store.loadCoordinatedVersioned(CommercialNewEstimateDraft.self, scope: draftScope, owner: owner) else { throw Failure.unavailable }
+            guard try encoder.encode(saved.value) == intended else { throw Failure.unavailable }
+            sourceSnapshot = saved.bytes
+            pendingWrite = nil
+            state = .editable
+        } catch {
+            state = attemptedWrite ? .writeUncertain : .saveFailed
+            throw error
+        }
+    }
+
+    /// Observes the current file without writing. Seeing the previous version
+    /// does not prove what happened during the attempted write; it only permits
+    /// an explicit, intent-bound retry while the caller retains its edits.
+    @discardableResult func reconcileUncertainWrite() throws -> WriteReconciliation {
+        guard state == .writeUncertain, let intended = pendingWrite else { throw Failure.unavailable }
+        let current = try store.loadCoordinatedVersioned(CommercialNewEstimateDraft.self, scope: draftScope, owner: owner)
+        if current == nil {
+            guard sourceSnapshot == nil else { throw Failure.unavailable }
+            state = .writeRetryRequired
+            return .previousDraftAbsent
+        }
+        guard let current else { throw Failure.unavailable }
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        if try encoder.encode(current.value) == intended {
+            sourceSnapshot = current.bytes; pendingWrite = nil; state = .editable
+            return .intendedDraftPresent
+        }
+        guard let previous = sourceSnapshot, current.bytes == previous else { throw Failure.unavailable }
+        state = .writeRetryRequired
+        return .previousDraftPresent
+    }
+
+    /// Retry only the exact in-memory draft from the uncertain write. The
+    /// previous file is checked again by save; a different source stays held.
+    func retryUncertainWrite(_ draft: CommercialNewEstimateDraft) throws {
+        guard state == .writeRetryRequired, let intended = pendingWrite else { throw Failure.invalidState }
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        guard try encoder.encode(draft) == intended else { throw Failure.invalidState }
+        state = .saveFailed
+        do { try save(draft) } catch {
+            if state == .saveFailed { state = .writeRetryRequired }
+            throw error
+        }
+    }
+
+    /// The caller must keep the editor visible and retain its in-memory draft
+    /// on failure. Closing preserves the draft; this API does not discard it.
+    func close(preserving draft: CommercialNewEstimateDraft) throws {
+        guard state == .needsRestore || state == .editable || state == .saveFailed || state == .attemptPending else { throw Failure.invalidState }
+        if state == .editable || state == .saveFailed { try save(draft) }
+        store.release(scope: draftScope, owner: owner)
+        state = .closed
+    }
+
+    /// Reserving is not authorization to send. An error after staging may
+    /// still have installed the marker, so this lifecycle remains held.
+    func stageLegacy(draft: CommercialNewEstimateDraft, attemptID: UUID) throws {
+        guard state == .editable else { throw Failure.invalidState }
+        try save(draft)
+        do {
+            _ = try journal.stageLegacy(draftScope: draftScope, draftOwner: owner, actorID: actorID,
+                organizationID: organizationID, origin: origin, jobID: jobID, customerID: customerID,
+                locationID: locationID, attemptID: attemptID)
+            state = .attemptPending
+        } catch { state = .stageUncertain; throw error }
+    }
+
+    func stageAtomic(draft: CommercialNewEstimateDraft, operation: AtomicEstimateCommand, storesLineGroups: Bool) throws {
+        guard state == .editable else { throw Failure.invalidState }
+        try save(draft)
+        do {
+            _ = try journal.prepare(operation: operation, draftScope: draftScope, draftOwner: owner,
+                actorID: actorID, organizationID: organizationID, origin: origin, jobID: jobID,
+                storesLineGroups: storesLineGroups)
+            state = .attemptPending
+        } catch { state = .stageUncertain; throw error }
+    }
+}
