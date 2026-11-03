@@ -150,14 +150,24 @@ struct NewEstimateView: View {
             requiresLocationVerification: requiresLocationVerification, requiresManualReview: requiresManualReview,
             requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss)
     }
-    private func holdUnpersistedDraft() {
-        guard jobID != nil, ownsDraft, didRestoreDraft, !draftRecoveryBlocked, !intentionallyDiscarded, let draftScope else { return }
+    @discardableResult private func holdUnpersistedDraft(_ draft: CommercialNewEstimateDraft) -> Bool {
+        guard jobID != nil, ownsDraft, didRestoreDraft, !draftRecoveryBlocked, !intentionallyDiscarded, let draftScope else { return false }
         if let sourceID = editingRecoveryCopyID {
-            guard let sessionID = editingRecoverySessionID else { return }
-            CommercialDraftStore.recoveryCopyEdits.hold(.init(draft: currentDraft(), sessionID: sessionID), for: .init(scope: draftScope, sourceID: sourceID))
+            guard let sessionID = editingRecoverySessionID else { return false }
+            CommercialDraftStore.recoveryCopyEdits.hold(.init(draft: draft, sessionID: sessionID), for: .init(scope: draftScope, sourceID: sourceID))
         } else {
-            CommercialDraftStore.unpersistedEstimates.hold(currentDraft(), for: draftScope)
+            CommercialDraftStore.unpersistedEstimates.hold(draft, for: draftScope)
         }
+        return true
+    }
+    private func holdUnpersistedDraft() { _ = holdUnpersistedDraft(currentDraft()) }
+    private func preserveUnpersistedDraft() {
+        guard let draftScope else { return }
+        let draft = currentDraft()
+        _ = EstimateTeardownPreservation.preserve(draft, scope: draftScope, intentID: editingRecoverySessionID,
+            attempts: CommercialDraftStore.estimateRecoveryCopyAttempts,
+            hold: { holdUnpersistedDraft(draft) },
+            install: { id, value in try CommercialDraftStore.estimateRecoveryCopies.install(value, scope: draftScope, id: id) })
     }
     private func saveDraft(uncertain: Bool? = nil, leavingOriginalScope: Bool = false) throws {
         guard ownsDraft, (scopeMatches || leavingOriginalScope), let draftScope else {
@@ -357,7 +367,7 @@ struct NewEstimateView: View {
             .onDisappear {
                 viewVisible = false; accessAttempt = UUID()
                 if !busy {
-                    if !recoveryChoicePending && recoveryPreview == nil && !persistDraft(leavingOriginalScope: true) { holdUnpersistedDraft() }
+                    if !recoveryChoicePending && recoveryPreview == nil && !persistDraft(leavingOriginalScope: true) { preserveUnpersistedDraft() }
                     releaseDraft()
                 }
             }
@@ -814,7 +824,7 @@ struct NewEstimateView: View {
         defer {
             busy = false
             if !viewVisible {
-                if jobDraftSaveGuard.requiresRetry || memoryRecoveryPending { holdUnpersistedDraft() }
+                if jobDraftSaveGuard.requiresRetry || memoryRecoveryPending { preserveUnpersistedDraft() }
                 releaseDraft()
             }
         }
