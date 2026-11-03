@@ -64,7 +64,7 @@ final class APIClient: ObservableObject {
 
     /// The same redirect-denying session is used by the app and by controlled
     /// tests. An injected session without this delegate cannot prove evidence.
-    static func makeNoRedirectSession(configuration: URLSessionConfiguration) -> URLSession {
+    nonisolated static func makeNoRedirectSession(configuration: URLSessionConfiguration) -> URLSession {
         URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
     }
 

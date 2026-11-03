@@ -1,4 +1,5 @@
 import Foundation
+@testable import Thorbis
 
 final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
     final class Gate: @unchecked Sendable {
