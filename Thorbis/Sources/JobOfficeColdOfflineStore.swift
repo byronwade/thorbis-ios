@@ -266,10 +266,12 @@ struct JobOfficeColdScope: Codable, Hashable {
                 Self.activeAttempts.removeAll()
                 try markers.removeAll()
                 let paths = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-                for path in paths where path != retired && (path.pathExtension == "json" || path.pathExtension == "barrier" || path.pathExtension == "denied") {
+                for path in paths where path.standardizedFileURL.path != retired.standardizedFileURL.path && (path.pathExtension == "json" || path.pathExtension == "barrier" || path.pathExtension == "denied") {
                     try FileManager.default.removeItem(at: path)
                 }
-                try FileManager.default.removeItem(at: retired)
+                // Keep the retirement fence. A stale process must not recreate
+                // a grant after sign-out; reactivation needs a separately
+                // qualified authority protocol, which this prototype lacks.
                 Self.retirementUnsafe.remove(directory.path)
             } catch {
                 Self.retirementUnsafe.insert(directory.path)

@@ -233,8 +233,9 @@ import Security
         _ = try store.completeLive(scope: scope, ticket: first, job: record(), stillAuthorized: true)
         let pending = try store.beginLive(scope: scope)
         try store.retireAll()
-        XCTAssertNil(try store.completeLive(scope: scope, ticket: pending, job: record(), stillAuthorized: true))
+        XCTAssertThrowsError(try store.completeLive(scope: scope, ticket: pending, job: record(), stillAuthorized: true))
         XCTAssertNil(JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now }).offline(scope: scope, authorized: true))
+        XCTAssertThrowsError(try store.beginLive(scope: scope), "A stale caller cannot recreate a grant after retirement")
         XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasSuffix(".json") })
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasSuffix(".lock") })
     }
