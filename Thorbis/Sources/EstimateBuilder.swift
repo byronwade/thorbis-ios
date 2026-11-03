@@ -740,9 +740,30 @@ struct BuilderLineRow: View {
     var descriptionIdentifier: String? = nil
     var quantityIdentifier: String? = nil
     var priceIdentifier: String? = nil
+    /// Keep both row actions clear of the keyboard's trailing Done control.
+    var lineActionsLeading = false
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var removeLineButton: some View {
+        Button(role: .destructive, action: remove) {
+            Text("Remove").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var closeLineButton: some View {
+        Button(action: toggle) {
+            Text("Done").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                .padding(.horizontal, 16).frame(minHeight: 44)
+                .background(Theme.fill, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Close line")
+    }
 
     private var quantityValue: Int { Int(quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 }
     private var stacked: Bool { typeSize.isAccessibilitySize }
@@ -877,21 +898,20 @@ struct BuilderLineRow: View {
                     }
                 }
             }
-            HStack {
-                Button(role: .destructive, action: remove) {
-                    Text("Remove").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
-                        .frame(minHeight: 44).contentShape(Rectangle())
+            if lineActionsLeading {
+                let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                                     : AnyLayout(HStackLayout(spacing: 24))
+                layout {
+                    closeLineButton
+                    removeLineButton
                 }
-                .buttonStyle(.plain)
-                Spacer()
-                Button(action: toggle) {
-                    Text("Done").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.fill, in: Capsule())
-                        .contentShape(Capsule())
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack {
+                    removeLineButton
+                    Spacer()
+                    closeLineButton
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Close line")
             }
         }
         .padding(.vertical, 12)
