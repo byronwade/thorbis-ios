@@ -8,6 +8,7 @@ import Security
     private let org = "018f0000-0000-7000-8000-000000000001"
     private let job = "018f0000-0000-7000-8000-000000000003"
     private let authority = UUID().uuidString
+    private let sessionDigest = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     private final class Markers: JobOfficeColdMarkerStorage {
         var values: [String: Data] = [:]
         var failReads = false
@@ -18,7 +19,7 @@ import Security
         func removeAll() throws { if failDeletes { throw CocoaError(.fileWriteNoPermission) }; values.removeAll() }
     }
     private func scope(deadline: Date) -> JobOfficeColdScope {
-        .init(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: authority, sessionDigest: String(repeating: "a", count: 64), deadline: deadline)
+        .init(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 3, authorityGeneration: authority, sessionDigest: sessionDigest, deadline: deadline)
     }
     private func record() throws -> JobRecord {
         try JSONDecoder().decode(JobRecord.self, from: Data("{\"id\":\"\(job)\",\"organizationId\":\"\(org)\",\"customerId\":\"018f0000-0000-7000-8000-000000000004\",\"title\":\"Repair\",\"notes\":\"Office instructions\",\"status\":\"scheduled\",\"createdAt\":\"2026-11-03T00:00:00Z\",\"updatedAt\":\"2026-11-03T00:00:00Z\"}".utf8))
@@ -86,7 +87,7 @@ import Security
         defer { try? FileManager.default.removeItem(at: directory) }
         let markers = Markers(); let now = Date(timeIntervalSince1970: 1_800_000_000)
         let old = scope(deadline: now.addingTimeInterval(60))
-        let changed = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 4, authorityGeneration: "new-authority", sessionDigest: String(repeating: "a", count: 64), deadline: now.addingTimeInterval(120))
+        let changed = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: job, policyVersion: 4, authorityGeneration: "new-authority", sessionDigest: sessionDigest, deadline: now.addingTimeInterval(120))
         let store = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now })
         let ticket = try store.beginLive(scope: old)
         _ = try store.completeLive(scope: old, ticket: ticket, job: record(), stillAuthorized: true)
@@ -144,7 +145,7 @@ import Security
         XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
         XCTAssertThrowsError(try store.beginLive(scope: scope))
         XCTAssertNil(store.offline(scope: scope, authorized: true))
-        let other = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: "018f0000-0000-7000-8000-000000000099", policyVersion: 3, authorityGeneration: UUID().uuidString, sessionDigest: String(repeating: "a", count: 64), deadline: now.addingTimeInterval(60))
+        let other = JobOfficeColdScope(actor: actor, organization: org, origin: "https://app.thorbis.com", job: "018f0000-0000-7000-8000-000000000099", policyVersion: 3, authorityGeneration: UUID().uuidString, sessionDigest: sessionDigest, deadline: now.addingTimeInterval(60))
         XCTAssertNoThrow(try store.beginLive(scope: other))
     }
     func testActualKeychainAdapterCanReadAndUpdate() throws {
