@@ -105,6 +105,21 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertNotEqual(firstSession.generation, secondSession.generation)
         XCTAssertEqual(secondSession.verifiedPersistedJobOfficeAuthority(), original)
     }
+
+    func testJobOfficeAuthoritySurvivesColdOfflineWithRealKeychain() async throws {
+        let snapshots = KeychainSessionSnapshotStore(service: "com.thorbis.tests.office.\(UUID().uuidString)")
+        defer { snapshots.clear() }
+        let firstAPI = APIClient(session: URLProtocolFixture.session([.init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)]), baseURL: "https://app.thorbis.com")
+        let firstSession = SessionController(api: firstAPI, defaults: isolatedDefaults(), snapshots: snapshots)
+        await firstSession.restore()
+        let original = try XCTUnwrap(firstSession.verifiedPersistedJobOfficeAuthority())
+        let secondAPI = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        let secondSession = SessionController(api: secondAPI, defaults: isolatedDefaults(), snapshots: snapshots)
+        await secondSession.restore()
+        XCTAssertTrue(secondSession.isOffline)
+        XCTAssertNotEqual(firstSession.generation, secondSession.generation)
+        XCTAssertEqual(secondSession.verifiedPersistedJobOfficeAuthority(), original)
+    }
     private let actor = "019f0000-0000-7000-8000-000000000011"
     private let first = "019f0000-0000-7000-8000-000000000001"
     private let second = "019f0000-0000-7000-8000-000000000002"

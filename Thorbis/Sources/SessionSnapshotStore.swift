@@ -31,11 +31,13 @@ protocol SessionSnapshotStoring: AnyObject {
 /// Device-only Keychain item; never synced to iCloud or restored to another device.
 final class KeychainSessionSnapshotStore: SessionSnapshotStoring, @unchecked Sendable {
     static let shared = KeychainSessionSnapshotStore()
-    private let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "com.thorbis.field.session-snapshot",
-        kSecAttrAccount as String: "current"
-    ]
+    private let query: [String: Any]
+
+    init(service: String = "com.thorbis.field.session-snapshot") {
+        query = [kSecClass as String: kSecClassGenericPassword,
+                 kSecAttrService as String: service,
+                 kSecAttrAccount as String: "current"]
+    }
 
     func load() -> SessionSnapshot? {
         var lookup = query
