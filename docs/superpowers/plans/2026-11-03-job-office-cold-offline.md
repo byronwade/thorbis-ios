@@ -71,3 +71,9 @@ simulator signing context, not a physical device or distribution-signed build.
 The session-digest isolation case is included in the passing run. Process tests
 with an injected marker are not power-loss evidence, and the cold store remains
 disconnected from the job reader and sign-out.
+
+A follow-up signed simulator run passed all 13 cold-store tests and expanded the
+real Keychain case to verify deletion is limited to the dedicated test service;
+a second Keychain service remained intact (`/tmp/thorbis-job-office-cold-delete-xcode.log`).
+This is simulator evidence only and does not qualify device signing, integrated
+logout, power-loss recovery or network/authority races.
