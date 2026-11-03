@@ -64,6 +64,23 @@ import Security
         let afterA = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now.addingTimeInterval(61) })
         XCTAssertNil(afterA.offline(scope: b, authorized: true))
     }
+    func testDenialAfterRequestExpiryStillRetiresEarlierLongerGrant() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let markers = Markers(); let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var now = start
+        let long = scope(deadline: start.addingTimeInterval(100)), short = scope(deadline: start.addingTimeInterval(10))
+        let store = JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now })
+        let first = try store.beginLive(scope: long)
+        _ = try store.completeLive(scope: long, ticket: first, job: record(), stillAuthorized: true)
+        _ = try store.beginLive(scope: short)
+        now = start.addingTimeInterval(11)
+        try store.deny(scope: short)
+        let renewed = scope(deadline: start.addingTimeInterval(120))
+        let later = try store.beginLive(scope: renewed)
+        XCTAssertNil(try store.restoreAfterConnectivityFailure(scope: renewed, ticket: later, stillAuthorized: true))
+        XCTAssertNil(store.offline(scope: renewed, authorized: true))
+    }
     func testDenialAcrossPolicyAndAuthorityChangesRetiresOlderGrant() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

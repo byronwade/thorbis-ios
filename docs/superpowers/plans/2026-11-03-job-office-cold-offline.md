@@ -103,3 +103,15 @@ that key. Standalone red/green process and deadline checks are recorded in
 `/tmp/thorbis-cold-deadline-{red,green}.log`. iOS and network/UI coverage of
 these revisions, cross-process policy races and full caller cancellation wiring
 remain open; no cold reader or sign-out path is enabled.
+
+A further race occurred when a previously granted long-lived snapshot was
+followed by a short-lived read whose denial arrived after that request's
+deadline: rejecting the expired scope prevented recording the denial, and a
+renewed request could then restore the older grant. This was reproduced in
+`/tmp/thorbis-cold-expired-denial-red.log`. Denial and cancellation now validate
+stable identity and origin without requiring the request deadline to remain
+current; reads, preflights and grants still require unexpired authority. The
+exact regression passed `/tmp/thorbis-cold-expired-denial-green.log`. The
+integrating caller must deliver a confirmed denial for the captured stable scope
+even if its request deadline expires while the response is in flight, while
+never treating it as authority to publish data.

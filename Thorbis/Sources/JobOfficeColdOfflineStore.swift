@@ -101,9 +101,9 @@ struct JobOfficeColdScope: Codable, Hashable {
         self.writeSnapshot = writeSnapshot ?? { data, path in try data.write(to: path, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
         self.removeSnapshot = removeSnapshot ?? { try FileManager.default.removeItem(at: $0) }
     }
-    private func key(_ scope: JobOfficeColdScope) throws -> String {
+    private func key(_ scope: JobOfficeColdScope, requireUnexpired: Bool) throws -> String {
         guard scope.identityIsValid, APIClient.normalizedOrigin(scope.origin) == scope.origin,
-              clock() < scope.deadline else { throw Failure.invalidScope }
+              !requireUnexpired || clock() < scope.deadline else { throw Failure.invalidScope }
         // Policy, authority and deadline can change and later recur. Denials
         // must cover every variant within the same actor/job/session identity.
         let fields = [scope.actor, scope.organization, scope.origin, scope.job, scope.sessionDigest]
@@ -120,8 +120,8 @@ struct JobOfficeColdScope: Codable, Hashable {
         defer { _ = flock(descriptor, LOCK_UN) }
         return try action()
     }
-    private func locked<T>(_ scope: JobOfficeColdScope, _ action: (String) throws -> T) throws -> T {
-        let key = try key(scope)
+    private func locked<T>(_ scope: JobOfficeColdScope, requireUnexpired: Bool = true, _ action: (String) throws -> T) throws -> T {
+        let key = try key(scope, requireUnexpired: requireUnexpired)
         guard !Self.unsafe.contains(key), !Self.retirementUnsafe.contains(directory.path) else { throw Failure.unavailable }
         return try withLifecycleLock(exclusive: false) {
         guard try !pathExists(directory.appendingPathComponent("retire.barrier")) else { throw Failure.unavailable }
@@ -221,7 +221,9 @@ struct JobOfficeColdScope: Codable, Hashable {
         }
     }
     func deny(scope: JobOfficeColdScope) throws {
-        try locked(scope) { key in
+        // A denial may arrive after this request's deadline. Expiry must never
+        // prevent retiring older grants for the same stable identity.
+        try locked(scope, requireUnexpired: false) { key in
             Self.activeAttempts.removeValue(forKey: key)
             try establishBarrier(key)
             try saveMarker(.init(state: .denied, ticket: nil, digest: nil), key: key)
@@ -231,7 +233,7 @@ struct JobOfficeColdScope: Codable, Hashable {
     /// Call when an in-flight task is canceled or retired without a result.
     /// The pending marker remains, but its previous grant cannot be restored.
     func abandon(scope: JobOfficeColdScope, ticket: UUID) throws {
-        try locked(scope) { key in
+        try locked(scope, requireUnexpired: false) { key in
             if Self.activeAttempts[key] == ticket { Self.activeAttempts.removeValue(forKey: key) }
         }
     }
