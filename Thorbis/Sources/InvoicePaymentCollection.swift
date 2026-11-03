@@ -1161,7 +1161,19 @@ struct InvoicePaymentCollectionSheet: View {
 
     private func charge() async {
         let tapToPay = tapToPayController
-        await tapToPay.charge(api: api) { [model] intent in
+        let actor = session.user?.id, organization = session.activeOrganization?.id
+        let sessionGeneration = session.generation, authority = session.authorityRevision
+        let apiGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        guard let actor, let organization, let origin else { return }
+        let scope = TerminalAttemptScope(actor: actor, organization: organization, sessionGeneration: sessionGeneration,
+                                         authorityRevision: authority, apiGeneration: apiGeneration, origin: origin)
+        await tapToPay.charge(api: api, scope: scope, authorized: {
+            return session.phase == .ready && session.user?.id == actor &&
+                session.activeOrganization?.id == organization && session.generation == sessionGeneration &&
+                session.authorityRevision == authority && api.requestGeneration == apiGeneration &&
+                api.normalizedOrigin == origin && session.isFeatureOn(TapToPayController.feature) &&
+                session.can("invoice.payment.create", feature: "payments")
+        }) { [model] intent in
             await model.load()
             return model.hasRecordedCardPresentPayment(intent)
         }

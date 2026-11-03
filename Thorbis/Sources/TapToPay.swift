@@ -61,6 +61,7 @@ final class TapToPayController: ObservableObject {
 
     private let invoiceID: String
     private var intent: CardPresentIntent?
+    private var intentScope: TerminalAttemptScope?
 
     init(invoiceID: String) {
         self.invoiceID = invoiceID
@@ -70,35 +71,58 @@ final class TapToPayController: ObservableObject {
 
     /// Runs one charge for the invoice balance. `refresh` reloads the invoice's payments and
     /// returns true only once this intent's webhook-settled payment shows up.
-    func charge(api: APIClient, refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
+    func charge(api: APIClient, scope: TerminalAttemptScope, authorized: @escaping @MainActor () -> Bool,
+                refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
         guard !busy else { return }
         guard Self.buildEnabled, Self.deviceSupported else {
             phase = .unavailable
             return
         }
+        guard authorized() else { phase = .failed("Your access changed. Check this invoice before trying again."); return }
+        guard intentScope == nil || intentScope == scope else {
+            phase = .failed("This payment belongs to an earlier session. Check its invoice before trying again.")
+            return
+        }
+        guard let lease = TerminalSetup.shared.acquire() else {
+            phase = .failed("Another card payment is in progress or needs review. Check its invoice first.")
+            return
+        }
+        var outcomeUncertain = false
+        defer { TerminalSetup.shared.release(lease, uncertain: outcomeUncertain) }
         phase = .preparing
         do {
             let intent: CardPresentIntent
-            if let cached = self.intent { intent = cached } else { intent = try await api.cardPresentIntent(invoiceID: invoiceID) }
+            if let cached = self.intent {
+                intent = cached
+            } else {
+                intentScope = scope
+                outcomeUncertain = true
+                intent = try await api.cardPresentIntent(invoiceID: invoiceID)
+                outcomeUncertain = false
+            }
             self.intent = intent
-            TerminalSetup.shared.prepare(api: api, invoiceID: invoiceID)
-            try await TerminalSetup.shared.connect(locationID: intent.locationId)
+            guard authorized() else { throw CancellationError() }
+            try await TerminalSetup.shared.connect(api: api, invoiceID: invoiceID, locationID: intent.locationId, lease: lease, authorized: authorized)
+            guard authorized() else { throw CancellationError() }
             let paymentIntent = try await Terminal.shared.retrievePaymentIntent(clientSecret: intent.clientSecret)
+            guard authorized() else { throw CancellationError() }
             phase = .waitingForCard
             let collected = try await Terminal.shared.collectPaymentMethod(paymentIntent)
+            guard authorized() else { throw CancellationError() }
             phase = .processing
+            outcomeUncertain = true
             _ = try await Terminal.shared.confirmPaymentIntent(collected)
             phase = .recording
             for attempt in 0..<20 {
-                if await refresh(intent) { phase = .paid; return }
+                guard authorized() else { throw CancellationError() }
+                if await refresh(intent), authorized() { outcomeUncertain = false; phase = .paid; return }
                 try await Task.sleep(nanoseconds: UInt64(min(1 + attempt, 4)) * 1_000_000_000)
             }
-            // Money moved; Thorbis records it as soon as Stripe's confirmation arrives.
-            phase = .failed("The card was charged. Thorbis is still recording the payment; check the invoice in a minute.")
+            phase = .failed("Payment status is still being checked. Review the invoice before trying again.")
         } catch is CancellationError {
-            phase = .idle
+            phase = outcomeUncertain ? .failed("Payment status is unknown. Check the invoice before trying again.") : .idle
         } catch {
-            phase = .failed(Self.message(for: error))
+            phase = .failed(outcomeUncertain ? "Payment status is unknown. Check the invoice before trying again." : Self.message(for: error))
         }
     }
 
@@ -136,11 +160,13 @@ final class TerminalSetup: NSObject {
     static let shared = TerminalSetup()
     private let tokens = TokenProvider()
     private var installed = false
+    private let isolation = TerminalIsolation()
 
-    func prepare(api: APIClient, invoiceID: String) {
-        tokens.api = api
-        tokens.invoiceID = invoiceID
-        installIfNeeded()
+    func acquire() -> UUID? { isolation.acquire() }
+    func release(_ lease: UUID, uncertain: Bool) {
+        guard isolation.owns(lease) else { return }
+        tokens.clear()
+        isolation.release(lease, uncertain: uncertain)
     }
 
     var supportsTapToPay: Bool {
@@ -158,10 +184,22 @@ final class TerminalSetup: NSObject {
         }
     }
 
-    func connect(locationID: String) async throws {
-        if Terminal.shared.connectedReader != nil { return }
+    func connect(api: APIClient, invoiceID: String, locationID: String, lease: UUID,
+                 authorized: @escaping @MainActor () -> Bool) async throws {
+        guard isolation.owns(lease), authorized() else { throw CancellationError() }
+        installIfNeeded()
+        try await TerminalIsolation.reset(connected: Terminal.shared.connectedReader != nil, disconnect: {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                Terminal.shared.disconnectReader { error in
+                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                }
+            }
+        }, clear: { try Terminal.shared.clearCachedCredentials().get() })
+        guard isolation.owns(lease), authorized() else { throw CancellationError() }
+        tokens.bind(api: api, invoiceID: invoiceID, locationID: locationID, authorized: authorized)
         let discovery = try TapToPayDiscoveryConfigurationBuilder().build()
         let reader = try await Discovery().first(discovery)
+        guard isolation.owns(lease), authorized() else { throw CancellationError() }
         let config = try connectionConfiguration(locationID: locationID)
         _ = try await Terminal.shared.connectReader(reader, connectionConfig: config)
     }
@@ -174,15 +212,36 @@ final class TerminalSetup: NSObject {
 }
 
 private final class TokenProvider: NSObject, ConnectionTokenProvider, @unchecked Sendable {
-    weak var api: APIClient?
-    var invoiceID = ""
+    private weak var api: APIClient?
+    private var invoiceID = ""
+    private var locationID = ""
+    private var authorized: (@MainActor () -> Bool)?
+    private var binding = UUID()
+
+    @MainActor func bind(api: APIClient, invoiceID: String, locationID: String, authorized: @escaping @MainActor () -> Bool) {
+        binding = UUID(); self.api = api; self.invoiceID = invoiceID; self.locationID = locationID; self.authorized = authorized
+    }
+
+    @MainActor func clear() {
+        binding = UUID(); api = nil; invoiceID = ""; locationID = ""; authorized = nil
+    }
 
     func fetchConnectionToken(_ completion: @escaping ConnectionTokenCompletionBlock) {
-        let invoiceID = invoiceID
         let reply = Unchecked(completion)
-        Task { @MainActor [weak api] in
-            guard let api else { return reply.value(nil, CancellationError()) }
-            do { reply.value(try await api.terminalConnectionToken(invoiceID: invoiceID).secret, nil) }
+        Task { @MainActor [weak self] in
+            guard let self, let api = self.api, self.authorized?() == true else { return reply.value(nil, CancellationError()) }
+            let invoiceID = self.invoiceID, locationID = self.locationID, binding = self.binding
+            do {
+                let token = try await api.terminalConnectionToken(invoiceID: invoiceID)
+                guard self.binding == binding, self.authorized?() == true else {
+                    return reply.value(nil, CancellationError())
+                }
+                guard TerminalIsolation.tokenMatches(expected: locationID, actual: token.locationId) else {
+                    return reply.value(nil, Problem(title: "Tap to Pay isn't ready", status: nil,
+                                                    detail: "Payment setup changed. Ask your office to check this invoice."))
+                }
+                reply.value(token.secret, nil)
+            }
             catch { reply.value(nil, error) }
         }
     }

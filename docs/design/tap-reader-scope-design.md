@@ -48,6 +48,16 @@ technician checkout, but it does not establish merchant-session isolation.
 
 ## Evidence needed before release
 
+The local candidate is an initial fail-closed safeguard, not a complete
+implementation of this design. It serializes access, clears credentials before
+each connection, scopes a cached intent to the initiating session, checks the
+token location, and quarantines uncertain creates and confirmations for the
+remainder of the process. That quarantine does not survive app termination and
+there is no customer-facing recovery flow. A server-verified merchant binding,
+durable attempt reconciliation, controller-level asynchronous tests and real
+device qualification remain outstanding. Do not enable Tap to Pay on the
+strength of the candidate or its focused simulator tests.
+
 - Fake-SDK call-order tests for same/different/unknown scope, nil location,
   disconnect failure, clear failure, reconnect failure, stale callbacks and two
   simultaneous attempts. Confirm no token request or card collection occurs
