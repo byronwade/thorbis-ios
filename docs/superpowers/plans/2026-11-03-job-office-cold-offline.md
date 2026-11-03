@@ -115,3 +115,9 @@ exact regression passed `/tmp/thorbis-cold-expired-denial-green.log`. The
 integrating caller must deliver a confirmed denial for the captured stable scope
 even if its request deadline expires while the response is in flight, while
 never treating it as authority to publish data.
+
+### Held coordinator seam (2026-11-03)
+
+`JobOfficeColdReadCoordinator` is disconnected from product screens. It starts the durable pending barrier before a fresh read, persists a confirmed 401/403/404 against the captured stable identity even if its runtime lease or deadline has since retired, rechecks caller authority after the read, and abandons canceled or failed attempts. Its injected caller must reread verified persisted authority and compare runtime session, API, actor, organization, job and policy on each check; it must map only an actual fresh uncached denial to `.denied`. No local check proves the server's job-specific authorization or deployed session identity.
+
+Standalone macOS compilation against model stubs ran the real coordinator and store for five scenarios: preflight storage failure, stale success, denial after scope retirement, task cancellation, and denial persistence failure (`/tmp/thorbis-cold-coordinator-cases.log`); the separate expired-denial check passed (`/tmp/thorbis-cold-coordinator-green.log`). The XCTest source adds corresponding checks but has not been run on a simulator. These results do not establish live networking, UI integration, cold relaunch, physical-device behavior, offline revocation, actual power-loss durability, or correct production sign-out handling. A production caller must mediate every read, prove current job access and authenticated server session identity, handle retirement failure, and test end to end before enabling this seam.
