@@ -622,7 +622,7 @@ struct NewEstimateView: View {
                 Button("Review recovery copy \(index + 1)") {
                     guard let draftScope, scopeMatches, resourceAuthorized else { return }
                     do { previewRecovery(try CommercialDraftStore.estimateRecoveryCopies.read(scope: draftScope, id: id), copyID: id) }
-                    catch { error = "This recovery copy could not be opened." }
+                    catch { self.error = "This recovery copy could not be opened." }
                 }.buttonStyle(.bordered)
             }
             if let scope = draftScope, let pending = CommercialDraftStore.estimateRecoveryCopyAttempts.pendingAttempt(for: scope) {
@@ -690,7 +690,7 @@ struct NewEstimateView: View {
             requiresGroupDisclosure = false; acceptedGroupLoss = draft.acceptedGroupLoss
             holdUnpersistedDraft()
             error = "Editing a separate copy. Save a recovery copy to keep these edits; closing the app can lose unsaved changes."
-        } catch { error = "This recovery copy could not be verified. Your saved drafts were not changed." }
+        } catch { self.error = "This recovery copy could not be verified. Your saved drafts were not changed." }
     }
 
     private func saveRecoveryCopy(_ draft: CommercialNewEstimateDraft, usingPending: Bool = false) {
@@ -714,7 +714,7 @@ struct NewEstimateView: View {
         } catch EstimateRecoveryCopyAttempts<CommercialDraftScope, CommercialNewEstimateDraft>.Failure.changedIntent {
             error = "A previous recovery copy needs confirmation. Review and retry the previous draft first."
         } catch {
-            error = "The recovery copy could not be confirmed. Keep the app open and try again."
+            self.error = "The recovery copy could not be confirmed. Keep the app open and try again."
         }
     }
 
