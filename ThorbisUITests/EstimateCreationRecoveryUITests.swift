@@ -243,7 +243,11 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let add = app.buttons["estimate-add-item"]
         XCTAssertTrue(add.waitForExistence(timeout: 30)); add.tap()
         let search = app.textFields["price-book-search"]
-        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("Replace capacitor")
+        let opened = search.waitForExistence(timeout: 10)
+        let editorTrace = app.staticTexts["estimate-recovery-event-trace"].value as? String ?? "unavailable"
+        print("PICKER_OPEN_TRACE: \(editorTrace)")
+        XCTAssertTrue(opened, "Picker did not open. Trace: \(editorTrace)")
+        search.tap(); search.typeText("Replace capacitor")
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
         XCTAssertTrue(item.waitForExistence(timeout: 15)); XCTAssertTrue(item.isHittable); item.tap()
         let added = app.buttons.matching(identifier: "price-book-item-00000000-0000-4000-8000-000000009201")

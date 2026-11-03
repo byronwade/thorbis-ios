@@ -564,14 +564,27 @@ struct NewEstimateView: View {
             .onChange(of: title) { _, _ in persistDraft() }
             .onChange(of: customerID) { _, _ in persistDraft() }
             .onChange(of: lines) { _, _ in persistDraft() }
+            .onChange(of: picker) { _, value in
+                #if DEBUG
+                if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record(value == nil ? "picker-state-closed" : "picker-state-open") }
+                #endif
+            }
             .onChange(of: scopeMatches) { wasMatching, matches in
                 if !matches {
+                    #if DEBUG
+                    if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-scope-retired") }
+                    #endif
                     if wasMatching { persistDraft(leavingOriginalScope: true) }
                     picker = nil; focus = nil
                 }
             }
             .onChange(of: session.can("estimate.create", feature: "estimates")) { _, allowed in
-                if !allowed { picker = nil; focus = nil }
+                if !allowed {
+                    #if DEBUG
+                    if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-permission-retired") }
+                    #endif
+                    picker = nil; focus = nil
+                }
             }
             .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
@@ -685,7 +698,12 @@ struct NewEstimateView: View {
                 label: lines.isEmpty ? "Items" : "Items · \(lines.count)",
                 lines: editableLines, disabled: !recovery.canEdit, focus: $focus, expandedLine: $expandedLine,
                 showTotal: false, materialsSwitch: storesLineGroups,
-                addItem: { picker = EstimateBuilderTarget() },
+                addItem: {
+                    #if DEBUG
+                    if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-open-request") }
+                    #endif
+                    picker = EstimateBuilderTarget()
+                },
                 removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
             )
             if let linesProblem {

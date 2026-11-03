@@ -88,6 +88,10 @@ struct PriceBookCartPicker: View {
                            symbol: added == 0 ? nil : "checkmark", identifier: "price-book-done") { dismiss() }
         }
         .sensoryFeedback(.success, trigger: added)
+        #if DEBUG
+        .onAppear { if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-sheet-appear") } }
+        .onDisappear { if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-sheet-disappear") } }
+        #endif
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .task(id: PriceBookPickerLoadScope(context: context, apiGeneration: api.requestGeneration)) {
