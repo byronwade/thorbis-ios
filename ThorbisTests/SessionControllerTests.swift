@@ -113,6 +113,29 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertFalse(session.organizations.contains { $0.id == second })
     }
 
+    func testCompanyCreateRejectionAndUnavailableHaveDifferentRetrySafety() async {
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(422, "{\"detail\":\"Name is invalid\"}"),
+            .init(503, "{\"detail\":\"Service unavailable\"}")
+        ])
+        await session.restore()
+        do {
+            _ = try await session.createCompany(name: "Bad name")
+            XCTFail("Expected rejected request")
+        } catch {
+            XCTAssertTrue(CompanyCreateFailure.isDefinitive(error))
+            XCTAssertEqual((error as? Problem)?.status, 422)
+        }
+        do {
+            _ = try await session.createCompany(name: "Unknown outcome")
+            XCTFail("Expected unavailable response")
+        } catch {
+            XCTAssertFalse(CompanyCreateFailure.isDefinitive(error))
+            XCTAssertEqual((error as? Problem)?.status, 503)
+        }
+    }
+
     func testCreatedCompanyRetryRefreshesMissingMembershipAndOpens() async {
         let secondSession = activeSession.replacingOccurrences(of: first, with: second)
         let secondCatalog = catalog.replacingOccurrences(of: first, with: second)

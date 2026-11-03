@@ -439,8 +439,12 @@ struct CreateCompanyForm: View {
                 error = "The company was created, but it could not be opened. \(session.error ?? "Try opening it again.")"
             }
         } catch {
-            companyCreateUnconfirmed = true
-            self.error = "The company creation could not be confirmed. Check your company list before trying again."
+            if CompanyCreateFailure.isDefinitive(error) {
+                self.error = (error as? LocalizedError)?.errorDescription ?? "The company was not created. Check the details and try again."
+            } else {
+                companyCreateUnconfirmed = true
+                self.error = "The company creation could not be confirmed. Check your company list before trying again."
+            }
         }
     }
 }

@@ -325,7 +325,8 @@ final class SessionController: ObservableObject {
     /// which makes the creator its owner), then opens it like any other workspace.
     /// Throws so the form can keep what was typed and say why.
     func createCompany(name: String) async throws -> (id: String, opened: Bool) {
-        guard !signingOut, user != nil else { throw Problem(title: nil, status: nil, detail: "Sign in again to create a company.") }
+        guard !signingOut, user != nil else { throw CompanyCreatePrerequisite.missingSession }
+        guard api.normalizedOrigin != nil else { throw CompanyCreatePrerequisite.invalidServer }
         let originalGeneration = generation
         let originalActor = user?.id
         let originalOrigin = api.normalizedOrigin
