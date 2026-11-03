@@ -17,6 +17,9 @@ struct SessionSnapshot: Codable, Equatable {
     // Optional for legacy snapshots; missing fields cannot authorize scoped caches.
     var authorityGeneration: String? = nil
     var authorityOrigin: String? = nil
+    // Digest of the authenticated server session ID, not its bearer token.
+    // Legacy snapshots cannot authorize a cross-relaunch office cache.
+    var sessionIdentityDigest: String? = nil
 }
 
 protocol SessionSnapshotStoring: AnyObject {

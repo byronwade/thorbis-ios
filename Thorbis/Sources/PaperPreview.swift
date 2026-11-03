@@ -1192,7 +1192,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         switch path {
         case "/api/auth/get-session":
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-cleanup-failure") { return NSNull() }
-            return ["user": ["id": actor, "name": "Ramon Marlowe", "email": "preview@example.invalid"], "session": ["userId": actor, "activeOrganizationId": org, "expiresAt": expiry]]
+            return ["user": ["id": actor, "name": "Ramon Marlowe", "email": "preview@example.invalid"], "session": ["id": "paper-preview-session", "userId": actor, "activeOrganizationId": org, "expiresAt": expiry]]
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]

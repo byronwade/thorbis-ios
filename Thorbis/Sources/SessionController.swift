@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct SessionUser: Codable, Identifiable, Equatable {
     let id: String
@@ -25,11 +26,13 @@ struct PersistedJobOfficeAuthority: Hashable {
     let origin: String
     let policyVersion: Int
     let authorityGeneration: String
+    let sessionIdentityDigest: String
     let deadline: Date
 }
 
 private struct SessionPayload: Decodable {
     struct Session: Decodable {
+        let id: String?
         let userId: String?
         let activeOrganizationId: String?
         let expiresAt: String
@@ -75,9 +78,11 @@ final class SessionController: ObservableObject {
               let organization = activeOrganization?.id, let currentDeadline = sessionDeadline,
               let origin = authorityOrigin, origin == api.normalizedOrigin,
               let policyVersion, policyVersion > 0, let authorityGeneration, !authorityGeneration.isEmpty,
+              let sessionIdentityDigest,
               let saved = snapshots.load(), saved.user.id == actor, saved.organization.id == organization,
               saved.authorityOrigin == origin, saved.policyVersion == policyVersion,
               saved.authorityGeneration == authorityGeneration,
+              saved.sessionIdentityDigest == sessionIdentityDigest,
               Set(saved.capabilities) == capabilities, saved.features == features else { return nil }
         let currentExpiry = min(currentDeadline, authorityDeadline ?? currentDeadline)
         let savedExpiry = min(saved.sessionDeadline, saved.authorityDeadline ?? saved.sessionDeadline)
@@ -85,6 +90,7 @@ final class SessionController: ObservableObject {
         guard Date() < deadline else { return nil }
         return PersistedJobOfficeAuthority(actor: actor, organization: organization, origin: origin,
                                            policyVersion: policyVersion, authorityGeneration: authorityGeneration,
+                                           sessionIdentityDigest: sessionIdentityDigest,
                                            deadline: deadline)
     }
     private static let explicitSignOutKey = "thorbis.session.explicitlySignedOut"
@@ -110,6 +116,7 @@ final class SessionController: ObservableObject {
     private(set) var policyVersion: Int?
     private(set) var authorityGeneration: String?
     private var authorityOrigin: String?
+    private var sessionIdentityDigest: String?
 
     var priceBookAuthority: PriceBookAuthority? {
         guard can("pricebook.view", feature: "price_book"), let actor = user?.id,
@@ -217,6 +224,7 @@ final class SessionController: ObservableObject {
             let exposure: FeaturesPayload = try await api.send("GET", "/v1/features", authed: false)
             guard revalidation == token, generation == sessionGeneration, phase == .ready else { return }
             guard exposure.organizationId == currentOrganization.id else { await restore(); return }
+            sessionIdentityDigest = Self.sessionDigest(payload.session.id)
             authorityRevision = UUID()
             capabilities = Set(catalog.capabilities)
             features = exposure.features
@@ -243,7 +251,8 @@ final class SessionController: ObservableObject {
         snapshots.save(SessionSnapshot(user: user, organization: activeOrganization, organizations: organizations,
                                        capabilities: capabilities.sorted(), features: features, policyVersion: policyVersion,
                                        sessionDeadline: sessionDeadline, authorityDeadline: authorityDeadline,
-                                       authorityGeneration: authorityGeneration, authorityOrigin: authorityOrigin))
+                                       authorityGeneration: authorityGeneration, authorityOrigin: authorityOrigin,
+                                       sessionIdentityDigest: sessionIdentityDigest))
     }
 
     /// Cold launch with no signal: adopt the last verified authority if it has not expired.
@@ -262,6 +271,7 @@ final class SessionController: ObservableObject {
         policyVersion = snapshot.policyVersion
         authorityGeneration = snapshot.authorityOrigin == api.normalizedOrigin ? snapshot.authorityGeneration : nil
         authorityOrigin = authorityGeneration == nil ? nil : snapshot.authorityOrigin
+        sessionIdentityDigest = snapshot.sessionIdentityDigest
         api.auth = .session
         api.displayName = snapshot.user.name ?? snapshot.user.email ?? ""
         error = nil
@@ -405,6 +415,7 @@ final class SessionController: ObservableObject {
         policyVersion = nil
         authorityGeneration = nil
         authorityOrigin = nil
+        sessionIdentityDigest = nil
         api.invalidateRequests()
         expiryTask?.cancel()
         expiryTask = nil
@@ -457,6 +468,7 @@ final class SessionController: ObservableObject {
                   memberships.allSatisfy({ !$0.id.isEmpty && !$0.name.isEmpty })
             else { throw SessionValidationError(reason: "Invalid workspace list.") }
             user = payload.user
+            sessionIdentityDigest = Self.sessionDigest(payload.session.id)
             organizations = memberships
             sessionDeadline = sessionExpiry
             if memberships.isEmpty {
@@ -560,6 +572,11 @@ final class SessionController: ObservableObject {
             self.invalidate(next: .failed)
             self.error = "Session or workspace authority expired. Sign in again."
         }
+    }
+
+    private static func sessionDigest(_ id: String?) -> String? {
+        guard let id, !id.isEmpty else { return nil }
+        return SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private func fail(_ failure: Error, generation requestGeneration: UUID) {
